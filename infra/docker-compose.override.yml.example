@@ -1,0 +1,9 @@
+# Copy to docker-compose.override.yml and tweak locally without committing.
+services:
+  web:
+    environment:
+      DJANGO_DEBUG: "1"
+  # Example: expose Postgres on a different port locally
+  # db:
+  #   ports:
+  #     - "55432:5432"
