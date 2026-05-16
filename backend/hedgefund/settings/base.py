@@ -19,6 +19,9 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_celery_beat",
     "apps.accounts",
+    "apps.data",
+    "apps.runs",
+    "hedgefund_agents",
 ]
 
 MIDDLEWARE = [
@@ -97,6 +100,15 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_TASK_ALWAYS_EAGER = False
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# External providers
+FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+EDGAR_USER_AGENT = os.environ.get(
+    "EDGAR_USER_AGENT", "AIHedgeFund Research example@example.com"
+)
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 LOGGING = {
     "version": 1,

@@ -1,0 +1,58 @@
+"""API contract tests for the runs endpoints. The Celery task is mocked
+so we don't actually call providers — we're verifying the lifecycle wiring.
+"""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from rest_framework.test import APIClient
+
+User = get_user_model()
+
+
+@pytest.fixture
+def auth_client() -> APIClient:
+    User.objects.create_user(email="a@b.com", password="supersecret")
+    c = APIClient()
+    token = c.post(reverse("login"), {"email": "a@b.com", "password": "supersecret"},
+                   format="json").data["access"]
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    return c
+
+
+@pytest.mark.django_db
+def test_create_run_enqueues_celery_task(auth_client: APIClient) -> None:
+    with patch("apps.runs.views.execute_run.delay") as mock_task:
+        resp = auth_client.post(
+            reverse("run-list-create"),
+            {"tickers": ["aapl"], "as_of_date": "2024-12-31"},
+            format="json",
+        )
+    assert resp.status_code == 201
+    assert mock_task.called
+    assert resp.data["tickers"] == ["AAPL"]
+
+
+@pytest.mark.django_db
+def test_run_detail_requires_owner(auth_client: APIClient) -> None:
+    with patch("apps.runs.views.execute_run.delay"):
+        created = auth_client.post(
+            reverse("run-list-create"),
+            {"tickers": ["AAPL"], "as_of_date": "2024-12-31"},
+            format="json",
+        )
+    rid = created.data["id"]
+    detail = auth_client.get(reverse("run-detail", args=[rid]))
+    assert detail.status_code == 200
+    assert detail.data["status"] == "queued"
+
+
+@pytest.mark.django_db
+def test_models_catalog_lists_at_least_two_providers(auth_client: APIClient) -> None:
+    resp = auth_client.get(reverse("model-catalog"))
+    assert resp.status_code == 200
+    providers = {m["id"].split(":", 1)[0] for m in resp.data["models"]}
+    assert {"anthropic", "openrouter"}.issubset(providers)

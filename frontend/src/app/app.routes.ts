@@ -20,5 +20,19 @@ export const routes: Routes = [
         (m) => m.DashboardPage,
       ),
   },
+  {
+    path: 'runs/new',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/runs/runs-new.page').then((m) => m.RunsNewPage),
+  },
+  {
+    path: 'runs/:id',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/runs/runs-detail.page').then(
+        (m) => m.RunsDetailPage,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

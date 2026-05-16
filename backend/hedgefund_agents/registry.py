@@ -1,0 +1,52 @@
+"""Factories. The graph nodes ask for clients/providers by name; this
+module decides which class to instantiate. Centralising the wiring here
+makes it easy to swap (e.g., Ollama in P2+) without touching agents.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from apps.data.providers import EdgarProvider, FmpProvider
+
+from .llm.adapters import AnthropicClient, OpenRouterClient
+from .llm.client import LLMClient
+
+
+@lru_cache(maxsize=4)
+def get_llm(provider: str) -> LLMClient:
+    if provider == "anthropic":
+        return AnthropicClient()
+    if provider == "openrouter":
+        return OpenRouterClient()
+    raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def get_data_provider() -> FmpProvider:
+    return FmpProvider()
+
+
+def get_filings_provider() -> EdgarProvider:
+    return EdgarProvider()
+
+
+# Default (provider, model) per agent — used unless run.model_overrides says otherwise.
+DEFAULT_MODELS: dict[str, tuple[str, str]] = {
+    "fundamentals": ("openrouter", "qwen/qwen3.6-27b"),
+    "technicals": ("openrouter", "qwen/qwen3.6-27b"),
+    "buffett": ("openrouter", "qwen/qwen3.6-27b"),
+}
+
+
+# Catalog for GET /api/models/ (stub for P2d).
+MODEL_CATALOG = [
+    {"id": "anthropic:claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "tier": "frontier",
+     "input_per_mtok": 3.0, "output_per_mtok": 15.0},
+    {"id": "anthropic:claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "tier": "fast",
+     "input_per_mtok": 1.0, "output_per_mtok": 5.0},
+    {"id": "openrouter:anthropic/claude-sonnet-4.6", "name": "Sonnet 4.6 (via OpenRouter)",
+     "tier": "frontier", "input_per_mtok": 3.15, "output_per_mtok": 15.75},
+    {"id": "openrouter:qwen/qwen3.6-27b", "name": "Qwen3 32B (OpenRouter)", "tier": "cheap",
+     "input_per_mtok": 0.15, "output_per_mtok": 0.30},
+    {"id": "openrouter:meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B (OpenRouter)",
+     "tier": "balanced", "input_per_mtok": 0.40, "output_per_mtok": 0.40},
+]
