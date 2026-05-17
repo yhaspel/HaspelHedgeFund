@@ -30,6 +30,9 @@ class Run(models.Model):
     )
     error_message = models.TextField(blank=True, default="")
 
+    def __str__(self) -> str:
+        return f"Run {self.pk} ({self.status})"
+
 
 class AgentMessage(models.Model):
     run = models.ForeignKey(Run, related_name="messages", on_delete=models.CASCADE)
@@ -38,6 +41,9 @@ class AgentMessage(models.Model):
     parsed_output = models.JSONField(default=dict)
     status = models.CharField(max_length=16, default="ok")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.agent_name} run={self.run_id}"
 
 
 class Decision(models.Model):
@@ -48,3 +54,6 @@ class Decision(models.Model):
     rationale = models.TextField(blank=True, default="")
     dissenting_views = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.action} run={self.run_id}"

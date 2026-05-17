@@ -17,6 +17,9 @@ class DailyBar(models.Model):
         unique_together = [("ticker", "date", "source")]
         indexes = [models.Index(fields=["ticker", "date"])]
 
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.date}"
+
 
 class Fundamental(models.Model):
     ticker = models.CharField(max_length=16, db_index=True)
@@ -31,6 +34,9 @@ class Fundamental(models.Model):
         unique_together = [("ticker", "period_end", "metric", "source")]
         indexes = [models.Index(fields=["ticker", "as_of_date"])]
 
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.metric} {self.period_end}"
+
 
 class FilingRecord(models.Model):
     ticker = models.CharField(max_length=16, db_index=True)
@@ -41,3 +47,6 @@ class FilingRecord(models.Model):
     url = models.URLField(max_length=500)
     text_excerpt = models.TextField()
     fetched_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.form_type} {self.filed_at}"

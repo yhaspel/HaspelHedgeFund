@@ -56,7 +56,9 @@ class AnthropicClient:
         resp.raise_for_status()
         payload = resp.json()
         text = "".join(
-            block.get("text", "") for block in payload.get("content", []) if block.get("type") == "text"
+            block.get("text", "")
+            for block in payload.get("content", [])
+            if block.get("type") == "text"
         )
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("input_tokens", 0))

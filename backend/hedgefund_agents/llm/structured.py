@@ -7,13 +7,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from .client import LLMClient, LLMResponse, Message
-
-T = TypeVar("T", bound=BaseModel)
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -30,7 +27,7 @@ def _extract_json(text: str) -> str:
     return text.strip()
 
 
-def call_structured(
+def call_structured[T: BaseModel](
     client: LLMClient,
     *,
     model: str,
@@ -52,7 +49,7 @@ def call_structured(
     last_err: Exception | None = None
     last_resp: LLMResponse | None = None
     attempt_tokens = max_tokens
-    for attempt in range(2):
+    for _attempt in range(2):
         resp = client.complete(
             model=model,
             messages=msgs,
