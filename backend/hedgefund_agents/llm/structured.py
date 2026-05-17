@@ -49,7 +49,7 @@ def call_structured[T: BaseModel](
     last_err: Exception | None = None
     last_resp: LLMResponse | None = None
     attempt_tokens = max_tokens
-    for _attempt in range(2):
+    for _attempt in range(3):
         resp = client.complete(
             model=model,
             messages=msgs,
@@ -86,7 +86,7 @@ def call_structured[T: BaseModel](
             ]
     assert last_resp is not None
     raise ValueError(
-        f"LLM structured output failed validation after 2 attempts: {last_err} "
+        f"LLM structured output failed validation after 3 attempts: {last_err} "
         f"(model={last_resp.model}, finish_reason={last_resp.finish_reason!r}, "
         f"completion_tokens={last_resp.completion_tokens})"
     )

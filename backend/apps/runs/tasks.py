@@ -56,11 +56,9 @@ def execute_run(run_id: int) -> None:
             final_state = graph.invoke(initial_state)
             _persist_outputs(run, final_state, selected_personas)
 
-        total = LLMCall.objects.filter(run=run).aggregate(s=Sum("cost_usd"))["s"] or Decimal("0")
-        run.total_cost_usd = total
         run.status = Run.DONE
         run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at", "total_cost_usd"])
+        run.save(update_fields=["status", "finished_at"])
     except Exception as exc:  # pragma: no cover
         log.exception("Run %s failed", run_id)
         run.status = Run.FAILED
@@ -68,6 +66,9 @@ def execute_run(run_id: int) -> None:
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error_message", "finished_at"])
         raise
+    finally:
+        total = LLMCall.objects.filter(run=run).aggregate(s=Sum("cost_usd"))["s"] or Decimal("0")
+        Run.objects.filter(pk=run.pk).update(total_cost_usd=total)
 
 
 def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> None:

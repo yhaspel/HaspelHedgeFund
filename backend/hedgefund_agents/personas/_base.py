@@ -57,7 +57,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             model=model,
             schema=PersonaOutput,
             messages=[Message("system", spec.prompt), Message("user", user)],
-            max_tokens=2048,
+            max_tokens=8192,
             temperature=0.4,
         )
         record_llm_call(run_id=state.get("run_id"), agent_name=name, resp=resp)
