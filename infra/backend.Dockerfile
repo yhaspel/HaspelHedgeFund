@@ -15,17 +15,14 @@ RUN apt-get update \
 
 COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
 
-COPY backend/pyproject.toml /app/pyproject.toml
-RUN uv pip install --system \
-    'django>=5,<6' 'djangorestframework>=3.15' 'djangorestframework-simplejwt>=5.3' \
-    'django-cors-headers>=4.4' 'django-celery-beat>=2.7' 'psycopg[binary]>=3.2' \
-    'celery>=5.4' 'redis>=5' 'python-json-logger>=2' 'gunicorn>=22'
+COPY backend/pyproject.toml backend/uv.lock /app/
+RUN uv pip install --system --requirement pyproject.toml
 
 COPY backend/ /app/
 
 FROM base AS dev
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8811"]
 
 FROM base AS prod
 RUN python manage.py collectstatic --noinput || true
-CMD ["gunicorn", "hedgefund.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+CMD ["gunicorn", "hedgefund.wsgi:application", "--bind", "0.0.0.0:8811", "--workers", "3"]

@@ -51,15 +51,26 @@ def call_structured(
     msgs = [system_addendum, *messages]
     last_err: Exception | None = None
     last_resp: LLMResponse | None = None
+    attempt_tokens = max_tokens
     for attempt in range(2):
         resp = client.complete(
             model=model,
             messages=msgs,
-            max_tokens=max_tokens,
+            max_tokens=attempt_tokens,
             temperature=temperature,
             json_mode=True,
         )
         last_resp = resp
+        if not resp.text.strip():
+            # Reasoning models (Qwen3, o1, etc.) can burn the full budget on
+            # hidden reasoning tokens and emit empty content with
+            # finish_reason="length". Retry once with a much larger budget.
+            last_err = ValueError(
+                f"empty content (finish_reason={resp.finish_reason!r}); "
+                "likely reasoning-token exhaustion"
+            )
+            attempt_tokens = max(attempt_tokens * 4, 8192)
+            continue
         try:
             parsed = schema.model_validate_json(_extract_json(resp.text))
             return parsed, resp
@@ -78,5 +89,7 @@ def call_structured(
             ]
     assert last_resp is not None
     raise ValueError(
-        f"LLM structured output failed validation after 2 attempts: {last_err}"
+        f"LLM structured output failed validation after 2 attempts: {last_err} "
+        f"(model={last_resp.model}, finish_reason={last_resp.finish_reason!r}, "
+        f"completion_tokens={last_resp.completion_tokens})"
     )

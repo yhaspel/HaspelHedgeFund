@@ -36,13 +36,13 @@ services:
     volumes:
       - ../backend:/app
     ports:
-      - "8000:8000"
+      - "8811:8811"
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
     command: >
       sh -c "python manage.py migrate --noinput
-      && python manage.py runserver 0.0.0.0:8000"
+      && python manage.py runserver 0.0.0.0:8811"
 
   worker:
     build:
@@ -83,7 +83,7 @@ services:
       - ../frontend:/app
       - /app/node_modules
     ports:
-      - "4200:4200"
+      - "4111:4111"
     depends_on:
       - web
 

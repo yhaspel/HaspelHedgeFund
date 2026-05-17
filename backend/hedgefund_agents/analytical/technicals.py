@@ -104,7 +104,7 @@ def run_technicals(state: AgentState) -> AgentState:
         model=model,
         schema=TechnicalsOutput,
         messages=[Message("system", system), Message("user", user)],
-        max_tokens=400,
+        max_tokens=4096,
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="technicals", resp=resp)
     # Trust our numeric metrics over whatever the LLM echoed.

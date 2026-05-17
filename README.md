@@ -24,9 +24,9 @@ docker compose -f infra/docker-compose.yml exec web python manage.py createsuper
 
 Then open:
 
-- Angular UI → http://localhost:4200/
-- Django admin → http://localhost:8000/admin/
-- API health probe → http://localhost:8000/api/me/ (returns 401 without a token — that's correct)
+- Angular UI → http://localhost:4111/
+- Django admin → http://localhost:8811/admin/
+- API health probe → http://localhost:8811/api/me/ (returns 401 without a token — that's correct)
 
 To trigger the demo Celery task, log into `/admin/` → Periodic Tasks → run `apps.accounts.tasks.ping` and watch the `worker-1` container logs.
 
@@ -42,7 +42,7 @@ export DJANGO_SETTINGS_MODULE=hedgefund.settings.dev
 export POSTGRES_HOST=localhost
 uv run python manage.py migrate
 uv run python manage.py createsuperuser
-uv run python manage.py runserver 0.0.0.0:8000
+uv run python manage.py runserver 0.0.0.0:8811
 ```
 
 Run tests:
@@ -58,7 +58,7 @@ Requires Node 22 LTS and `pnpm`.
 ```bash
 cd frontend
 pnpm install
-pnpm start            # ng serve at http://localhost:4200
+pnpm start            # ng serve at http://localhost:4111
 pnpm test --watch=false
 pnpm build
 ```

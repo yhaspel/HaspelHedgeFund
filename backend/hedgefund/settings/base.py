@@ -93,7 +93,7 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:4200").split(",") if o
+    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:4111").split(",") if o
 ]
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")

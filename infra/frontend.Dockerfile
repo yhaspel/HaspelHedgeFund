@@ -10,8 +10,8 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 FROM base AS dev
 COPY --from=deps /app/node_modules /app/node_modules
 COPY frontend/ /app/
-EXPOSE 4200
-CMD ["pnpm", "ng", "serve", "--host", "0.0.0.0", "--port", "4200"]
+EXPOSE 4111
+CMD ["pnpm", "ng", "serve", "--host", "0.0.0.0", "--port", "4111"]
 
 FROM base AS build
 COPY --from=deps /app/node_modules /app/node_modules

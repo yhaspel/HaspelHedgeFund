@@ -64,7 +64,7 @@ def run_fundamentals(state: AgentState) -> AgentState:
         model=model,
         schema=FundamentalsOutput,
         messages=[Message("system", system), Message("user", user)],
-        max_tokens=800,
+        max_tokens=4096,
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="fundamentals", resp=resp)
     state["fundamentals"] = parsed.model_dump()

@@ -54,7 +54,9 @@ class OpenRouterClient:
                 response=resp,
             )
         payload = resp.json()
-        text = payload["choices"][0]["message"]["content"] or ""
+        choice = payload["choices"][0]
+        text = choice["message"].get("content") or ""
+        finish_reason = choice.get("finish_reason") or ""
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))
@@ -66,5 +68,6 @@ class OpenRouterClient:
             completion_tokens=completion_tokens,
             cost_usd=estimate_cost(model, prompt_tokens, completion_tokens),
             latency_ms=latency_ms,
+            finish_reason=finish_reason,
             raw=payload,
         )
