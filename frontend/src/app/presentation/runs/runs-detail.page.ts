@@ -29,7 +29,19 @@ interface PersonaCard {
         <h1 class="text-2xl font-semibold">
           Run #{{ run()?.id }} — {{ run()?.tickers?.join(', ') }}
         </h1>
-        <a routerLink="/runs/new" class="text-blue-600 hover:underline">New run</a>
+        <div class="flex items-center gap-4">
+          @if (canCancel()) {
+            <button
+              type="button"
+              (click)="cancel()"
+              [disabled]="cancelling()"
+              class="text-sm bg-red-50 text-red-700 border border-red-300 rounded px-3 py-1 hover:bg-red-100 disabled:opacity-50"
+            >
+              {{ cancelling() ? 'Cancelling…' : 'Stop analysis' }}
+            </button>
+          }
+          <a routerLink="/runs/new" class="text-blue-600 hover:underline">New run</a>
+        </div>
       </header>
 
       @if (!run()) {
@@ -62,7 +74,7 @@ interface PersonaCard {
           </section>
         }
 
-        <!-- Portfolio Manager ticket -->
+        <!-- Final order ticket (CIO if enabled, else PM verbatim) -->
         @for (d of run()!.decisions; track d.id) {
           <section
             class="bg-white rounded shadow p-5 mb-4 border-l-4"
@@ -73,12 +85,15 @@ interface PersonaCard {
             <div class="flex justify-between items-start">
               <div>
                 <h2 class="text-xl font-semibold">
-                  Order ticket: {{ d.action.toUpperCase() }} {{ d.ticker }}
+                  Final order ticket: {{ d.action.toUpperCase() }} {{ d.ticker }}
                 </h2>
                 <p class="text-sm text-gray-500">
-                  PM aggregate confidence {{ d.confidence }}
+                  Confidence {{ d.confidence }}
                   @if (d.risk_overrides.veto) {
                     · <span class="text-red-600 font-medium">RISK VETO</span>
+                  }
+                  @if (cioOutput()?.['overrode_pm']) {
+                    · <span class="text-amber-700 font-medium">CIO OVERRIDE</span>
                   }
                 </p>
               </div>
@@ -88,6 +103,45 @@ interface PersonaCard {
               </div>
             </div>
             <p class="text-sm whitespace-pre-wrap mt-3">{{ d.rationale }}</p>
+          </section>
+        }
+
+        <!-- CIO discretionary layer -->
+        @if (cioOutput(); as c) {
+          <section class="bg-white rounded shadow p-5 mb-4 border-l-4"
+                   [class.border-amber-500]="c['overrode_pm']"
+                   [class.border-blue-300]="!c['overrode_pm']">
+            <div class="flex justify-between items-start mb-2">
+              <h2 class="text-lg font-semibold">
+                Chief Investment Officer
+                @if (c['overrode_pm']) {
+                  <span class="ml-2 inline-block bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">
+                    OVERRIDE
+                  </span>
+                } @else {
+                  <span class="ml-2 inline-block bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">
+                    RATIFIED PM
+                  </span>
+                }
+              </h2>
+              <span class="text-xs text-gray-500">confidence {{ c['confidence'] }}</span>
+            </div>
+            <p class="text-sm text-gray-700">{{ c['outlook'] }}</p>
+            @if (c['overrode_pm'] && c['override_reason']) {
+              <p class="text-sm mt-2"><span class="font-semibold">Override reason:</span> {{ c['override_reason'] }}</p>
+            }
+            @if (c['stop_loss_pct']) {
+              <p class="text-xs text-gray-500 mt-2">
+                Stop loss: <span class="font-mono">{{ pct(c['stop_loss_pct']) }}</span>
+              </p>
+            }
+            @if (pmDecisionMsg(); as pm) {
+              <details class="mt-3 text-xs text-gray-500">
+                <summary class="cursor-pointer">Original PM ticket (pre-CIO)</summary>
+                <pre class="mt-1 bg-gray-50 p-2 rounded overflow-auto">action: {{ pm['action'] }}, weight: {{ pm['target_weight_pct'] }}%, qty: {{ pm['target_quantity'] }}
+{{ pm['rationale'] }}</pre>
+              </details>
+            }
           </section>
         }
 
@@ -137,6 +191,65 @@ interface PersonaCard {
             </div>
             <p class="text-xs text-gray-500 mt-2">
               Most sensitive: {{ v['most_sensitive_assumption'] }}
+            </p>
+          </section>
+        }
+
+        <!-- Macro context -->
+        @if (macroOutput(); as m) {
+          <section class="bg-white rounded shadow p-5 mb-4">
+            <h2 class="text-lg font-semibold mb-2">Macro context</h2>
+            <div class="flex flex-wrap gap-2 mb-2">
+              <span class="px-2 py-1 rounded text-xs bg-gray-100">
+                growth: {{ m['growth_quadrant'] }}
+              </span>
+              <span class="px-2 py-1 rounded text-xs bg-gray-100">
+                inflation: {{ m['inflation_regime'] }}
+              </span>
+              <span class="px-2 py-1 rounded text-xs bg-gray-100">
+                curve: {{ m['yield_curve_state'] }}
+              </span>
+              <span class="px-2 py-1 rounded text-xs bg-gray-100">
+                policy: {{ m['policy_stance'] }}
+              </span>
+            </div>
+            <p class="text-sm text-gray-700">{{ m['narrative'] }}</p>
+          </section>
+        }
+
+        <!-- News & filings digest -->
+        @if (newsOutput(); as n) {
+          <section class="bg-white rounded shadow p-5 mb-4">
+            <h2 class="text-lg font-semibold mb-2">News & filings</h2>
+            <p class="text-sm text-gray-700 mb-3">{{ n['digest'] }}</p>
+            @if (asArray(n['risk_factor_highlights']).length) {
+              <h3 class="text-sm font-semibold mt-2 mb-1">Risk factor highlights</h3>
+              <ul class="list-disc list-inside text-sm text-gray-700">
+                @for (r of asArray(n['risk_factor_highlights']); track r) {
+                  <li>{{ r }}</li>
+                }
+              </ul>
+            }
+            @if (asAnyArray(n['material_events']).length) {
+              <h3 class="text-sm font-semibold mt-3 mb-1">Material events</h3>
+              <ul class="text-sm">
+                @for (e of asAnyArray(n['material_events']); track e['url']) {
+                  <li class="border-t py-1">
+                    <span class="font-mono text-xs text-gray-500">{{ e['date'] }}</span>
+                    <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-100">{{ e['tag'] }}</span>
+                    <span class="ml-2 text-xs text-gray-500">m={{ e['materiality'] }}</span>
+                    <a [href]="e['url']" target="_blank" class="ml-2 text-blue-600 hover:underline">
+                      {{ e['headline'] }}
+                    </a>
+                  </li>
+                }
+              </ul>
+            }
+            <p class="text-xs text-gray-500 mt-2">
+              Sentiment: <span class="font-mono">{{ num(n['sentiment_score']) }}</span>
+              @if (asArray(n['sentiment_drivers']).length) {
+                · drivers: {{ asArray(n['sentiment_drivers']).join('; ') }}
+              }
             </p>
           </section>
         }
@@ -242,6 +355,25 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly store = inject(RunsStore);
   readonly run = this.store.currentRun;
   readonly expanded = signal<Set<string>>(new Set());
+  readonly cancelling = signal(false);
+
+  readonly canCancel = computed(() => {
+    const s = this.run()?.status;
+    return s === 'queued' || s === 'running';
+  });
+
+  cancel(): void {
+    const id = this.run()?.id;
+    if (!id) return;
+    this.cancelling.set(true);
+    this.store.cancelRun(id).subscribe({
+      next: () => {
+        this.cancelling.set(false);
+        this.store.pollRun(id);  // refresh detail; polling stops on terminal status
+      },
+      error: () => this.cancelling.set(false),
+    });
+  }
 
   private readonly messageByAgent = computed(() => {
     const map = new Map<string, AgentMessage>();
@@ -284,6 +416,30 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     const msg = this.messageByAgent().get('valuation');
     return msg ? (msg.parsed_output as Record<string, unknown>) : null;
   });
+
+  readonly macroOutput = computed<Record<string, unknown> | null>(() => {
+    const msg = this.messageByAgent().get('macro');
+    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
+  });
+
+  readonly newsOutput = computed<Record<string, unknown> | null>(() => {
+    const msg = this.messageByAgent().get('news_digest');
+    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
+  });
+
+  readonly cioOutput = computed<Record<string, unknown> | null>(() => {
+    const msg = this.messageByAgent().get('cio');
+    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
+  });
+
+  readonly pmDecisionMsg = computed<Record<string, unknown> | null>(() => {
+    const msg = this.messageByAgent().get('pm_decision');
+    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
+  });
+
+  asAnyArray(v: unknown): Record<string, unknown>[] {
+    return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+  }
 
   readonly dissent = computed(() => {
     const run = this.run();
@@ -344,6 +500,7 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   statusClass(s: string): string {
     if (s === 'done') return 'text-green-600';
     if (s === 'failed') return 'text-red-600';
+    if (s === 'cancelled') return 'text-gray-600';
     return 'text-blue-600';
   }
 

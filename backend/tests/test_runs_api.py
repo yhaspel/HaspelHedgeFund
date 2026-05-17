@@ -51,6 +51,40 @@ def test_run_detail_requires_owner(auth_client: APIClient) -> None:
 
 
 @pytest.mark.django_db
+def test_cancel_active_run_revokes_and_marks_cancelled(auth_client: APIClient) -> None:
+    with patch("apps.runs.views.execute_run.delay") as mock_task:
+        mock_task.return_value.id = "fake-task-id"
+        created = auth_client.post(
+            reverse("run-list-create"),
+            {"tickers": ["AAPL"], "as_of_date": "2024-12-31"},
+            format="json",
+        )
+    rid = created.data["id"]
+    with patch("apps.runs.views.celery_app.control.revoke") as mock_revoke:
+        resp = auth_client.post(reverse("run-cancel", args=[rid]))
+    assert resp.status_code == 200
+    assert resp.data["status"] == "cancelled"
+    mock_revoke.assert_called_once_with("fake-task-id", terminate=True, signal="SIGTERM")
+
+
+@pytest.mark.django_db
+def test_cancel_terminal_run_409s(auth_client: APIClient) -> None:
+    from apps.runs.models import Run
+    with patch("apps.runs.views.execute_run.delay"):
+        created = auth_client.post(
+            reverse("run-list-create"),
+            {"tickers": ["AAPL"], "as_of_date": "2024-12-31"},
+            format="json",
+        )
+    rid = created.data["id"]
+    Run.objects.filter(pk=rid).update(status=Run.DONE)
+    with patch("apps.runs.views.celery_app.control.revoke") as mock_revoke:
+        resp = auth_client.post(reverse("run-cancel", args=[rid]))
+    assert resp.status_code == 409
+    mock_revoke.assert_not_called()
+
+
+@pytest.mark.django_db
 def test_models_catalog_lists_at_least_two_providers(auth_client: APIClient) -> None:
     resp = auth_client.get(reverse("model-catalog"))
     assert resp.status_code == 200

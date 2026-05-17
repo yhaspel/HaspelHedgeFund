@@ -21,6 +21,7 @@ from hedgefund_agents.analytical.sentiment import NewsBatch
 from hedgefund_agents.graphs.council import build_council_graph
 from hedgefund_agents.llm.client import LLMResponse
 from hedgefund_agents.outputs import (
+    CioOutput,
     FundamentalsOutput,
     PersonaOutput,
     RiskOutput,
@@ -36,7 +37,35 @@ _LLM_PATCH_TARGETS = [
     "hedgefund_agents.analytical.sentiment.get_llm",
     "hedgefund_agents.risk.risk_manager.get_llm",
     "hedgefund_agents.personas._base.get_llm",
+    "hedgefund_agents.portfolio.cio.get_llm",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _stub_macro_and_news(monkeypatch):
+    """Replace macro + news nodes with no-op stubs so the council graph can run
+    offline. The P2b agents have their own dedicated tests."""
+    from hedgefund_agents.graphs import council
+
+    def _macro_stub(state):
+        return {"macro": {
+            "as_of_date": state["as_of_date"].isoformat(),
+            "growth_quadrant": "expansion", "inflation_regime": "moderate",
+            "yield_curve_state": "normal", "policy_stance": "neutral",
+            "narrative": "stub", "sector_implications": {},
+        }}
+
+    def _news_stub(state):
+        return {"news_digest": {
+            "ticker": state["ticker"], "digest": "stub",
+            "material_events": [], "risk_factor_highlights": [],
+            "sentiment_score": 0.0, "sentiment_drivers": [],
+        }}
+
+    nodes = dict(council.ANALYTICAL_NODES)
+    nodes["macro"] = _macro_stub
+    nodes["news_digest"] = _news_stub
+    monkeypatch.setattr(council, "ANALYTICAL_NODES", nodes)
 
 
 _PERSIST_TARGETS = [
@@ -46,6 +75,7 @@ _PERSIST_TARGETS = [
     "hedgefund_agents.analytical.sentiment.record_llm_call",
     "hedgefund_agents.risk.risk_manager.record_llm_call",
     "hedgefund_agents.personas._base.record_llm_call",
+    "hedgefund_agents.portfolio.cio.record_llm_call",
 ]
 
 
@@ -157,6 +187,26 @@ def _make_fake_llm(persona_signal: str = "bullish", risk_veto: bool = False):
                     stop_loss_pct=0.08, veto=risk_veto,
                     rationale="ok",
                 ).model_dump_json()
+            elif "chief investment officer" in sys_text:
+                # CIO ratifies PM unchanged by default.
+                user_block = next(
+                    (m.content for m in messages if m.role == "user"), ""
+                )
+                # Pull PM action/weight/qty from the context the CIO sees.
+                import json as _json
+                import re as _re
+                m = _re.search(r'"action":\s*"(\w+)"', user_block)
+                action = m.group(1) if m else "hold"
+                w = _re.search(r'"target_weight_pct":\s*([0-9.]+)', user_block)
+                q = _re.search(r'"target_quantity":\s*([0-9.]+)', user_block)
+                text = CioOutput(
+                    ticker="AAPL", action=action,  # type: ignore[arg-type]
+                    target_weight_pct=float(w.group(1)) if w else 0.0,
+                    target_quantity=float(q.group(1)) if q else 0.0,
+                    overrode_pm=False, outlook="ratify",
+                    confidence=70,
+                ).model_dump_json()
+                _ = _json  # noqa
             else:
                 # persona
                 text = _persona_payload(signal=persona_signal)

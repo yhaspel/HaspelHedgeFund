@@ -42,6 +42,8 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             "technicals": state.get("technicals", {}),
             "valuation": state.get("valuation", {}),
             "sentiment": state.get("sentiment", {}),
+            "macro": state.get("macro", {}),
+            "news_digest": state.get("news_digest", {}),
         }
         user = (
             f"Ticker: {ticker}\nAs-of: {as_of.isoformat()}\n\n"

@@ -1,6 +1,7 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+import { MacroStore } from '../../abstraction/macro.store';
 import { RunsStore } from '../../abstraction/runs.store';
 
 @Component({
@@ -18,6 +19,38 @@ import { RunsStore } from '../../abstraction/runs.store';
           </button>
         </div>
       </header>
+
+      <section class="bg-white rounded shadow mb-6 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold">Macro regime</h2>
+          @if (macro.snapshot(); as s) {
+            <span class="text-xs text-gray-500">as of {{ s.as_of_date }}</span>
+          }
+        </div>
+        @if (macro.snapshot(); as s) {
+          <div class="flex flex-wrap gap-2 mb-3">
+            <span class="px-2 py-1 rounded text-xs font-medium"
+                  [class]="chipColor('growth', s.growth_quadrant)">
+              growth: {{ s.growth_quadrant }}
+            </span>
+            <span class="px-2 py-1 rounded text-xs font-medium"
+                  [class]="chipColor('inflation', s.inflation_regime)">
+              inflation: {{ s.inflation_regime }}
+            </span>
+            <span class="px-2 py-1 rounded text-xs font-medium"
+                  [class]="chipColor('curve', s.yield_curve_state)">
+              yield curve: {{ s.yield_curve_state }}
+            </span>
+            <span class="px-2 py-1 rounded text-xs font-medium"
+                  [class]="chipColor('policy', s.policy_stance)">
+              policy: {{ s.policy_stance }}
+            </span>
+          </div>
+          <p class="text-sm text-gray-700">{{ s.narrative }}</p>
+        } @else {
+          <p class="text-sm text-gray-500">Loading macro snapshot…</p>
+        }
+      </section>
 
       <div class="mb-6">
         <a
@@ -71,8 +104,24 @@ import { RunsStore } from '../../abstraction/runs.store';
 export class DashboardPage implements OnInit {
   readonly auth = inject(AuthStore);
   readonly runs = inject(RunsStore);
+  readonly macro = inject(MacroStore);
 
   ngOnInit(): void {
     this.runs.listRuns().subscribe();
+    this.macro.loadSnapshot().subscribe({ error: () => {} });
+  }
+
+  chipColor(kind: string, value: string): string {
+    const positive = 'bg-green-100 text-green-800';
+    const neutral = 'bg-gray-100 text-gray-800';
+    const negative = 'bg-red-100 text-red-800';
+    const warn = 'bg-yellow-100 text-yellow-800';
+    const map: Record<string, Record<string, string>> = {
+      growth: { expansion: positive, recovery: positive, slowdown: warn, recession: negative },
+      inflation: { low: positive, moderate: neutral, high: warn, accelerating: negative },
+      curve: { normal: positive, flat: warn, inverted: negative },
+      policy: { easing: positive, neutral: neutral, tightening: warn },
+    };
+    return map[kind]?.[value] ?? neutral;
   }
 }

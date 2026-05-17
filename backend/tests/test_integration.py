@@ -34,8 +34,17 @@ def _run(model_overrides: dict[str, str]) -> dict:
 @pytest.mark.django_db
 @pytest.mark.vcr
 def test_full_run_aapl_qwen() -> None:
-    """Default path: Qwen3.6 27B via OpenRouter, FMP fundamentals, EDGAR filings."""
-    out = _run(model_overrides={})
+    """OpenRouter path: Qwen3.6 27B for every agent, FMP fundamentals, EDGAR filings.
+
+    Pinned via overrides so the cassette stays valid regardless of the global
+    default (flipped to Haiku 4.5 on 2026-05-17).
+    """
+    qwen = "openrouter:qwen/qwen3.6-27b"
+    out = _run(model_overrides={
+        a: qwen for a in (
+            "fundamentals", "technicals", "valuation", "sentiment", "buffett"
+        )
+    })
 
     decision = out["decision"]
     assert decision["ticker"] == "AAPL"

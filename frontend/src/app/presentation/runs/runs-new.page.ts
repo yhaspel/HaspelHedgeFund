@@ -2,7 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { RunsStore } from '../../abstraction/runs.store';
-import { ALL_PERSONAS } from '../../core/models/run.model';
+import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
 
 @Component({
   selector: 'hf-runs-new',
@@ -48,7 +48,7 @@ import { ALL_PERSONAS } from '../../core/models/run.model';
             [(ngModel)]="personaModel"
             class="mt-1 w-full border rounded px-3 py-2"
           >
-            <option value="">Default (Qwen3.6 27B)</option>
+            <option value="">Default (Claude Haiku 4.5)</option>
             @for (m of runs.models(); track m.id) {
               <option [value]="m.id">{{ m.name }} ({{ m.tier }})</option>
             }
@@ -66,6 +66,9 @@ import { ALL_PERSONAS } from '../../core/models/run.model';
                   (change)="toggle(p.id)"
                 />
                 {{ p.name }}
+                @if (p.optional) {
+                  <span class="text-xs text-gray-400">(optional)</span>
+                }
               </label>
             }
           </div>
@@ -95,11 +98,11 @@ export class RunsNewPage implements OnInit {
 
   readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
-  asOfDate = '2024-12-31';
+  asOfDate = new Date().toISOString().slice(0, 10);
   personaModel = '';
   submitting = signal(false);
   error = signal<string | null>(null);
-  selected = signal<Set<string>>(new Set(ALL_PERSONAS.map((p) => p.id)));
+  selected = signal<Set<string>>(new Set(DEFAULT_PERSONA_IDS));
 
   toggle(id: string): void {
     const next = new Set(this.selected());

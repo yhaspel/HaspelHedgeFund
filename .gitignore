@@ -40,3 +40,6 @@ Thumbs.db
 
 # Local overrides
 infra/docker-compose.override.yml
+
+# Django media (filing full-text dumps written here in dev)
+backend/media/

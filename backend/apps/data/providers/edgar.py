@@ -6,6 +6,8 @@ in the User-Agent header — see https://www.sec.gov/os/accessing-edgar-data.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import os
 import re
 
 import httpx
@@ -14,6 +16,17 @@ from django.db import transaction
 
 from ..interfaces import Filing
 from ..models import FilingRecord
+
+# Sections we index for 10-K / 10-Q. The keys are normalized; the values are
+# regex fragments that match the section heading in the stripped text.
+SECTION_PATTERNS = {
+    "risk_factors": re.compile(r"item\s*1a[.\s]+risk\s+factors", re.IGNORECASE),
+    "mdna": re.compile(
+        r"item\s*7[.\s]+management.?s\s+discussion\s+and\s+analysis", re.IGNORECASE
+    ),
+    "business": re.compile(r"item\s*1[.\s]+business", re.IGNORECASE),
+}
+NEXT_ITEM_RE = re.compile(r"\bitem\s*\d+[ab]?[.\s]+", re.IGNORECASE)
 
 DATA_BASE = "https://data.sec.gov"
 ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
@@ -71,7 +84,9 @@ class EdgarProvider:
             )
             acc_nodash = accession.replace("-", "")
             url_doc = f"{ARCHIVES_BASE}/{cik}/{acc_nodash}/{doc}"
-            excerpt = self._fetch_excerpt(url_doc)
+            excerpt, full_path, section_index = self._fetch_and_index(
+                url_doc, accession=accession, form_type=form
+            )
             created.append(
                 FilingRecord(
                     ticker=ticker,
@@ -81,6 +96,8 @@ class EdgarProvider:
                     accession=accession,
                     url=url_doc,
                     text_excerpt=excerpt,
+                    full_text_path=full_path,
+                    section_index=section_index,
                 )
             )
             if len(created) >= limit:
@@ -109,6 +126,58 @@ class EdgarProvider:
             return ""
         text = _strip_html(resp.text)
         return text[:max_chars]
+
+    def _fetch_and_index(
+        self, url: str, *, accession: str, form_type: str
+    ) -> tuple[str, str, dict]:
+        """Download the filing, write full text to MEDIA_ROOT/filings/, build a
+        section index (char offsets) for 10-K/10-Q items, return (excerpt,
+        relative_path, section_index)."""
+        try:
+            resp = self._http.get(url)
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            return "", "", {}
+        text = _strip_html(resp.text)
+        rel_path = ""
+        try:
+            digest = hashlib.sha256(accession.encode()).hexdigest()[:2]
+            sub = os.path.join("filings", digest)
+            abs_dir = os.path.join(settings.MEDIA_ROOT, sub)
+            os.makedirs(abs_dir, exist_ok=True)
+            fname = f"{accession.replace('-', '')}.txt"
+            abs_path = os.path.join(abs_dir, fname)
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            rel_path = os.path.join(sub, fname)
+        except OSError:
+            rel_path = ""
+
+        section_index: dict = {}
+        if form_type in ("10-K", "10-Q"):
+            for name, pat in SECTION_PATTERNS.items():
+                m = pat.search(text)
+                if not m:
+                    continue
+                start = m.start()
+                tail = text[m.end():]
+                nxt = NEXT_ITEM_RE.search(tail)
+                end = m.end() + (nxt.start() if nxt else min(len(tail), 80_000))
+                section_index[name] = {"start": start, "end": end}
+        return text[:4000], rel_path, section_index
+
+    @staticmethod
+    def load_section(record: FilingRecord, section: str) -> str:
+        info = (record.section_index or {}).get(section)
+        if not info or not record.full_text_path:
+            return ""
+        path = os.path.join(settings.MEDIA_ROOT, record.full_text_path)
+        try:
+            with open(path, encoding="utf-8") as f:
+                full = f.read()
+        except OSError:
+            return ""
+        return full[info["start"]: info["end"]]
 
 
 _TAG_RE = re.compile(r"<[^>]+>")

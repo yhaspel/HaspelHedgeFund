@@ -7,6 +7,8 @@ from __future__ import annotations
 from functools import lru_cache
 
 from apps.data.providers import EdgarProvider, FmpProvider
+from apps.data.providers.fred import FredProvider
+from apps.data.providers.news import NewsService
 
 from .llm.adapters import AnthropicClient, OpenRouterClient
 from .llm.client import LLMClient
@@ -29,8 +31,19 @@ def get_filings_provider() -> EdgarProvider:
     return EdgarProvider()
 
 
+def get_macro_provider() -> FredProvider:
+    return FredProvider()
+
+
+def get_news_service() -> NewsService:
+    return NewsService()
+
+
 # Default (provider, model) per agent — used unless run.model_overrides says otherwise.
-_DEFAULT = ("openrouter", "qwen/qwen3.6-27b")
+# Qwen3.6 27B (reasoning model) had brutal wall-time on persona calls (2-3 min
+# each). Haiku 4.5 finishes each call in 2-8s with comparable structured-output
+# quality at this scale; flip to it as the global default 2026-05-17.
+_DEFAULT = ("anthropic", "claude-haiku-4-5-20251001")
 DEFAULT_MODELS: dict[str, tuple[str, str]] = {
     "fundamentals": _DEFAULT,
     "technicals": _DEFAULT,
@@ -45,6 +58,9 @@ DEFAULT_MODELS: dict[str, tuple[str, str]] = {
     "damodaran": _DEFAULT,
     "lynch": _DEFAULT,
     "risk_manager": _DEFAULT,
+    "macro": _DEFAULT,
+    "news_digest": _DEFAULT,
+    "cio": _DEFAULT,
 }
 
 

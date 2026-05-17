@@ -38,6 +38,10 @@ export class RunsStore {
     return this.api.post<RunSummary>('/runs/', body);
   }
 
+  cancelRun(runId: number): Observable<{ id: number; status: string }> {
+    return this.api.post<{ id: number; status: string }>(`/runs/${runId}/cancel/`, {});
+  }
+
   pollRun(runId: number, intervalMs = 2000): void {
     this.stopPolling();
     const tick = () => {

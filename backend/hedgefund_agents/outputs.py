@@ -71,6 +71,42 @@ class SentimentOutput(BaseModel):
     top_drivers: list[str] = Field(default_factory=list)
 
 
+GrowthQuadrant = Literal["expansion", "slowdown", "recession", "recovery"]
+InflationRegime = Literal["low", "moderate", "high", "accelerating"]
+YieldCurveState = Literal["normal", "flat", "inverted"]
+PolicyStance = Literal["tightening", "neutral", "easing"]
+SectorTilt = Literal["overweight", "neutral", "underweight"]
+
+
+class MacroOutput(BaseModel):
+    as_of_date: str  # ISO date — kept as string for trivial JSON serialization
+    growth_quadrant: GrowthQuadrant
+    inflation_regime: InflationRegime
+    yield_curve_state: YieldCurveState
+    policy_stance: PolicyStance
+    narrative: str
+    sector_implications: dict[str, SectorTilt] = Field(default_factory=dict)
+
+
+class MaterialEvent(BaseModel):
+    date: str
+    headline: str
+    tag: str
+    materiality: float = Field(ge=0.0, le=10.0)
+    url: str = ""
+
+
+class NewsOutput(BaseModel):
+    ticker: str
+    digest: str
+    material_events: list[MaterialEvent] = Field(default_factory=list)
+    risk_factor_highlights: list[str] = Field(default_factory=list)
+    sentiment_score: float = Field(ge=-1.0, le=1.0)
+    sentiment_drivers: list[str] = Field(default_factory=list)
+
+
+
+
 class RiskOutput(BaseModel):
     hard_caps_applied: list[str] = Field(default_factory=list)
     max_position_pct_for_this_trade: float = Field(ge=0.0, le=1.0)
@@ -94,3 +130,21 @@ class PortfolioOutput(BaseModel):
     aggregate_confidence: int = Field(ge=0, le=100)
     rationale: str
     dissenting_personas: list[DissentingPersona] = Field(default_factory=list)
+
+
+class CioOutput(BaseModel):
+    """Chief Investment Officer — LLM discretionary layer above the PM.
+
+    Strongly biased toward the deterministic PM. Allowed to: downsize,
+    flip to hold, or attach a stop_loss. Should NOT flip hold→buy or
+    sell→buy without strong evidence — log it in `override_reason` if so.
+    """
+    ticker: str
+    action: Action
+    target_weight_pct: float = Field(ge=0.0, le=100.0)
+    target_quantity: float = 0.0
+    stop_loss_pct: float | None = None
+    overrode_pm: bool = False
+    override_reason: str = ""  # required if overrode_pm=True
+    outlook: str
+    confidence: int = Field(ge=0, le=100)

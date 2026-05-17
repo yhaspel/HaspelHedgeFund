@@ -108,7 +108,12 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 EDGAR_USER_AGENT = os.environ.get(
     "EDGAR_USER_AGENT", "AIHedgeFund Research example@example.com"
 )
+FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "/media/"
 
 LOGGING = {
     "version": 1,

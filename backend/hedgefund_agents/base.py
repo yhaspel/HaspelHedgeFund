@@ -32,6 +32,8 @@ class AgentState(TypedDict, total=False):
     technicals: dict[str, Any]
     valuation: dict[str, Any]
     sentiment: dict[str, Any]
+    macro: dict[str, Any]
+    news_digest: dict[str, Any]
 
     # Persona outputs
     buffett: dict[str, Any]
@@ -43,9 +45,12 @@ class AgentState(TypedDict, total=False):
     damodaran: dict[str, Any]
     lynch: dict[str, Any]
 
-    # Risk + PM
+    # Risk + PM + CIO
     risk: dict[str, Any]
     decision: dict[str, Any]
+    pm_decision: dict[str, Any]  # deterministic PM, preserved for audit
+    cio: dict[str, Any]
+    disable_cio: bool  # backtests: skip CIO for reproducibility
 
 
 def pick_model(state: AgentState, agent_name: str, default: tuple[str, str]) -> tuple[str, str]:

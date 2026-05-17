@@ -1,6 +1,7 @@
 """Celery task that drives one Run through the council LangGraph."""
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from decimal import Decimal
 
@@ -23,7 +24,60 @@ from .models import AgentMessage, Decision, Run
 log = logging.getLogger(__name__)
 
 ANALYTICAL_AGENTS = list(ANALYTICAL_NODES.keys())
-PIPELINE_AGENTS = ["risk_manager", "portfolio_manager"]
+PIPELINE_AGENTS = [
+    "risk_manager", "portfolio_manager", "cio", "macro", "news_digest",
+]
+
+
+ORPHAN_THRESHOLD_MIN = 15
+
+
+@shared_task
+def sweep_orphan_runs() -> dict:
+    """Mark abandoned runs as failed.
+
+    A run is "orphaned" if it's still in {queued, running} but has been sitting
+    that way for > ORPHAN_THRESHOLD_MIN minutes AND the Celery broker has no
+    active task with its task id. Happens after worker restarts /
+    container recreation kills the subprocess before the task wrapper can
+    record terminal status.
+    """
+    from hedgefund.celery import app as celery_app  # local: avoid load-time cycle
+
+    cutoff = timezone.now() - dt.timedelta(minutes=ORPHAN_THRESHOLD_MIN)
+    candidates = Run.objects.filter(
+        status__in=Run.ACTIVE_STATUSES, created_at__lt=cutoff
+    )
+    if not candidates.exists():
+        return {"swept": 0}
+
+    active_ids: set[str] = set()
+    try:
+        inspect = celery_app.control.inspect(timeout=2.0)
+        for _worker, tasks in (inspect.active() or {}).items():
+            for t in tasks or []:
+                tid = t.get("id")
+                if tid:
+                    active_ids.add(tid)
+    except Exception:  # broker unreachable etc. — better to do nothing than to clobber live runs
+        log.warning("orphan sweep: could not inspect active tasks; aborting")
+        return {"swept": 0, "error": "inspect_failed"}
+
+    swept = 0
+    for run in candidates:
+        if run.celery_task_id and run.celery_task_id in active_ids:
+            continue  # still running, just slow
+        run.status = Run.FAILED
+        run.error_message = (
+            "Orphaned: no active Celery task for this run; worker likely "
+            "restarted mid-execution."
+        )
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "error_message", "finished_at"])
+        swept += 1
+    if swept:
+        log.warning("orphan sweep marked %d runs failed", swept)
+    return {"swept": swept}
 
 
 @shared_task
@@ -61,10 +115,15 @@ def execute_run(run_id: int) -> None:
         run.save(update_fields=["status", "finished_at"])
     except Exception as exc:  # pragma: no cover
         log.exception("Run %s failed", run_id)
-        run.status = Run.FAILED
-        run.error_message = f"{type(exc).__name__}: {exc}"[:2000]
-        run.finished_at = timezone.now()
-        run.save(update_fields=["status", "error_message", "finished_at"])
+        # If the user already cancelled this run via the API, don't clobber
+        # the cancelled state with FAILED — the SIGTERM that revoke()
+        # delivered will surface here as an unhandled exception.
+        current = Run.objects.filter(pk=run_id).values_list("status", flat=True).first()
+        if current != Run.CANCELLED:
+            run.status = Run.FAILED
+            run.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error_message", "finished_at"])
         raise
     finally:
         total = LLMCall.objects.filter(run=run).aggregate(s=Sum("cost_usd"))["s"] or Decimal("0")
@@ -72,7 +131,7 @@ def execute_run(run_id: int) -> None:
 
 
 def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> None:
-    agent_keys = ANALYTICAL_AGENTS + selected_personas + ["risk"]
+    agent_keys = ANALYTICAL_AGENTS + selected_personas + ["risk", "pm_decision", "cio"]
     for agent_name in agent_keys:
         payload = state.get(agent_name)
         if payload is None:

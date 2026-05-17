@@ -9,12 +9,15 @@ class Run(models.Model):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (QUEUED, "Queued"),
         (RUNNING, "Running"),
         (DONE, "Done"),
         (FAILED, "Failed"),
+        (CANCELLED, "Cancelled"),
     ]
+    ACTIVE_STATUSES = {QUEUED, RUNNING}
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="runs", on_delete=models.CASCADE
@@ -33,6 +36,8 @@ class Run(models.Model):
     personas = models.JSONField(default=list, blank=True)
     # {agent_name: version} snapshot of which versions executed.
     agent_versions = models.JSONField(default=dict, blank=True)
+    # Celery task id, so /cancel/ can revoke + terminate the worker subprocess.
+    celery_task_id = models.CharField(max_length=64, blank=True, default="")
 
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"

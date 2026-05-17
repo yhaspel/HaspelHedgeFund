@@ -1,4 +1,4 @@
-export type RunStatus = 'queued' | 'running' | 'done' | 'failed';
+export type RunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface ModelOption {
   id: string;
@@ -83,15 +83,16 @@ export interface CreateRunRequest {
   personas?: string[];
 }
 
-export const ALL_PERSONAS: { id: string; name: string }[] = [
+export const ALL_PERSONAS: { id: string; name: string; optional?: boolean }[] = [
   { id: 'buffett', name: 'Warren Buffett' },
   { id: 'munger', name: 'Charlie Munger' },
   { id: 'graham', name: 'Benjamin Graham' },
   { id: 'wood', name: 'Cathie Wood' },
   { id: 'druckenmiller', name: 'Stanley Druckenmiller' },
-  { id: 'burry', name: 'Michael Burry' },
-  { id: 'damodaran', name: 'Aswath Damodaran' },
-  { id: 'lynch', name: 'Peter Lynch' },
+  { id: 'burry', name: 'Michael Burry', optional: true },
+  { id: 'damodaran', name: 'Aswath Damodaran', optional: true },
+  { id: 'lynch', name: 'Peter Lynch', optional: true },
 ];
 
 export const PERSONA_IDS = new Set(ALL_PERSONAS.map((p) => p.id));
+export const DEFAULT_PERSONA_IDS = ALL_PERSONAS.filter((p) => !p.optional).map((p) => p.id);
