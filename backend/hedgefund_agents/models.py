@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from django.db import models
 
+from .versioning import AgentVersion  # noqa: F401 — register model with Django
+
 
 class LLMCall(models.Model):
     run = models.ForeignKey(

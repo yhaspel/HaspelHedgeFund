@@ -30,10 +30,21 @@ def get_filings_provider() -> EdgarProvider:
 
 
 # Default (provider, model) per agent — used unless run.model_overrides says otherwise.
+_DEFAULT = ("openrouter", "qwen/qwen3.6-27b")
 DEFAULT_MODELS: dict[str, tuple[str, str]] = {
-    "fundamentals": ("openrouter", "qwen/qwen3.6-27b"),
-    "technicals": ("openrouter", "qwen/qwen3.6-27b"),
-    "buffett": ("openrouter", "qwen/qwen3.6-27b"),
+    "fundamentals": _DEFAULT,
+    "technicals": _DEFAULT,
+    "valuation": _DEFAULT,
+    "sentiment": _DEFAULT,
+    "buffett": _DEFAULT,
+    "munger": _DEFAULT,
+    "graham": _DEFAULT,
+    "wood": _DEFAULT,
+    "druckenmiller": _DEFAULT,
+    "burry": _DEFAULT,
+    "damodaran": _DEFAULT,
+    "lynch": _DEFAULT,
+    "risk_manager": _DEFAULT,
 }
 
 

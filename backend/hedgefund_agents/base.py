@@ -22,10 +22,29 @@ class AgentState(TypedDict, total=False):
     filings_provider: Any
     llm_clients: dict[str, Any]  # provider name -> client instance
 
-    # Outputs accumulated by nodes
+    # Optional inputs
+    portfolio: Any
+    risk_limits: Any
+    news: Any
+
+    # Outputs accumulated by nodes (analytical)
     fundamentals: dict[str, Any]
     technicals: dict[str, Any]
+    valuation: dict[str, Any]
+    sentiment: dict[str, Any]
+
+    # Persona outputs
     buffett: dict[str, Any]
+    munger: dict[str, Any]
+    graham: dict[str, Any]
+    wood: dict[str, Any]
+    druckenmiller: dict[str, Any]
+    burry: dict[str, Any]
+    damodaran: dict[str, Any]
+    lynch: dict[str, Any]
+
+    # Risk + PM
+    risk: dict[str, Any]
     decision: dict[str, Any]
 
 

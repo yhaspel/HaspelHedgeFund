@@ -67,5 +67,4 @@ def run_fundamentals(state: AgentState) -> AgentState:
         max_tokens=4096,
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="fundamentals", resp=resp)
-    state["fundamentals"] = parsed.model_dump()
-    return state
+    return {"fundamentals": parsed.model_dump()}  # type: ignore[return-value]

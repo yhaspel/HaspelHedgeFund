@@ -53,3 +53,44 @@ class PMDecision(BaseModel):
     confidence: int = Field(ge=0, le=100)
     rationale: str
     dissenting_views: list[str] = Field(default_factory=list)
+
+
+class ValuationOutput(BaseModel):
+    dcf_fair_value: float | None = None
+    multiples_fair_value: float | None = None
+    residual_income_fair_value: float | None = None
+    fair_value_low: float
+    fair_value_high: float
+    current_price: float
+    upside_pct: float
+    most_sensitive_assumption: str
+
+
+class SentimentOutput(BaseModel):
+    score: float = Field(ge=-1.0, le=1.0)
+    top_drivers: list[str] = Field(default_factory=list)
+
+
+class RiskOutput(BaseModel):
+    hard_caps_applied: list[str] = Field(default_factory=list)
+    max_position_pct_for_this_trade: float = Field(ge=0.0, le=1.0)
+    stop_loss_pct: float | None = None
+    veto: bool = False
+    rationale: str
+
+
+class DissentingPersona(BaseModel):
+    name: str
+    signal: Signal
+    confidence: int
+    thesis_summary: str
+
+
+class PortfolioOutput(BaseModel):
+    ticker: str
+    action: Action
+    target_quantity: float = 0.0
+    target_weight_pct: float = 0.0
+    aggregate_confidence: int = Field(ge=0, le=100)
+    rationale: str
+    dissenting_personas: list[DissentingPersona] = Field(default_factory=list)

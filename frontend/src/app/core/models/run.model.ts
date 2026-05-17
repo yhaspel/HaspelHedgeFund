@@ -16,13 +16,31 @@ export interface AgentMessage {
   created_at: string;
 }
 
+export interface DissentingPersona {
+  name: string;
+  signal: 'bullish' | 'neutral' | 'bearish';
+  confidence: number;
+  thesis_summary: string;
+}
+
+export interface RiskOverrides {
+  hard_caps_applied?: string[];
+  max_position_pct_for_this_trade?: number;
+  stop_loss_pct?: number | null;
+  veto?: boolean;
+  rationale?: string;
+}
+
 export interface DecisionRow {
   id: number;
   ticker: string;
   action: 'buy' | 'hold' | 'sell';
   confidence: number;
   rationale: string;
-  dissenting_views: string[];
+  dissenting_views: DissentingPersona[];
+  target_quantity: string;
+  target_weight_pct: string;
+  risk_overrides: RiskOverrides;
   created_at: string;
 }
 
@@ -50,6 +68,8 @@ export interface RunSummary {
 
 export interface RunDetail extends RunSummary {
   model_overrides: Record<string, string>;
+  personas: string[];
+  agent_versions: Record<string, string>;
   error_message: string;
   messages: AgentMessage[];
   decisions: DecisionRow[];
@@ -60,4 +80,18 @@ export interface CreateRunRequest {
   tickers: string[];
   as_of_date: string;
   model_overrides?: Record<string, string>;
+  personas?: string[];
 }
+
+export const ALL_PERSONAS: { id: string; name: string }[] = [
+  { id: 'buffett', name: 'Warren Buffett' },
+  { id: 'munger', name: 'Charlie Munger' },
+  { id: 'graham', name: 'Benjamin Graham' },
+  { id: 'wood', name: 'Cathie Wood' },
+  { id: 'druckenmiller', name: 'Stanley Druckenmiller' },
+  { id: 'burry', name: 'Michael Burry' },
+  { id: 'damodaran', name: 'Aswath Damodaran' },
+  { id: 'lynch', name: 'Peter Lynch' },
+];
+
+export const PERSONA_IDS = new Set(ALL_PERSONAS.map((p) => p.id));

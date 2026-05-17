@@ -26,7 +26,9 @@ class DecisionSerializer(serializers.ModelSerializer):
         model = Decision
         fields = (
             "id", "ticker", "action", "confidence",
-            "rationale", "dissenting_views", "created_at",
+            "rationale", "dissenting_views",
+            "target_quantity", "target_weight_pct", "risk_overrides",
+            "created_at",
         )
 
 
@@ -39,6 +41,7 @@ class RunDetailSerializer(serializers.ModelSerializer):
         model = Run
         fields = (
             "id", "tickers", "status", "model_overrides", "as_of_date",
+            "personas", "agent_versions",
             "created_at", "finished_at", "total_cost_usd", "error_message",
             "messages", "decisions", "llm_calls",
         )
@@ -56,7 +59,7 @@ class RunListSerializer(serializers.ModelSerializer):
 class RunCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Run
-        fields = ("id", "tickers", "model_overrides", "as_of_date", "status")
+        fields = ("id", "tickers", "model_overrides", "as_of_date", "personas", "status")
         read_only_fields = ("id", "status")
 
     def validate_tickers(self, v: list) -> list:

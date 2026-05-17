@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { RunsStore } from '../../abstraction/runs.store';
+import { ALL_PERSONAS } from '../../core/models/run.model';
 
 @Component({
   selector: 'hf-runs-new',
@@ -41,10 +42,10 @@ import { RunsStore } from '../../abstraction/runs.store';
         </label>
 
         <label class="block text-sm font-medium">
-          Buffett model
+          Persona model (applies to all selected personas)
           <select
-            name="model"
-            [(ngModel)]="buffettModel"
+            name="personaModel"
+            [(ngModel)]="personaModel"
             class="mt-1 w-full border rounded px-3 py-2"
           >
             <option value="">Default (Qwen3.6 27B)</option>
@@ -54,16 +55,35 @@ import { RunsStore } from '../../abstraction/runs.store';
           </select>
         </label>
 
+        <fieldset class="border rounded p-3">
+          <legend class="text-sm font-medium px-1">Council personas</legend>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            @for (p of allPersonas; track p.id) {
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  [checked]="selected().has(p.id)"
+                  (change)="toggle(p.id)"
+                />
+                {{ p.name }}
+              </label>
+            }
+          </div>
+          <p class="text-xs text-gray-500 mt-2">
+            {{ selected().size }} of {{ allPersonas.length }} selected.
+          </p>
+        </fieldset>
+
         @if (error()) {
           <p class="text-red-600 text-sm">{{ error() }}</p>
         }
 
         <button
           type="submit"
-          [disabled]="submitting()"
+          [disabled]="submitting() || selected().size === 0"
           class="w-full bg-blue-600 text-white rounded py-2 disabled:opacity-50"
         >
-          {{ submitting() ? 'Submitting…' : 'Run analysis' }}
+          {{ submitting() ? 'Submitting…' : 'Run council' }}
         </button>
       </form>
     </div>
@@ -73,11 +93,20 @@ export class RunsNewPage implements OnInit {
   readonly runs = inject(RunsStore);
   private readonly router = inject(Router);
 
+  readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
   asOfDate = '2024-12-31';
-  buffettModel = '';
+  personaModel = '';
   submitting = signal(false);
   error = signal<string | null>(null);
+  selected = signal<Set<string>>(new Set(ALL_PERSONAS.map((p) => p.id)));
+
+  toggle(id: string): void {
+    const next = new Set(this.selected());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.selected.set(next);
+  }
 
   ngOnInit(): void {
     this.runs.loadModels().subscribe();
@@ -87,12 +116,15 @@ export class RunsNewPage implements OnInit {
     this.error.set(null);
     this.submitting.set(true);
     const overrides: Record<string, string> = {};
-    if (this.buffettModel) overrides['buffett'] = this.buffettModel;
+    if (this.personaModel) {
+      for (const id of this.selected()) overrides[id] = this.personaModel;
+    }
     this.runs
       .submitRun({
         tickers: [this.ticker.toUpperCase()],
         as_of_date: this.asOfDate,
         model_overrides: overrides,
+        personas: Array.from(this.selected()),
       })
       .subscribe({
         next: (run) => this.router.navigate(['/runs', run.id]),

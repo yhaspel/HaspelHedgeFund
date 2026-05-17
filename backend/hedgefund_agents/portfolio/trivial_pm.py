@@ -17,5 +17,4 @@ def run_trivial_pm(state: AgentState) -> AgentState:
         confidence=int(buffett.get("confidence", 0)),
         rationale=(buffett.get("thesis") or "").strip()[:1000],
     )
-    state["decision"] = decision.model_dump()
-    return state
+    return {"decision": decision.model_dump()}  # type: ignore[return-value]

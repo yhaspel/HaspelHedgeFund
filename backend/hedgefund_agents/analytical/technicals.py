@@ -60,12 +60,11 @@ def run_technicals(state: AgentState) -> AgentState:
     bars = state["data_provider"].get_daily_bars(ticker, start, as_of, as_of=as_of)
     if len(bars) < 30:
         # Not enough data to do anything useful — return a neutral output without LLM.
-        state["technicals"] = TechnicalsOutput(
+        return {"technicals": TechnicalsOutput(
             regime="range",
             momentum_1m=0.0, momentum_3m=0.0, momentum_6m=0.0,
             rsi_14=50.0, atr_pct=0.0, signal="neutral", confidence=0,
-        ).model_dump()
-        return state
+        ).model_dump()}  # type: ignore[return-value]
 
     closes = np.array([float(b.close) for b in bars])
     highs = np.array([float(b.high) for b in bars])
@@ -110,5 +109,4 @@ def run_technicals(state: AgentState) -> AgentState:
     # Trust our numeric metrics over whatever the LLM echoed.
     out = parsed.model_dump()
     out.update(metrics)
-    state["technicals"] = out
-    return state
+    return {"technicals": out}  # type: ignore[return-value]
