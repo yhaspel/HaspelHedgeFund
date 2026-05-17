@@ -54,6 +54,12 @@ class OpenRouterClient:
                 response=resp,
             )
         payload = resp.json()
+        if "choices" not in payload:
+            # OpenRouter returns HTTP 200 with {"error": {...}} for upstream
+            # provider failures (rate limit, model unavailable, content
+            # policy). Raise so call_structured retries / surfaces it.
+            err = payload.get("error") or payload
+            raise RuntimeError(f"OpenRouter response missing 'choices': {err}")
         choice = payload["choices"][0]
         text = choice["message"].get("content") or ""
         finish_reason = choice.get("finish_reason") or ""
