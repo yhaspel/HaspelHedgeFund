@@ -98,8 +98,16 @@ interface PersonaCard {
                 </p>
               </div>
               <div class="text-right text-sm">
-                <p>Target qty: <span class="font-mono">{{ d.target_quantity }}</span></p>
-                <p>Target weight: <span class="font-mono">{{ d.target_weight_pct }}%</span></p>
+                <p>
+                  Target qty: <span class="font-mono">{{ d.target_quantity }}</span>
+                  <span
+                    class="ml-1 text-gray-400 cursor-help"
+                    title="Illustrative — computed against a $100K stub portfolio. Replaced by your real broker account balance in P3a (paper trading)."
+                  >ⓘ</span>
+                </p>
+                <p>
+                  Target weight: <span class="font-mono">{{ d.target_weight_pct }}%</span>
+                </p>
               </div>
             </div>
             <p class="text-sm whitespace-pre-wrap mt-3">{{ d.rationale }}</p>
