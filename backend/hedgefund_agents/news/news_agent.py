@@ -153,6 +153,7 @@ def run_news(state: AgentState) -> AgentState:
         f"10-K RISK FACTORS EXCERPT:\n{risk_factors or '(none available)'}"
     )
     try:
+        from apps.backtests.cache import make_cache_ctx
         parsed, resp = call_structured(
             client,
             model=model,
@@ -160,6 +161,7 @@ def run_news(state: AgentState) -> AgentState:
             messages=[Message("system", system), Message("user", user)],
             max_tokens=8192,
             temperature=0.3,
+            cache_ctx=make_cache_ctx(state, "news_digest"),
         )
         record_llm_call(run_id=run_id, agent_name="news_digest", resp=resp)
         _backfill_scores(items, parsed.material_events)

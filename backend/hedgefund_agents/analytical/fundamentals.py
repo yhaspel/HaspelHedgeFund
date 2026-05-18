@@ -59,12 +59,14 @@ def run_fundamentals(state: AgentState) -> AgentState:
         "trailing-twelve-months gross/operating/FCF margins, approximate ROIC, "
         "debt/equity, and assign quality_score 0-100. Provide a 1-2 sentence note."
     )
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
         schema=FundamentalsOutput,
         messages=[Message("system", system), Message("user", user)],
         max_tokens=4096,
+        cache_ctx=make_cache_ctx(state, "fundamentals"),
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="fundamentals", resp=resp)
     return {"fundamentals": parsed.model_dump()}  # type: ignore[return-value]

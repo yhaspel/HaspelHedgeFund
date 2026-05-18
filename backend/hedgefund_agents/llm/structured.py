@@ -35,7 +35,32 @@ def call_structured[T: BaseModel](
     messages: list[Message],
     max_tokens: int = 2048,
     temperature: float = 0.2,
+    cache_ctx: dict | None = None,
 ) -> tuple[T, LLMResponse]:
+    # L2 backtest cache: when enabled, hash (agent_name, version, model, messages, schema)
+    # and short-circuit on hit. We hash the user-supplied messages BEFORE we inject the
+    # schema-hint system message so the key is stable across schema_hint formatting changes.
+    if cache_ctx and cache_ctx.get("enabled"):
+        from apps.backtests import cache as bt_cache
+
+        key = bt_cache.build_key(
+            agent_name=cache_ctx["agent_name"],
+            agent_version=cache_ctx["agent_version"],
+            model=model,
+            messages=messages,
+            schema_name=schema.__name__,
+        )
+        cached = bt_cache.lookup(key)
+        if cached is not None:
+            bt_cache._bump("hits")
+            parsed = schema.model_validate(cached)
+            resp = LLMResponse(
+                text=json.dumps(cached),
+                model=model, provider=getattr(client, "provider", ""),
+                cached_tokens=0, cost_usd=0.0, finish_reason="cache_hit",
+            )
+            return parsed, resp
+        bt_cache._bump("misses")
     schema_hint = json.dumps(schema.model_json_schema(), indent=2)
     system_addendum = Message(
         role="system",
@@ -70,6 +95,23 @@ def call_structured[T: BaseModel](
             continue
         try:
             parsed = schema.model_validate_json(_extract_json(resp.text))
+            if cache_ctx and cache_ctx.get("enabled"):
+                from apps.backtests import cache as bt_cache
+
+                bt_cache.store(
+                    cache_key=bt_cache.build_key(
+                        agent_name=cache_ctx["agent_name"],
+                        agent_version=cache_ctx["agent_version"],
+                        model=model, messages=messages, schema_name=schema.__name__,
+                    ),
+                    agent_name=cache_ctx["agent_name"],
+                    agent_version=cache_ctx["agent_version"],
+                    response_json=parsed.model_dump(),
+                    tokens_in=resp.prompt_tokens,
+                    tokens_out=resp.completion_tokens,
+                    cost_usd=float(resp.cost_usd or 0.0),
+                )
+                bt_cache._bump("writes")
             return parsed, resp
         except (ValidationError, json.JSONDecodeError) as e:
             last_err = e

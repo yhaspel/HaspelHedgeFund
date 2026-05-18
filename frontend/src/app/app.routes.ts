@@ -34,5 +34,29 @@ export const routes: Routes = [
         (m) => m.RunsDetailPage,
       ),
   },
+  {
+    path: 'backtests',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/backtests/backtests-list.page').then(
+        (m) => m.BacktestsListPage,
+      ),
+  },
+  {
+    path: 'backtests/new',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/backtests/backtests-new.page').then(
+        (m) => m.BacktestsNewPage,
+      ),
+  },
+  {
+    path: 'backtests/:id',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/backtests/backtests-detail.page').then(
+        (m) => m.BacktestsDetailPage,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

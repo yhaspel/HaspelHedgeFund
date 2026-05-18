@@ -81,6 +81,7 @@ def run_cio(state: AgentState) -> AgentState:
         "anything, set overrode_pm=True and explain in override_reason."
     )
     try:
+        from apps.backtests.cache import make_cache_ctx
         parsed, resp = call_structured(
             client,
             model=model,
@@ -88,6 +89,7 @@ def run_cio(state: AgentState) -> AgentState:
             messages=[Message("system", SPEC.prompt), Message("user", user)],
             max_tokens=4096,
             temperature=0.2,
+            cache_ctx=make_cache_ctx(state, "cio"),
         )
         record_llm_call(run_id=state.get("run_id"), agent_name="cio", resp=resp)
     except Exception as e:

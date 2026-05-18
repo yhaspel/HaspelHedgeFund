@@ -57,12 +57,14 @@ def run_sentiment(state: AgentState) -> AgentState:
         "HEADLINES:\n" + "\n".join(news.headlines)
         + "\n\nSUMMARIES:\n" + "\n".join(news.summaries)
     )
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
         schema=SentimentOutput,
         messages=[Message("system", system), Message("user", user)],
         max_tokens=512,
+        cache_ctx=make_cache_ctx(state, "sentiment"),
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="sentiment", resp=resp)
     return {"sentiment": parsed.model_dump()}  # type: ignore[return-value]

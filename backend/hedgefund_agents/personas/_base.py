@@ -65,6 +65,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             spec_default = fallback
         provider, model = pick_model(state, name, spec_default)
         client = get_llm(provider)
+        from apps.backtests.cache import make_cache_ctx
         parsed, resp = call_structured(
             client,
             model=model,
@@ -72,6 +73,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             messages=[Message("system", spec.prompt), Message("user", user)],
             max_tokens=8192,
             temperature=0.4,
+            cache_ctx=make_cache_ctx(state, name),
         )
         record_llm_call(run_id=state.get("run_id"), agent_name=name, resp=resp)
         return {name: parsed.model_dump()}  # type: ignore[return-value]

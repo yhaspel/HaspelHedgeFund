@@ -129,12 +129,14 @@ def run_risk_manager(state: AgentState) -> AgentState:
         f"Sector exposure_pct ({portfolio.sector}): {portfolio.sector_pct(portfolio.sector):.4f}\n"
         f"Recent volatility (atr_pct): {technicals.get('atr_pct', 0.0):.2f}\n"
     )
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
         schema=RiskOutput,
         messages=[Message("system", system), Message("user", user)],
         max_tokens=1024,
+        cache_ctx=make_cache_ctx(state, "risk_manager"),
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="risk_manager", resp=resp)
     out = parsed.model_dump()

@@ -1,10 +1,17 @@
 """Real Portfolio Manager.
 
-Deterministic aggregation of persona signals + risk cap. The PM is
-pure Python — no LLM call. The rationale is composed from the inputs
-so the decision is fully traceable.
+Deterministic aggregation of persona signals + risk cap. The PM is pure
+Python — no LLM call. The rationale is composed from the inputs so the
+decision is fully traceable.
+
+Parameterized via `state["pm_config"]` so backtests can sweep weights,
+thresholds, and sizing without forking the aggregator. Defaults match
+the previous behavior so production runs are unchanged.
 """
 from __future__ import annotations
+
+import math
+from typing import Any
 
 from ..base import AgentState
 from ..outputs import DissentingPersona, PortfolioOutput
@@ -12,18 +19,25 @@ from ..personas import PERSONA_NODES
 from ..versioning import AGENT_VERSIONS, AgentSpec, register
 
 SIGNAL_TO_NUM = {"bullish": 1.0, "neutral": 0.0, "bearish": -1.0}
-NUM_TO_ACTION = {"buy": 1, "hold": 0, "sell": -1}
 SPEC = AgentSpec(
     agent_name="portfolio_manager",
-    version="v1",
+    version="v2",
     default_model="(deterministic — no LLM)",
     prompt="(deterministic aggregator — see portfolio/portfolio_manager.py)",
     config={"kind": "pm"},
 )
 register(SPEC)
 
-BUY_THRESHOLD = 0.25
-SELL_THRESHOLD = -0.25
+DEFAULTS = {
+    "buy_threshold": 0.25,
+    "sell_threshold": -0.25,
+    "min_confidence": 0.0,        # gate; 0.0 = no gate
+    "weights": None,              # None => use quality_score from registry
+    "vol_target_annual": None,    # None => legacy confidence×cap sizing
+    "max_weight": 1.0,            # hard cap per name
+    "vol_lookback_days": 60,
+    "vol_floor": 0.05,
+}
 
 
 def _quality(name: str) -> float:
@@ -33,27 +47,36 @@ def _quality(name: str) -> float:
     return float(spec.config.get("quality_score", 1.0))
 
 
-def aggregate_personas(persona_outputs: dict[str, dict]) -> tuple[float, int]:
-    """Returns (signed_score in [-1,1], aggregate_confidence 0-100)."""
+def _resolve_config(pm_config: dict | None) -> dict:
+    cfg = dict(DEFAULTS)
+    if pm_config:
+        cfg.update({k: v for k, v in pm_config.items() if v is not None})
+    return cfg
+
+
+def aggregate_personas(
+    persona_outputs: dict[str, dict], weights: dict[str, float] | None = None
+) -> tuple[float, int]:
+    """Weighted average of persona signals -> (signed_score in [-1,1], avg_confidence 0-100)."""
     total_weight = 0.0
     signed = 0.0
     conf_weighted = 0.0
     for name, out in persona_outputs.items():
         sig = SIGNAL_TO_NUM.get(out.get("signal", "neutral"), 0.0)
         conf = float(out.get("confidence", 0)) / 100.0
-        w = conf * _quality(name)
-        signed += sig * w
-        conf_weighted += conf * _quality(name)
-        total_weight += _quality(name)
+        w = weights[name] if (weights and name in weights) else _quality(name)
+        signed += sig * conf * w
+        conf_weighted += conf * w
+        total_weight += w
     if total_weight == 0:
         return 0.0, 0
     return signed / total_weight, int(round(conf_weighted / total_weight * 100))
 
 
-def map_to_action(signed: float) -> str:
-    if signed >= BUY_THRESHOLD:
+def map_to_action(signed: float, buy_thr: float = 0.25, sell_thr: float = -0.25) -> str:
+    if signed >= buy_thr:
         return "buy"
-    if signed <= SELL_THRESHOLD:
+    if signed <= sell_thr:
         return "sell"
     return "hold"
 
@@ -77,33 +100,78 @@ def find_dissent(
     return out
 
 
-def run_portfolio_manager(state: AgentState) -> AgentState:
-    ticker = state["ticker"]
-    persona_outputs: dict[str, dict] = {
-        n: state[n]  # type: ignore[literal-required]
-        for n in PERSONA_NODES
-        if state.get(n)  # type: ignore[arg-type]
-    }
-    risk = state.get("risk") or {}  # type: ignore[assignment]
-    valuation = state.get("valuation") or {}  # type: ignore[assignment]
+def realized_vol_annual(returns: list[float]) -> float:
+    if len(returns) < 5:
+        return 0.0
+    mean = sum(returns) / len(returns)
+    var = sum((r - mean) ** 2 for r in returns) / max(1, len(returns) - 1)
+    return math.sqrt(var) * math.sqrt(252)
 
-    signed, agg_conf = aggregate_personas(persona_outputs)
-    action = map_to_action(signed)
+
+def compute_target_weight(
+    signed: float,
+    action: str,
+    confidence: int,
+    cap: float,
+    cfg: dict,
+    trailing_returns: list[float] | None,
+) -> float:
+    """Resolve a target weight in [-max_weight, +max_weight].
+
+    Three modes:
+      1. Vol-targeted: weight = vol_target / realized_vol, clipped to max_weight, signed.
+      2. Legacy: signed × cap (the previous confidence-times-cap behavior).
+      3. Sell: zero (exit).
+    """
+    max_weight = float(cfg["max_weight"])
+    if action == "sell":
+        return 0.0
+    if action == "hold":
+        return 0.0
+
+    direction = 1.0 if action == "buy" else 0.0  # short side handled by P2e
+    vol_target = cfg.get("vol_target_annual")
+    if vol_target and trailing_returns:
+        vol = realized_vol_annual(trailing_returns)
+        vol = max(float(cfg["vol_floor"]), vol)
+        raw = float(vol_target) / vol
+        weight = min(max_weight, raw) * direction
+    else:
+        weight = min(cap, max(0.0, signed) * cap) if cap > 0 else min(max_weight, abs(signed) * max_weight) * direction
+    return weight
+
+
+def aggregate(
+    *,
+    ticker: str,
+    persona_outputs: dict[str, dict],
+    risk: dict[str, Any] | None,
+    valuation: dict[str, Any] | None,
+    pm_config: dict | None = None,
+    trailing_returns: list[float] | None = None,
+    portfolio_value: float = 100_000.0,
+) -> PortfolioOutput:
+    """Pure aggregator usable from the LangGraph node OR from the backtest
+    sweep (which has cached persona outputs and wants to re-aggregate cheaply)."""
+    cfg = _resolve_config(pm_config)
+    risk = risk or {}
+    valuation = valuation or {}
+
+    signed, agg_conf = aggregate_personas(persona_outputs, weights=cfg["weights"])
+    action = map_to_action(signed, cfg["buy_threshold"], cfg["sell_threshold"])
+
     veto = bool(risk.get("veto"))
     cap = float(risk.get("max_position_pct_for_this_trade", 0.0))
-
     if veto:
         action = "hold"
+    if action == "buy" and (agg_conf / 100.0) < float(cfg["min_confidence"]):
+        action = "hold"
 
-    if action == "buy":
-        target_weight = min(cap, max(0.0, signed) * cap)
-    elif action == "sell":
-        target_weight = 0.0  # exit signal
-    else:
-        target_weight = 0.0
+    target_weight = compute_target_weight(
+        signed, action, agg_conf, cap, cfg, trailing_returns
+    )
+    target_weight = max(-float(cfg["max_weight"]), min(float(cfg["max_weight"]), target_weight))
 
-    portfolio = state.get("portfolio")  # may be None
-    portfolio_value = getattr(portfolio, "total_value", 100_000.0)
     current_price = float(valuation.get("current_price") or 0.0)
     target_dollars = target_weight * portfolio_value
     target_qty = (target_dollars / current_price) if current_price > 0 else 0.0
@@ -118,13 +186,17 @@ def run_portfolio_manager(state: AgentState) -> AgentState:
         rationale_bits.append("Risk Manager veto in effect: forcing hold.")
     if risk.get("hard_caps_applied"):
         rationale_bits.append(f"Hard caps applied: {', '.join(risk['hard_caps_applied'])}.")
+    if cfg.get("vol_target_annual") and trailing_returns:
+        rationale_bits.append(
+            f"Vol-targeted sizing (target {cfg['vol_target_annual']:.0%})."
+        )
     if dissent:
         rationale_bits.append(
             f"Dissenting personas ({len(dissent)}): "
             + ", ".join(d.name for d in dissent) + "."
         )
 
-    out = PortfolioOutput(
+    return PortfolioOutput(
         ticker=ticker,
         action=action,  # type: ignore[arg-type]
         target_quantity=target_qty,
@@ -132,5 +204,25 @@ def run_portfolio_manager(state: AgentState) -> AgentState:
         aggregate_confidence=agg_conf,
         rationale=" ".join(rationale_bits),
         dissenting_personas=dissent,
+    )
+
+
+def run_portfolio_manager(state: AgentState) -> AgentState:
+    ticker = state["ticker"]
+    persona_outputs: dict[str, dict] = {
+        n: state[n]  # type: ignore[literal-required]
+        for n in PERSONA_NODES
+        if state.get(n)  # type: ignore[arg-type]
+    }
+    portfolio = state.get("portfolio")
+    portfolio_value = getattr(portfolio, "total_value", 100_000.0)
+    out = aggregate(
+        ticker=ticker,
+        persona_outputs=persona_outputs,
+        risk=state.get("risk") or {},  # type: ignore[arg-type]
+        valuation=state.get("valuation") or {},  # type: ignore[arg-type]
+        pm_config=state.get("pm_config"),  # type: ignore[arg-type]
+        trailing_returns=state.get("trailing_returns"),  # type: ignore[arg-type]
+        portfolio_value=portfolio_value,
     )
     return {"decision": out.model_dump()}  # type: ignore[return-value]

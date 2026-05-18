@@ -6,4 +6,5 @@ urlpatterns = [
     path("api/", include("apps.accounts.urls")),
     path("api/", include("apps.runs.urls")),
     path("api/", include("apps.data.urls")),
+    path("api/", include("apps.backtests.urls")),
 ]

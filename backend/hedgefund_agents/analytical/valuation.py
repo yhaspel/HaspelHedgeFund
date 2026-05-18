@@ -172,12 +172,14 @@ def run_valuation(state: AgentState) -> AgentState:
         "naming the single most sensitive assumption in <= 20 words."
     )
     user = "INPUTS:\n" + str(summary_input)
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
         schema=ValuationOutput,
         messages=[Message("system", system), Message("user", user)],
         max_tokens=1024,
+        cache_ctx=make_cache_ctx(state, "valuation"),
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="valuation", resp=resp)
     out = parsed.model_dump()

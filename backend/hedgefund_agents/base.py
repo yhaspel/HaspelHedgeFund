@@ -51,6 +51,10 @@ class AgentState(TypedDict, total=False):
     pm_decision: dict[str, Any]  # deterministic PM, preserved for audit
     cio: dict[str, Any]
     disable_cio: bool  # backtests: skip CIO for reproducibility
+    pm_config: dict[str, Any]  # backtest sweep overrides for portfolio_manager
+    trailing_returns: list[float]  # trailing daily returns for vol-target sizing
+    use_llm_cache: bool  # backtests: read/write LLMResponseCache (L2)
+    backtest_id: int  # for cache scoping / telemetry
 
 
 def pick_model(state: AgentState, agent_name: str, default: tuple[str, str]) -> tuple[str, str]:

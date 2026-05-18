@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.data",
     "apps.runs",
+    "apps.backtests",
     "hedgefund_agents",
 ]
 

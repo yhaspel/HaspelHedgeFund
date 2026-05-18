@@ -141,7 +141,10 @@ def compute_snapshot(as_of, provider: FredProvider | None = None) -> MacroSnapsh
     return snapshot
 
 
-def _llm_narrative(*, as_of, regime: dict[str, str], series_used: dict[str, float | None]):
+def _llm_narrative(
+    *, as_of, regime: dict[str, str], series_used: dict[str, float | None],
+    state: dict | None = None,
+):
     default = DEFAULT_MODELS.get("macro", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = default
     client = get_llm(provider)
@@ -159,6 +162,7 @@ def _llm_narrative(*, as_of, regime: dict[str, str], series_used: dict[str, floa
         "energy, healthcare, consumer_staples, consumer_discretionary, "
         "utilities, industrials."
     )
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
@@ -166,6 +170,7 @@ def _llm_narrative(*, as_of, regime: dict[str, str], series_used: dict[str, floa
         messages=[Message("system", system), Message("user", user)],
         max_tokens=4096,
         temperature=0.3,
+        cache_ctx=make_cache_ctx(state or {}, "macro"),
     )
     record_llm_call(run_id=None, agent_name="macro", resp=resp)
     return parsed.narrative, parsed.sector_implications

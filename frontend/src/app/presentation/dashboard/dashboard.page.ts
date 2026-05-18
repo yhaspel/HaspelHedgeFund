@@ -54,6 +54,12 @@ import { RunsStore } from '../../abstraction/runs.store';
 
       <div class="mb-6">
         <a
+          routerLink="/backtests"
+          class="inline-block bg-indigo-600 text-white rounded px-4 py-2 mr-2"
+        >
+          Backtests
+        </a>
+        <a
           routerLink="/runs/new"
           class="inline-block bg-blue-600 text-white rounded px-4 py-2"
         >

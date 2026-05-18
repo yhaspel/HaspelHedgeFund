@@ -98,12 +98,14 @@ def run_technicals(state: AgentState) -> AgentState:
         "Choose one regime label and a bullish/neutral/bearish signal with a "
         "0-100 confidence."
     )
+    from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,
         model=model,
         schema=TechnicalsOutput,
         messages=[Message("system", system), Message("user", user)],
         max_tokens=4096,
+        cache_ctx=make_cache_ctx(state, "technicals"),
     )
     record_llm_call(run_id=state.get("run_id"), agent_name="technicals", resp=resp)
     # Trust our numeric metrics over whatever the LLM echoed.
