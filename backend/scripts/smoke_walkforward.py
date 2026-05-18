@@ -41,10 +41,16 @@ END = dt.date(2025, 4, 1)
 
 
 def main() -> int:
+    # Belt-and-suspenders: httpx logger gets configured before django.setup
+    # in this script, so add explicit WARNING level here even though the
+    # global RedactSecretsFilter would also catch leaks if it fires first.
+    import logging as _logging
+    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+
     user = User.objects.get(email="owner@example.com")
     bt = Backtest.objects.create(
         user=user,
-        name=f"Smoke {dt.date.today().isoformat()} 5n 1yr",
+        name=f"Verify {dt.date.today().isoformat()} 5n 1yr v2",
         universe=UNIVERSE,
         start_date=START,
         end_date=END,
@@ -52,7 +58,7 @@ def main() -> int:
         commission_bps=Decimal("5"),
         spread_bps=Decimal("5"),
         rebalance_frequency="weekly",
-        is_window_days=126,
+        is_window_days=189,
         oos_window_days=42,
         step_days=42,
         n_candidates=10,

@@ -232,12 +232,17 @@ def prime_agent_cache(
     days = trading_days(start, end, universe)
     rebal = sorted(rebalance_dates_for(days, rebalance_freq))
 
+    from django.db import close_old_connections
+
     cache_map: dict[tuple[str, dt.date], dict] = {}
     total = len(rebal) * len(universe)
     done = 0
     failures = 0
     for day in rebal:
         for ticker in universe:
+            # Long-running scripts/Celery tasks accumulate stale DB connections.
+            # Recycle here so we don't blow past Postgres' max_connections.
+            close_old_connections()
             initial_state: dict[str, Any] = {
                 "ticker": ticker,
                 "as_of_date": day,
