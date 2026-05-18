@@ -119,6 +119,9 @@ MEDIA_URL = "/media/"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "redact_secrets": {"()": "hedgefund.logging_filters.RedactSecretsFilter"},
+    },
     "formatters": {
         "json": {
             "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
@@ -126,7 +129,11 @@ LOGGING = {
         },
     },
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "json"},
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+            "filters": ["redact_secrets"],
+        },
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }

@@ -1,6 +1,8 @@
 """Anthropic Messages API adapter. Thin wrapper over HTTPS."""
 from __future__ import annotations
 
+import logging
+import random
 import time
 
 import httpx
@@ -11,6 +13,11 @@ from ..pricing import estimate_cost
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+RETRY_STATUSES = {408, 429, 500, 502, 503, 504, 529}
+MAX_RETRIES = 5
+BASE_BACKOFF_SECONDS = 2.0
+
+log = logging.getLogger(__name__)
 
 
 class AnthropicClient:
@@ -51,7 +58,7 @@ class AnthropicClient:
             "content-type": "application/json",
         }
         t0 = time.perf_counter()
-        resp = self._http.post(API_URL, json=body, headers=headers)
+        resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         resp.raise_for_status()
         payload = resp.json()
@@ -75,3 +82,29 @@ class AnthropicClient:
             latency_ms=latency_ms,
             raw=payload,
         )
+
+    def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:
+        """Exponential backoff on 408/429/5xx including 529 overload.
+
+        Honors `retry-after` if Anthropic returns one. Per Anthropic guidance,
+        these are transient and should be retried."""
+        last: httpx.Response | None = None
+        for attempt in range(MAX_RETRIES + 1):
+            resp = self._http.post(API_URL, json=body, headers=headers)
+            if resp.status_code not in RETRY_STATUSES:
+                return resp
+            last = resp
+            if attempt == MAX_RETRIES:
+                return resp
+            retry_after = resp.headers.get("retry-after")
+            try:
+                wait = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2 ** attempt)
+            except ValueError:
+                wait = BASE_BACKOFF_SECONDS * (2 ** attempt)
+            wait += random.uniform(0, 0.5)  # jitter
+            log.warning(
+                "anthropic %s on attempt %d; sleeping %.1fs", resp.status_code, attempt + 1, wait
+            )
+            time.sleep(wait)
+        assert last is not None
+        return last

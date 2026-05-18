@@ -235,6 +235,7 @@ def prime_agent_cache(
     cache_map: dict[tuple[str, dt.date], dict] = {}
     total = len(rebal) * len(universe)
     done = 0
+    failures = 0
     for day in rebal:
         for ticker in universe:
             initial_state: dict[str, Any] = {
@@ -252,6 +253,7 @@ def prime_agent_cache(
                 final = graph.invoke(initial_state)
             except Exception as e:
                 log.warning("graph.invoke failed for %s %s: %s", ticker, day, e)
+                failures += 1
                 done += 1
                 continue
             entry: dict[str, Any] = {}
@@ -266,4 +268,13 @@ def prime_agent_cache(
             done += 1
             if progress_cb:
                 progress_cb(done, total, f"primed {ticker} {day.isoformat()}")
+    # Hard fail if >25% of (ticker, day) invocations failed — the IS sweep
+    # against a sparse cache produces garbage.
+    if total and failures / total > 0.25:
+        raise RuntimeError(
+            f"prime_agent_cache: {failures}/{total} graph invocations failed "
+            f"(>25% threshold). Refusing to score on a sparse cache."
+        )
+    if failures:
+        log.warning("prime_agent_cache: %d/%d graph invocations failed", failures, total)
     return cache_map
