@@ -13,7 +13,6 @@ from apps.backtests.cache import (
     store,
 )
 
-
 pytestmark = pytest.mark.django_db
 
 
@@ -38,10 +37,11 @@ def test_make_cache_ctx_emits_version_from_state():
 
 def test_build_key_is_deterministic_and_version_sensitive():
     msgs = [_Msg("system", "sys"), _Msg("user", "ticker=AAPL")]
-    k1 = build_key(agent_name="buffett", agent_version="v1", model="haiku", messages=msgs, schema_name="X")
-    k2 = build_key(agent_name="buffett", agent_version="v1", model="haiku", messages=msgs, schema_name="X")
+    kwargs = dict(agent_name="buffett", model="haiku", messages=msgs, schema_name="X")
+    k1 = build_key(agent_version="v1", **kwargs)
+    k2 = build_key(agent_version="v1", **kwargs)
     assert k1 == k2
-    k3 = build_key(agent_name="buffett", agent_version="v2", model="haiku", messages=msgs, schema_name="X")
+    k3 = build_key(agent_version="v2", **kwargs)
     assert k1 != k3
 
 

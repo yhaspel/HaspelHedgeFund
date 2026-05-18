@@ -68,7 +68,9 @@ class BacktestFold(models.Model):
     is_sharpe = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     oos_sharpe = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     oos_return_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
-    oos_max_drawdown_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    oos_max_drawdown_pct = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0"),
+    )
     candidates_scored = models.JSONField(default=list, blank=True)
 
     class Meta:
@@ -103,10 +105,14 @@ class BacktestDay(models.Model):
 
 
 class BacktestMetrics(models.Model):
-    backtest = models.OneToOneField(Backtest, related_name="metrics", on_delete=models.CASCADE)
+    backtest = models.OneToOneField(
+        Backtest, related_name="metrics", on_delete=models.CASCADE,
+    )
     # Computed on stitched OOS curve.
     total_return_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
-    annualized_return_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    annualized_return_pct = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0"),
+    )
     sharpe = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     sortino = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     max_drawdown_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
@@ -119,6 +125,9 @@ class BacktestMetrics(models.Model):
     oos_sharpe_std = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     baseline_return_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     per_agent_attribution = models.JSONField(default=dict, blank=True)
+
+    def __str__(self) -> str:
+        return f"Metrics bt={self.backtest_id}"
 
 
 class LLMResponseCache(models.Model):

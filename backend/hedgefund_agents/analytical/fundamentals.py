@@ -68,5 +68,8 @@ def run_fundamentals(state: AgentState) -> AgentState:
         max_tokens=4096,
         cache_ctx=make_cache_ctx(state, "fundamentals"),
     )
-    record_llm_call(run_id=state.get("run_id"), backtest_id=state.get("backtest_id"), agent_name="fundamentals", resp=resp)
+    record_llm_call(
+        run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+        agent_name="fundamentals", resp=resp,
+    )
     return {"fundamentals": parsed.model_dump()}  # type: ignore[return-value]

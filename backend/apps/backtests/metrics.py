@@ -10,7 +10,6 @@ from decimal import Decimal
 
 from apps.data.models import DailyBar
 
-from .engine import trading_days
 from .models import BacktestDay
 
 TRADING_DAYS_PER_YEAR = 252
@@ -101,7 +100,6 @@ def _stitched_oos_equity(bt) -> list[tuple]:
     out: list[tuple] = []
     current_fold = None
     fold_start_value = base
-    fold_running = base
     for d, val, fid in qs:
         val = float(val)
         if fid != current_fold:
@@ -111,7 +109,6 @@ def _stitched_oos_equity(bt) -> list[tuple]:
             else:
                 fold_start_value = base
             current_fold = fid
-            fold_running = fold_start_value
             initial = val  # this fold's initial portfolio_value
             ratio = val / initial if initial else 1.0
             out.append((d, fold_start_value * ratio))
@@ -126,7 +123,10 @@ def stitched_oos_returns(bt) -> tuple[list, list[float]]:
     points = _stitched_oos_equity(bt)
     dates = [p[0] for p in points]
     equity = [p[1] for p in points]
-    rets = [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))] if len(equity) >= 2 else []
+    rets = (
+        [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))]
+        if len(equity) >= 2 else []
+    )
     return dates, equity, rets  # type: ignore[return-value]
 
 
@@ -161,7 +161,10 @@ def compute_stitched_metrics(bt, fold_records, agent_outputs_cache=None) -> dict
     dates_eq = _stitched_oos_equity(bt)
     dates = [p[0] for p in dates_eq]
     equity = [p[1] for p in dates_eq]
-    rets = [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))] if len(equity) >= 2 else []
+    rets = (
+        [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))]
+        if len(equity) >= 2 else []
+    )
 
     total_ret = (equity[-1] / equity[0] - 1.0) if len(equity) >= 2 else 0.0
     years = max(1e-9, len(equity) / TRADING_DAYS_PER_YEAR)

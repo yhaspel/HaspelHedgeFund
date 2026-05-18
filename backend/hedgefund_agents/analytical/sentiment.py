@@ -66,5 +66,8 @@ def run_sentiment(state: AgentState) -> AgentState:
         max_tokens=512,
         cache_ctx=make_cache_ctx(state, "sentiment"),
     )
-    record_llm_call(run_id=state.get("run_id"), backtest_id=state.get("backtest_id"), agent_name="sentiment", resp=resp)
+    record_llm_call(
+        run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+        agent_name="sentiment", resp=resp,
+    )
     return {"sentiment": parsed.model_dump()}  # type: ignore[return-value]

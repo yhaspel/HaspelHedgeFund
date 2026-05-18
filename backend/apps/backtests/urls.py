@@ -14,7 +14,10 @@ from .views import (
 
 urlpatterns = [
     path("backtests/", BacktestListCreateView.as_view(), name="backtest-list-create"),
-    path("backtests/default-universe/", DefaultUniverseView.as_view(), name="backtest-default-universe"),
+    path(
+        "backtests/default-universe/", DefaultUniverseView.as_view(),
+        name="backtest-default-universe",
+    ),
     path("backtests/compare/", BacktestCompareView.as_view(), name="backtest-compare"),
     path("backtests/<int:pk>/", BacktestDetailView.as_view(), name="backtest-detail"),
     path("backtests/<int:pk>/cancel/", BacktestCancelView.as_view(), name="backtest-cancel"),

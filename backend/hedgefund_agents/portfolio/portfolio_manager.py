@@ -137,7 +137,10 @@ def compute_target_weight(
         raw = float(vol_target) / vol
         weight = min(max_weight, raw) * direction
     else:
-        weight = min(cap, max(0.0, signed) * cap) if cap > 0 else min(max_weight, abs(signed) * max_weight) * direction
+        if cap > 0:
+            weight = min(cap, max(0.0, signed) * cap)
+        else:
+            weight = min(max_weight, abs(signed) * max_weight) * direction
     return weight
 
 

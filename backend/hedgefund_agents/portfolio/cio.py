@@ -91,7 +91,10 @@ def run_cio(state: AgentState) -> AgentState:
             temperature=0.2,
             cache_ctx=make_cache_ctx(state, "cio"),
         )
-        record_llm_call(run_id=state.get("run_id"), backtest_id=state.get("backtest_id"), agent_name="cio", resp=resp)
+        record_llm_call(
+            run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+            agent_name="cio", resp=resp,
+        )
     except Exception as e:
         log.warning("CIO call failed (%s); ratifying PM unchanged", e)
         parsed = CioOutput(

@@ -53,7 +53,7 @@ def actions_on(ticker: str, as_of: dt.date, source: str = "fmp") -> list[dict]:
     # Adjusted-close ratio captures both split and dividend; close ratio
     # captures price only. The split is the close ratio (after normalizing).
     try:
-        adj_today = float(today.adjusted_close)
+        float(today.adjusted_close)
         adj_prev = float(prev.adjusted_close)
         close_today = float(today.close)
         close_prev = float(prev.close)

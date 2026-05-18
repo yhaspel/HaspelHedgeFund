@@ -49,7 +49,7 @@ def sample_candidate(
     # Dirichlet weights (alpha=1.0 = uniform on simplex).
     raw = [rng.gammavariate(1.0, 1.0) for _ in personas]
     s = sum(raw) or 1.0
-    weights = {p: w / s for p, w in zip(personas, raw)}
+    weights = {p: w / s for p, w in zip(personas, raw, strict=False)}
 
     return {
         "weights": weights,

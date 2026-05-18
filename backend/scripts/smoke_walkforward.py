@@ -35,7 +35,6 @@ from apps.accounts.models import User  # noqa: E402
 from apps.backtests.models import Backtest  # noqa: E402
 from apps.backtests.walkforward import run_walkforward  # noqa: E402
 
-
 UNIVERSE = ["AAPL", "MSFT", "GOOGL", "JPM", "JNJ"]
 START = dt.date(2024, 4, 1)
 END = dt.date(2025, 4, 1)

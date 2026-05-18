@@ -181,7 +181,10 @@ def run_valuation(state: AgentState) -> AgentState:
         max_tokens=1024,
         cache_ctx=make_cache_ctx(state, "valuation"),
     )
-    record_llm_call(run_id=state.get("run_id"), backtest_id=state.get("backtest_id"), agent_name="valuation", resp=resp)
+    record_llm_call(
+        run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+        agent_name="valuation", resp=resp,
+    )
     out = parsed.model_dump()
     # Trust our arithmetic, not the LLM's echo.
     out.update({

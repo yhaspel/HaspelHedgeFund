@@ -11,9 +11,8 @@ import pytest
 from apps.backtests import cache as bt_cache
 from apps.backtests.engine import rebalance_dates_for, run_segment, trading_days
 from apps.backtests.optimizer import optimize_is, sample_candidate
-from apps.backtests.walkforward import generate_folds, run_walkforward
+from apps.backtests.walkforward import generate_folds
 from apps.data.models import DailyBar
-
 
 pytestmark = pytest.mark.django_db
 
@@ -93,7 +92,7 @@ def test_generate_folds_nonoverlapping():
     )
     assert len(folds) >= 3
     # OOS ranges must be non-overlapping (step >= oos_window)
-    for a, b in zip(folds, folds[1:]):
+    for a, b in zip(folds, folds[1:], strict=False):
         assert b.oos_start > a.oos_end
     # IS must precede OOS for every fold
     for f in folds:

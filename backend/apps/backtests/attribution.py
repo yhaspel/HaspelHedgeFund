@@ -7,7 +7,6 @@ vs the original.
 from __future__ import annotations
 
 import copy
-from decimal import Decimal
 
 from .engine import rebalance_dates_for, run_segment, trading_days
 from .models import BacktestMetrics

@@ -19,10 +19,16 @@ from .tasks import run_backtest
 
 class BacktestListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
-        return Backtest.objects.filter(user=self.request.user).select_related("metrics").order_by("-created_at")
+        return (
+            Backtest.objects.filter(user=self.request.user)
+            .select_related("metrics")
+            .order_by("-created_at")
+        )
 
     def get_serializer_class(self):
-        return BacktestCreateSerializer if self.request.method == "POST" else BacktestListSerializer
+        if self.request.method == "POST":
+            return BacktestCreateSerializer
+        return BacktestListSerializer
 
     def perform_create(self, serializer: BacktestCreateSerializer) -> None:
         bt = serializer.save(user=self.request.user)
@@ -34,7 +40,11 @@ class BacktestDetailView(generics.RetrieveAPIView):
     serializer_class = BacktestDetailSerializer
 
     def get_queryset(self):
-        return Backtest.objects.filter(user=self.request.user).select_related("metrics").prefetch_related("folds")
+        return (
+            Backtest.objects.filter(user=self.request.user)
+            .select_related("metrics")
+            .prefetch_related("folds")
+        )
 
 
 class BacktestCancelView(APIView):
@@ -77,7 +87,7 @@ class EquityCurveView(APIView):
                 "baseline": round(b, 2) if i < len(baseline) else None,
                 "fold_id": fold_lookup.get(d),
             }
-            for i, (d, v) in enumerate(zip(dates, equity))
+            for i, (d, v) in enumerate(zip(dates, equity, strict=False))
             for b in [baseline[i] if i < len(baseline) else None]
         ]
         return Response({"points": points, "baseline_kind": bt.baseline})
@@ -106,7 +116,11 @@ class DeflationView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         m = getattr(bt, "metrics", None)
         per_fold = [
-            {"fold_index": f.fold_index, "is_sharpe": float(f.is_sharpe), "oos_sharpe": float(f.oos_sharpe)}
+            {
+                "fold_index": f.fold_index,
+                "is_sharpe": float(f.is_sharpe),
+                "oos_sharpe": float(f.oos_sharpe),
+            }
             for f in bt.folds.all()
         ]
         return Response({
@@ -154,7 +168,10 @@ class BacktestCompareView(APIView):
             dates, equity, _ = stitched_oos_returns(bt)
             return {
                 "id": bt.id, "name": bt.name,
-                "points": [{"date": d.isoformat(), "portfolio_value": round(v, 2)} for d, v in zip(dates, equity)],
+                "points": [
+                    {"date": d.isoformat(), "portfolio_value": round(v, 2)}
+                    for d, v in zip(dates, equity, strict=False)
+                ],
                 "metrics": BacktestDetailSerializer(bt).data.get("metrics"),
             }
 
