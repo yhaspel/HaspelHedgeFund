@@ -10,9 +10,11 @@ class Backtest(models.Model):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    ABORTED_BUDGET = "aborted_budget"
     STATUS_CHOICES = [
         (QUEUED, "Queued"), (RUNNING, "Running"), (DONE, "Done"),
         (FAILED, "Failed"), (CANCELLED, "Cancelled"),
+        (ABORTED_BUDGET, "Aborted (budget)"),
     ]
     ACTIVE_STATUSES = {QUEUED, RUNNING}
 
@@ -47,6 +49,12 @@ class Backtest(models.Model):
     progress_message = models.CharField(max_length=200, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
     total_cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0"))
+    # Hard kill-switch on cumulative LLM spend (USD). prime_agent_cache aborts
+    # the run if total_cost_usd >= max_budget_usd. Default is intentionally
+    # conservative; raise per-run from the UI if a larger sweep is justified.
+    max_budget_usd = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("4.00")
+    )
     celery_task_id = models.CharField(max_length=64, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)

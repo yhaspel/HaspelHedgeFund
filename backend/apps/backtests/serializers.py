@@ -61,7 +61,8 @@ class BacktestDetailSerializer(serializers.ModelSerializer):
             "is_window_days", "oos_window_days", "step_days",
             "search_space", "n_candidates", "is_objective", "rng_seed", "baseline",
             "status", "progress_pct", "progress_message", "error_message",
-            "total_cost_usd", "created_at", "started_at", "finished_at",
+            "total_cost_usd", "max_budget_usd",
+            "created_at", "started_at", "finished_at",
             "metrics", "folds",
         )
 
@@ -86,7 +87,7 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             "commission_bps", "spread_bps", "personas", "model_overrides",
             "rebalance_frequency", "is_window_days", "oos_window_days", "step_days",
             "search_space", "n_candidates", "is_objective", "rng_seed", "baseline",
-            "status",
+            "max_budget_usd", "status",
         )
         read_only_fields = ("id", "status")
 

@@ -70,10 +70,15 @@ def run_backtest(backtest_id: int) -> None:
 
         run_walkforward(bt)
     except Exception as exc:  # pragma: no cover
+        from .exceptions import BudgetExceeded
+
         log.exception("Backtest %s failed", backtest_id)
         current = Backtest.objects.filter(pk=backtest_id).values_list("status", flat=True).first()
         if current != Backtest.CANCELLED:
-            bt.status = Backtest.FAILED
+            if isinstance(exc, BudgetExceeded):
+                bt.status = Backtest.ABORTED_BUDGET
+            else:
+                bt.status = Backtest.FAILED
             bt.error_message = f"{type(exc).__name__}: {exc}"[:2000]
             bt.finished_at = timezone.now()
             bt.save(update_fields=["status", "error_message", "finished_at"])

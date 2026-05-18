@@ -58,6 +58,7 @@ export interface BacktestDetail extends BacktestSummary {
   baseline: string;
   error_message: string;
   total_cost_usd: number;
+  max_budget_usd: number;
   metrics: BacktestMetrics | null;
   folds: BacktestFold[];
 }
@@ -79,6 +80,31 @@ export interface CreateBacktestRequest {
   n_candidates: number;
   is_objective: 'sharpe' | 'sortino' | 'calmar';
   baseline: 'universe_ew' | 'spy';
+  max_budget_usd?: number;
+}
+
+export interface EstimateRequest {
+  universe: string[];
+  start_date: string;
+  end_date: string;
+  rebalance_frequency?: 'daily' | 'weekly' | 'monthly';
+  personas?: string[];
+  model_overrides?: Record<string, string>;
+  max_budget_usd?: number;
+}
+
+export interface EstimateResponse {
+  n_trading_days: number;
+  n_rebalance_days: number;
+  n_universe: number;
+  n_invocations: number;
+  n_llm_calls: number;
+  est_total_usd: number;
+  est_minutes_optimistic: number;
+  est_minutes_upper: number;
+  budget_cap_usd: number | null;
+  exceeds_budget: boolean;
+  by_agent: { agent: string; model: string; per_call_usd: number; total_usd: number }[];
 }
 
 export interface EquityPoint {

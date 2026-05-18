@@ -1,12 +1,14 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { EstimateResponse } from '../../core/models/backtest.model';
 
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, DecimalPipe],
   template: `
     <div class="min-h-screen bg-gray-50 p-8">
       <header class="flex items-center justify-between mb-8">
@@ -97,7 +99,7 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
           </label>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-3 gap-4">
           <label class="text-sm font-medium block">
             Commission (bps)
             <input type="number" name="comm" [(ngModel)]="commissionBps" min="0" class="mt-1 w-full border rounded px-3 py-2" />
@@ -106,14 +108,79 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
             Spread (bps)
             <input type="number" name="spr" [(ngModel)]="spreadBps" min="0" class="mt-1 w-full border rounded px-3 py-2" />
           </label>
+          <label class="text-sm font-medium block">
+            Max budget (USD)
+            <input type="number" name="bud" [(ngModel)]="maxBudgetUsd" min="0.5" step="0.5" class="mt-1 w-full border rounded px-3 py-2" />
+            <p class="text-xs text-gray-500 mt-1">Run aborts if spend reaches this cap.</p>
+          </label>
         </div>
 
         @if (error()) {
           <p class="text-red-600 text-sm">{{ error() }}</p>
         }
-        <button type="submit" [disabled]="submitting()" class="w-full bg-blue-600 text-white rounded py-2 disabled:opacity-50">
-          {{ submitting() ? 'Submitting…' : 'Start walk-forward' }}
-        </button>
+
+        @if (!estimate()) {
+          <button type="button" (click)="estimateCost()" [disabled]="estimating()"
+            class="w-full bg-blue-600 text-white rounded py-2 disabled:opacity-50">
+            {{ estimating() ? 'Estimating…' : 'Estimate cost' }}
+          </button>
+        } @else {
+          <div class="border rounded p-4 space-y-2"
+            [class.bg-red-50]="estimate()!.exceeds_budget"
+            [class.border-red-300]="estimate()!.exceeds_budget"
+            [class.bg-green-50]="!estimate()!.exceeds_budget"
+            [class.border-green-300]="!estimate()!.exceeds_budget">
+            <div class="flex justify-between items-baseline">
+              <h3 class="text-sm font-semibold">Pre-flight estimate</h3>
+              <button type="button" (click)="resetEstimate()" class="text-xs text-blue-600 hover:underline">
+                Edit & re-estimate
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              <div>Estimated cost:
+                <span class="font-mono font-semibold"
+                  [class.text-red-700]="estimate()!.exceeds_budget">
+                  \${{ estimate()!.est_total_usd | number: '1.2-2' }}
+                </span>
+                <span class="text-gray-500"> / cap \${{ estimate()!.budget_cap_usd | number: '1.2-2' }}</span>
+              </div>
+              <div>LLM calls: <span class="font-mono">{{ estimate()!.n_llm_calls | number }}</span></div>
+              <div>Rebalance days: <span class="font-mono">{{ estimate()!.n_rebalance_days }}</span></div>
+              <div>Est. wall-time: <span class="font-mono">{{ estimate()!.est_minutes_optimistic | number: '1.0-1' }}–{{ estimate()!.est_minutes_upper | number: '1.0-1' }} min</span></div>
+            </div>
+            @if (estimate()!.exceeds_budget) {
+              <p class="text-sm text-red-700 font-medium">
+                ⚠ Estimated cost exceeds your max budget. The run will abort partway.
+                Either raise the cap, shrink the universe/date range, or switch to a cheaper rebalance frequency.
+              </p>
+            }
+            <details class="text-xs text-gray-600">
+              <summary class="cursor-pointer">Per-agent breakdown</summary>
+              <table class="mt-2 w-full font-mono">
+                <thead><tr class="text-left text-gray-500">
+                  <th>Agent</th><th>Model</th><th class="text-right">$/call</th><th class="text-right">Total</th>
+                </tr></thead>
+                <tbody>
+                  @for (row of estimate()!.by_agent; track row.agent) {
+                    <tr>
+                      <td>{{ row.agent }}</td>
+                      <td class="text-gray-500">{{ row.model }}</td>
+                      <td class="text-right">{{ row.per_call_usd | number: '1.4-5' }}</td>
+                      <td class="text-right">{{ row.total_usd | number: '1.2-4' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </details>
+            <button type="submit" [disabled]="submitting() || estimate()!.exceeds_budget"
+              class="w-full rounded py-2 disabled:opacity-50"
+              [class.bg-green-600]="!estimate()!.exceeds_budget"
+              [class.bg-gray-400]="estimate()!.exceeds_budget"
+              [class.text-white]="true">
+              {{ submitting() ? 'Submitting…' : (estimate()!.exceeds_budget ? 'Over budget — raise cap to submit' : 'Confirm & start walk-forward') }}
+            </button>
+          </div>
+        }
       </form>
     </div>
   `,
@@ -136,25 +203,74 @@ export class BacktestsNewPage implements OnInit {
   baseline: 'universe_ew' | 'spy' = 'universe_ew';
   commissionBps = 5;
   spreadBps = 5;
+  maxBudgetUsd = 4.0;
 
   submitting = signal(false);
+  estimating = signal(false);
+  estimate = signal<EstimateResponse | null>(null);
   error = signal<string | null>(null);
 
   ngOnInit(): void {
     this.store.loadDefaultUniverse().subscribe();
   }
 
-  submit(): void {
-    this.submitting.set(true);
-    this.error.set(null);
-    const universe = this.universeStr
+  private parsedUniverse(): string[] {
+    const raw = this.universeStr
       .split(/[,\s]+/)
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean);
+    return raw.length ? raw : this.store.defaultUniverse();
+  }
+
+  resetEstimate(): void {
+    this.estimate.set(null);
+    this.error.set(null);
+  }
+
+  estimateCost(): void {
+    this.estimating.set(true);
+    this.error.set(null);
+    this.store
+      .estimate({
+        universe: this.parsedUniverse(),
+        start_date: this.startDate,
+        end_date: this.endDate,
+        rebalance_frequency: this.rebalance,
+        max_budget_usd: this.maxBudgetUsd,
+      })
+      .subscribe({
+        next: (est) => {
+          this.estimating.set(false);
+          this.estimate.set(est);
+        },
+        error: (e) => {
+          this.estimating.set(false);
+          const detail = e?.error;
+          this.error.set(
+            typeof detail === 'string'
+              ? detail
+              : detail?.detail || JSON.stringify(detail) || 'Failed to estimate',
+          );
+        },
+      });
+  }
+
+  submit(): void {
+    const est = this.estimate();
+    if (!est) {
+      // The form is in "estimate first" mode; ignore stray submits.
+      return;
+    }
+    if (est.exceeds_budget) {
+      this.error.set('Estimated cost exceeds the max budget. Raise the cap or shrink the run.');
+      return;
+    }
+    this.submitting.set(true);
+    this.error.set(null);
     this.store
       .create({
         name: this.name,
-        universe,
+        universe: this.parsedUniverse(),
         start_date: this.startDate,
         end_date: this.endDate,
         starting_cash: this.startingCash,
@@ -167,6 +283,7 @@ export class BacktestsNewPage implements OnInit {
         is_objective: this.objective,
         rebalance_frequency: this.rebalance,
         baseline: this.baseline,
+        max_budget_usd: this.maxBudgetUsd,
       })
       .subscribe({
         next: (bt) => this.router.navigate(['/backtests', bt.id]),

@@ -7,6 +7,8 @@ import {
   CreateBacktestRequest,
   DeflationPayload,
   EquityPoint,
+  EstimateRequest,
+  EstimateResponse,
 } from '../core/models/backtest.model';
 
 @Injectable({ providedIn: 'root' })
@@ -41,6 +43,10 @@ export class BacktestsStore {
 
   create(body: CreateBacktestRequest): Observable<BacktestSummary> {
     return this.api.post<BacktestSummary>('/backtests/', body);
+  }
+
+  estimate(body: EstimateRequest): Observable<EstimateResponse> {
+    return this.api.post<EstimateResponse>('/backtests/estimate/', body);
   }
 
   cancel(id: number): Observable<{ id: number; status: string }> {

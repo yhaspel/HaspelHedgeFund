@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from hedgefund.celery import app as celery_app
 
+from .estimator import estimate_cost
 from .metrics import baseline_curve, stitched_oos_returns
 from .models import Backtest, BacktestDay
 from .serializers import (
@@ -143,6 +144,34 @@ class AttributionView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         m = getattr(bt, "metrics", None)
         return Response({"per_agent": (m.per_agent_attribution if m else {})})
+
+
+class BacktestEstimateView(APIView):
+    """Pre-flight cost estimate — no DB write, no Celery task."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request) -> Response:
+        import datetime as _dt
+
+        d = request.data or {}
+        try:
+            start = _dt.date.fromisoformat(d["start_date"])
+            end = _dt.date.fromisoformat(d["end_date"])
+            universe = list(d.get("universe") or [])
+            if not universe:
+                return Response({"detail": "universe is required"}, status=400)
+        except (KeyError, ValueError, TypeError) as e:
+            return Response({"detail": f"bad input: {e}"}, status=400)
+        est = estimate_cost(
+            universe=universe,
+            start_date=start,
+            end_date=end,
+            rebalance_frequency=d.get("rebalance_frequency", "weekly"),
+            personas=d.get("personas") or None,
+            model_overrides=d.get("model_overrides") or None,
+            max_budget_usd=d.get("max_budget_usd", 4.00),
+        )
+        return Response(est)
 
 
 class DefaultUniverseView(APIView):

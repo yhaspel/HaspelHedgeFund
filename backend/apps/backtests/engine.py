@@ -234,15 +234,28 @@ def prime_agent_cache(
 
     from django.db import close_old_connections
 
+    from .exceptions import BudgetExceeded
+
     cache_map: dict[tuple[str, dt.date], dict] = {}
     total = len(rebal) * len(universe)
     done = 0
     failures = 0
+    budget_cap = float(getattr(bt, "max_budget_usd", 0) or 0)
     for day in rebal:
         for ticker in universe:
             # Long-running scripts/Celery tasks accumulate stale DB connections.
             # Recycle here so we don't blow past Postgres' max_connections.
             close_old_connections()
+            # Hard budget kill-switch — total_cost_usd is bumped atomically by
+            # record_llm_call after every LLM response, so re-reading here gives
+            # us an upper bound on spend before issuing the next invocation.
+            if budget_cap > 0:
+                spent = float(
+                    type(bt).objects.filter(pk=bt.pk)
+                    .values_list("total_cost_usd", flat=True).first() or 0
+                )
+                if spent >= budget_cap:
+                    raise BudgetExceeded(spent, budget_cap, done, total)
             initial_state: dict[str, Any] = {
                 "ticker": ticker,
                 "as_of_date": day,

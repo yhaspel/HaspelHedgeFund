@@ -22,7 +22,8 @@ PRICING: dict[str, ModelPrice] = {
     # OpenRouter routes — provider markup baked in (~5%).
     "anthropic/claude-sonnet-4.6": ModelPrice(3.15, 15.75),
     "anthropic/claude-haiku-4.5": ModelPrice(1.05, 5.25),
-    "qwen/qwen-3-32b": ModelPrice(0.15, 0.30),
+    # Note: "qwen/qwen-3-32b" was rejected by OpenRouter (invalid slug,
+    # 2026-05-18 bench). Removed until we verify the live slug.
     "qwen/qwen3.6-27b": ModelPrice(0.32, 3.20),
     "meta-llama/llama-3.3-70b-instruct": ModelPrice(0.40, 0.40),
 }

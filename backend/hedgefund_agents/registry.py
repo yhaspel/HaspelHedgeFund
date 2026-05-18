@@ -43,24 +43,31 @@ def get_news_service() -> NewsService:
 # Qwen3.6 27B (reasoning model) had brutal wall-time on persona calls (2-3 min
 # each). Haiku 4.5 finishes each call in 2-8s with comparable structured-output
 # quality at this scale; flip to it as the global default 2026-05-17.
-_DEFAULT = ("anthropic", "claude-haiku-4-5-20251001")
+# Tiered defaults after the 2026-05-18 benchmark on 3-ticker × 5-day slice
+# (scripts/bench_models.py): Llama 3.3 70B via OpenRouter scored 100% action
+# agreement vs Haiku 4.5 at 4.7× lower cost ($0.24 vs $1.14 over 15 council
+# invocations). Used for ANALYTICAL + macro/news (structured extraction tasks
+# that don't need frontier synthesis). Personas + risk/PM stay on Haiku since
+# they synthesize multi-source context.
+_PERSONA = ("anthropic", "claude-haiku-4-5-20251001")
+_ANALYTICAL = ("openrouter", "meta-llama/llama-3.3-70b-instruct")
 DEFAULT_MODELS: dict[str, tuple[str, str]] = {
-    "fundamentals": _DEFAULT,
-    "technicals": _DEFAULT,
-    "valuation": _DEFAULT,
-    "sentiment": _DEFAULT,
-    "buffett": _DEFAULT,
-    "munger": _DEFAULT,
-    "graham": _DEFAULT,
-    "wood": _DEFAULT,
-    "druckenmiller": _DEFAULT,
-    "burry": _DEFAULT,
-    "damodaran": _DEFAULT,
-    "lynch": _DEFAULT,
-    "risk_manager": _DEFAULT,
-    "macro": _DEFAULT,
-    "news_digest": _DEFAULT,
-    "cio": _DEFAULT,
+    "fundamentals": _ANALYTICAL,
+    "technicals": _ANALYTICAL,
+    "valuation": _ANALYTICAL,
+    "sentiment": _ANALYTICAL,
+    "macro": _ANALYTICAL,
+    "news_digest": _ANALYTICAL,
+    "buffett": _PERSONA,
+    "munger": _PERSONA,
+    "graham": _PERSONA,
+    "wood": _PERSONA,
+    "druckenmiller": _PERSONA,
+    "burry": _PERSONA,
+    "damodaran": _PERSONA,
+    "lynch": _PERSONA,
+    "risk_manager": _PERSONA,
+    "cio": _PERSONA,
 }
 
 
