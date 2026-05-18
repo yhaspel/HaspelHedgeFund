@@ -107,7 +107,7 @@ def run_technicals(state: AgentState) -> AgentState:
         max_tokens=4096,
         cache_ctx=make_cache_ctx(state, "technicals"),
     )
-    record_llm_call(run_id=state.get("run_id"), agent_name="technicals", resp=resp)
+    record_llm_call(run_id=state.get("run_id"), backtest_id=state.get("backtest_id"), agent_name="technicals", resp=resp)
     # Trust our numeric metrics over whatever the LLM echoed.
     out = parsed.model_dump()
     out.update(metrics)

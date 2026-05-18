@@ -58,5 +58,13 @@ export const routes: Routes = [
         (m) => m.BacktestsDetailPage,
       ),
   },
+  {
+    path: 'backtests/:id/compare',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/backtests/backtests-compare.page').then(
+        (m) => m.BacktestsComparePage,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

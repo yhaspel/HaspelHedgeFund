@@ -57,6 +57,7 @@ export interface BacktestDetail extends BacktestSummary {
   is_objective: string;
   baseline: string;
   error_message: string;
+  total_cost_usd: number;
   metrics: BacktestMetrics | null;
   folds: BacktestFold[];
 }

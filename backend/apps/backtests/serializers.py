@@ -65,6 +65,11 @@ class BacktestDetailSerializer(serializers.ModelSerializer):
             "metrics", "folds",
         )
 
+    def to_representation(self, instance):
+        d = super().to_representation(instance)
+        d["total_cost_usd"] = float(d.get("total_cost_usd") or 0)
+        return d
+
 
 DEFAULT_UNIVERSE_20 = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B",

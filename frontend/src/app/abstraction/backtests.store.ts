@@ -85,4 +85,10 @@ export class BacktestsStore {
       .get<DeflationPayload>(`/backtests/${id}/deflation/`)
       .pipe(tap((r) => this._deflation.set(r)));
   }
+
+  compare(a: number, b: number): Observable<{ a: any; b: any }> {
+    return this.api.post<{ a: any; b: any }>('/backtests/compare/', {
+      backtest_a_id: a, backtest_b_id: b,
+    });
+  }
 }

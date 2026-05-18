@@ -51,7 +51,16 @@ Chart.register(
         <h1 class="text-2xl font-semibold">
           {{ store.current()?.name || 'Backtest' }}
         </h1>
-        <a routerLink="/backtests" class="text-blue-600 hover:underline">Back to list</a>
+        <div class="flex items-center gap-3 text-sm">
+          @if (store.current(); as bt) {
+            <span class="text-gray-600">Run cost:
+              <span class="font-medium">\${{ (bt.total_cost_usd || 0) | number: '1.2-2' }}</span>
+            </span>
+            <a [routerLink]="['/backtests', bt.id, 'compare']"
+               class="text-blue-600 hover:underline">Compare…</a>
+          }
+          <a routerLink="/backtests" class="text-blue-600 hover:underline">Back to list</a>
+        </div>
       </header>
 
       @if (store.current(); as bt) {

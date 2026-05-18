@@ -163,7 +163,10 @@ def run_news(state: AgentState) -> AgentState:
             temperature=0.3,
             cache_ctx=make_cache_ctx(state, "news_digest"),
         )
-        record_llm_call(run_id=run_id, agent_name="news_digest", resp=resp)
+        record_llm_call(
+            run_id=run_id, backtest_id=state.get("backtest_id"),
+            agent_name="news_digest", resp=resp,
+        )
         _backfill_scores(items, parsed.material_events)
         return {"news_digest": parsed.model_dump()}  # type: ignore[return-value]
     except Exception as e:

@@ -10,6 +10,10 @@ class LLMCall(models.Model):
     run = models.ForeignKey(
         "runs.Run", related_name="llm_calls", on_delete=models.CASCADE, null=True, blank=True
     )
+    backtest = models.ForeignKey(
+        "backtests.Backtest", related_name="llm_calls", on_delete=models.CASCADE,
+        null=True, blank=True,
+    )
     agent_name = models.CharField(max_length=64)
     provider = models.CharField(max_length=32)  # "anthropic", "openrouter"
     model = models.CharField(max_length=128)
