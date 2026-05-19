@@ -11,7 +11,10 @@ FROM base AS dev
 COPY --from=deps /app/node_modules /app/node_modules
 COPY frontend/ /app/
 EXPOSE 4111
-CMD ["pnpm", "ng", "serve", "--host", "0.0.0.0", "--port", "4111"]
+# Invoke the local ng binary directly; going through `pnpm` triggers pnpm's
+# depsStatusCheck which hard-fails on ignored postinstall build scripts
+# (esbuild, @parcel/watcher, lmdb, msgpackr-extract) under pnpm 11+.
+CMD ["node_modules/.bin/ng", "serve", "--host", "0.0.0.0", "--port", "4111"]
 
 FROM base AS build
 COPY --from=deps /app/node_modules /app/node_modules

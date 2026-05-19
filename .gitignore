@@ -43,3 +43,9 @@ infra/docker-compose.override.yml
 
 # Django media (filing full-text dumps written here in dev)
 backend/media/
+
+# Project-local notes (dev creds, scratch). Never commit.
+MEMORY.md
+
+# pnpm content-addressable cache (auto-restored from pnpm-lock.yaml)
+frontend/.pnpm-store/
