@@ -86,7 +86,8 @@ def test_cancel_terminal_run_409s(auth_client: APIClient) -> None:
 
 @pytest.mark.django_db
 def test_models_catalog_lists_at_least_two_providers(auth_client: APIClient) -> None:
-    resp = auth_client.get(reverse("model-catalog"))
+    # GET /api/models/ moved to the models_catalog app in P2d.
+    resp = auth_client.get(reverse("models-catalog"))
     assert resp.status_code == 200
-    providers = {m["id"].split(":", 1)[0] for m in resp.data["models"]}
+    providers = {m["provider"] for m in resp.data["models"]}
     assert {"anthropic", "openrouter"}.issubset(providers)
