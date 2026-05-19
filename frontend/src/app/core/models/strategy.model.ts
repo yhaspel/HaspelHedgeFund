@@ -119,6 +119,31 @@ export const DEFAULT_SCREENER_WEIGHTS: Record<string, number> = {
   short_quality_roic: 0.5,
 };
 
+export const SCREENER_WEIGHT_TOOLTIPS: Record<string, string> = {
+  momentum_3m:
+    'Bigger weight = the screener prefers names that have rallied over the last 3 months when picking long candidates.',
+  momentum_6m:
+    'Bigger weight = the screener prefers names that have rallied over the last 6 months for long candidates.',
+  earnings_yield:
+    'Cheapness signal. Earnings yield = 1 / P/E. Bigger weight = the screener prefers lower-P/E (cheaper) names for longs.',
+  quality_roic:
+    'Bigger weight = the screener prefers high-ROIC (better capital efficiency) names for longs.',
+  fcf_margin:
+    'Bigger weight = the screener prefers high free-cash-flow-margin (more profitable) names for longs.',
+  debt_to_equity:
+    'Penalty applied to leveraged names on the long side. Higher = more debt is treated as more disqualifying for a long.',
+  short_drawdown:
+    'For shorts. Bigger weight = the screener prefers names that are well off their 12-month high.',
+  short_momentum_3m:
+    'For shorts. Bigger weight = the screener prefers names with the worst trailing 3-month returns.',
+  short_news_neg:
+    'For shorts. Bigger weight = names with negative recent news get bumped up the short list.',
+  short_debt:
+    'For shorts. Bigger weight = leveraged names are preferred as short candidates.',
+  short_quality_roic:
+    'For shorts. Bigger weight = low-ROIC names are preferred as short candidates.',
+};
+
 export const SCREENER_WEIGHT_LABELS: Record<string, string> = {
   momentum_3m: '3-month momentum (long)',
   momentum_6m: '6-month momentum (long)',

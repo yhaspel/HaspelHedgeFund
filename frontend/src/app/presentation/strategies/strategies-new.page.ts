@@ -5,12 +5,14 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
 import {
   DEFAULT_SCREENER_WEIGHTS,
   SCREENER_WEIGHT_LABELS,
+  SCREENER_WEIGHT_TOOLTIPS,
 } from '../../core/models/strategy.model';
+import { InfoTooltipComponent } from '../shared/info-tooltip.component';
 
 @Component({
   selector: 'hf-strategies-new',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, InfoTooltipComponent],
   template: `
     <div class="min-h-screen bg-gray-50 p-8">
       <header class="flex items-center justify-between mb-6">
@@ -21,6 +23,7 @@ import {
       <form (ngSubmit)="submit()" class="bg-white p-6 rounded shadow max-w-3xl space-y-4">
         <label class="block text-sm font-medium">
           Name
+          <hf-info text="A human-friendly label for this strategy. Used in the dashboard and the strategies list — doesn't affect behaviour." />
           <input name="name" [(ngModel)]="name" required
                  class="mt-1 w-full border rounded px-3 py-2" />
         </label>
@@ -28,6 +31,7 @@ import {
         <div class="grid grid-cols-2 gap-4">
           <label class="block text-sm font-medium">
             Universe
+            <hf-info text="The investable pool of tickers the screener evaluates each cycle. Pick a named universe (e.g. sp500_top_200) — only its active members on the as-of date are scored." />
             <select name="universe" [(ngModel)]="universe" required
                     class="mt-1 w-full border rounded px-3 py-2">
               @for (u of store.universes(); track u.id) {
@@ -37,6 +41,7 @@ import {
           </label>
           <label class="block text-sm font-medium">
             Portfolio
+            <hf-info text="The simulated account this strategy trades against. Holds cash + positions; the rebalancer computes orders relative to it. Create a starter one if you don't have any." />
             <select name="portfolio" [(ngModel)]="portfolio" required
                     class="mt-1 w-full border rounded px-3 py-2">
               @for (p of store.portfolios(); track p.id) {
@@ -54,48 +59,56 @@ import {
           <legend class="text-sm font-medium px-1">Construction targets</legend>
           <label class="text-sm">
             Target gross
+            <hf-info text="Total dollar exposure as a fraction of portfolio value (|longs| + |shorts|). 1.50 means 150% gross — e.g. 100% long + 50% short." />
             <input name="g" type="number" step="0.05" min="0.5" max="3.0"
                    [(ngModel)]="targetGross"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Target net
+            <hf-info text="Long exposure minus short exposure as a fraction of portfolio value. 0.50 = +50% net (long-biased). 0 = market neutral. Negative = short-biased." />
             <input name="n" type="number" step="0.05" min="-1.0" max="2.0"
                    [(ngModel)]="targetNet"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Max position pct
+            <hf-info text="No single name can exceed this fraction of portfolio value. 0.03 = 3% per name. Overflow above the cap is redistributed to other names." />
             <input name="mp" type="number" step="0.005" min="0.005" max="0.20"
                    [(ngModel)]="maxPosition"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Max sector pct
+            <hf-info text="No single GICS sector can exceed this fraction of |gross|. Breaches are scaled down proportionally with one pass." />
             <input name="ms" type="number" step="0.05" min="0.05" max="0.60"
                    [(ngModel)]="maxSector"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Top K longs
+            <hf-info text="How many top-ranked long candidates the screener surfaces each cycle. Each one gets a full council run, so higher K = more cost + latency." />
             <input name="kl" type="number" min="1" max="50"
                    [(ngModel)]="topLongs"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Top K shorts
+            <hf-info text="How many top-ranked short candidates the screener surfaces each cycle. Each gets a council run; non-locatable names (HTB) are dropped automatically." />
             <input name="ks" type="number" min="0" max="50"
                    [(ngModel)]="topShorts"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Cost ceiling per cycle (USD)
+            <hf-info text="Hard cap on LLM spend per cycle. If the estimated cost for K longs + K shorts exceeds this, the cycle trims K (proportionally) before dispatching the council fan-out." />
             <input name="cc" type="number" step="0.5" min="0.5"
                    [(ngModel)]="costCeiling"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
           <label class="text-sm">
             Model preset
+            <hf-info text="Which model preset the council uses. 'frugal' = OpenRouter Qwen/Llama (cheap), 'hybrid' = mix, 'quality' = Sonnet-only, 'dev' = cheapest, 'research' = Sonnet personas + Haiku analysts." />
             <select name="pre" [(ngModel)]="modelPreset"
                     class="mt-1 w-full border rounded px-2 py-1">
               <option value="dev">dev</option>
@@ -111,12 +124,15 @@ import {
           <legend class="text-sm font-medium px-1">Screener weights</legend>
           <p class="text-xs text-gray-500 mb-2">
             How much each feature contributes to the ranking. Higher = more weight.
-            Negative weights flip the sign.
+            Hover the (!) icon on each row for what it does.
           </p>
           <div class="grid grid-cols-2 gap-2">
             @for (key of weightKeys; track key) {
               <label class="text-xs flex items-center gap-2">
-                <span class="w-56">{{ label(key) }}</span>
+                <span class="w-56 inline-flex items-center">
+                  {{ label(key) }}
+                  <hf-info [text]="tooltip(key)" />
+                </span>
                 <input type="number" step="0.05" min="0" max="5"
                        [ngModel]="weights[key]"
                        (ngModelChange)="weights[key] = $event"
@@ -160,6 +176,7 @@ export class StrategiesNewPage implements OnInit {
   error = signal<string | null>(null);
 
   label(k: string): string { return SCREENER_WEIGHT_LABELS[k] ?? k; }
+  tooltip(k: string): string { return SCREENER_WEIGHT_TOOLTIPS[k] ?? ''; }
 
   ngOnInit(): void {
     this.store.loadUniverses().subscribe((us) => {
