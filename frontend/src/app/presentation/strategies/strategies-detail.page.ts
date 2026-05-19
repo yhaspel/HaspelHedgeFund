@@ -24,16 +24,105 @@ import { CycleDetail } from '../../core/models/strategy.model';
           </p>
         </div>
         <div class="flex gap-2">
-          <button (click)="runNow()" [disabled]="running()"
+          <button (click)="openEstimate()" [disabled]="running() || estimating()"
                   class="bg-emerald-600 text-white rounded px-4 py-2 text-sm disabled:opacity-50"
                   data-test="run-now">
-            {{ running() ? 'Dispatching…' : 'Run cycle now' }}
+            {{ running() ? 'Dispatching…' : estimating() ? 'Estimating…' : 'Run cycle now' }}
           </button>
           <a routerLink="/strategies" class="text-blue-600 self-center text-sm hover:underline">
             All strategies
           </a>
         </div>
       </header>
+
+      @if (estimate(); as est) {
+        <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+             (click)="cancelEstimate()">
+          <div class="bg-white rounded shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto"
+               (click)="$event.stopPropagation()">
+            <h2 class="text-lg font-semibold mb-1">Confirm cycle dispatch</h2>
+            <p class="text-xs text-gray-500 mb-4">
+              Preset <span class="font-mono">{{ est.preset }}</span> ·
+              {{ est.n_candidates }} candidates ·
+              full council per candidate
+            </p>
+
+            <div class="mb-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm"
+                 [class.bg-red-50]="est.exceeds_ceiling"
+                 [class.border-red-300]="est.exceeds_ceiling"
+                 [class.bg-green-50]="!est.exceeds_ceiling"
+                 [class.border-green-300]="!est.exceeds_ceiling"
+                 [class.border]="true" [class.rounded]="true" [class.p-3]="true">
+              <div>Est. per-call:
+                <span class="font-mono">\${{ est.per_call_usd.toFixed(4) }}</span>
+              </div>
+              <div>Est. total:
+                <span class="font-mono font-semibold"
+                  [class.text-red-700]="est.exceeds_ceiling">
+                  \${{ est.est_total_usd.toFixed(2) }}
+                </span>
+              </div>
+              <div>Cost ceiling: <span class="font-mono">\${{ est.cost_ceiling_usd.toFixed(2) }}</span></div>
+              <div>n_candidates: <span class="font-mono">{{ est.n_candidates }}</span></div>
+            </div>
+
+            @if (est.exceeds_ceiling) {
+              <p class="text-xs text-red-700 mb-3">
+                ⚠ Estimate exceeds your cost ceiling. The cycle will trim K_longs/K_shorts
+                before dispatching — but if you want a full fan-out, raise the ceiling first.
+              </p>
+            }
+
+            <h3 class="text-xs font-semibold uppercase text-gray-600 mb-1">
+              Per-agent model assignment
+            </h3>
+            <table class="w-full text-xs font-mono mb-4">
+              <thead class="text-gray-500 text-left">
+                <tr>
+                  <th>Agent</th>
+                  <th>Model</th>
+                  <th>Tier</th>
+                  <th class="text-right">$/call</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of est.per_agent; track row.agent) {
+                  <tr class="border-t"
+                      [class.text-red-700]="row.model.startsWith('anthropic')">
+                    <td>{{ row.agent }}</td>
+                    <td>{{ row.model_name || row.model }}</td>
+                    <td>{{ row.tier }}</td>
+                    <td class="text-right">{{ row.per_call_usd.toFixed(4) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+
+            @if (anyAnthropic(est)) {
+              <p class="text-xs text-red-700 mb-3">
+                ⚠ This cycle will hit Anthropic for at least one agent. If you didn't
+                intend this, change the model in
+                <a routerLink="/settings/models" class="underline">Settings → Models</a>
+                or pick a different strategy preset.
+              </p>
+            }
+
+            <div class="flex justify-end gap-2">
+              <button (click)="cancelEstimate()"
+                      class="px-4 py-2 rounded text-sm bg-gray-200 text-gray-800">
+                Cancel
+              </button>
+              <button (click)="confirmRun()" [disabled]="running()"
+                      class="px-4 py-2 rounded text-sm text-white disabled:opacity-50"
+                      [class.bg-emerald-600]="!est.exceeds_ceiling"
+                      [class.bg-amber-600]="est.exceeds_ceiling"
+                      data-test="confirm-run">
+                {{ running() ? 'Dispatching…' : 'Confirm & run cycle' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      }
 
       @if (notice()) {
         <p class="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded p-3 mb-4">
@@ -192,8 +281,36 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
   running = signal(false);
+  estimating = signal(false);
+  estimate = signal<{
+    n_candidates: number;
+    per_call_usd: number;
+    est_total_usd: number;
+    cost_ceiling_usd: number;
+    exceeds_ceiling: boolean;
+    per_agent: { agent: string; model: string; model_name: string; tier: string; per_call_usd: number }[];
+    overrides: Record<string, string>;
+    preset: string;
+  } | null>(null);
   notice = signal<string | null>(null);
   cycle = signal<CycleDetail | null>(null);
+
+  openEstimate(): void {
+    this.estimating.set(true);
+    this.notice.set(null);
+    this.store.estimate(this.strategyId).subscribe({
+      next: (e) => { this.estimating.set(false); this.estimate.set(e); },
+      error: () => { this.estimating.set(false); this.notice.set('Failed to fetch cost estimate.'); },
+    });
+  }
+  cancelEstimate(): void { this.estimate.set(null); }
+  anyAnthropic(est: { per_agent: { model: string }[] }): boolean {
+    return est.per_agent.some((r) => r.model.startsWith('anthropic'));
+  }
+  confirmRun(): void {
+    this.estimate.set(null);
+    this.runNow();
+  }
 
   strategyId = 0;
 

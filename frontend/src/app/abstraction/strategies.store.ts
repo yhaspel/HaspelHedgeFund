@@ -61,6 +61,18 @@ export class StrategiesStore {
       tap((r) => this._currentStrategy.set(r)),
     );
   }
+  estimate(id: number): Observable<{
+    n_candidates: number;
+    per_call_usd: number;
+    est_total_usd: number;
+    cost_ceiling_usd: number;
+    exceeds_ceiling: boolean;
+    per_agent: { agent: string; model: string; model_name: string; tier: string; per_call_usd: number }[];
+    overrides: Record<string, string>;
+    preset: string;
+  }> {
+    return this.api.get(`/strategies/${id}/estimate/`);
+  }
   runNow(id: number): Observable<{ task_id: string; status: string }> {
     return this.api.post<{ task_id: string; status: string }>(
       `/strategies/${id}/run-now/`, {},

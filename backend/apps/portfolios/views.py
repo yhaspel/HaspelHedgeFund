@@ -26,7 +26,7 @@ from .serializers import (
     UniverseMembershipSerializer,
     UniverseSerializer,
 )
-from .tasks import daily_long_short_cycle
+from .tasks import daily_long_short_cycle, estimate_cycle
 
 
 class UniverseListView(generics.ListAPIView):
@@ -82,6 +82,17 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return PortfolioStrategy.objects.filter(user=self.request.user)
+
+
+class StrategyEstimateView(APIView):
+    def get(self, request: Request, pk: int) -> Response:
+        try:
+            strategy = PortfolioStrategy.objects.select_related("user").get(
+                pk=pk, user=request.user
+            )
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        return Response(estimate_cycle(strategy))
 
 
 class StrategyRunNowView(APIView):

@@ -78,6 +78,59 @@ def _active_members(strategy: PortfolioStrategy, as_of: date_cls) -> list[tuple[
     return [(m.ticker, m.sector) for m in qs]
 
 
+PER_AGENT_TOKEN_ESTIMATES = {
+    "buffett": (10000, 1500), "munger": (10000, 1500), "graham": (10000, 1500),
+    "wood": (10000, 1500), "druckenmiller": (10000, 1500), "burry": (10000, 1500),
+    "damodaran": (10000, 1500), "lynch": (10000, 1500),
+    "fundamentals": (7000, 800), "technicals": (7000, 800),
+    "valuation": (8000, 1000), "sentiment": (5000, 600),
+    "macro": (5000, 1000), "news_digest": (15000, 1500),
+    "risk_manager": (15000, 1500), "portfolio_manager": (20000, 1500),
+    "cio": (12000, 1000),
+}
+
+
+def estimate_cycle(strategy: PortfolioStrategy) -> dict:
+    """Pre-flight cost estimate for a manual `Run cycle now`.
+
+    Returns the resolved per-agent model map plus the projected USD spend
+    for `top_k_longs + top_k_shorts` council invocations. CIO is excluded
+    because the cycle disables it (disable_cio=True)."""
+    from apps.models_catalog.models import ModelEntry
+
+    overrides = _resolve_model_overrides(strategy)
+    prices = {m.id: m for m in ModelEntry.objects.all()}
+    n = int(strategy.top_k_longs) + int(strategy.top_k_shorts)
+    per_agent = []
+    per_call_cost = 0.0
+    for agent, (tin, tout) in PER_AGENT_TOKEN_ESTIMATES.items():
+        if agent == "cio":  # disabled in the cycle
+            continue
+        model_id = overrides.get(agent)
+        m = prices.get(model_id) if model_id else None
+        pin = float(m.price_in_per_mtok or 0) if m else 0.0
+        pout = float(m.price_out_per_mtok or 0) if m else 0.0
+        c = (tin * pin + tout * pout) / 1_000_000
+        per_call_cost += c
+        per_agent.append({
+            "agent": agent,
+            "model": model_id or "(registry default)",
+            "model_name": m.display_name if m else "",
+            "tier": m.tier if m else "",
+            "per_call_usd": round(c, 4),
+        })
+    return {
+        "n_candidates": n,
+        "per_call_usd": round(per_call_cost, 4),
+        "est_total_usd": round(per_call_cost * n, 2),
+        "cost_ceiling_usd": float(strategy.cost_ceiling_per_cycle_usd),
+        "exceeds_ceiling": (per_call_cost * n) > float(strategy.cost_ceiling_per_cycle_usd),
+        "per_agent": per_agent,
+        "overrides": overrides,
+        "preset": strategy.model_preset,
+    }
+
+
 def _trim_k_for_budget(strategy: PortfolioStrategy, n_longs: int, n_shorts: int) -> tuple[int, int]:
     """Very rough cost estimate. Each council call ~ $0.05 on hybrid preset
     (3 frontier + 10 cheap LLM calls). Trim symmetrically until under cap.

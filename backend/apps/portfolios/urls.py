@@ -7,6 +7,7 @@ from .views import (
     StrategyCycleDetailView,
     StrategyCyclesView,
     StrategyDetailView,
+    StrategyEstimateView,
     StrategyListCreateView,
     StrategyRunNowView,
     UniverseListView,
@@ -24,6 +25,7 @@ urlpatterns = [
 
     path("strategies/", StrategyListCreateView.as_view(), name="strategies"),
     path("strategies/<int:pk>/", StrategyDetailView.as_view(), name="strategy-detail"),
+    path("strategies/<int:pk>/estimate/", StrategyEstimateView.as_view(), name="strategy-estimate"),
     path("strategies/<int:pk>/run-now/", StrategyRunNowView.as_view(), name="strategy-run-now"),
     path("strategies/<int:pk>/cycles/", StrategyCyclesView.as_view(),
          name="strategy-cycles"),
