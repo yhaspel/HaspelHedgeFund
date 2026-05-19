@@ -19,7 +19,16 @@ export interface AgentInfo {
   id: string;
   default_model: string;
   recommended_tier: ModelTier;
+  group: 'persona' | 'analyst' | 'context' | 'orchestration' | 'other';
 }
+
+export const GROUP_LABEL: Record<string, string> = {
+  persona: 'Personas',
+  analyst: 'Analyst agents',
+  context: 'Context agents',
+  orchestration: 'Risk · Portfolio · CIO',
+  other: 'Other',
+};
 
 export interface AgentsResponse {
   agents: AgentInfo[];

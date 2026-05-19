@@ -2,7 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ModelsStore } from '../../abstraction/models.store';
-import { AGENT_DISPLAY, PRESET_NAMES } from '../../core/models/model.types';
+import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/model.types';
 
 @Component({
   selector: 'hf-settings-models',
@@ -61,15 +61,36 @@ import { AGENT_DISPLAY, PRESET_NAMES } from '../../core/models/model.types';
           }
         </section>
 
-        <!-- B: Default preset + cost ceiling -->
+        <!-- B: Default model + preset + cost ceiling -->
         <section class="bg-white rounded shadow p-5 space-y-3">
-          <h2 class="font-medium">Default preset</h2>
-          <select [(ngModel)]="preset" name="preset"
-            class="w-full border rounded px-3 py-2 text-sm" data-test="preset-select">
-            @for (p of presets; track p) {
-              <option [value]="p">{{ p }}</option>
-            }
-          </select>
+          <label class="block text-sm font-medium">
+            Default model (applies to every agent)
+            <select [(ngModel)]="globalDefault" name="globalDefault"
+              (ngModelChange)="applyGlobalDefault($event)"
+              class="mt-1 w-full border rounded px-3 py-2 text-sm"
+              data-test="global-default-select">
+              <option value="">— use preset per-agent rules —</option>
+              @for (m of store.models(); track m.id) {
+                <option [value]="m.id" [disabled]="!m.available">
+                  {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                </option>
+              }
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+              Sets the same model for every agent. Clear to fall back to the preset rules below.
+            </p>
+          </label>
+
+          <label class="block text-sm font-medium mt-2">
+            Preset (used when no global default is set)
+            <select [(ngModel)]="preset" name="preset"
+              (ngModelChange)="loadPresetOverrides()"
+              class="mt-1 w-full border rounded px-3 py-2 text-sm" data-test="preset-select">
+              @for (p of presets; track p) {
+                <option [value]="p">{{ p }}</option>
+              }
+            </select>
+          </label>
 
           <label class="block text-sm mt-3">
             Cost ceiling per scheduled run (USD)
@@ -89,26 +110,41 @@ import { AGENT_DISPLAY, PRESET_NAMES } from '../../core/models/model.types';
 
         <!-- C: per-agent defaults -->
         <section class="bg-white rounded shadow p-5 space-y-2 lg:col-span-2">
-          <h2 class="font-medium">Per-agent default overrides</h2>
+          <h2 class="font-medium">Per-agent defaults</h2>
           <p class="text-xs text-gray-500">
-            Blank = use the global default for the active preset.
+            "Current default" = what the active preset (<b>{{ preset }}</b>) resolves to.
+            Pick an explicit model to override it for this agent.
           </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            @for (a of agentIds(); track a) {
-              <div class="grid grid-cols-2 gap-2 items-center text-sm">
-                <div>{{ display(a) }}</div>
-                <select
-                  [ngModel]="agentDefault(a)"
-                  (ngModelChange)="setAgentDefault(a, $event)"
-                  class="border rounded px-2 py-1 text-xs"
-                >
-                  <option value="">— (default)</option>
-                  @for (m of store.models(); track m.id) {
-                    <option [value]="m.id" [disabled]="!m.available">
-                      {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
-                    </option>
+          <div class="mt-2 space-y-4">
+            @for (g of groupedAgents(); track g.group) {
+              <div>
+                <h3 class="text-xs font-semibold uppercase text-gray-500 border-b pb-1 mb-2">
+                  {{ groupLabel(g.group) }} ({{ g.agents.length }})
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                  @for (a of g.agents; track a) {
+                    <div class="grid grid-cols-3 gap-2 items-center text-sm">
+                      <div>{{ display(a) }}</div>
+                      <div class="text-xs font-mono"
+                           [class.text-gray-400]="!!agentDefault(a)"
+                           [class.text-gray-700]="!agentDefault(a)">
+                        {{ resolvedDefault(a) }}
+                      </div>
+                      <select
+                        [ngModel]="agentDefault(a)"
+                        (ngModelChange)="setAgentDefault(a, $event)"
+                        class="border rounded px-2 py-1 text-xs"
+                      >
+                        <option value="">— use preset default —</option>
+                        @for (m of store.models(); track m.id) {
+                          <option [value]="m.id" [disabled]="!m.available">
+                            {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                          </option>
+                        }
+                      </select>
+                    </div>
                   }
-                </select>
+                </div>
               </div>
             }
           </div>
@@ -160,11 +196,13 @@ export class SettingsModelsPage implements OnInit {
   ollamaHost = '';
   preset = 'research';
   ceiling: number | null = 5;
+  globalDefault = 'openrouter:meta-llama/llama-3.3-70b-instruct';
 
   savingKeys = signal(false);
   savingPrefs = signal(false);
   keysMsg = signal<string | null>(null);
   prefsMsg = signal<string | null>(null);
+  presetOverrides = signal<Record<string, string>>({});
 
   ngOnInit(): void {
     this.store.loadAll().subscribe(() => {
@@ -175,12 +213,65 @@ export class SettingsModelsPage implements OnInit {
         this.preset = prefs.preset ?? 'research';
         this.ceiling = prefs.cost_ceiling_per_run_usd
           ? Number(prefs.cost_ceiling_per_run_usd) : null;
+        // If every agent shares one model in per_agent_defaults, treat that as
+        // the active "global default" — otherwise leave the selector blank so
+        // the preset rules apply.
+        const vals = Object.values(prefs.per_agent_defaults ?? {});
+        const allSame = vals.length > 0 && vals.every((v) => v === vals[0]);
+        this.globalDefault = allSame ? (vals[0] as string) : '';
       }
+      this.loadPresetOverrides();
     });
+  }
+
+  applyGlobalDefault(modelId: string): void {
+    const next: Record<string, string> = {};
+    if (modelId) {
+      for (const a of this.store.agents()) next[a.id] = modelId;
+    }
+    this.store.savePrefs({ per_agent_defaults: next }).subscribe(() => {
+      this.prefsMsg.set(modelId ? 'Default model applied to all agents.' : 'Cleared.');
+    });
+  }
+
+  loadPresetOverrides(): void {
+    this.store.fetchPreset(this.preset).subscribe((r) => {
+      this.presetOverrides.set(r.overrides);
+    });
+  }
+
+  resolvedDefault(a: string): string {
+    const override = this.agentDefault(a);
+    if (override) {
+      const m = this.store.models().find((x) => x.id === override);
+      return (m?.display_name ?? override) + ' (override)';
+    }
+    const fromPreset = this.presetOverrides()[a];
+    if (fromPreset) {
+      const m = this.store.models().find((x) => x.id === fromPreset);
+      return m?.display_name ?? fromPreset;
+    }
+    const sysDefault = this.store.agents().find((x) => x.id === a)?.default_model;
+    if (sysDefault) {
+      const m = this.store.models().find((x) => x.id === sysDefault);
+      return (m?.display_name ?? sysDefault) + ' (system)';
+    }
+    return '—';
   }
 
   display(a: string): string { return AGENT_DISPLAY[a] ?? a; }
   agentIds(): string[] { return this.store.agents().map((a) => a.id); }
+  groupLabel(g: string): string { return GROUP_LABEL[g] ?? g; }
+  groupedAgents(): { group: string; agents: string[] }[] {
+    const order = ['persona', 'analyst', 'context', 'orchestration', 'other'];
+    const buckets: Record<string, string[]> = {};
+    for (const a of this.store.agents()) {
+      (buckets[a.group ?? 'other'] ??= []).push(a.id);
+    }
+    return order
+      .filter((g) => buckets[g]?.length)
+      .map((g) => ({ group: g, agents: buckets[g] }));
+  }
   agentDefault(a: string): string {
     return this.store.prefs()?.per_agent_defaults?.[a] ?? '';
   }

@@ -60,15 +60,46 @@ class ModelsView(APIView):
         return Response({"models": items})
 
 
+AGENT_ORDER = [
+    # Personas
+    "buffett", "munger", "graham", "wood",
+    "druckenmiller", "burry", "damodaran", "lynch",
+    # Analyst agents
+    "fundamentals", "technicals", "valuation", "sentiment",
+    # Context agents
+    "macro", "news_digest",
+    # Orchestration
+    "risk_manager", "portfolio_manager", "cio",
+]
+
+AGENT_GROUP = {
+    **{a: "persona" for a in [
+        "buffett", "munger", "graham", "wood",
+        "druckenmiller", "burry", "damodaran", "lynch",
+    ]},
+    **{a: "analyst" for a in ["fundamentals", "technicals", "valuation", "sentiment"]},
+    "macro": "context", "news_digest": "context",
+    "risk_manager": "orchestration", "portfolio_manager": "orchestration", "cio": "orchestration",
+}
+
+
 class AgentsView(APIView):
     def get(self, request: Request) -> Response:
         agents = []
-        for name in sorted(ALL_AGENTS):
+        seen = set()
+        ordered = [a for a in AGENT_ORDER if a in ALL_AGENTS]
+        # Any agents in ALL_AGENTS not in the explicit order get appended at the end.
+        ordered += [a for a in sorted(ALL_AGENTS) if a not in ordered]
+        for name in ordered:
+            if name in seen:
+                continue
+            seen.add(name)
             default = DEFAULT_MODELS.get(name, ("anthropic", "claude-haiku-4-5-20251001"))
             agents.append({
                 "id": name,
                 "default_model": f"{default[0]}:{default[1]}",
                 "recommended_tier": AGENT_RECOMMENDATIONS.get(name, "fast_cheap"),
+                "group": AGENT_GROUP.get(name, "other"),
             })
         return Response({"agents": agents, "presets": list(PRESETS.keys())})
 
