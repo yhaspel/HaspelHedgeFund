@@ -24,9 +24,30 @@ export interface Position {
   opened_at: string;
 }
 
+export type StrategyKind = 'long_only' | 'short_only' | 'long_short' | 'market_neutral';
+
+export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
+  { value: 'long_only', label: 'Long-only' },
+  { value: 'short_only', label: 'Short-only' },
+  { value: 'long_short', label: 'Long/Short' },
+  { value: 'market_neutral', label: 'Market-neutral' },
+];
+
+export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
+  long_only:
+    'Buys only. The screener surfaces long candidates and the portfolio holds positive positions; no shorting. Target net ≈ target gross. Use when you want directional upside without the borrow costs, locate risk, or short-side drawdown tail.',
+  short_only:
+    'Shorts only. The screener surfaces short candidates and the portfolio holds negative positions; no longs. Target net is negative (≈ −target gross). Use when you want a dedicated bearish book — pays borrow fees and is gated by locate availability.',
+  long_short:
+    'Both sides, directional net. The portfolio holds both long and short positions and the net (longs − shorts) is whatever you set — long-biased, short-biased, or anywhere between. Classic hedge-fund construction; gross > net, so you get some idiosyncratic exposure with reduced market beta.',
+  market_neutral:
+    'Both sides, net forced to 0. Longs and shorts are sized to cancel market exposure (target net = 0). Returns come from the long–short spread, not market direction. Highest gross/net ratio — most idiosyncratic, lowest market beta.',
+};
+
 export interface Strategy {
   id: number;
   name: string;
+  kind: StrategyKind;
   universe: number;
   universe_name: string;
   portfolio: number;

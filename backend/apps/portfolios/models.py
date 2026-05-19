@@ -68,10 +68,22 @@ class Position(models.Model):
 
 
 class PortfolioStrategy(models.Model):
+    KIND_LONG_ONLY = "long_only"
+    KIND_SHORT_ONLY = "short_only"
+    KIND_LONG_SHORT = "long_short"
+    KIND_MARKET_NEUTRAL = "market_neutral"
+    KIND_CHOICES = [
+        (KIND_LONG_ONLY, "Long-only"),
+        (KIND_SHORT_ONLY, "Short-only"),
+        (KIND_LONG_SHORT, "Long/Short"),
+        (KIND_MARKET_NEUTRAL, "Market-neutral"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=80)
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_LONG_SHORT)
     universe = models.ForeignKey(Universe, on_delete=models.PROTECT)
     portfolio = models.ForeignKey(Portfolio, on_delete=models.PROTECT)
 

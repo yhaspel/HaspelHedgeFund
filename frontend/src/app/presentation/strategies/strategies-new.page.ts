@@ -6,6 +6,9 @@ import {
   DEFAULT_SCREENER_WEIGHTS,
   SCREENER_WEIGHT_LABELS,
   SCREENER_WEIGHT_TOOLTIPS,
+  STRATEGY_KIND_DESCRIPTIONS,
+  STRATEGY_KIND_OPTIONS,
+  StrategyKind,
 } from '../../core/models/strategy.model';
 import { InfoTooltipComponent } from '../shared/info-tooltip.component';
 
@@ -26,6 +29,18 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
           <hf-info text="A human-friendly label for this strategy. Used in the dashboard and the strategies list — doesn't affect behaviour." />
           <input name="name" [(ngModel)]="name" required
                  class="mt-1 w-full border rounded px-3 py-2" />
+        </label>
+
+        <label class="block text-sm font-medium">
+          Strategy kind
+          <hf-info text="Long-only: longs only (no shorts). Short-only: shorts only (no longs). Long/Short: both sides, directional net. Market-neutral: both sides, net=0." />
+          <select name="kind" [(ngModel)]="kind" (ngModelChange)="onKindChange($event)"
+                  class="mt-1 w-full border rounded px-3 py-2">
+            @for (k of kindOptions; track k.value) {
+              <option [value]="k.value">{{ k.label }}</option>
+            }
+          </select>
+          <p class="mt-2 text-xs font-normal text-gray-600">{{ kindDescription() }}</p>
         </label>
 
         <div class="grid grid-cols-2 gap-4">
@@ -64,13 +79,15 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                    [(ngModel)]="targetGross"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
-          <label class="text-sm">
-            Target net
-            <hf-info text="Long exposure minus short exposure as a fraction of portfolio value. 0.50 = +50% net (long-biased). 0 = market neutral. Negative = short-biased." />
-            <input name="n" type="number" step="0.05" min="-1.0" max="2.0"
-                   [(ngModel)]="targetNet"
-                   class="mt-1 w-full border rounded px-2 py-1" />
-          </label>
+          @if (kind !== 'market_neutral') {
+            <label class="text-sm">
+              Target net
+              <hf-info text="Long exposure minus short exposure as a fraction of portfolio value. 0.50 = +50% net (long-biased). 0 = market neutral. Negative = short-biased." />
+              <input name="n" type="number" step="0.05" min="-1.0" max="2.0"
+                     [(ngModel)]="targetNet"
+                     class="mt-1 w-full border rounded px-2 py-1" />
+            </label>
+          }
           <label class="text-sm">
             Max position pct
             <hf-info text="No single name can exceed this fraction of portfolio value. 0.03 = 3% per name. Overflow above the cap is redistributed to other names." />
@@ -85,20 +102,24 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                    [(ngModel)]="maxSector"
                    class="mt-1 w-full border rounded px-2 py-1" />
           </label>
-          <label class="text-sm">
-            Top K longs
-            <hf-info text="How many top-ranked long candidates the screener surfaces each cycle. Each one gets a full council run, so higher K = more cost + latency." />
-            <input name="kl" type="number" min="1" max="50"
-                   [(ngModel)]="topLongs"
-                   class="mt-1 w-full border rounded px-2 py-1" />
-          </label>
-          <label class="text-sm">
-            Top K shorts
-            <hf-info text="How many top-ranked short candidates the screener surfaces each cycle. Each gets a council run; non-locatable names (HTB) are dropped automatically." />
-            <input name="ks" type="number" min="0" max="50"
-                   [(ngModel)]="topShorts"
-                   class="mt-1 w-full border rounded px-2 py-1" />
-          </label>
+          @if (kind !== 'short_only') {
+            <label class="text-sm">
+              Top K longs
+              <hf-info text="How many top-ranked long candidates the screener surfaces each cycle. Each one gets a full council run, so higher K = more cost + latency." />
+              <input name="kl" type="number" min="1" max="50"
+                     [(ngModel)]="topLongs"
+                     class="mt-1 w-full border rounded px-2 py-1" />
+            </label>
+          }
+          @if (kind !== 'long_only') {
+            <label class="text-sm">
+              Top K shorts
+              <hf-info text="How many top-ranked short candidates the screener surfaces each cycle. Each gets a council run; non-locatable names (HTB) are dropped automatically." />
+              <input name="ks" type="number" min="0" max="50"
+                     [(ngModel)]="topShorts"
+                     class="mt-1 w-full border rounded px-2 py-1" />
+            </label>
+          }
           <label class="text-sm">
             Cost ceiling per cycle (USD)
             <hf-info text="Hard cap on LLM spend per cycle. If the estimated cost for K longs + K shorts exceeds this, the cycle trims K (proportionally) before dispatching the council fan-out." />
@@ -160,6 +181,8 @@ export class StrategiesNewPage implements OnInit {
   private readonly router = inject(Router);
 
   name = 'Daily L/S 100/50';
+  kind: StrategyKind = 'long_short';
+  readonly kindOptions = STRATEGY_KIND_OPTIONS;
   universe: number | null = null;
   portfolio: number | null = null;
   targetGross = 1.5;
@@ -169,11 +192,25 @@ export class StrategiesNewPage implements OnInit {
   topLongs = 10;
   topShorts = 5;
   costCeiling = 2.0;
-  modelPreset = 'hybrid';
+  modelPreset = 'frugal';
   weights: Record<string, number> = { ...DEFAULT_SCREENER_WEIGHTS };
   weightKeys = Object.keys(DEFAULT_SCREENER_WEIGHTS);
   submitting = signal(false);
   error = signal<string | null>(null);
+
+  kindDescription(): string { return STRATEGY_KIND_DESCRIPTIONS[this.kind]; }
+
+  onKindChange(k: StrategyKind): void {
+    if (k === 'long_only') {
+      this.topShorts = 0;
+      if (this.targetNet < 0) this.targetNet = Math.abs(this.targetNet);
+    } else if (k === 'short_only') {
+      this.topLongs = 0;
+      if (this.targetNet > 0) this.targetNet = -Math.abs(this.targetNet);
+    } else if (k === 'market_neutral') {
+      this.targetNet = 0;
+    }
+  }
 
   label(k: string): string { return SCREENER_WEIGHT_LABELS[k] ?? k; }
   tooltip(k: string): string { return SCREENER_WEIGHT_TOOLTIPS[k] ?? ''; }
@@ -205,6 +242,7 @@ export class StrategiesNewPage implements OnInit {
     this.submitting.set(true);
     this.store.create({
       name: this.name,
+      kind: this.kind,
       universe: this.universe,
       portfolio: this.portfolio,
       target_gross_pct: String(this.targetGross),

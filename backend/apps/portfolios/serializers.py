@@ -54,7 +54,7 @@ class StrategySerializer(serializers.ModelSerializer):
     class Meta:
         model = PortfolioStrategy
         fields = (
-            "id", "name", "universe", "universe_name", "portfolio", "portfolio_name",
+            "id", "name", "kind", "universe", "universe_name", "portfolio", "portfolio_name",
             "target_gross_pct", "target_net_pct",
             "max_position_pct", "max_sector_pct", "min_position_pct",
             "top_k_longs", "top_k_shorts",
