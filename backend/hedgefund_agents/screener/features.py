@@ -32,6 +32,14 @@ class ScreenerFeatures:
     last_close: float = 0.0
     market_cap: float = 0.0
     available: bool = True
+    # True when the feature row was filled from a synthetic sha1-derived
+    # fallback (no provider data). Surfaced on the ranking output so the
+    # UI / paper-trading layer can distinguish real signals from filler.
+    synthetic: bool = False
+    # Names of feature buckets that came from a real provider this run.
+    # Empty list means "everything is synthetic". A future hardening pass
+    # will widen this to include fundamentals/news/borrow flags.
+    real_signals: tuple = ()
 
 
 def _safe(x, default=0.0) -> float:
@@ -65,6 +73,8 @@ def _synthetic_fallback(ticker: str, as_of: date) -> ScreenerFeatures:
     feats.last_close = f(9, 10.0, 500.0)
     feats.market_cap = f(10, 1e9, 3e12)
     feats.available = True
+    feats.synthetic = True
+    feats.real_signals = ()
     return feats
 
 
@@ -93,6 +103,8 @@ def compute_features(
         rolling_high = max(closes[-min(252, len(closes)):])
         feats.drawdown_from_high = closes[-1] / rolling_high - 1.0
         feats.available = True
+        feats.synthetic = False
+        feats.real_signals = ("price_momentum", "drawdown")
         feats.sector = sector
         return feats
     # Fallback to synthetic so ranking still produces a stable list.

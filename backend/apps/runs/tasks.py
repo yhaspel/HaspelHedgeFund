@@ -126,7 +126,12 @@ def execute_run(run_id: int) -> None:
             run.save(update_fields=["status", "error_message", "finished_at"])
         raise
     finally:
-        total = LLMCall.objects.filter(run=run).aggregate(s=Sum("cost_usd"))["s"] or Decimal("0")
+        # Exclude unknown-price sentinel rows (cost_usd < 0) from the total.
+        total = (
+            LLMCall.objects.filter(run=run, cost_usd__gt=0)
+            .aggregate(s=Sum("cost_usd"))["s"]
+            or Decimal("0")
+        )
         Run.objects.filter(pk=run.pk).update(total_cost_usd=total)
 
 

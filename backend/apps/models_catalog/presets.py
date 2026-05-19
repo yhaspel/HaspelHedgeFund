@@ -25,11 +25,15 @@ PRESETS: dict[str, dict[str, str]] = {
         "macro": "anthropic:claude-haiku-4-5-20251001",
         "news_digest": "anthropic:claude-sonnet-4-6",
     },
+    # "quality" intentionally pays for the premium model on the decision
+    # path (personas + PM + RM + CIO) per master plan §7.5. Analytical /
+    # macro / news stay on Sonnet — Opus is overkill for structured-extraction
+    # workloads and would burn budget for negligible quality gain.
     "quality": {
-        "*persona*": "anthropic:claude-sonnet-4-6",
-        "portfolio_manager": "anthropic:claude-sonnet-4-6",
-        "risk_manager": "anthropic:claude-sonnet-4-6",
-        "cio": "anthropic:claude-sonnet-4-6",
+        "*persona*": "anthropic:claude-opus-4-6",
+        "portfolio_manager": "anthropic:claude-opus-4-6",
+        "risk_manager": "anthropic:claude-opus-4-6",
+        "cio": "anthropic:claude-opus-4-6",
         "*analytical*": "anthropic:claude-sonnet-4-6",
         "macro": "anthropic:claude-sonnet-4-6",
         "news_digest": "anthropic:claude-sonnet-4-6",

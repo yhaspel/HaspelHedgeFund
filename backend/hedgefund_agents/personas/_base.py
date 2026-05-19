@@ -77,6 +77,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
         )
         record_llm_call(
             run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+            portfolio_target_id=state.get("portfolio_target_id"),
             agent_name=name, resp=resp,
         )
         return {name: parsed.model_dump()}  # type: ignore[return-value]

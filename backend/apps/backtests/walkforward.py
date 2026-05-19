@@ -75,6 +75,7 @@ def _persist_segment_days(
             positions=seg.positions_by_day[i],
             portfolio_value=Decimal(str(round(seg.equity[i], 2))),
             decisions=seg.decisions_by_day[i] if i < len(seg.decisions_by_day) else [],
+            fills=seg.fills_by_day[i] if i < len(seg.fills_by_day) else [],
         ))
     BacktestDay.objects.bulk_create(rows)
 

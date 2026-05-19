@@ -44,7 +44,10 @@ def test_snapshot_is_cached_per_date(monkeypatch):
     # Skip the LLM narrative call — return fixed text + tilts.
     monkeypatch.setattr(
         "hedgefund_agents.macro.macro_agent._llm_narrative",
-        lambda *, as_of, regime, series_used: ("test narrative", {"technology": "overweight"}),
+        lambda *, as_of, regime, series_used, state=None, run_id=None, backtest_id=None: (
+            "test narrative",
+            {"technology": "overweight"},
+        ),
     )
     d = dt.date(2024, 12, 31)
     s1 = compute_snapshot(d, provider=fake)

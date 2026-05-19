@@ -51,7 +51,16 @@ class NewsService:
                 published_at__date__lte=as_of,
             )
         )
-        if existing:
+        # Cache freshness rule: only short-circuit if we have at least one
+        # provider's row *and* a row within the last day of as_of. A single
+        # stale row from one provider must not block fetching newer rows or
+        # additional providers' rows. (Dedup_key + ignore_conflicts make the
+        # merge safe.)
+        freshness_cutoff = as_of - dt.timedelta(days=1)
+        has_fresh = any(r.published_at.date() >= freshness_cutoff for r in existing)
+        sources_present = {r.source for r in existing}
+        expected_sources = {getattr(p, "name", "") for p in self._providers}
+        if has_fresh and expected_sources.issubset(sources_present | {""}):
             return self._dedup(existing)
 
         collected: list[NewsItem] = []

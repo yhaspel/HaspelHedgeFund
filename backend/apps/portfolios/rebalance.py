@@ -112,14 +112,23 @@ def compute_orders(
                 reason=reason, estimated_notional_usd=qty * price, sequence=1,
             ))
 
-    # Turnover cap
-    total_notional = sum(o.estimated_notional_usd for o in orders)
+    # Turnover cap — risk-reducing orders are exempt; the cap restricts
+    # additions of exposure. Closes / resize_down are stop-out / de-risk
+    # actions and must always run in full, even if they alone exceed the
+    # cap. Only resize_up + opens are scaled down to fit whatever notional
+    # remains under the cap.
     turnover_cap_usd = cfg.max_turnover_pct * cfg.portfolio_value
-    if turnover_cap_usd > 0 and total_notional > turnover_cap_usd:
-        scale = turnover_cap_usd / total_notional
-        for o in orders:
-            o.quantity *= scale
-            o.estimated_notional_usd *= scale
+    if turnover_cap_usd > 0:
+        risk_off_reasons = {"close", "resize_down"}
+        risk_off = [o for o in orders if o.reason in risk_off_reasons]
+        risk_on = [o for o in orders if o.reason not in risk_off_reasons]
+        risk_on_notional = sum(o.estimated_notional_usd for o in risk_on)
+        if risk_on_notional > turnover_cap_usd > 0:
+            scale = turnover_cap_usd / risk_on_notional
+            for o in risk_on:
+                o.quantity *= scale
+                o.estimated_notional_usd *= scale
+        orders = risk_off + risk_on
 
     orders.sort(key=lambda o: (o.sequence, o.ticker))
     return orders

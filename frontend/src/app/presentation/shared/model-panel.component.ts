@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, model, signal, OnInit } from '@angular/core';
+import { Component, computed, effect, inject, input, model, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ModelsStore } from '../../abstraction/models.store';
 import {
@@ -86,7 +86,7 @@ import {
     </section>
   `,
 })
-export class ModelPanelComponent implements OnInit {
+export class ModelPanelComponent {
   readonly store = inject(ModelsStore);
 
   agents = input<string[]>([]);
@@ -107,10 +107,17 @@ export class ModelPanelComponent implements OnInit {
     ),
   );
 
-  ngOnInit(): void {
+  // React to async preference loads — the prefs() signal may still be null
+  // when the panel first renders; flipping it must update the active preset.
+  // Only adopt the server preset if the user hasn't already touched the
+  // dropdown locally (preserve user intent during the GET round-trip).
+  private prefsApplied = false;
+  private readonly _syncPreset = effect(() => {
     const prefs = this.store.prefs();
-    if (prefs?.preset) this.activePreset.set(prefs.preset);
-  }
+    if (!prefs?.preset || this.prefsApplied) return;
+    this.activePreset.set(prefs.preset);
+    this.prefsApplied = true;
+  });
 
   display(a: string): string {
     return AGENT_DISPLAY[a] ?? a;

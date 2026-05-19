@@ -70,13 +70,15 @@ def run_backtest(backtest_id: int) -> None:
 
         run_walkforward(bt)
     except Exception as exc:  # pragma: no cover
-        from .exceptions import BudgetExceeded
+        from .exceptions import BudgetExceeded, SparseCache
 
         log.exception("Backtest %s failed", backtest_id)
         current = Backtest.objects.filter(pk=backtest_id).values_list("status", flat=True).first()
         if current != Backtest.CANCELLED:
             if isinstance(exc, BudgetExceeded):
                 bt.status = Backtest.ABORTED_BUDGET
+            elif isinstance(exc, SparseCache):
+                bt.status = Backtest.ABORTED_PARTIAL
             else:
                 bt.status = Backtest.FAILED
             bt.error_message = f"{type(exc).__name__}: {exc}"[:2000]

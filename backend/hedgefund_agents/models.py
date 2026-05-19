@@ -14,6 +14,10 @@ class LLMCall(models.Model):
         "backtests.Backtest", related_name="llm_calls", on_delete=models.CASCADE,
         null=True, blank=True,
     )
+    portfolio_target = models.ForeignKey(
+        "portfolios.PortfolioTarget", related_name="llm_calls",
+        on_delete=models.CASCADE, null=True, blank=True,
+    )
     agent_name = models.CharField(max_length=64)
     provider = models.CharField(max_length=32)  # "anthropic", "openrouter"
     model = models.CharField(max_length=128)

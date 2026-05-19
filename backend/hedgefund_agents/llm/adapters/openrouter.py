@@ -1,6 +1,8 @@
 """OpenRouter adapter — speaks the OpenAI Chat Completions dialect."""
 from __future__ import annotations
 
+import logging
+import random
 import time
 
 import httpx
@@ -10,6 +12,11 @@ from ..client import LLMResponse, Message
 from ..pricing import estimate_cost
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
+RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
+MAX_RETRIES = 5
+BASE_BACKOFF_SECONDS = 2.0
+
+log = logging.getLogger(__name__)
 
 
 class OpenRouterClient:
@@ -45,7 +52,7 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
         t0 = time.perf_counter()
-        resp = self._http.post(API_URL, json=body, headers=headers)
+        resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         if resp.status_code >= 400:
             raise httpx.HTTPStatusError(
@@ -77,3 +84,35 @@ class OpenRouterClient:
             finish_reason=finish_reason,
             raw=payload,
         )
+
+    def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:
+        """Exponential backoff on 408/429/5xx, mirroring AnthropicClient.
+
+        OpenRouter exposes the same transient-failure classes (rate-limited,
+        upstream provider hiccup); keeping retry semantics identical means
+        the agent layer sees one consistent retry budget regardless of which
+        provider the model is routed through.
+        """
+        last: httpx.Response | None = None
+        for attempt in range(MAX_RETRIES + 1):
+            resp = self._http.post(API_URL, json=body, headers=headers)
+            if resp.status_code not in RETRY_STATUSES:
+                return resp
+            last = resp
+            if attempt == MAX_RETRIES:
+                return resp
+            retry_after = resp.headers.get("retry-after")
+            try:
+                wait = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2 ** attempt)
+            except ValueError:
+                wait = BASE_BACKOFF_SECONDS * (2 ** attempt)
+            wait += random.uniform(0, 0.5)
+            log.warning(
+                "openrouter %s on attempt %d; sleeping %.1fs",
+                resp.status_code,
+                attempt + 1,
+                wait,
+            )
+            time.sleep(wait)
+        assert last is not None
+        return last

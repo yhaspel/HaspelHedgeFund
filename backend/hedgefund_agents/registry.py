@@ -4,23 +4,63 @@ makes it easy to swap (e.g., Ollama in P2+) without touching agents.
 """
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from apps.data.providers import EdgarProvider, FmpProvider
 from apps.data.providers.fred import FredProvider
 from apps.data.providers.news import NewsService
 
-from .llm.adapters import AnthropicClient, OpenRouterClient
+from .llm.adapters import AnthropicClient, OllamaClient, OpenRouterClient
 from .llm.client import LLMClient
 
+log = logging.getLogger(__name__)
 
-@lru_cache(maxsize=4)
-def get_llm(provider: str) -> LLMClient:
+
+@lru_cache(maxsize=64)
+def _make_client(provider: str, user_id: int | None, api_key: str, host: str) -> LLMClient:
+    """Internal cache key is the (provider, user_id, key, host) tuple so
+    we don't reuse a platform-key client where a user just saved a BYO key."""
     if provider == "anthropic":
-        return AnthropicClient()
+        return AnthropicClient(api_key=api_key or None)
     if provider == "openrouter":
-        return OpenRouterClient()
+        return OpenRouterClient(api_key=api_key or None)
+    if provider == "ollama":
+        return OllamaClient(host=host or None)
     raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = None) -> LLMClient:
+    """Return an LLM client honoring the user's BYO key when available.
+
+    Resolution order:
+      1. If `user_id` (or `state["user_id"]`) is given and the user has a
+         `ProviderKey` row with a stored key for `provider`, use it.
+      2. Otherwise fall back to the platform env key (`settings.*_API_KEY`).
+      3. Ollama: per-user host overrides the env `OLLAMA_HOST`.
+
+    We log only provider + key-source — never plaintext.
+    """
+    if user_id is None and state is not None:
+        user_id = state.get("user_id")
+    api_key = ""
+    host = ""
+    source = "platform"
+    if user_id is not None:
+        try:
+            from apps.models_catalog.models import ProviderKey
+            pk = ProviderKey.objects.filter(user_id=user_id).first()
+        except Exception:
+            pk = None
+        if pk is not None:
+            if provider in ("anthropic", "openrouter", "openai") and pk.has_key(provider):
+                api_key = pk.get_key(provider)
+                source = "user"
+            if provider == "ollama" and pk.ollama_host:
+                host = pk.ollama_host
+                source = "user"
+    log.info("llm_client provider=%s user_id=%s key_source=%s", provider, user_id, source)
+    return _make_client(provider, user_id if source == "user" else None, api_key, host)
 
 
 def get_data_provider() -> FmpProvider:

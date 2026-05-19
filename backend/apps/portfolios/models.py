@@ -164,6 +164,17 @@ class PortfolioTarget(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["strategy", "-as_of_date"])]
+        # Race-safe idempotency: two concurrent dispatches for the same
+        # (strategy, as_of_date) cannot both succeed at the DB level.
+        # Combined with the transactional get-or-create in tasks.py, this
+        # collapses retries onto the existing target instead of creating a
+        # duplicate cycle.
+        constraints = [
+            models.UniqueConstraint(
+                fields=["strategy", "as_of_date"],
+                name="uniq_strategy_target_per_day",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"target s={self.strategy_id} {self.as_of_date} {self.status}"

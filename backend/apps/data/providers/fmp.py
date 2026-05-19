@@ -126,8 +126,22 @@ class FmpProvider:
         lookback_quarters: int = 8,
     ) -> list[FundamentalRow]:
         statements = {METRIC_MAP[m][0] for m in metrics if m in METRIC_MAP}
+        # FMP's `limit` returns the latest N quarters relative to *today*, not
+        # to `as_of`. If as_of is far in the past we need extra depth so that
+        # at least `lookback_quarters` rows with as_of_date <= as_of survive
+        # the point-in-time filter. Each quarter spans ~0.25 years; the
+        # `*2` slack absorbs filing-date jitter and missed quarters.
+        today = dt.date.today()
+        quarters_since_asof = max(0, (today - as_of).days // 90)
+        # Original (P1) behavior: lookback_quarters * 2. We only bump beyond
+        # that when as_of is far enough in the past that the latest-N rows
+        # FMP returns wouldn't span back to it. This keeps near-current
+        # backtests cassette-compatible while letting deep-history runs
+        # actually get the rows they need.
+        extra_quarters = max(0, quarters_since_asof - lookback_quarters)
+        fetch_limit = (lookback_quarters + extra_quarters) * 2
         for stmt in statements:
-            self._ensure_statement_cached(ticker, stmt, lookback_quarters * 2)
+            self._ensure_statement_cached(ticker, stmt, fetch_limit)
         qs = Fundamental.objects.filter(
             ticker=ticker,
             source=SOURCE,

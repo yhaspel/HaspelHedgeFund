@@ -64,6 +64,19 @@ class StrategySerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("last_run_at", "created_at")
 
+    def validate_portfolio(self, portfolio: Portfolio) -> Portfolio:
+        # A strategy may only point at a portfolio the requesting user owns.
+        # Without this, an attacker who guesses a numeric portfolio_id could
+        # attach their strategy (and its cycles/trades) to someone else's book.
+        request = self.context.get("request")
+        if request is None or not request.user or not request.user.is_authenticated:
+            raise serializers.ValidationError("authentication required")
+        if portfolio.user_id != request.user.id:
+            raise serializers.ValidationError(
+                "portfolio belongs to another user"
+            )
+        return portfolio
+
 
 class RebalanceOrderSerializer(serializers.ModelSerializer):
     class Meta:

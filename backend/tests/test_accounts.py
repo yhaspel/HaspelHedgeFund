@@ -61,3 +61,9 @@ def test_ping_task_runs_eagerly() -> None:
     result = ping.delay().get()
     assert isinstance(result, str)
     assert "T" in result
+
+
+def test_health_endpoint_is_unauthenticated(client: APIClient) -> None:
+    resp = client.get(reverse("health"))
+    assert resp.status_code == 200
+    assert resp.data == {"status": "ok"}

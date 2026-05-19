@@ -6,7 +6,23 @@ operators.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
+from django.conf import settings
+
+log = logging.getLogger(__name__)
+
+# Sentinel cost recorded when a model's price isn't in PRICING and strict
+# mode is off. Negative so it can't masquerade as a $0.00 (free) call —
+# downstream code (LLMCall serializer, totals) treats < 0 as "unknown".
+UNKNOWN_COST_SENTINEL = -1.0
+
+
+class UnknownModelPriceError(LookupError):
+    """Raised when `estimate_cost` is asked for a model with no PRICING entry
+    and `LLM_REQUIRE_KNOWN_PRICES` is True. Add the model to PRICING (or seed
+    a `ModelEntry` row in `models_catalog`) before invoking it."""
 
 
 @dataclass(frozen=True)
@@ -29,10 +45,69 @@ PRICING: dict[str, ModelPrice] = {
 }
 
 
-def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    price = PRICING.get(model)
+def _lookup_catalog_price(model: str) -> ModelPrice | None:
+    """Read pricing from `ModelEntry` (P2d catalog) if available.
+
+    Catalog rows are the single source of truth for cost estimates and
+    recorded `LLMCall.cost_usd`. The static `PRICING` table below remains
+    only as a bootstrap/fallback for environments where migrations haven't
+    populated the catalog yet (tests that don't load fixtures, dev runs
+    against a fresh DB).
+    """
+    try:
+        from apps.models_catalog.models import ModelEntry
+    except Exception:
+        return None
+    # `model` may be a bare id ("claude-sonnet-4-6") or provider-qualified
+    # ("anthropic:claude-sonnet-4-6"). Try both shapes.
+    candidates = {model, model.split(":", 1)[-1]}
+    if ":" not in model:
+        candidates.update({f"anthropic:{model}", f"openrouter:{model}"})
+    try:
+        entry = ModelEntry.objects.filter(id__in=candidates, is_active=True).first()
+    except Exception:
+        return None
+    if entry is None or entry.price_in_per_mtok is None or entry.price_out_per_mtok is None:
+        return None
+    return ModelPrice(float(entry.price_in_per_mtok), float(entry.price_out_per_mtok))
+
+
+def estimate_cost(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    strict: bool | None = None,
+) -> float:
+    """Return $ cost for a call, or `UNKNOWN_COST_SENTINEL` (-1.0) when the
+    model is not priced and strict mode is disabled.
+
+    Strict mode (the default) raises `UnknownModelPriceError`. Disable it
+    via `LLM_REQUIRE_KNOWN_PRICES=False` for dev exploration, but never silently
+    record an unknown-priced call as $0.00 — that's the failure mode this
+    function exists to prevent.
+    """
+    if strict is None:
+        strict = bool(getattr(settings, "LLM_REQUIRE_KNOWN_PRICES", True))
+    # Catalog (ModelEntry) wins; static PRICING is a bootstrap fallback.
+    price = _lookup_catalog_price(model)
     if price is None:
-        return 0.0
+        price = PRICING.get(model)
+        if price is not None:
+            log.debug("pricing fallback (static table) for model=%r", model)
+    if price is None:
+        if strict:
+            raise UnknownModelPriceError(
+                f"No price entry for model {model!r}. Add it to "
+                "`hedgefund_agents.llm.pricing.PRICING` or set "
+                "LLM_REQUIRE_KNOWN_PRICES=False to record the call as unknown."
+            )
+        log.warning(
+            "Unknown model price for %r — recording cost as 'unknown' (%s).",
+            model,
+            UNKNOWN_COST_SENTINEL,
+        )
+        return UNKNOWN_COST_SENTINEL
     return (
         prompt_tokens / 1_000_000 * price.input_per_mtok
         + completion_tokens / 1_000_000 * price.output_per_mtok

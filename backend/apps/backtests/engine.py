@@ -122,7 +122,10 @@ def run_segment(
         # 3. Execute pending orders at today's open
         if pending_orders:
             opens = fill_prices_for(day, universe)
-            fills = pf.execute(pending_orders, opens, as_of=day)
+            fills = pf.execute(
+                pending_orders, opens, as_of=day,
+                hold_semantics=getattr(bt, "hold_semantics", "hold_existing"),
+            )
             out.fills_by_day.append([f.__dict__ for f in fills])
             pending_orders = []
         else:
@@ -286,13 +289,20 @@ def prime_agent_cache(
             done += 1
             if progress_cb:
                 progress_cb(done, total, f"primed {ticker} {day.isoformat()}")
-    # Hard fail if >25% of (ticker, day) invocations failed — the IS sweep
-    # against a sparse cache produces garbage.
-    if total and failures / total > 0.25:
-        raise RuntimeError(
-            f"prime_agent_cache: {failures}/{total} graph invocations failed "
-            f"(>25% threshold). Refusing to score on a sparse cache."
-        )
+    # Quality gate: persist the actual completeness ratio so the UI can show
+    # whether a run is complete or partial, and abort below the configured
+    # `prime_min_completeness` (default 0.85). Failures inside this band still
+    # taint metrics, so the run is marked ABORTED_PARTIAL, not DONE.
+    completeness = (1.0 - failures / total) if total else 1.0
+    min_required = float(getattr(bt, "prime_min_completeness", 0.85) or 0.85)
+    bt.prime_completeness = completeness
+    bt.save(update_fields=["prime_completeness"])
+    if completeness < min_required:
+        from .exceptions import SparseCache
+        raise SparseCache(completeness, min_required, done, total)
     if failures:
-        log.warning("prime_agent_cache: %d/%d graph invocations failed", failures, total)
+        log.warning(
+            "prime_agent_cache: %d/%d graph invocations failed (completeness=%.2f)",
+            failures, total, completeness,
+        )
     return cache_map

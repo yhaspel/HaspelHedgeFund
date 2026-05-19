@@ -106,6 +106,11 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localho
 CELERY_TASK_ALWAYS_EAGER = False
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+# LLM pricing strictness — when True (default), an LLM call against a model
+# with no PRICING entry raises rather than silently recording $0.00. Tests
+# and CI should keep this True. See hedgefund_agents/llm/pricing.py.
+LLM_REQUIRE_KNOWN_PRICES = os.environ.get("LLM_REQUIRE_KNOWN_PRICES", "1") == "1"
+
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
@@ -141,3 +146,29 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+
+# --- Secret-safety guard ------------------------------------------------
+# In any environment that is not explicitly `dev` or `test`, refuse to start
+# with insecure default secrets. Dev defaults stay convenient but visibly
+# unsafe; prod-ish environments must override them.
+_DJANGO_ENV = os.environ.get("DJANGO_ENV", "dev").lower()
+_INSECURE_SECRET_SENTINELS = {"", "dev-insecure-change-me", "change-me", "insecure"}
+
+if _DJANGO_ENV not in {"dev", "test"}:
+    if SECRET_KEY in _INSECURE_SECRET_SENTINELS:
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY is still the insecure default; set a unique value "
+            f"before starting in DJANGO_ENV={_DJANGO_ENV!r}."
+        )
+    _jwt_key = SIMPLE_JWT["SIGNING_KEY"]
+    if _jwt_key in _INSECURE_SECRET_SENTINELS:
+        raise RuntimeError(
+            "JWT_SIGNING_KEY is still the insecure default; set a unique value "
+            f"before starting in DJANGO_ENV={_DJANGO_ENV!r}."
+        )
+    if len(_jwt_key.encode("utf-8")) < 32:
+        raise RuntimeError(
+            "JWT_SIGNING_KEY must be at least 32 bytes "
+            f"(got {len(_jwt_key.encode('utf-8'))}) in DJANGO_ENV={_DJANGO_ENV!r}."
+        )

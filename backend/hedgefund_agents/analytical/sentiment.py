@@ -68,6 +68,7 @@ def run_sentiment(state: AgentState) -> AgentState:
     )
     record_llm_call(
         run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+            portfolio_target_id=state.get("portfolio_target_id"),
         agent_name="sentiment", resp=resp,
     )
     return {"sentiment": parsed.model_dump()}  # type: ignore[return-value]

@@ -12,10 +12,16 @@ The source of truth is the in-process `AGENT_VERSIONS` dict; the
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 from django.db import models
+
+# Composition version for the council graph itself — bump when the graph's
+# node set, fan-out shape, or join semantics change in a way that affects
+# decisions, even if no individual agent's prompt changed.
+COUNCIL_GRAPH_VERSION = "v2"
 
 
 @dataclass(frozen=True)
@@ -25,10 +31,35 @@ class AgentSpec:
     default_model: str  # "provider:model"
     prompt: str
     config: dict[str, Any] = field(default_factory=dict)
+    # Deterministic-code fingerprint. Bump when an agent's Python logic
+    # (e.g. Valuation's DCF math, Risk Manager's rule engine) changes in a
+    # behavior-affecting way without the prompt changing. Keeps the
+    # `spec_hash` sensitive to silent code drift.
+    code_version: str = "v1"
 
     @property
     def prompt_hash(self) -> str:
         return hashlib.sha256(self.prompt.encode()).hexdigest()[:16]
+
+    @property
+    def spec_hash(self) -> str:
+        """Full fingerprint over (prompt, default_model, config, code_version).
+
+        Two AgentSpecs with the same `spec_hash` are interchangeable for
+        cache lookups and run reproducibility. Run snapshots record this
+        alongside the human-readable `version` string.
+        """
+        payload = json.dumps(
+            {
+                "prompt": self.prompt,
+                "default_model": self.default_model,
+                "config": self.config,
+                "code_version": self.code_version,
+            },
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 # Source of truth: edit prompts here, bump version when prompt changes.
@@ -41,8 +72,20 @@ def register(spec: AgentSpec) -> AgentSpec:
 
 
 def snapshot_versions(agent_names: list[str]) -> dict[str, str]:
-    """Used by Run.tasks to record which agent versions executed."""
-    return {n: AGENT_VERSIONS[n].version for n in agent_names if n in AGENT_VERSIONS}
+    """Used by Run.tasks to record which agent versions executed.
+
+    Returns a dict where each value is "<version>:<spec_hash>" so a run can
+    be replayed against the exact (prompt, model, config, code) tuple even
+    if the human-readable version string is later reused. The graph's own
+    composition version is recorded under the special key `__graph__`.
+    """
+    snap: dict[str, str] = {
+        n: f"{AGENT_VERSIONS[n].version}:{AGENT_VERSIONS[n].spec_hash}"
+        for n in agent_names
+        if n in AGENT_VERSIONS
+    }
+    snap["__graph__"] = COUNCIL_GRAPH_VERSION
+    return snap
 
 
 class AgentVersion(models.Model):
@@ -74,9 +117,12 @@ def ensure_versions_synced() -> None:
             agent_name=spec.agent_name,
             version=spec.version,
             defaults={
-                "prompt_hash": spec.prompt_hash,
+                # Store the full spec hash (prompt+model+config+code) — the
+                # column is named prompt_hash for legacy reasons but its job
+                # is to fingerprint the whole behaviorally-relevant tuple.
+                "prompt_hash": spec.spec_hash,
                 "default_model": spec.default_model,
-                "config": spec.config,
+                "config": {**spec.config, "code_version": spec.code_version},
                 "is_current": True,
             },
         )

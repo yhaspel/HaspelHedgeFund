@@ -112,9 +112,21 @@ def _fetch_observations(
     return {sid: provider.get_latest_value(sid, as_of=as_of) for sid in MACRO_SERIES}
 
 
-def compute_snapshot(as_of, provider: FredProvider | None = None) -> MacroSnapshot:
-    """Build (or fetch from cache) the MacroSnapshot for `as_of`. Used by the
-    Celery beat pre-warm task AND lazily by run_macro."""
+def compute_snapshot(
+    as_of,
+    provider: FredProvider | None = None,
+    *,
+    run_id: int | None = None,
+    backtest_id: int | None = None,
+    state: dict | None = None,
+) -> MacroSnapshot:
+    """Build (or fetch from cache) the MacroSnapshot for `as_of`.
+
+    `run_id` / `backtest_id` attribute the LLM-narrative call to the caller.
+    The Celery beat pre-warm task passes neither (the resulting LLMCall is
+    intentionally an unattributed "shared prewarm" — visible in the cost
+    dashboard, not billed to any single run).
+    """
     cached = MacroSnapshot.objects.filter(as_of_date=as_of).first()
     if cached:
         return cached
@@ -127,7 +139,14 @@ def compute_snapshot(as_of, provider: FredProvider | None = None) -> MacroSnapsh
         for sid, o in obs.items()
     }
 
-    narrative, sector_tilts = _llm_narrative(as_of=as_of, regime=regime, series_used=series_used)
+    narrative, sector_tilts = _llm_narrative(
+        as_of=as_of,
+        regime=regime,
+        series_used=series_used,
+        state=state,
+        run_id=run_id,
+        backtest_id=backtest_id,
+    )
 
     snapshot, _ = MacroSnapshot.objects.update_or_create(
         as_of_date=as_of,
@@ -144,6 +163,8 @@ def compute_snapshot(as_of, provider: FredProvider | None = None) -> MacroSnapsh
 def _llm_narrative(
     *, as_of, regime: dict[str, str], series_used: dict[str, float | None],
     state: dict | None = None,
+    run_id: int | None = None,
+    backtest_id: int | None = None,
 ):
     default = DEFAULT_MODELS.get("macro", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = default
@@ -172,13 +193,23 @@ def _llm_narrative(
         temperature=0.3,
         cache_ctx=make_cache_ctx(state or {}, "macro"),
     )
-    record_llm_call(run_id=None, agent_name="macro", resp=resp)
+    record_llm_call(
+        run_id=run_id,
+        backtest_id=backtest_id,
+        agent_name="macro",
+        resp=resp,
+    )
     return parsed.narrative, parsed.sector_implications
 
 
 def run_macro(state: AgentState) -> AgentState:
     as_of = state["as_of_date"]
-    snapshot = compute_snapshot(as_of)
+    snapshot = compute_snapshot(
+        as_of,
+        run_id=state.get("run_id"),
+        backtest_id=state.get("backtest_id"),
+        state=state,
+    )
     out = MacroOutput(
         as_of_date=snapshot.as_of_date.isoformat(),
         growth_quadrant=snapshot.growth_quadrant,  # type: ignore[arg-type]

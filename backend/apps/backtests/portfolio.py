@@ -105,11 +105,17 @@ class SimulatedPortfolio:
         decisions: list[dict],
         fill_prices: dict[str, float],
         as_of: dt.date | None = None,
+        hold_semantics: str = "hold_existing",
     ) -> list[Fill]:
         """Execute decisions against `fill_prices` (e.g., next day's open).
 
         Each decision: {"ticker": str, "action": "buy"|"sell"|"hold",
                          "target_weight_pct": float, "target_quantity": float}.
+
+        `hold_semantics`:
+          - "hold_existing" — action="hold" skips the name (keep current target).
+          - "target_zero"   — action="hold" liquidates (target_weight_pct treated as 0).
+        Both behaviors are reachable; tests pin one per backtest.
 
         We compute target qty from current portfolio_value × target_weight%
         / fill_price (more robust than trusting upstream's target_quantity
@@ -123,9 +129,11 @@ class SimulatedPortfolio:
             price = fill_prices.get(tkr)
             if price is None or price <= 0:
                 continue
+            if action == "hold" and hold_semantics == "hold_existing":
+                continue
             target_weight = float(d.get("target_weight_pct", 0.0)) / 100.0
             target_dollars = equity * target_weight
-            if action == "sell":
+            if action == "sell" or (action == "hold" and hold_semantics == "target_zero"):
                 target_qty = 0.0
             else:
                 target_qty = target_dollars / price

@@ -2472,7 +2472,7 @@ interactions:
       Host:
       - www.sec.gov
       User-Agent:
-      - AIHedgeFund Research owner@example.com
+      - AIHedgeFund Research example@example.com
     method: GET
     uri: https://www.sec.gov/files/company_tickers.json
   response:
@@ -11285,7 +11285,7 @@ interactions:
       Host:
       - data.sec.gov
       User-Agent:
-      - AIHedgeFund Research owner@example.com
+      - AIHedgeFund Research example@example.com
     method: GET
     uri: https://data.sec.gov/submissions/CIK0000320193.json
   response:
@@ -11528,7 +11528,7 @@ interactions:
       Host:
       - www.sec.gov
       User-Agent:
-      - AIHedgeFund Research owner@example.com
+      - AIHedgeFund Research example@example.com
     method: GET
     uri: https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm
   response:
@@ -25800,7 +25800,7 @@ interactions:
       Host:
       - www.sec.gov
       User-Agent:
-      - AIHedgeFund Research owner@example.com
+      - AIHedgeFund Research example@example.com
     method: GET
     uri: https://www.sec.gov/Archives/edgar/data/320193/000032019324000081/aapl-20240629.htm
   response:

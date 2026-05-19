@@ -11,10 +11,14 @@ class Backtest(models.Model):
     FAILED = "failed"
     CANCELLED = "cancelled"
     ABORTED_BUDGET = "aborted_budget"
+    ABORTED_PARTIAL = "aborted_partial"
+    SYNTHETIC = "synthetic"
     STATUS_CHOICES = [
         (QUEUED, "Queued"), (RUNNING, "Running"), (DONE, "Done"),
         (FAILED, "Failed"), (CANCELLED, "Cancelled"),
         (ABORTED_BUDGET, "Aborted (budget)"),
+        (ABORTED_PARTIAL, "Aborted (sparse data)"),
+        (SYNTHETIC, "Synthetic"),
     ]
     ACTIVE_STATUSES = {QUEUED, RUNNING}
 
@@ -43,6 +47,14 @@ class Backtest(models.Model):
     is_objective = models.CharField(max_length=16, default="sharpe")  # sharpe|sortino|calmar
     rng_seed = models.IntegerField(default=42)
     baseline = models.CharField(max_length=16, default="universe_ew")  # universe_ew|spy
+    # "hold_existing" → action="hold" preserves current target (skip rebalance for that name);
+    # "target_zero"   → action="hold" routes to liquidate (target_weight_pct=0).
+    # See decision-semantics block in phase-02a-agent-council.md.
+    hold_semantics = models.CharField(max_length=16, default="hold_existing")
+    # Fraction of ticker-days the cache-prime phase actually populated (0–1).
+    # If too low, the run transitions to ABORTED_PARTIAL rather than DONE.
+    prime_completeness = models.FloatField(default=1.0)
+    prime_min_completeness = models.FloatField(default=0.85)
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=QUEUED)
     progress_pct = models.IntegerField(default=0)
@@ -102,7 +114,11 @@ class BacktestDay(models.Model):
     cash = models.DecimalField(max_digits=18, decimal_places=2)
     positions = models.JSONField(default=list)
     portfolio_value = models.DecimalField(max_digits=18, decimal_places=2)
-    decisions = models.JSONField(default=list, blank=True)  # list of decision dicts
+    decisions = models.JSONField(default=list, blank=True)  # list of PM decision dicts (intent)
+    # Executed fills as produced by SimulatedPortfolio.execute — list of
+    # {ticker, qty, price, commission, notional, cash_delta}. Authoritative
+    # source for turnover; decisions[].notional reflects intent, not execution.
+    fills = models.JSONField(default=list, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["backtest", "segment", "date"])]

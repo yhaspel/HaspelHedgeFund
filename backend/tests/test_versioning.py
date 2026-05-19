@@ -37,9 +37,13 @@ def test_prompt_hash_is_stable() -> None:
 
 def test_snapshot_versions_records_executed_agents() -> None:
     snap = snapshot_versions(["buffett", "munger", "nonexistent"])
-    assert snap["buffett"] == AGENT_VERSIONS["buffett"].version
-    assert snap["munger"] == AGENT_VERSIONS["munger"].version
+    buf = AGENT_VERSIONS["buffett"]
+    mun = AGENT_VERSIONS["munger"]
+    # Format: "<version>:<spec_hash>" — full fingerprint travels with the run.
+    assert snap["buffett"] == f"{buf.version}:{buf.spec_hash}"
+    assert snap["munger"] == f"{mun.version}:{mun.spec_hash}"
     assert "nonexistent" not in snap
+    assert "__graph__" in snap
 
 
 @pytest.mark.django_db

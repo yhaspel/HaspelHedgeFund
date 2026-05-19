@@ -23,6 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from celery import chord, shared_task
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -169,6 +170,11 @@ def run_candidate_council(payload: dict) -> dict:
         "model_overrides": payload.get("model_overrides", {}),
         "data_provider": get_data_provider(),
         "filings_provider": get_filings_provider(),
+        # Cost attribution: every LLMCall this council emits will be linked
+        # to the parent PortfolioTarget, so PortfolioTarget.total_cost_usd
+        # aggregates real spend rather than a per-candidate guess.
+        "portfolio_target_id": payload.get("portfolio_target_id"),
+        "user_id": payload.get("user_id"),
         # P2e: tell PM/RM this is a short candidate so the action mapping
         # produces open_short instead of just sell, and so the borrow veto
         # propagates. Looser thresholds because the screener already
@@ -339,26 +345,30 @@ def daily_long_short_cycle(
     except ScreenerAbort as exc:
         raise RuntimeError(str(exc)) from exc
 
-    ranking = ScreenerRanking.objects.create(
-        strategy=strategy,
-        as_of_date=as_of,
-        long_candidates=screener_out["long_candidates"],
-        short_candidates=screener_out["short_candidates"],
-        universe_size_evaluated=screener_out["universe_size_evaluated"],
-    )
-
-    target, _ = PortfolioTarget.objects.update_or_create(
-        strategy=strategy, as_of_date=as_of,
-        defaults={
-            "status": "running",
-            "screener_ranking": ranking,
-            "target_weights": {},
-            "rejected_candidates": [],
-            "decisions": [],
-            "error_message": "",
-            "finished_at": None,
-        },
-    )
+    # One transaction so the ranking row + target row appear atomically.
+    # The unique constraint on (strategy, as_of_date) means a concurrent
+    # dispatch lands in update_or_create's UPDATE branch instead of creating
+    # a duplicate row.
+    with transaction.atomic():
+        ranking = ScreenerRanking.objects.create(
+            strategy=strategy,
+            as_of_date=as_of,
+            long_candidates=screener_out["long_candidates"],
+            short_candidates=screener_out["short_candidates"],
+            universe_size_evaluated=screener_out["universe_size_evaluated"],
+        )
+        target, _ = PortfolioTarget.objects.update_or_create(
+            strategy=strategy, as_of_date=as_of,
+            defaults={
+                "status": "running",
+                "screener_ranking": ranking,
+                "target_weights": {},
+                "rejected_candidates": [],
+                "decisions": [],
+                "error_message": "",
+                "finished_at": None,
+            },
+        )
 
     # Cost-ceiling trim.
     n_l = len(screener_out["long_candidates"])
@@ -371,6 +381,9 @@ def daily_long_short_cycle(
     # configured default (or the strategy preset) instead of the registry
     # fallback, which still routes some agents to Anthropic.
     overrides = _resolve_model_overrides(strategy)
+
+    user_id = strategy.user_id
+    target_id = target.pk
 
     # Borrow quotes for short side.
     borrow = StubBorrowProvider()
@@ -386,6 +399,8 @@ def daily_long_short_cycle(
             "as_of_date": as_of.isoformat(),
             "model_overrides": overrides,
             "personas": strategy.personas or None,
+            "portfolio_target_id": target_id,
+            "user_id": user_id,
         })
     long_payloads = [
         {
@@ -396,6 +411,8 @@ def daily_long_short_cycle(
             "as_of_date": as_of.isoformat(),
             "model_overrides": overrides,
             "personas": strategy.personas or None,
+            "portfolio_target_id": target_id,
+            "user_id": user_id,
         }
         for c in long_cands
     ]

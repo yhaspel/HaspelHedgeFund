@@ -109,6 +109,7 @@ def run_technicals(state: AgentState) -> AgentState:
     )
     record_llm_call(
         run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
+            portfolio_target_id=state.get("portfolio_target_id"),
         agent_name="technicals", resp=resp,
     )
     # Trust our numeric metrics over whatever the LLM echoed.

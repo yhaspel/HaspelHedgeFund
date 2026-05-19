@@ -97,7 +97,17 @@ def map_to_action(
 def find_dissent(
     persona_outputs: dict[str, dict], aggregate_action: str
 ) -> list[DissentingPersona]:
-    aggregate_signal = {"buy": "bullish", "sell": "bearish", "hold": "neutral"}[aggregate_action]
+    # Map every Action to the persona signal it implies. open_short/sell
+    # are both bearish from the council's perspective; cover_short closes
+    # a bearish view, so it implies neutral/bullish-leaning context.
+    action_to_signal = {
+        "buy": "bullish",
+        "sell": "bearish",
+        "open_short": "bearish",
+        "cover_short": "bullish",
+        "hold": "neutral",
+    }
+    aggregate_signal = action_to_signal.get(aggregate_action, "neutral")
     out = []
     for name, p in persona_outputs.items():
         sig = p.get("signal", "neutral")

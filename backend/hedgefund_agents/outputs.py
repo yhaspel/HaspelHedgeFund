@@ -13,6 +13,30 @@ from pydantic import BaseModel, Field
 
 Signal = Literal["bullish", "neutral", "bearish"]
 Regime = Literal["trending_up", "trending_down", "range", "breakout", "breakdown"]
+
+# Decision semantics — frozen contract. Downstream code (rebalancer,
+# backtest engine, paper-trading adapters) reads this enum and MUST honor
+# the meanings below:
+#
+#   "buy"         — target positive (long) exposure. Sizing comes from
+#                   PortfolioOutput.target_weight_pct under the Risk
+#                   Manager's per-trade cap.
+#   "sell"        — close/exit existing LONG exposure. Does NOT initiate a
+#                   short; for that use "open_short". On an absent position
+#                   this is effectively a no-op (and rebalancers MUST treat
+#                   it as such — never as "open_short" by accident).
+#   "hold"        — no new recommendation this cycle. The caller decides
+#                   whether that means "keep the existing position" (the
+#                   default for paper/live trading) or "target zero" (e.g.
+#                   when a strategy is being unwound). Backtest replays
+#                   keep existing.
+#   "open_short"  — initiate a short position. Reserved for P2e+; the
+#                   single-ticker council in P2a/b should not emit this
+#                   unless the strategy explicitly enables short_side.
+#   "cover_short" — close/exit existing SHORT exposure. Reserved for P2e+.
+#
+# Adding a new value here is a breaking schema change; bump the Decision
+# model's `action` semantics in lockstep with rebalance + broker adapters.
 Action = Literal["buy", "hold", "sell", "open_short", "cover_short"]
 
 

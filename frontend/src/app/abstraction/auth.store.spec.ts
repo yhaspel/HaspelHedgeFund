@@ -57,4 +57,16 @@ describe('AuthStore', () => {
     expect(tokens.getAccess()).toBeNull();
     expect(store.user()).toBeNull();
   });
+
+  it('refreshMe with an expired token logs the user out', () => {
+    tokens.set('expired', 'r');
+    store.refreshMe();
+    http
+      .expectOne((r) => r.url.endsWith('/me/'))
+      .flush({ detail: 'Token expired' }, { status: 401, statusText: 'Unauthorized' });
+
+    expect(store.user()).toBeNull();
+    expect(tokens.getAccess()).toBeNull();
+    expect(store.isAuthenticated()).toBe(false);
+  });
 });

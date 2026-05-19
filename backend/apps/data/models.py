@@ -109,3 +109,45 @@ class NewsItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ticker} {self.published_at:%Y-%m-%d} {self.headline[:60]}"
+
+
+class CorporateAction(models.Model):
+    """Provider-backed corporate actions (splits, dividends, symbol changes).
+
+    Backtests consult these instead of inferring from bar series. `as_of_date`
+    is the ex-date / effective date — the date the action takes effect from
+    the holder's perspective. `source` records which provider supplied the
+    row so we can audit/disambiguate when two providers disagree.
+    """
+
+    SPLIT = "split"
+    CASH_DIVIDEND = "cash_dividend"
+    STOCK_DIVIDEND = "stock_dividend"
+    SYMBOL_CHANGE = "symbol_change"
+    DELISTING = "delisting"
+    MERGER_CASH = "merger_cash"
+    KIND_CHOICES = [
+        (SPLIT, "Split"),
+        (CASH_DIVIDEND, "Cash dividend"),
+        (STOCK_DIVIDEND, "Stock dividend"),
+        (SYMBOL_CHANGE, "Symbol change"),
+        (DELISTING, "Delisting"),
+        (MERGER_CASH, "Cash merger"),
+    ]
+
+    ticker = models.CharField(max_length=16, db_index=True)
+    as_of_date = models.DateField(db_index=True)  # ex-date
+    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    # For SPLIT: ratio (e.g. 2.0 for 2:1). For *_DIVIDEND: per-share amount.
+    # For SYMBOL_CHANGE: new symbol in `new_symbol`. For MERGER_CASH: per-share cash.
+    ratio = models.DecimalField(max_digits=18, decimal_places=8, null=True, blank=True)
+    amount = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    new_symbol = models.CharField(max_length=16, blank=True, default="")
+    source = models.CharField(max_length=32)  # "fmp" | "tiingo" | "manual"
+
+    class Meta:
+        indexes = [models.Index(fields=["ticker", "as_of_date", "kind"])]
+        unique_together = [("ticker", "as_of_date", "kind", "source")]
+
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.kind} {self.as_of_date}"

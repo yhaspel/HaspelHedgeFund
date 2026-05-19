@@ -156,15 +156,56 @@ class EdgarProvider:
         section_index: dict = {}
         if form_type in ("10-K", "10-Q"):
             for name, pat in SECTION_PATTERNS.items():
-                m = pat.search(text)
-                if not m:
-                    continue
-                start = m.start()
-                tail = text[m.end():]
-                nxt = NEXT_ITEM_RE.search(tail)
-                end = m.end() + (nxt.start() if nxt else min(len(tail), 80_000))
-                section_index[name] = {"start": start, "end": end}
+                section_index[name] = _locate_section(name, pat, text, url)
+                # Drop entries that didn't locate; keeps the dict shape but
+                # callers can detect missing sections via missing key.
+                if section_index[name] is None:
+                    del section_index[name]
         return text[:4000], rel_path, section_index
+
+
+# Minimum body length for a real section. TOC entries are short (the heading
+# line plus a page number / dotted leader), bodies are thousands of chars.
+_MIN_SECTION_BODY = 1500
+
+
+def _locate_section(
+    name: str, pat: "re.Pattern[str]", text: str, source_url: str
+) -> dict | None:
+    """Pick the real section body, not the Table of Contents entry.
+
+    10-Ks repeat every "Item 1A. Risk Factors" heading once in the TOC
+    (followed by a page number, very short span to next item) and once at
+    the actual section body (followed by thousands of characters before
+    the next item). We pick the candidate whose span to the next item is
+    the largest, breaking ties by latest position.
+
+    Returns a dict with start/end and diagnostics (`source_url`,
+    `matched_heading`, `char_count`) or None if no plausible body was
+    found.
+    """
+    candidates: list[tuple[int, int, str]] = []
+    for m in pat.finditer(text):
+        start = m.start()
+        tail = text[m.end():]
+        nxt = NEXT_ITEM_RE.search(tail)
+        end = m.end() + (nxt.start() if nxt else min(len(tail), 80_000))
+        candidates.append((start, end, m.group(0)))
+
+    # Keep only candidates with a body long enough to be the real section.
+    bodies = [c for c in candidates if (c[1] - c[0]) >= _MIN_SECTION_BODY]
+    chosen_pool = bodies or candidates
+    if not chosen_pool:
+        return None
+    # Largest span wins; ties broken by latest position (TOC entries are early).
+    start, end, heading = max(chosen_pool, key=lambda c: (c[1] - c[0], c[0]))
+    return {
+        "start": start,
+        "end": end,
+        "source_url": source_url,
+        "matched_heading": heading,
+        "char_count": end - start,
+    }
 
     @staticmethod
     def load_section(record: FilingRecord, section: str) -> str:

@@ -184,12 +184,15 @@ def compute_stitched_metrics(bt, fold_records, agent_outputs_cache=None) -> dict
     deflation = (mean_oos / mean_is) if mean_is != 0 else 0.0
     oos_std = statistics.pstdev(oos_s) if len(oos_s) >= 2 else 0.0
 
-    # Turnover: |notional|/equity per day, summed and annualized.
+    # Turnover: |fill notional|/equity per day, summed and annualized.
+    # Reads from BacktestDay.fills (executed) — not decisions (intent) — so
+    # the metric is auditable and matches what actually moved capital.
     qs = BacktestDay.objects.filter(backtest=bt, segment=BacktestDay.SEG_OOS).order_by("date")
     daily_turnover = 0.0
     eq_for_to = float(bt.starting_cash)
     for day in qs:
-        notional = sum(abs(f.get("notional", 0.0)) for f in (day.decisions or []))
+        fills = day.fills or []
+        notional = sum(abs(f.get("notional", 0.0)) for f in fills)
         if eq_for_to > 0:
             daily_turnover += notional / eq_for_to
         eq_for_to = float(day.portfolio_value)

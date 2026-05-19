@@ -36,10 +36,30 @@ def _round_split(ratio: float) -> float | None:
 
 
 def actions_on(ticker: str, as_of: dt.date, source: str = "fmp") -> list[dict]:
-    """Detect corporate actions effective on `as_of` (ex-date).
+    """Return corporate actions effective on `as_of` (ex-date).
 
-    Returns list of dicts. Empty list if none detected.
+    Preferred source: provider-backed `CorporateAction` rows (P2c improvement
+    #3). Falls back to the legacy ratio-inferred path from `DailyBar` when no
+    provider rows exist for the date, so existing seed data still works.
     """
+    # Provider-backed path — explicit rows beat inference.
+    from apps.data.models import CorporateAction
+    rows = list(
+        CorporateAction.objects.filter(ticker=ticker.upper(), as_of_date=as_of)
+    )
+    if rows:
+        out: list[dict] = []
+        for r in rows:
+            if r.kind == CorporateAction.SPLIT and r.ratio is not None:
+                out.append({"kind": "split", "ratio": float(r.ratio)})
+            elif r.kind == CorporateAction.CASH_DIVIDEND and r.amount is not None:
+                out.append({"kind": "dividend", "dps": float(r.amount)})
+            elif r.kind == CorporateAction.MERGER_CASH and r.amount is not None:
+                out.append({"kind": "merger_cash", "cash_per_share": float(r.amount)})
+            # symbol_change / delisting / stock_dividend — wire when needed.
+        return out
+
+    # Legacy fallback: infer split from close-ratio jump.
     bars = list(
         DailyBar.objects.filter(
             ticker=ticker, source=source, date__lte=as_of
