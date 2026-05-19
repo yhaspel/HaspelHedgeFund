@@ -26,11 +26,10 @@ from celery import chord, shared_task
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.models_catalog.presets import expand_preset
 from hedgefund_agents.graphs.council import build_council_graph
 from hedgefund_agents.registry import get_data_provider, get_filings_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
-
-from apps.models_catalog.presets import expand_preset
 
 from .borrow import StubBorrowProvider
 from .construction import Candidate, Constraints, construct
