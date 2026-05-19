@@ -71,6 +71,13 @@ import { RunsStore } from '../../abstraction/runs.store';
         >
           + New analysis
         </a>
+        <a
+          routerLink="/settings/models"
+          class="inline-block bg-gray-200 text-gray-800 rounded px-4 py-2 ml-2"
+          data-test="settings-link"
+        >
+          Settings
+        </a>
       </div>
 
       <section class="bg-white rounded shadow">

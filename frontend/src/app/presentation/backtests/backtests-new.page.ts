@@ -3,12 +3,14 @@ import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { ModelsStore } from '../../abstraction/models.store';
 import { EstimateResponse } from '../../core/models/backtest.model';
+import { ModelPanelComponent } from '../shared/model-panel.component';
 
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [FormsModule, RouterLink, DecimalPipe],
+  imports: [FormsModule, RouterLink, DecimalPipe, ModelPanelComponent],
   template: `
     <div class="min-h-screen bg-gray-50 p-8">
       <header class="flex items-center justify-between mb-8">
@@ -115,6 +117,12 @@ import { EstimateResponse } from '../../core/models/backtest.model';
           </label>
         </div>
 
+        <hf-model-panel
+          [agents]="councilAgents"
+          [multiplier]="rebalanceCountEstimate()"
+          [(overrides)]="overrides"
+        />
+
         @if (error()) {
           <p class="text-red-600 text-sm">{{ error() }}</p>
         }
@@ -187,7 +195,25 @@ import { EstimateResponse } from '../../core/models/backtest.model';
 })
 export class BacktestsNewPage implements OnInit {
   readonly store = inject(BacktestsStore);
+  readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
+
+  readonly councilAgents = [
+    'buffett', 'munger', 'graham', 'wood', 'druckenmiller',
+    'fundamentals', 'technicals', 'valuation', 'sentiment',
+    'macro', 'news_digest', 'risk_manager', 'portfolio_manager',
+  ];
+  overrides = signal<Record<string, string>>({});
+
+  rebalanceCountEstimate(): number {
+    const start = new Date(this.startDate).getTime();
+    const end = new Date(this.endDate).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 1;
+    const days = (end - start) / 86400000;
+    const stride = this.rebalance === 'daily' ? 1 : this.rebalance === 'weekly' ? 5 : 21;
+    const nUniv = (this.parsedUniverse().length || 20);
+    return Math.max(1, Math.round((days / stride) * nUniv));
+  }
 
   name = 'WF ' + new Date().toISOString().slice(0, 10);
   universeStr = '';
@@ -212,6 +238,7 @@ export class BacktestsNewPage implements OnInit {
 
   ngOnInit(): void {
     this.store.loadDefaultUniverse().subscribe();
+    this.modelsStore.loadAll().subscribe();
   }
 
   private parsedUniverse(): string[] {
@@ -284,6 +311,7 @@ export class BacktestsNewPage implements OnInit {
         rebalance_frequency: this.rebalance,
         baseline: this.baseline,
         max_budget_usd: this.maxBudgetUsd,
+        model_overrides: this.overrides(),
       })
       .subscribe({
         next: (bt) => this.router.navigate(['/backtests', bt.id]),

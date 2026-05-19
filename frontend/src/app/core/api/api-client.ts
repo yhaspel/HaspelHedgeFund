@@ -15,4 +15,8 @@ export class ApiClient {
   post<T>(path: string, body: unknown): Observable<T> {
     return this.http.post<T>(`${this.base}${path}`, body);
   }
+
+  put<T>(path: string, body: unknown): Observable<T> {
+    return this.http.put<T>(`${this.base}${path}`, body);
+  }
 }

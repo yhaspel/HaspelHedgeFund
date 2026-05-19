@@ -66,5 +66,13 @@ export const routes: Routes = [
         (m) => m.BacktestsComparePage,
       ),
   },
+  {
+    path: 'settings/models',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-models.page').then(
+        (m) => m.SettingsModelsPage,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

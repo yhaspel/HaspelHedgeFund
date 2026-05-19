@@ -1,13 +1,15 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { ModelsStore } from '../../abstraction/models.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
+import { ModelPanelComponent } from '../shared/model-panel.component';
 
 @Component({
   selector: 'hf-runs-new',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, ModelPanelComponent],
   template: `
     <div class="min-h-screen bg-gray-50 p-8">
       <header class="flex items-center justify-between mb-8">
@@ -41,19 +43,10 @@ import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
           />
         </label>
 
-        <label class="block text-sm font-medium">
-          Persona model (applies to all selected personas)
-          <select
-            name="personaModel"
-            [(ngModel)]="personaModel"
-            class="mt-1 w-full border rounded px-3 py-2"
-          >
-            <option value="">Default (Claude Haiku 4.5)</option>
-            @for (m of runs.models(); track m.id) {
-              <option [value]="m.id">{{ m.name }} ({{ m.tier }})</option>
-            }
-          </select>
-        </label>
+        <hf-model-panel
+          [agents]="panelAgents()"
+          [(overrides)]="overrides"
+        />
 
         <fieldset class="border rounded p-3">
           <legend class="text-sm font-medium px-1">Council personas</legend>
@@ -94,15 +87,23 @@ import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
 })
 export class RunsNewPage implements OnInit {
   readonly runs = inject(RunsStore);
+  readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
 
   readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
   asOfDate = new Date().toISOString().slice(0, 10);
-  personaModel = '';
   submitting = signal(false);
   error = signal<string | null>(null);
   selected = signal<Set<string>>(new Set(DEFAULT_PERSONA_IDS));
+  overrides = signal<Record<string, string>>({});
+
+  panelAgents = () => [
+    ...Array.from(this.selected()),
+    'fundamentals', 'technicals', 'valuation', 'sentiment',
+    'macro', 'news_digest',
+    'risk_manager', 'portfolio_manager', 'cio',
+  ];
 
   toggle(id: string): void {
     const next = new Set(this.selected());
@@ -112,21 +113,17 @@ export class RunsNewPage implements OnInit {
   }
 
   ngOnInit(): void {
-    this.runs.loadModels().subscribe();
+    this.modelsStore.loadAll().subscribe();
   }
 
   submit(): void {
     this.error.set(null);
     this.submitting.set(true);
-    const overrides: Record<string, string> = {};
-    if (this.personaModel) {
-      for (const id of this.selected()) overrides[id] = this.personaModel;
-    }
     this.runs
       .submitRun({
         tickers: [this.ticker.toUpperCase()],
         as_of_date: this.asOfDate,
-        model_overrides: overrides,
+        model_overrides: this.overrides(),
         personas: Array.from(this.selected()),
       })
       .subscribe({
