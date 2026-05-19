@@ -1,0 +1,134 @@
+export interface Universe {
+  id: number;
+  name: string;
+  description: string;
+  source: string;
+  is_active: boolean;
+  member_count: number;
+}
+
+export interface Portfolio {
+  id: number;
+  name: string;
+  cash_balance: string;
+  created_at: string;
+}
+
+export interface Position {
+  id: number;
+  ticker: string;
+  quantity: string;
+  avg_cost: string;
+  sector: string;
+  is_short: boolean;
+  opened_at: string;
+}
+
+export interface Strategy {
+  id: number;
+  name: string;
+  universe: number;
+  universe_name: string;
+  portfolio: number;
+  portfolio_name: string;
+  target_gross_pct: string;
+  target_net_pct: string;
+  max_position_pct: string;
+  max_sector_pct: string;
+  min_position_pct: string;
+  top_k_longs: number;
+  top_k_shorts: number;
+  personas: string[];
+  model_preset: string;
+  cost_ceiling_per_cycle_usd: string;
+  min_trade_notional_usd: string;
+  max_turnover_pct: string;
+  screener_weights: Record<string, number>;
+  is_active: boolean;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+export interface RebalanceOrder {
+  id: number;
+  ticker: string;
+  side: 'buy' | 'sell' | 'short' | 'cover';
+  quantity: string;
+  limit_price: string | null;
+  reason: string;
+  estimated_notional_usd: string;
+  sequence: number;
+}
+
+export interface ScreenerCandidate {
+  ticker: string;
+  sector: string;
+  score: number;
+  features: Record<string, unknown>;
+  rationale: string;
+}
+
+export interface ScreenerRanking {
+  id: number;
+  as_of_date: string;
+  long_candidates: ScreenerCandidate[];
+  short_candidates: ScreenerCandidate[];
+  universe_size_evaluated: number;
+  created_at: string;
+}
+
+export interface CycleSummary {
+  id: number;
+  as_of_date: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  gross_pct: string;
+  net_pct: string;
+  total_cost_usd: string;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface CycleDetail extends CycleSummary {
+  target_weights: Record<string, number>;
+  sector_exposure: Record<string, number>;
+  rejected_candidates: { ticker?: string; reason?: string; [k: string]: unknown }[];
+  decisions: {
+    ticker: string;
+    sector: string;
+    side: 'long' | 'short';
+    borrow_veto: boolean;
+    decision: { action: string; rationale: string; aggregate_confidence?: number };
+    risk: Record<string, unknown>;
+  }[];
+  screener_ranking: ScreenerRanking | null;
+  orders: RebalanceOrder[];
+  error_message: string;
+}
+
+export const DEFAULT_SCREENER_WEIGHTS: Record<string, number> = {
+  momentum_3m: 1.0,
+  momentum_6m: 0.5,
+  earnings_yield: 1.0,
+  quality_roic: 1.0,
+  fcf_margin: 1.0,
+  debt_to_equity: 0.25,
+  short_drawdown: 1.0,
+  short_momentum_3m: 1.0,
+  short_news_neg: 1.0,
+  short_debt: 0.5,
+  short_quality_roic: 0.5,
+};
+
+export const SCREENER_WEIGHT_LABELS: Record<string, string> = {
+  momentum_3m: '3-month momentum (long)',
+  momentum_6m: '6-month momentum (long)',
+  earnings_yield: 'Earnings yield (1/PE) — cheapness',
+  quality_roic: 'ROIC (quality)',
+  fcf_margin: 'FCF margin (quality)',
+  debt_to_equity: 'Debt/equity penalty (long)',
+  short_drawdown: 'Drawdown from 12-mo high (short)',
+  short_momentum_3m: 'Negative 3-month momentum (short)',
+  short_news_neg: 'Negative news (short)',
+  short_debt: 'Leverage (short)',
+  short_quality_roic: 'Low ROIC bonus (short)',
+};

@@ -73,7 +73,20 @@ def aggregate_personas(
     return signed / total_weight, int(round(conf_weighted / total_weight * 100))
 
 
-def map_to_action(signed: float, buy_thr: float = 0.25, sell_thr: float = -0.25) -> str:
+def map_to_action(
+    signed: float,
+    buy_thr: float = 0.25,
+    sell_thr: float = -0.25,
+    *,
+    short_side: bool = False,
+) -> str:
+    """Standard mapping for long candidates. When `short_side=True`, the
+    candidate was surfaced by the screener as a short — a sufficiently
+    bearish aggregate becomes `open_short` (instead of just `sell`)."""
+    if short_side:
+        if signed <= sell_thr:
+            return "open_short"
+        return "hold"
     if signed >= buy_thr:
         return "buy"
     if signed <= sell_thr:
@@ -129,7 +142,12 @@ def compute_target_weight(
     if action == "hold":
         return 0.0
 
-    direction = 1.0 if action == "buy" else 0.0  # short side handled by P2e
+    if action == "buy":
+        direction = 1.0
+    elif action == "open_short":
+        direction = -1.0
+    else:
+        direction = 0.0
     vol_target = cfg.get("vol_target_annual")
     if vol_target and trailing_returns:
         vol = realized_vol_annual(trailing_returns)
@@ -138,7 +156,7 @@ def compute_target_weight(
         weight = min(max_weight, raw) * direction
     else:
         if cap > 0:
-            weight = min(cap, max(0.0, signed) * cap)
+            weight = min(cap, abs(signed) * cap) * direction
         else:
             weight = min(max_weight, abs(signed) * max_weight) * direction
     return weight
@@ -161,11 +179,17 @@ def aggregate(
     valuation = valuation or {}
 
     signed, agg_conf = aggregate_personas(persona_outputs, weights=cfg["weights"])
-    action = map_to_action(signed, cfg["buy_threshold"], cfg["sell_threshold"])
+    short_side = bool(cfg.get("short_side", False))
+    action = map_to_action(
+        signed, cfg["buy_threshold"], cfg["sell_threshold"], short_side=short_side
+    )
 
     veto = bool(risk.get("veto"))
+    borrow_veto = bool(risk.get("borrow_veto"))
     cap = float(risk.get("max_position_pct_for_this_trade", 0.0))
     if veto:
+        action = "hold"
+    if borrow_veto and action == "open_short":
         action = "hold"
     if action == "buy" and (agg_conf / 100.0) < float(cfg["min_confidence"]):
         action = "hold"

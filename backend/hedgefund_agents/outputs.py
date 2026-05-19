@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 Signal = Literal["bullish", "neutral", "bearish"]
 Regime = Literal["trending_up", "trending_down", "range", "breakout", "breakdown"]
-Action = Literal["buy", "hold", "sell"]
+Action = Literal["buy", "hold", "sell", "open_short", "cover_short"]
 
 
 class FundamentalsOutput(BaseModel):

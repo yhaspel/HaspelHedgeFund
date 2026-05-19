@@ -105,6 +105,11 @@ def run_risk_manager(state: AgentState) -> AgentState:
 
     triggered, cap, veto = apply_hard_caps(portfolio, limits, ticker)
 
+    # Short-side borrow veto (P2e): set in state by the long-short cycle.
+    borrow_veto = bool(state.get("borrow_veto"))  # type: ignore[arg-type]
+    if borrow_veto:
+        triggered = list(triggered) + ["borrow_not_locatable"]
+
     # LLM narrative (pure text). Pass the deterministic result so it can't
     # contradict the rules.
     default = DEFAULT_MODELS.get("risk_manager", ("openrouter", "qwen/qwen3.6-27b"))
@@ -149,4 +154,5 @@ def run_risk_manager(state: AgentState) -> AgentState:
         out.get("max_position_pct_for_this_trade", cap), cap
     )
     out["veto"] = bool(out.get("veto")) or veto
+    out["borrow_veto"] = borrow_veto
     return {"risk": out}  # type: ignore[return-value]

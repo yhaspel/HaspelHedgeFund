@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16
+    command: postgres -c max_connections=400
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-hedgefund}
       POSTGRES_USER: ${POSTGRES_USER:-hedgefund}
@@ -57,7 +58,7 @@ services:
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
-    command: celery -A hedgefund worker -l info
+    command: celery -A hedgefund worker -l info --concurrency=8
 
   beat:
     build:
@@ -79,6 +80,11 @@ services:
       context: ..
       dockerfile: infra/frontend.Dockerfile
       target: dev
+    environment:
+      # pnpm's deps-status-check wants TTY confirmation to purge node_modules
+      # when the host lockfile drifts from the named volume; CI=true makes it
+      # non-interactive so `docker compose up` brings the service up cleanly.
+      CI: "true"
     volumes:
       - ../frontend:/app
       - /app/node_modules

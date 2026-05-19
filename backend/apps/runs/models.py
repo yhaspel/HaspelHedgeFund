@@ -65,6 +65,10 @@ class Decision(models.Model):
     target_quantity = models.DecimalField(max_digits=18, decimal_places=6, default=Decimal("0"))
     target_weight_pct = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0"))
     risk_overrides = models.JSONField(default=dict, blank=True)
+    side = models.CharField(max_length=8, default="long")  # "long" | "short"
+    target_weight_signed = models.DecimalField(
+        max_digits=7, decimal_places=4, default=Decimal("0")
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

@@ -67,6 +67,30 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'strategies',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/strategies/strategies-list.page').then(
+        (m) => m.StrategiesListPage,
+      ),
+  },
+  {
+    path: 'strategies/new',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/strategies/strategies-new.page').then(
+        (m) => m.StrategiesNewPage,
+      ),
+  },
+  {
+    path: 'strategies/:id',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/strategies/strategies-detail.page').then(
+        (m) => m.StrategiesDetailPage,
+      ),
+  },
+  {
     path: 'settings/models',
     canActivate: [authGuard],
     loadComponent: () =>

@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "apps.runs",
     "apps.backtests",
     "apps.models_catalog",
+    "apps.portfolios",
     "hedgefund_agents",
 ]
 
