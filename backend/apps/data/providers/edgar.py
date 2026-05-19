@@ -170,7 +170,7 @@ _MIN_SECTION_BODY = 1500
 
 
 def _locate_section(
-    name: str, pat: "re.Pattern[str]", text: str, source_url: str
+    name: str, pat: re.Pattern[str], text: str, source_url: str
 ) -> dict | None:
     """Pick the real section body, not the Table of Contents entry.
 

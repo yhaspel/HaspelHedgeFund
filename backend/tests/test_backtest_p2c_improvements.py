@@ -15,7 +15,6 @@ from apps.backtests.models import Backtest, BacktestDay, BacktestFold
 from apps.backtests.portfolio import SimulatedPortfolio
 from apps.data.models import CorporateAction
 
-
 # --- 1. hold_semantics ---------------------------------------------------
 
 
