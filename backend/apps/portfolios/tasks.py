@@ -30,6 +30,8 @@ from hedgefund_agents.graphs.council import build_council_graph
 from hedgefund_agents.registry import get_data_provider, get_filings_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 
+from apps.models_catalog.presets import expand_preset
+
 from .borrow import StubBorrowProvider
 from .construction import Candidate, Constraints, construct
 from .models import (
@@ -51,6 +53,21 @@ def _resolve_as_of(s: str | None) -> date_cls:
     if isinstance(s, date_cls):
         return s
     return datetime.fromisoformat(str(s)).date()
+
+
+def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
+    """Order of precedence:
+      1. User's per-agent defaults from Settings → Models (the "Default model"
+         selector populates this with the same model for every agent).
+      2. The strategy's model_preset (e.g. 'frugal', 'hybrid') expanded into a
+         per-agent map.
+      3. Empty dict → registry DEFAULT_MODELS applies.
+    """
+    user_prefs = getattr(strategy.user, "model_prefs", None)
+    if user_prefs and user_prefs.per_agent_defaults:
+        return dict(user_prefs.per_agent_defaults)
+    preset_map = expand_preset(strategy.model_preset or "hybrid")
+    return preset_map or {}
 
 
 def _active_members(strategy: PortfolioStrategy, as_of: date_cls) -> list[tuple[str, str]]:
@@ -298,6 +315,11 @@ def daily_long_short_cycle(
     long_cands = screener_out["long_candidates"][:new_l]
     short_cands = screener_out["short_candidates"][:new_s]
 
+    # Resolve model overrides up front so every council call uses the user's
+    # configured default (or the strategy preset) instead of the registry
+    # fallback, which still routes some agents to Anthropic.
+    overrides = _resolve_model_overrides(strategy)
+
     # Borrow quotes for short side.
     borrow = StubBorrowProvider()
     short_payloads = []
@@ -310,7 +332,7 @@ def daily_long_short_cycle(
             "side": "short",
             "borrow_veto": (not info.is_locatable),
             "as_of_date": as_of.isoformat(),
-            "model_overrides": {},
+            "model_overrides": overrides,
             "personas": strategy.personas or None,
         })
     long_payloads = [
@@ -320,7 +342,7 @@ def daily_long_short_cycle(
             "side": "long",
             "borrow_veto": False,
             "as_of_date": as_of.isoformat(),
-            "model_overrides": {},
+            "model_overrides": overrides,
             "personas": strategy.personas or None,
         }
         for c in long_cands
