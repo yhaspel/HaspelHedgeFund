@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date as date_cls, datetime
+from datetime import date as date_cls
+from datetime import datetime
 
 from rest_framework import generics, permissions, status
 from rest_framework.request import Request
@@ -17,7 +18,6 @@ from .models import (
     UniverseMembership,
 )
 from .serializers import (
-    BorrowQuoteSerializer,
     PortfolioSerializer,
     PortfolioTargetDetailSerializer,
     PortfolioTargetSummarySerializer,
@@ -93,7 +93,10 @@ class StrategyRunNowView(APIView):
         as_of = request.data.get("as_of_date") or date_cls.today().isoformat()
         force = bool(request.data.get("force", False))
         result = daily_long_short_cycle.delay(strategy.pk, as_of, force=force)
-        return Response({"task_id": str(result.id), "status": "queued"}, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            {"task_id": str(result.id), "status": "queued"},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class StrategyCyclesView(generics.ListAPIView):

@@ -30,6 +30,9 @@ class UniverseMembership(models.Model):
         unique_together = [("universe", "ticker", "effective_from")]
         indexes = [models.Index(fields=["universe", "ticker"])]
 
+    def __str__(self) -> str:
+        return f"{self.universe_id}:{self.ticker}"
+
 
 class Portfolio(models.Model):
     user = models.ForeignKey(
@@ -55,6 +58,9 @@ class Position(models.Model):
 
     class Meta:
         unique_together = [("portfolio", "ticker")]
+
+    def __str__(self) -> str:
+        return f"{self.ticker} qty={self.quantity}"
 
     @property
     def is_short(self) -> bool:
@@ -110,14 +116,22 @@ class BorrowQuote(models.Model):
     class Meta:
         unique_together = [("ticker", "as_of_date", "source")]
 
+    def __str__(self) -> str:
+        return f"{self.ticker}@{self.as_of_date}"
+
 
 class ScreenerRanking(models.Model):
-    strategy = models.ForeignKey(PortfolioStrategy, related_name="rankings", on_delete=models.CASCADE)
+    strategy = models.ForeignKey(
+        PortfolioStrategy, related_name="rankings", on_delete=models.CASCADE
+    )
     as_of_date = models.DateField(db_index=True)
     long_candidates = models.JSONField(default=list)
     short_candidates = models.JSONField(default=list)
     universe_size_evaluated = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"rank s={self.strategy_id} {self.as_of_date}"
 
 
 class PortfolioTarget(models.Model):
@@ -127,7 +141,9 @@ class PortfolioTarget(models.Model):
         ("done", "Done"),
         ("failed", "Failed"),
     ]
-    strategy = models.ForeignKey(PortfolioStrategy, related_name="targets", on_delete=models.CASCADE)
+    strategy = models.ForeignKey(
+        PortfolioStrategy, related_name="targets", on_delete=models.CASCADE
+    )
     as_of_date = models.DateField()
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="queued")
     target_weights = models.JSONField(default=dict)  # {ticker: signed_weight_pct}
@@ -148,6 +164,9 @@ class PortfolioTarget(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["strategy", "-as_of_date"])]
+
+    def __str__(self) -> str:
+        return f"target s={self.strategy_id} {self.as_of_date} {self.status}"
 
 
 class RebalanceOrder(models.Model):
@@ -170,9 +189,14 @@ class RebalanceOrder(models.Model):
     quantity = models.DecimalField(max_digits=18, decimal_places=6)
     limit_price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     reason = models.CharField(max_length=16, choices=REASON_CHOICES)
-    estimated_notional_usd = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    estimated_notional_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0")
+    )
     sequence = models.IntegerField(default=2)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["sequence", "ticker"]
+
+    def __str__(self) -> str:
+        return f"{self.side} {self.ticker} qty={self.quantity}"

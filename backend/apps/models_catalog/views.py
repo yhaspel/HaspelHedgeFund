@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from rest_framework import permissions
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,7 +15,6 @@ from .serializers import (
     ProviderKeyWriteSerializer,
     UserModelPreferencesSerializer,
 )
-
 
 AGENT_RECOMMENDATIONS = {
     "buffett": "frontier", "munger": "frontier", "graham": "frontier",

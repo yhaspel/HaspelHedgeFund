@@ -48,6 +48,9 @@ class ProviderKey(models.Model):
     ollama_host = models.CharField(max_length=255, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
+    def __str__(self) -> str:
+        return f"keys u={self.user_id}"
+
     def set_key(self, provider: str, value: str | None) -> None:
         field = f"{provider}_api_key_enc"
         if not hasattr(self, field):
@@ -73,3 +76,6 @@ class UserModelPreferences(models.Model):
         max_digits=10, decimal_places=4, null=True, blank=True, default=Decimal("5.0")
     )
     updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"prefs u={self.user_id} preset={self.preset}"

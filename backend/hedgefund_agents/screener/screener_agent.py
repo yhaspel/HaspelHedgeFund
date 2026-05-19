@@ -20,7 +20,6 @@ from .features import (
     short_score,
 )
 
-
 MAX_UNIVERSE = 2000
 
 

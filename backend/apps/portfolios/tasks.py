@@ -18,7 +18,8 @@ with `force=True` resets it.
 from __future__ import annotations
 
 import logging
-from datetime import date as date_cls, datetime
+from datetime import date as date_cls
+from datetime import datetime
 from decimal import Decimal
 
 from celery import chord, shared_task
@@ -85,7 +86,6 @@ def run_candidate_council(payload: dict) -> dict:
     """Sub-task: run the full council on one candidate.
 
     Returns a dict suitable for the chord callback (the decision + side metadata)."""
-    from hedgefund.celery import app  # avoid circular at import time
     ticker = payload["ticker"]
     sector = payload.get("sector", "")
     side = payload["side"]  # "long" | "short"
@@ -171,8 +171,10 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     # Pull last close per ticker for the rebalancer.
     data_provider = get_data_provider()
     last_close: dict[str, float] = {}
-    for t in set(list(result.target_weights.keys())
-                 + list(Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True))):
+    existing_tickers = list(
+        Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True)
+    )
+    for t in set(list(result.target_weights.keys()) + existing_tickers):
         try:
             bars = data_provider.get_daily_bars(
                 t, start=as_of, end=as_of, as_of=as_of
