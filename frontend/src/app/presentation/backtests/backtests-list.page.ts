@@ -1,83 +1,60 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { DecimalPipe, NgClass } from '@angular/common';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 
 @Component({
   selector: 'hf-backtests-list',
   standalone: true,
-  imports: [RouterLink, DecimalPipe, NgClass],
+  imports: [CommonModule, RouterLink, DecimalPipe, AppShellComponent],
   template: `
-    <div class="min-h-screen bg-gray-50 p-8">
-      <header class="flex items-center justify-between mb-8">
-        <h1 class="text-2xl font-semibold">Backtests</h1>
-        <div class="flex gap-3">
-          <a routerLink="/" class="text-blue-600 hover:underline self-center">Dashboard</a>
-          <a
-            routerLink="/backtests/new"
-            class="bg-blue-600 text-white rounded px-4 py-2 hover:bg-blue-700"
-          >New walk-forward</a>
+    <hf-app-shell [crumbs]="[{label:'Backtests'}]">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Walk-forward backtests</div>
+          <h1 style="margin-top:6px">Backtests</h1>
         </div>
-      </header>
+        <div class="head-actions">
+          <a class="btn primary" routerLink="/backtests/new"><svg width="12" height="12"><use href="/icons.svg#i-plus" /></svg> New walk-forward</a>
+        </div>
+      </div>
 
-      <div class="bg-white rounded shadow overflow-hidden">
-        <table class="min-w-full text-sm">
-          <thead class="bg-gray-100 text-left">
-            <tr>
-              <th class="px-4 py-2">Name</th>
-              <th class="px-4 py-2">Status</th>
-              <th class="px-4 py-2">Period</th>
-              <th class="px-4 py-2 text-right">Stitched OOS return</th>
-              <th class="px-4 py-2 text-right">Mean OOS Sharpe</th>
-              <th class="px-4 py-2 text-right">Deflation</th>
-            </tr>
-          </thead>
+      <section class="card">
+        <table class="tbl">
+          <thead><tr>
+            <th>Name</th><th>Status</th><th>Period</th>
+            <th class="right">OOS return</th><th class="right">OOS Sharpe</th><th class="right">Deflation</th>
+          </tr></thead>
           <tbody>
-            @for (bt of store.list(); track bt.id) {
-              <tr class="border-t hover:bg-gray-50">
-                <td class="px-4 py-2">
-                  <a [routerLink]="['/backtests', bt.id]" class="text-blue-700 hover:underline">{{ bt.name }}</a>
+            @for(bt of store.list(); track bt.id){
+              <tr>
+                <td><a [routerLink]="['/backtests', bt.id]" style="color:var(--acc-info-fg)">{{ bt.name }}</a></td>
+                <td>
+                  <span class="pill"
+                    [class.ok]="bt.status==='done'" [class.warn]="bt.status==='running' || bt.status==='queued'"
+                    [class.err]="bt.status==='failed'"><span class="dot"></span>{{ bt.status }}
+                    @if(bt.status==='running' || bt.status==='queued'){<span class="mono"> · {{ bt.progress_pct }}%</span>}
+                  </span>
                 </td>
-                <td class="px-4 py-2">
-                  <span [ngClass]="{
-                    'text-green-700': bt.status === 'done',
-                    'text-yellow-700': bt.status === 'running' || bt.status === 'queued',
-                    'text-red-700': bt.status === 'failed',
-                    'text-gray-500': bt.status === 'cancelled'
-                  }">{{ bt.status }}</span>
-                  @if (bt.status === 'running' || bt.status === 'queued') {
-                    <span class="text-xs text-gray-500"> · {{ bt.progress_pct }}%</span>
-                  }
-                </td>
-                <td class="px-4 py-2 text-gray-700">{{ bt.start_date }} → {{ bt.end_date }}</td>
-                <td class="px-4 py-2 text-right">
-                  @if (bt.total_return_pct !== null) {
-                    {{ bt.total_return_pct | number: '1.2-2' }}%
-                  } @else { — }
-                </td>
-                <td class="px-4 py-2 text-right">
-                  @if (bt.oos_sharpe !== null) { {{ bt.oos_sharpe | number: '1.2-2' }} } @else { — }
-                </td>
-                <td class="px-4 py-2 text-right">
-                  @if (bt.deflation !== null) {
-                    <span [ngClass]="{ 'text-red-600': bt.deflation < 0.3, 'text-yellow-700': bt.deflation >= 0.3 && bt.deflation < 0.5, 'text-green-700': bt.deflation >= 0.5 }">
-                      {{ bt.deflation | number: '1.2-2' }}
-                    </span>
-                  } @else { — }
+                <td class="mono" style="color:var(--text-2)">{{ bt.start_date }} → {{ bt.end_date }}</td>
+                <td class="num">{{ bt.total_return_pct !== null ? ((bt.total_return_pct | number:'1.2-2') + '%') : '—' }}</td>
+                <td class="num">{{ bt.oos_sharpe !== null ? (bt.oos_sharpe | number:'1.2-2') : '—' }}</td>
+                <td class="num"
+                  [style.color]="bt.deflation !== null && bt.deflation < 0.3 ? 'var(--acc-short-fg)' : bt.deflation !== null && bt.deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
+                  {{ bt.deflation !== null ? (bt.deflation | number:'1.2-2') : '—' }}
                 </td>
               </tr>
             } @empty {
-              <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No backtests yet — start your first walk-forward.</td></tr>
+              <tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:40px 0">No backtests yet — start your first walk-forward.</td></tr>
             }
           </tbody>
         </table>
-      </div>
-    </div>
+      </section>
+    </hf-app-shell>
   `,
 })
 export class BacktestsListPage implements OnInit {
   readonly store = inject(BacktestsStore);
-  ngOnInit(): void {
-    this.store.listBacktests().subscribe();
-  }
+  ngOnInit(): void { this.store.listBacktests().subscribe(); }
 }

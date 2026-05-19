@@ -1,196 +1,164 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { EstimateResponse } from '../../core/models/backtest.model';
-import { ModelPanelComponent } from '../shared/model-panel.component';
 
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [FormsModule, RouterLink, DecimalPipe, ModelPanelComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DecimalPipe, AppShellComponent],
   template: `
-    <div class="min-h-screen bg-gray-50 p-8">
-      <header class="flex items-center justify-between mb-8">
-        <h1 class="text-2xl font-semibold">New walk-forward backtest</h1>
-        <a routerLink="/backtests" class="text-blue-600 hover:underline">Backtests</a>
-      </header>
-
-      <form (ngSubmit)="submit()" class="bg-white p-6 rounded shadow w-full max-w-2xl space-y-4">
-        <label class="block text-sm font-medium">
-          Name
-          <input name="name" [(ngModel)]="name" required class="mt-1 w-full border rounded px-3 py-2" />
-        </label>
-
-        <label class="block text-sm font-medium">
-          Universe (comma-separated tickers; leave blank for default 20 quality names)
-          <textarea
-            name="universe"
-            [(ngModel)]="universeStr"
-            rows="3"
-            class="mt-1 w-full border rounded px-3 py-2 font-mono text-sm"
-            placeholder="AAPL, MSFT, GOOGL, ..."
-          ></textarea>
-          <p class="text-xs text-gray-500 mt-1">
-            Default universe: {{ store.defaultUniverse().join(', ') || '(loading)' }}
+    <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label:'New'}]">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Backtest setup</div>
+          <h1 style="margin-top:6px">Run a backtest</h1>
+          <p style="color:var(--text-2);font-size:13px;margin-top:6px;max-width:560px">
+            Pick a strategy or build one ad-hoc, set the window, configure folds, and we'll quote runtime and cost.
           </p>
-        </label>
-
-        <div class="grid grid-cols-2 gap-4">
-          <label class="text-sm font-medium block">
-            Master start
-            <input type="date" name="start" [(ngModel)]="startDate" required class="mt-1 w-full border rounded px-3 py-2" />
-          </label>
-          <label class="text-sm font-medium block">
-            Master end
-            <input type="date" name="end" [(ngModel)]="endDate" required class="mt-1 w-full border rounded px-3 py-2" />
-          </label>
         </div>
-
-        <fieldset class="border rounded p-4 space-y-3">
-          <legend class="text-sm font-medium px-1">Walk-forward</legend>
-          <div class="grid grid-cols-3 gap-3">
-            <label class="text-sm">
-              IS window (days)
-              <input type="number" name="is_w" [(ngModel)]="isWindow" min="126" class="mt-1 w-full border rounded px-2 py-1" />
-            </label>
-            <label class="text-sm">
-              OOS window (days)
-              <input type="number" name="oos_w" [(ngModel)]="oosWindow" min="21" class="mt-1 w-full border rounded px-2 py-1" />
-            </label>
-            <label class="text-sm">
-              Step (days)
-              <input type="number" name="step_w" [(ngModel)]="stepDays" min="21" class="mt-1 w-full border rounded px-2 py-1" />
-            </label>
-            <label class="text-sm">
-              Candidates / fold
-              <input type="number" name="ncand" [(ngModel)]="nCandidates" min="5" max="200" class="mt-1 w-full border rounded px-2 py-1" />
-            </label>
-            <label class="text-sm">
-              IS objective
-              <select name="obj" [(ngModel)]="objective" class="mt-1 w-full border rounded px-2 py-1">
-                <option value="sharpe">Sharpe</option>
-                <option value="sortino">Sortino</option>
-                <option value="calmar">Calmar</option>
-              </select>
-            </label>
-            <label class="text-sm">
-              Rebalance
-              <select name="rb" [(ngModel)]="rebalance" class="mt-1 w-full border rounded px-2 py-1">
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </label>
-          </div>
-        </fieldset>
-
-        <div class="grid grid-cols-2 gap-4">
-          <label class="text-sm font-medium block">
-            Starting cash (USD)
-            <input type="number" name="cash" [(ngModel)]="startingCash" min="1000" class="mt-1 w-full border rounded px-3 py-2" />
-          </label>
-          <label class="text-sm font-medium block">
-            Baseline
-            <select name="bl" [(ngModel)]="baseline" class="mt-1 w-full border rounded px-3 py-2">
-              <option value="universe_ew">Equal-weighted universe</option>
-              <option value="spy">SPY</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="grid grid-cols-3 gap-4">
-          <label class="text-sm font-medium block">
-            Commission (bps)
-            <input type="number" name="comm" [(ngModel)]="commissionBps" min="0" class="mt-1 w-full border rounded px-3 py-2" />
-          </label>
-          <label class="text-sm font-medium block">
-            Spread (bps)
-            <input type="number" name="spr" [(ngModel)]="spreadBps" min="0" class="mt-1 w-full border rounded px-3 py-2" />
-          </label>
-          <label class="text-sm font-medium block">
-            Max budget (USD)
-            <input type="number" name="bud" [(ngModel)]="maxBudgetUsd" min="0.5" step="0.5" class="mt-1 w-full border rounded px-3 py-2" />
-            <p class="text-xs text-gray-500 mt-1">Run aborts if spend reaches this cap.</p>
-          </label>
-        </div>
-
-        <hf-model-panel
-          [agents]="councilAgents"
-          [multiplier]="rebalanceCountEstimate()"
-          [(overrides)]="overrides"
-        />
-
-        @if (error()) {
-          <p class="text-red-600 text-sm">{{ error() }}</p>
-        }
-
-        @if (!estimate()) {
-          <button type="button" (click)="estimateCost()" [disabled]="estimating()"
-            class="w-full bg-blue-600 text-white rounded py-2 disabled:opacity-50">
-            {{ estimating() ? 'Estimating…' : 'Estimate cost' }}
+        <div class="head-actions">
+          <a class="btn ghost" routerLink="/backtests">Cancel</a>
+          <button class="btn">Save as preset</button>
+          <button class="btn primary" (click)="submit()" [disabled]="submitting()">
+            Run backtest <span class="kbd">⌘↵</span>
           </button>
-        } @else {
-          <div class="border rounded p-4 space-y-2"
-            [class.bg-red-50]="estimate()!.exceeds_budget"
-            [class.border-red-300]="estimate()!.exceeds_budget"
-            [class.bg-green-50]="!estimate()!.exceeds_budget"
-            [class.border-green-300]="!estimate()!.exceeds_budget">
-            <div class="flex justify-between items-baseline">
-              <h3 class="text-sm font-semibold">Pre-flight estimate</h3>
-              <button type="button" (click)="resetEstimate()" class="text-xs text-blue-600 hover:underline">
-                Edit & re-estimate
-              </button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <section class="card">
+            <div class="card-hd"><span class="title mono">01 · Identity</span></div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+              <div class="field"><label class="lbl">Name</label>
+                <input class="input sans" name="name" [(ngModel)]="name" /></div>
             </div>
-            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-              <div>Estimated cost:
-                <span class="font-mono font-semibold"
-                  [class.text-red-700]="estimate()!.exceeds_budget">
-                  \${{ estimate()!.est_total_usd | number: '1.2-2' }}
-                </span>
-                <span class="text-gray-500"> / cap \${{ estimate()!.budget_cap_usd | number: '1.2-2' }}</span>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><span class="title mono">02 · Universe</span></div>
+            <div class="card-bd">
+              <textarea class="input sans" rows="3" [(ngModel)]="universeStr" placeholder="AAPL, MSFT, GOOGL …"
+                style="height:auto;padding:10px;line-height:18px;font-family:var(--font-mono);font-size:13px"></textarea>
+              <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:6px">
+                Default: {{ store.defaultUniverse().join(', ') || '(loading)' }}
               </div>
-              <div>LLM calls: <span class="font-mono">{{ estimate()!.n_llm_calls | number }}</span></div>
-              <div>Rebalance days: <span class="font-mono">{{ estimate()!.n_rebalance_days }}</span></div>
-              <div>Est. wall-time: <span class="font-mono">{{ estimate()!.est_minutes_optimistic | number: '1.0-1' }}–{{ estimate()!.est_minutes_upper | number: '1.0-1' }} min</span></div>
             </div>
-            @if (estimate()!.exceeds_budget) {
-              <p class="text-sm text-red-700 font-medium">
-                ⚠ Estimated cost exceeds your max budget. The run will abort partway.
-                Either raise the cap, shrink the universe/date range, or switch to a cheaper rebalance frequency.
-              </p>
-            }
-            <details class="text-xs text-gray-600">
-              <summary class="cursor-pointer">Per-agent breakdown</summary>
-              <table class="mt-2 w-full font-mono">
-                <thead><tr class="text-left text-gray-500">
-                  <th>Agent</th><th>Model</th><th class="text-right">$/call</th><th class="text-right">Total</th>
-                </tr></thead>
-                <tbody>
-                  @for (row of estimate()!.by_agent; track row.agent) {
-                    <tr>
-                      <td>{{ row.agent }}</td>
-                      <td class="text-gray-500">{{ row.model }}</td>
-                      <td class="text-right">{{ row.per_call_usd | number: '1.4-5' }}</td>
-                      <td class="text-right">{{ row.total_usd | number: '1.2-4' }}</td>
-                    </tr>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><span class="title mono">03 · Date window</span></div>
+            <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+              <div class="field"><label class="lbl">Master start</label>
+                <input class="input" type="date" [(ngModel)]="startDate" /></div>
+              <div class="field"><label class="lbl">Master end</label>
+                <input class="input" type="date" [(ngModel)]="endDate" /></div>
+              <div class="field"><label class="lbl">Starting cash</label>
+                <input class="input" type="number" [(ngModel)]="startingCash" /></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><span class="title mono">04 · Walk-forward folds</span>
+              <span class="pill"><span class="dot"></span>{{ foldCount() }} folds</span>
+            </div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px">
+                <div class="field"><label class="lbl">IS window (d)</label>
+                  <input class="input" type="number" [(ngModel)]="isWindow" min="126" /></div>
+                <div class="field"><label class="lbl">OOS (d)</label>
+                  <input class="input" type="number" [(ngModel)]="oosWindow" min="21" /></div>
+                <div class="field"><label class="lbl">Step (d)</label>
+                  <input class="input" type="number" [(ngModel)]="stepDays" min="21" /></div>
+                <div class="field"><label class="lbl">Candidates/fold</label>
+                  <input class="input" type="number" [(ngModel)]="nCandidates" min="5" /></div>
+              </div>
+
+              <div style="display:grid;gap:2px;grid-template-columns:repeat(12,1fr);height:32px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+                @for(i of folds(); track i){
+                  <div [style.background]="i%2===0 ? 'var(--acc-long-soft)' : 'var(--acc-info-soft)'"
+                       style="display:grid;place-items:center;font-family:var(--font-mono);font-size:10px;color:var(--text-2)">F{{ i+1 }}</div>
+                }
+              </div>
+              <div class="mono" style="font-size:11px;color:var(--text-3)">
+                ■ IS {{ isWindow }}d &nbsp; ■ OOS {{ oosWindow }}d · step {{ stepDays }}d &nbsp; · &nbsp; {{ startDate }} → {{ endDate }}
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><span class="title mono">05 · Strategy parameters</span></div>
+            <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div class="field"><label class="lbl">IS objective</label>
+                <select class="input sans" [(ngModel)]="objective">
+                  <option value="sharpe">Sharpe</option><option value="sortino">Sortino</option><option value="calmar">Calmar</option>
+                </select></div>
+              <div class="field"><label class="lbl">Rebalance</label>
+                <select class="input sans" [(ngModel)]="rebalance">
+                  <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+                </select></div>
+              <div class="field"><label class="lbl">Commission (bps)</label>
+                <input class="input" type="number" [(ngModel)]="commissionBps" /></div>
+              <div class="field"><label class="lbl">Spread (bps)</label>
+                <input class="input" type="number" [(ngModel)]="spreadBps" /></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-hd"><span class="title mono">06 · Budget cap</span></div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:10px">
+              <div class="field" style="max-width:200px"><label class="lbl">Max budget</label>
+                <input class="input" type="number" step="0.01" [(ngModel)]="maxBudgetUsd" /><span class="suffix">USD</span></div>
+              <div class="cost-gauge"><div class="fill" style="width:52%"></div><div class="mark" style="left:51.5%"></div></div>
+              <div class="mono" style="font-size:11px;color:var(--text-3)">Monthly $ 412.10 / $ 800.00</div>
+            </div>
+          </section>
+        </div>
+
+        <aside style="position:sticky;top:64px;align-self:flex-start">
+          <section class="card">
+            <div class="card-hd"><span class="title">Live estimate</span>
+              <span class="pill info live"><span class="dot"></span>{{ foldCount() }} folds</span>
+            </div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+              <button class="btn" style="width:100%;justify-content:center" (click)="estimateCost()" [disabled]="estimating()">
+                {{ estimating() ? 'Estimating…' : (estimate() ? 'Re-estimate' : 'Estimate cost') }}
+              </button>
+              @if(estimate(); as e){
+                <div>
+                  <div class="kpi" style="border:0;padding:0">
+                    <div class="v" style="font-size:32px" [style.color]="e.exceeds_budget ? 'var(--acc-short-fg)' : 'var(--text)'">$ {{ e.est_total_usd | number:'1.2-2' }}</div>
+                    <div class="mono" style="font-size:12px;color:var(--text-3)">cap $ {{ maxBudgetUsd | number:'1.2-2' }} · {{ e.by_agent?.length || 0 }} agents</div>
+                  </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;border-top:1px solid var(--border);padding-top:8px">
+                  @for(r of e.by_agent || []; track r.agent){
+                    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;font-size:11.5px;color:var(--text-2)">
+                      <span>{{ r.agent }} <span class="mono" style="color:var(--text-3)">· {{ r.model }}</span></span>
+                      <span class="mono">$ {{ r.total_usd | number:'1.2-4' }}</span>
+                    </div>
                   }
-                </tbody>
-              </table>
-            </details>
-            <button type="submit" [disabled]="submitting() || estimate()!.exceeds_budget"
-              class="w-full rounded py-2 disabled:opacity-50"
-              [class.bg-green-600]="!estimate()!.exceeds_budget"
-              [class.bg-gray-400]="estimate()!.exceeds_budget"
-              [class.text-white]="true">
-              {{ submitting() ? 'Submitting…' : (estimate()!.exceeds_budget ? 'Over budget — raise cap to submit' : 'Confirm & start walk-forward') }}
-            </button>
-          </div>
-        }
-      </form>
-    </div>
+                </div>
+                @if(e.exceeds_budget){
+                  <div style="background:var(--acc-short-soft);color:var(--acc-short-fg);font-size:12px;padding:8px;border-radius:6px">
+                    ⚠ Estimated cost exceeds budget — raise the cap or shrink the run.
+                  </div>
+                }
+              }
+              @if(error()){<p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>}
+              <button class="btn primary" style="height:36px;justify-content:center"
+                [disabled]="submitting() || !estimate() || estimate()!.exceeds_budget"
+                (click)="submit()">Run backtest <span class="kbd">⌘↵</span></button>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </hf-app-shell>
   `,
 })
 export class BacktestsNewPage implements OnInit {
@@ -198,22 +166,7 @@ export class BacktestsNewPage implements OnInit {
   readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
 
-  readonly councilAgents = [
-    'buffett', 'munger', 'graham', 'wood', 'druckenmiller',
-    'fundamentals', 'technicals', 'valuation', 'sentiment',
-    'macro', 'news_digest', 'risk_manager', 'portfolio_manager',
-  ];
   overrides = signal<Record<string, string>>({});
-
-  rebalanceCountEstimate(): number {
-    const start = new Date(this.startDate).getTime();
-    const end = new Date(this.endDate).getTime();
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 1;
-    const days = (end - start) / 86400000;
-    const stride = this.rebalance === 'daily' ? 1 : this.rebalance === 'weekly' ? 5 : 21;
-    const nUniv = (this.parsedUniverse().length || 20);
-    return Math.max(1, Math.round((days / stride) * nUniv));
-  }
 
   name = 'WF ' + new Date().toISOString().slice(0, 10);
   universeStr = '';
@@ -236,94 +189,57 @@ export class BacktestsNewPage implements OnInit {
   estimate = signal<EstimateResponse | null>(null);
   error = signal<string | null>(null);
 
+  foldCount = computed(() => {
+    const start = new Date(this.startDate).getTime();
+    const end = new Date(this.endDate).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+    const days = (end - start) / 86400000;
+    return Math.max(1, Math.floor((days - this.isWindow) / Math.max(1, this.stepDays)));
+  });
+  folds = (): number[] => Array.from({ length: Math.min(12, this.foldCount()) }, (_, i) => i);
+
   ngOnInit(): void {
     this.store.loadDefaultUniverse().subscribe();
-    this.modelsStore.loadAll().subscribe();
+    this.modelsStore.loadAll().subscribe({ error: () => {} });
   }
 
   private parsedUniverse(): string[] {
-    const raw = this.universeStr
-      .split(/[,\s]+/)
-      .map((s) => s.trim().toUpperCase())
-      .filter(Boolean);
+    const raw = this.universeStr.split(/[,\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
     return raw.length ? raw : this.store.defaultUniverse();
   }
 
-  resetEstimate(): void {
-    this.estimate.set(null);
-    this.error.set(null);
-  }
-
   estimateCost(): void {
-    this.estimating.set(true);
-    this.error.set(null);
-    this.store
-      .estimate({
-        universe: this.parsedUniverse(),
-        start_date: this.startDate,
-        end_date: this.endDate,
-        rebalance_frequency: this.rebalance,
-        max_budget_usd: this.maxBudgetUsd,
-      })
-      .subscribe({
-        next: (est) => {
-          this.estimating.set(false);
-          this.estimate.set(est);
-        },
-        error: (e) => {
-          this.estimating.set(false);
-          const detail = e?.error;
-          this.error.set(
-            typeof detail === 'string'
-              ? detail
-              : detail?.detail || JSON.stringify(detail) || 'Failed to estimate',
-          );
-        },
-      });
+    this.estimating.set(true); this.error.set(null);
+    this.store.estimate({
+      universe: this.parsedUniverse(),
+      start_date: this.startDate, end_date: this.endDate,
+      rebalance_frequency: this.rebalance, max_budget_usd: this.maxBudgetUsd,
+    }).subscribe({
+      next: (est) => { this.estimating.set(false); this.estimate.set(est); },
+      error: (e) => { this.estimating.set(false);
+        const d = e?.error; this.error.set(typeof d === 'string' ? d : d?.detail || 'Failed to estimate');
+      },
+    });
   }
 
   submit(): void {
     const est = this.estimate();
-    if (!est) {
-      // The form is in "estimate first" mode; ignore stray submits.
-      return;
-    }
-    if (est.exceeds_budget) {
-      this.error.set('Estimated cost exceeds the max budget. Raise the cap or shrink the run.');
-      return;
-    }
-    this.submitting.set(true);
-    this.error.set(null);
-    this.store
-      .create({
-        name: this.name,
-        universe: this.parsedUniverse(),
-        start_date: this.startDate,
-        end_date: this.endDate,
-        starting_cash: this.startingCash,
-        commission_bps: this.commissionBps,
-        spread_bps: this.spreadBps,
-        is_window_days: this.isWindow,
-        oos_window_days: this.oosWindow,
-        step_days: this.stepDays,
-        n_candidates: this.nCandidates,
-        is_objective: this.objective,
-        rebalance_frequency: this.rebalance,
-        baseline: this.baseline,
-        max_budget_usd: this.maxBudgetUsd,
-        model_overrides: this.overrides(),
-      })
-      .subscribe({
-        next: (bt) => this.router.navigate(['/backtests', bt.id]),
-        error: (e) => {
-          this.submitting.set(false);
-          const detail = e?.error;
-          this.error.set(
-            typeof detail === 'string'
-              ? detail
-              : detail?.detail || JSON.stringify(detail) || 'Failed to submit',
-          );
-        },
-      });
+    if (!est) { this.estimateCost(); return; }
+    if (est.exceeds_budget) { this.error.set('Estimated cost exceeds budget.'); return; }
+    this.submitting.set(true); this.error.set(null);
+    this.store.create({
+      name: this.name, universe: this.parsedUniverse(),
+      start_date: this.startDate, end_date: this.endDate,
+      starting_cash: this.startingCash, commission_bps: this.commissionBps, spread_bps: this.spreadBps,
+      is_window_days: this.isWindow, oos_window_days: this.oosWindow, step_days: this.stepDays,
+      n_candidates: this.nCandidates, is_objective: this.objective,
+      rebalance_frequency: this.rebalance, baseline: this.baseline,
+      max_budget_usd: this.maxBudgetUsd, model_overrides: this.overrides(),
+    }).subscribe({
+      next: (bt) => this.router.navigate(['/backtests', bt.id]),
+      error: (e) => { this.submitting.set(false);
+        const d = e?.error; this.error.set(typeof d === 'string' ? d : d?.detail || 'Failed to submit');
+      },
+    });
   }
 }

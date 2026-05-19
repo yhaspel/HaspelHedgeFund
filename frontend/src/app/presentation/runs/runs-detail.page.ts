@@ -1,361 +1,333 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { AppShellComponent } from '../shared/app-shell.component';
 import { RunsStore } from '../../abstraction/runs.store';
-import {
-  AgentMessage,
-  ALL_PERSONAS,
-  PERSONA_IDS,
-} from '../../core/models/run.model';
+import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
 
 interface PersonaCard {
-  id: string;
-  displayName: string;
-  version: string;
+  id: string; displayName: string; version: string;
   signal: 'bullish' | 'neutral' | 'bearish' | 'unknown';
-  confidence: number;
-  thesis: string;
-  keyRisks: string[];
-  intrinsicValue: number | null;
-  marginOfSafety: number | null;
+  confidence: number; thesis: string; keyRisks: string[];
+  intrinsicValue: number | null; marginOfSafety: number | null;
 }
+
+const COL: Record<string, string> = {
+  buffett: 'c1', munger: 'c2', graham: 'c3', wood: 'c4',
+  druckenmiller: 'c5', burry: 'c6', damodaran: 'c7', lynch: 'c8',
+};
+const MONO: Record<string, string> = {
+  buffett: 'WB', munger: 'CM', graham: 'BG', wood: 'CW',
+  druckenmiller: 'SD', burry: 'MB', damodaran: 'AD', lynch: 'PL',
+};
 
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [RouterLink],
+  imports: [CommonModule, RouterLink, AppShellComponent],
   template: `
-    <div class="min-h-screen bg-gray-50 p-8">
-      <header class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-semibold">
-          Run #{{ run()?.id }} — {{ run()?.tickers?.join(', ') }}
-        </h1>
-        <div class="flex items-center gap-4">
-          @if (canCancel()) {
-            <button
-              type="button"
-              (click)="cancel()"
-              [disabled]="cancelling()"
-              class="text-sm bg-red-50 text-red-700 border border-red-300 rounded px-3 py-1 hover:bg-red-100 disabled:opacity-50"
-            >
-              {{ cancelling() ? 'Cancelling…' : 'Stop analysis' }}
+    <hf-app-shell [crumbs]="crumbs()">
+      @if (!run()) {
+        <p style="color:var(--text-3)">Loading…</p>
+      } @else {
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">Single-name run · Equity / US · {{ run()!.status }}</div>
+            <h1 style="margin-top:6px">{{ run()!.tickers.join(' · ') }} <span style="color:var(--text-3);font-weight:500">· run #{{ run()!.id }}</span></h1>
+            <div class="meta-strip">
+              <div class="meta"><div class="k">As-of</div><div class="v">{{ run()!.as_of_date }}</div></div>
+              <div class="meta"><div class="k">Council</div><div class="v">{{ personas().length }} personas + CIO</div></div>
+              <div class="meta"><div class="k">Cost</div><div class="v">$ {{ formatCost(run()!.total_cost_usd) }}</div></div>
+              <div class="meta"><div class="k">Status</div><div class="v">{{ run()!.status }}</div></div>
+            </div>
+          </div>
+          <div class="head-actions">
+            @if(canCancel()){
+              <button class="btn danger" (click)="cancel()" [disabled]="cancelling()">{{ cancelling() ? 'Cancelling…' : 'Stop' }}</button>
+            }
+            <button class="btn">Export</button>
+            <a class="btn" routerLink="/runs/new">Rerun</a>
+            <button class="btn primary">Copy decision <span class="kbd">⌘C</span></button>
+          </div>
+        </div>
+
+        <div class="tabs" style="margin-bottom:18px">
+          @for(t of tabs; track t.id){
+            <button class="tab" [class.active]="tab()===t.id" (click)="tab.set($any(t.id))">
+              {{ t.label }}
+              @if(t.count){<span class="count" [class.attn]="t.attn">{{ t.count }}</span>}
             </button>
           }
-          <a routerLink="/runs/new" class="text-blue-600 hover:underline">New run</a>
         </div>
-      </header>
 
-      @if (!run()) {
-        <p class="text-gray-500">Loading…</p>
-      } @else {
-        <section class="bg-white rounded shadow p-4 mb-4 flex justify-between">
-          <div>
-            <p class="text-sm text-gray-500">Status</p>
-            <p class="text-lg font-medium">
-              <span [class]="statusClass(run()!.status)">{{ run()!.status }}</span>
-            </p>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">As-of</p>
-            <p class="text-lg font-medium">{{ run()!.as_of_date }}</p>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Personas</p>
-            <p class="text-lg font-medium">{{ personas().length }}</p>
-          </div>
-          <div>
-            <p class="text-sm text-gray-500">Total cost</p>
-            <p class="text-lg font-medium">\${{ formatCost(run()!.total_cost_usd) }}</p>
-          </div>
-        </section>
-
-        @if (run()!.error_message) {
-          <section class="bg-red-50 border border-red-200 rounded p-4 mb-4">
-            <p class="text-red-700 text-sm font-mono">{{ run()!.error_message }}</p>
-          </section>
-        }
-
-        <!-- Final order ticket (CIO if enabled, else PM verbatim) -->
-        @for (d of run()!.decisions; track d.id) {
-          <section
-            class="bg-white rounded shadow p-5 mb-4 border-l-4"
-            [class.border-green-500]="d.action === 'buy'"
-            [class.border-yellow-500]="d.action === 'hold'"
-            [class.border-red-500]="d.action === 'sell'"
-          >
-            <div class="flex justify-between items-start">
-              <div>
-                <h2 class="text-xl font-semibold">
-                  Final order ticket: {{ d.action.toUpperCase() }} {{ d.ticker }}
-                </h2>
-                <p class="text-sm text-gray-500">
-                  Confidence {{ d.confidence }}
-                  @if (d.risk_overrides.veto) {
-                    · <span class="text-red-600 font-medium">RISK VETO</span>
-                  }
-                  @if (cioOutput()?.['overrode_pm']) {
-                    · <span class="text-amber-700 font-medium">CIO OVERRIDE</span>
-                  }
-                </p>
-              </div>
-              <div class="text-right text-sm">
-                <p>
-                  Target qty: <span class="font-mono">{{ d.target_quantity }}</span>
-                  <span
-                    class="ml-1 text-gray-400 cursor-help"
-                    title="Illustrative — computed against a $100K stub portfolio. Replaced by your real broker account balance in P3a (paper trading)."
-                  >ⓘ</span>
-                </p>
-                <p>
-                  Target weight: <span class="font-mono">{{ d.target_weight_pct }}%</span>
-                </p>
-              </div>
-            </div>
-            <p class="text-sm whitespace-pre-wrap mt-3">{{ d.rationale }}</p>
-          </section>
-        }
-
-        <!-- CIO discretionary layer -->
-        @if (cioOutput(); as c) {
-          <section class="bg-white rounded shadow p-5 mb-4 border-l-4"
-                   [class.border-amber-500]="c['overrode_pm']"
-                   [class.border-blue-300]="!c['overrode_pm']">
-            <div class="flex justify-between items-start mb-2">
-              <h2 class="text-lg font-semibold">
-                Chief Investment Officer
-                @if (c['overrode_pm']) {
-                  <span class="ml-2 inline-block bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded">
-                    OVERRIDE
-                  </span>
-                } @else {
-                  <span class="ml-2 inline-block bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">
-                    RATIFIED PM
-                  </span>
-                }
-              </h2>
-              <span class="text-xs text-gray-500">confidence {{ c['confidence'] }}</span>
-            </div>
-            <p class="text-sm text-gray-700">{{ c['outlook'] }}</p>
-            @if (c['overrode_pm'] && c['override_reason']) {
-              <p class="text-sm mt-2"><span class="font-semibold">Override reason:</span> {{ c['override_reason'] }}</p>
-            }
-            @if (c['stop_loss_pct']) {
-              <p class="text-xs text-gray-500 mt-2">
-                Stop loss: <span class="font-mono">{{ pct(c['stop_loss_pct']) }}</span>
-              </p>
-            }
-            @if (pmDecisionMsg(); as pm) {
-              <details class="mt-3 text-xs text-gray-500">
-                <summary class="cursor-pointer">Original PM ticket (pre-CIO)</summary>
-                <pre class="mt-1 bg-gray-50 p-2 rounded overflow-auto">action: {{ pm['action'] }}, weight: {{ pm['target_weight_pct'] }}%, qty: {{ pm['target_quantity'] }}
-{{ pm['rationale'] }}</pre>
-              </details>
-            }
-          </section>
-        }
-
-        <!-- Risk Manager panel -->
-        @if (riskOutput(); as risk) {
-          <section class="bg-white rounded shadow p-5 mb-4">
-            <h2 class="text-lg font-semibold mb-2">
-              Risk Manager
-              @if (risk['veto']) {
-                <span class="ml-2 inline-block bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded">VETO</span>
-              }
-            </h2>
-            <div class="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <p class="text-gray-500">Max position</p>
-                <p class="font-mono">{{ pct(risk['max_position_pct_for_this_trade']) }}</p>
-              </div>
-              <div>
-                <p class="text-gray-500">Stop loss</p>
-                <p class="font-mono">{{ pct(risk['stop_loss_pct']) }}</p>
-              </div>
-              <div>
-                <p class="text-gray-500">Hard caps applied</p>
-                <p class="font-mono text-xs">
-                  {{ (asArray(risk['hard_caps_applied'])).join(', ') || 'none' }}
-                </p>
-              </div>
-            </div>
-            <p class="text-sm mt-3 whitespace-pre-wrap text-gray-700">
-              {{ risk['rationale'] }}
-            </p>
-          </section>
-        }
-
-        <!-- Valuation -->
-        @if (valuationOutput(); as v) {
-          <section class="bg-white rounded shadow p-5 mb-4">
-            <h2 class="text-lg font-semibold mb-2">Valuation</h2>
-            <div class="grid grid-cols-4 gap-3 text-sm">
-              <div><p class="text-gray-500">DCF</p><p class="font-mono">{{ num(v['dcf_fair_value']) }}</p></div>
-              <div><p class="text-gray-500">Multiples</p><p class="font-mono">{{ num(v['multiples_fair_value']) }}</p></div>
-              <div><p class="text-gray-500">Residual income</p><p class="font-mono">{{ num(v['residual_income_fair_value']) }}</p></div>
-              <div><p class="text-gray-500">Current price</p><p class="font-mono">{{ num(v['current_price']) }}</p></div>
-              <div><p class="text-gray-500">FV low</p><p class="font-mono">{{ num(v['fair_value_low']) }}</p></div>
-              <div><p class="text-gray-500">FV high</p><p class="font-mono">{{ num(v['fair_value_high']) }}</p></div>
-              <div class="col-span-2"><p class="text-gray-500">Upside</p><p class="font-mono">{{ num(v['upside_pct']) }}%</p></div>
-            </div>
-            <p class="text-xs text-gray-500 mt-2">
-              Most sensitive: {{ v['most_sensitive_assumption'] }}
-            </p>
-          </section>
-        }
-
-        <!-- Macro context -->
-        @if (macroOutput(); as m) {
-          <section class="bg-white rounded shadow p-5 mb-4">
-            <h2 class="text-lg font-semibold mb-2">Macro context</h2>
-            <div class="flex flex-wrap gap-2 mb-2">
-              <span class="px-2 py-1 rounded text-xs bg-gray-100">
-                growth: {{ m['growth_quadrant'] }}
-              </span>
-              <span class="px-2 py-1 rounded text-xs bg-gray-100">
-                inflation: {{ m['inflation_regime'] }}
-              </span>
-              <span class="px-2 py-1 rounded text-xs bg-gray-100">
-                curve: {{ m['yield_curve_state'] }}
-              </span>
-              <span class="px-2 py-1 rounded text-xs bg-gray-100">
-                policy: {{ m['policy_stance'] }}
-              </span>
-            </div>
-            <p class="text-sm text-gray-700">{{ m['narrative'] }}</p>
-          </section>
-        }
-
-        <!-- News & filings digest -->
-        @if (newsOutput(); as n) {
-          <section class="bg-white rounded shadow p-5 mb-4">
-            <h2 class="text-lg font-semibold mb-2">News & filings</h2>
-            <p class="text-sm text-gray-700 mb-3">{{ n['digest'] }}</p>
-            @if (asArray(n['risk_factor_highlights']).length) {
-              <h3 class="text-sm font-semibold mt-2 mb-1">Risk factor highlights</h3>
-              <ul class="list-disc list-inside text-sm text-gray-700">
-                @for (r of asArray(n['risk_factor_highlights']); track r) {
-                  <li>{{ r }}</li>
-                }
-              </ul>
-            }
-            @if (asAnyArray(n['material_events']).length) {
-              <h3 class="text-sm font-semibold mt-3 mb-1">Material events</h3>
-              <ul class="text-sm">
-                @for (e of asAnyArray(n['material_events']); track e['url']) {
-                  <li class="border-t py-1">
-                    <span class="font-mono text-xs text-gray-500">{{ e['date'] }}</span>
-                    <span class="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-100">{{ e['tag'] }}</span>
-                    <span class="ml-2 text-xs text-gray-500">m={{ e['materiality'] }}</span>
-                    <a [href]="e['url']" target="_blank" class="ml-2 text-blue-600 hover:underline">
-                      {{ e['headline'] }}
-                    </a>
-                  </li>
-                }
-              </ul>
-            }
-            <p class="text-xs text-gray-500 mt-2">
-              Sentiment: <span class="font-mono">{{ num(n['sentiment_score']) }}</span>
-              @if (asArray(n['sentiment_drivers']).length) {
-                · drivers: {{ asArray(n['sentiment_drivers']).join('; ') }}
-              }
-            </p>
-          </section>
-        }
-
-        <!-- Persona council grid -->
-        <section class="mb-4">
-          <h2 class="text-lg font-semibold mb-3">Council</h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            @for (p of personas(); track p.id) {
-              <article class="bg-white rounded shadow p-4 border-t-4"
-                [class.border-green-500]="p.signal === 'bullish'"
-                [class.border-yellow-500]="p.signal === 'neutral'"
-                [class.border-red-500]="p.signal === 'bearish'"
-                [class.border-gray-300]="p.signal === 'unknown'"
-              >
-                <div class="flex justify-between items-baseline">
-                  <h3 class="font-semibold">{{ p.displayName }}</h3>
-                  <span class="text-xs font-mono text-gray-500">
-                    {{ p.id }}&#64;{{ p.version }}
-                  </span>
+        @if(tab()==='decision'){
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:28px">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <!-- Decision hero -->
+              <section class="card">
+                <div class="card-bd" style="display:grid;grid-template-columns:1.1fr 1px 1fr;gap:24px">
+                  <div>
+                    <div class="eyebrow">Recommended action</div>
+                    <div style="font-size:44px;line-height:48px;font-weight:600;letter-spacing:-0.018em;margin-top:6px"
+                      [style.color]="decisionColor()">{{ decision() }}</div>
+                    <div style="color:var(--text-2);font-size:13px;margin-top:6px">{{ decisionSub() }}</div>
+                    <div class="mono" style="font-size:12px;color:var(--text-3);margin-top:10px">
+                      Limit $ 192.50 · Stop $ 162.60 · Horizon ~6 weeks
+                    </div>
+                  </div>
+                  <div style="width:1px;background:var(--border)"></div>
+                  <div>
+                    <div class="eyebrow">Council confidence</div>
+                    <div class="mono" style="font-size:28px;line-height:34px;margin-top:6px">{{ avgConf() }} <span style="color:var(--text-3)">/ 100</span></div>
+                    <div class="conf-bar" style="margin-top:10px">
+                      <div class="conf-fill" [style.width]="avgConf() + '%'"></div>
+                      <div class="conf-ticks">
+                        @for(_ of [].constructor(9); track $index){<div class="conf-tick"></div>}
+                      </div>
+                    </div>
+                    <div class="mono" style="font-size:12px;color:var(--text-2);margin-top:8px">
+                      {{ stanceCount().bull }} bull · {{ stanceCount().bear }} bear · {{ stanceCount().neut }} neutral
+                    </div>
+                  </div>
                 </div>
-                <p class="text-sm">
-                  <span class="font-medium uppercase">{{ p.signal }}</span>
-                  <span class="text-gray-500"> · {{ p.confidence }}% confidence</span>
-                </p>
-                <p class="text-sm mt-2">
-                  {{ expanded().has(p.id) ? p.thesis : truncate(p.thesis, 200) }}
-                </p>
-                @if (p.thesis.length > 200) {
-                  <button
-                    type="button"
-                    class="text-xs text-blue-600 hover:underline mt-1"
-                    (click)="toggleExpand(p.id)"
-                  >
-                    {{ expanded().has(p.id) ? 'Collapse' : 'See full reasoning' }}
-                  </button>
+              </section>
+
+              <!-- Stat grid -->
+              <section class="card">
+                <div class="card-hd"><span class="title">Targets &amp; risk</span></div>
+                <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+                  <div>
+                    <div class="eyebrow">Target zone</div>
+                    <div class="mono" style="margin-top:4px;font-size:18px">$ 192.50</div>
+                    <div style="position:relative;height:12px;background:var(--surface-2);border-radius:4px;margin-top:8px">
+                      <div style="position:absolute;left:30%;width:50%;height:100%;background:var(--acc-long-soft);border-radius:4px"></div>
+                      <div style="position:absolute;left:55%;top:-2px;bottom:-2px;width:2px;background:var(--acc-long)"></div>
+                    </div>
+                    <div class="mono" style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-top:4px"><span>$ 178</span><span>$ 214</span></div>
+                  </div>
+                  <div>
+                    <div class="eyebrow">Stop</div>
+                    <div class="mono" style="margin-top:4px;font-size:18px;color:var(--acc-short-fg)">$ 162.60</div>
+                    <div style="position:relative;height:12px;background:var(--surface-2);border-radius:4px;margin-top:8px">
+                      <div style="position:absolute;left:20%;width:30%;height:100%;background:var(--acc-short-soft);border-radius:4px"></div>
+                      <div style="position:absolute;left:38%;top:-2px;bottom:-2px;width:2px;background:var(--acc-short)"></div>
+                    </div>
+                    <div class="mono" style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-top:4px"><span>$ 155</span><span>$ 175</span></div>
+                  </div>
+                  <div>
+                    <div class="eyebrow">Expected return</div>
+                    <div class="mono" style="margin-top:4px;font-size:18px;color:var(--acc-long-fg)">+12.4%</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">over ~6 weeks · base / bull / bear</div>
+                  </div>
+                  <div>
+                    <div class="eyebrow">Drawdown budget</div>
+                    <div class="mono" style="margin-top:4px;font-size:18px;color:var(--acc-short-fg)">−5.8%</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">on −12% → 0 band</div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Council snapshot -->
+              <section class="card">
+                <div class="card-hd"><span class="title">Council snapshot</span>
+                  <span class="pill"><span class="dot"></span>{{ personas().length }} personas</span>
+                </div>
+                <div class="card-bd" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+                  @for(p of personas(); track p.id){
+                    <article class="p-card" style="padding:10px">
+                      <header>
+                        <span class="mono-tile" [class]="'mt-' + colOf(p.id)">{{ monoOf(p.id) }}</span>
+                        <div style="display:flex;flex-direction:column;line-height:1.2">
+                          <span style="font-size:12px;color:var(--text)">{{ p.displayName }}</span>
+                          <span style="font-size:10.5px;color:var(--text-3)">{{ p.version }}</span>
+                        </div>
+                        <span class="stance"
+                          [class.bull]="p.signal==='bullish'"
+                          [class.bear]="p.signal==='bearish'"
+                          [class.neut]="p.signal==='neutral'"
+                          style="margin-left:auto">{{ stanceShort(p.signal) }} · {{ Math.round(p.confidence) }}</span>
+                      </header>
+                      <p style="font-size:11.5px;line-height:16px;color:var(--text-2);margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ p.thesis }}</p>
+                    </article>
+                  }
+                </div>
+              </section>
+
+              <!-- Drivers -->
+              <section class="card">
+                <div class="card-hd"><span class="title">Drivers</span></div>
+                <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+                  <div>
+                    <div class="eyebrow" style="color:var(--acc-long-fg)">Bull</div>
+                    <ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2)">
+                      <li>· services margin expansion <span class="mono" style="color:var(--text-3);float:right">[WB · 84]</span></li>
+                      <li>· on-device AI cycle <span class="mono" style="color:var(--text-3);float:right">[CW · 69]</span></li>
+                      <li>· buyback cadence <span class="mono" style="color:var(--text-3);float:right">[SD · 66]</span></li>
+                      <li>· DCF triangulation $ 222 <span class="mono" style="color:var(--text-3);float:right">[AD · 73]</span></li>
+                    </ul>
+                  </div>
+                  <div>
+                    <div class="eyebrow" style="color:var(--acc-short-fg)">Bear</div>
+                    <ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2)">
+                      <li>· crowded long <span class="mono" style="color:var(--text-3);float:right">[MB · 58]</span></li>
+                      <li>· sell-side raising into print <span class="mono" style="color:var(--text-3);float:right">[MB · 58]</span></li>
+                      <li>· factor exhaustion <span class="mono" style="color:var(--text-3);float:right">[MB · 58]</span></li>
+                    </ul>
+                  </div>
+                  <div>
+                    <div class="eyebrow" style="color:var(--acc-hold-fg)">Neutral</div>
+                    <ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2)">
+                      <li>· net-net MoS absent <span class="mono" style="color:var(--text-3);float:right">[BG · 41]</span></li>
+                      <li>· PEG ~1.6 <span class="mono" style="color:var(--text-3);float:right">[PL · 48]</span></li>
+                      <li>· macro tailwind partially priced <span class="mono" style="color:var(--text-3);float:right">[PL · 48]</span></li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <!-- Order ticket sticky -->
+            <aside style="position:sticky;top:64px;align-self:flex-start">
+              <section class="card">
+                <div class="card-hd"><span class="title">Order ticket</span></div>
+                <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+                  <div class="seg">
+                    <button class="opt on buy">BUY</button>
+                    <button class="opt">SELL</button>
+                    <button class="opt">HOLD</button>
+                  </div>
+                  <div class="field"><label class="lbl">Quantity</label>
+                    <input class="input" value="15,600" /><span class="suffix">sh</span></div>
+                  <div class="field"><label class="lbl">Limit</label>
+                    <input class="input" value="192.50" /><span class="suffix">USD</span></div>
+                  <div class="field"><label class="lbl">Stop</label>
+                    <input class="input" value="162.60" /><span class="suffix">USD</span></div>
+                  <div class="field"><label class="lbl">Horizon</label>
+                    <select class="input sans"><option>6 weeks</option><option>3 months</option></select></div>
+                  <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2)">
+                      <span>Max position</span><span class="mono">3.50%</span>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2)">
+                      <input type="checkbox" checked style="accent-color:var(--acc-info)" /> Stop guard ON
+                    </label>
+                  </div>
+                  <div class="mono" style="font-size:11px;color:var(--text-3)">Routes to paper book only</div>
+                  <button class="btn primary" style="height:36px;justify-content:center">Confirm ticket <span class="kbd">⌘↵</span></button>
+                </div>
+              </section>
+            </aside>
+          </div>
+        }
+
+        @if(tab()==='council'){
+          <div style="display:flex;flex-direction:column;gap:14px">
+            @for(p of personas(); track p.id){
+              <section class="card">
+                <button class="card-hd" style="width:100%;background:transparent;border:0;cursor:pointer;display:flex" (click)="toggleExpand(p.id)">
+                  <span class="mono-tile lg" [class]="'mt-' + colOf(p.id)">{{ monoOf(p.id) }}</span>
+                  <div style="display:flex;flex-direction:column;line-height:1.3">
+                    <span style="font-size:14px;color:var(--text)">{{ p.displayName }}</span>
+                    <span style="font-size:11px;color:var(--text-3)" class="mono">{{ p.version }}</span>
+                  </div>
+                  <span class="stance"
+                    [class.bull]="p.signal==='bullish'" [class.bear]="p.signal==='bearish'" [class.neut]="p.signal==='neutral'"
+                    style="margin-left:14px">{{ stanceShort(p.signal) }} · {{ Math.round(p.confidence) }}</span>
+                  <span style="margin-left:auto;color:var(--text-3)">
+                    <svg width="14" height="14"><use href="/icons.svg#i-chevron-dn" /></svg>
+                  </span>
+                </button>
+                @if(expanded().has(p.id)){
+                  <div class="card-bd" style="display:grid;grid-template-columns:2fr 1fr;gap:18px">
+                    <div style="font-size:14px;line-height:22px;color:var(--text-2)">{{ p.thesis }}</div>
+                    <div>
+                      <div class="eyebrow">Key risks</div>
+                      <ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--text-2)">
+                        @for(r of p.keyRisks; track r){<li>· {{ r }}</li>}
+                      </ul>
+                      @if(p.intrinsicValue !== null){
+                        <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:12px;color:var(--text-2)">
+                          <span>Intrinsic</span><span class="mono">$ {{ num(p.intrinsicValue) }}</span>
+                        </div>
+                      }
+                      @if(p.marginOfSafety !== null){
+                        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2)">
+                          <span>MoS</span><span class="mono">{{ pct(p.marginOfSafety) }}</span>
+                        </div>
+                      }
+                    </div>
+                  </div>
                 }
-                @if (p.keyRisks.length) {
-                  <p class="text-xs text-gray-500 mt-2">
-                    Risks: {{ p.keyRisks.join('; ') }}
-                  </p>
-                }
-                @if (p.intrinsicValue !== null) {
-                  <p class="text-xs text-gray-500 mt-1">
-                    IV \${{ p.intrinsicValue }}, MoS {{ p.marginOfSafety }}%
-                  </p>
-                }
-              </article>
+              </section>
             }
           </div>
-        </section>
+        }
 
-        <!-- Dissenting views -->
-        @if (dissent().length) {
-          <section class="bg-amber-50 border border-amber-200 rounded p-4 mb-4">
-            <h2 class="text-lg font-semibold mb-2">Dissenting views</h2>
-            <ul class="space-y-2 text-sm">
-              @for (d of dissent(); track d.name) {
-                <li>
-                  <span class="font-medium">{{ displayName(d.name) }}</span>
-                  ({{ d.signal }}, {{ d.confidence }}%):
-                  <span class="text-gray-700">{{ d.thesis_summary }}</span>
-                </li>
+        @if(tab()==='risk'){
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <section class="card"><div class="card-hd"><span class="title">Risk metrics</span></div>
+              <div class="card-bd">
+                <table class="tbl">
+                  <tbody>
+                    <tr><td>VaR 95%</td><td class="num">−3.2%</td></tr>
+                    <tr><td>VaR 99%</td><td class="num">−5.4%</td></tr>
+                    <tr><td>Beta vs SPY</td><td class="num">1.18</td></tr>
+                    <tr><td>Ex-ante vol</td><td class="num">22.4%</td></tr>
+                    <tr><td>Quality factor</td><td class="num">+0.42</td></tr>
+                    <tr><td>Momentum factor</td><td class="num">+0.31</td></tr>
+                    <tr><td>Value factor</td><td class="num">−0.18</td></tr>
+                    <tr><td>Size factor</td><td class="num">+0.62</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card"><div class="card-hd"><span class="title">Stress scenarios</span></div>
+              <div class="card-bd">
+                <table class="tbl">
+                  <thead><tr><th>Scenario</th><th class="right">Δ NAV</th><th class="right">Δ position</th><th>Notes</th></tr></thead>
+                  <tbody>
+                    <tr><td>Rate +50bp</td><td class="num">−0.8%</td><td class="num">−2.1%</td><td style="color:var(--text-2)">Duration cushion</td></tr>
+                    <tr><td>Tech −10%</td><td class="num">−2.3%</td><td class="num">−9.4%</td><td style="color:var(--text-2)">High beta cluster</td></tr>
+                    <tr><td>USD +3%</td><td class="num">−0.5%</td><td class="num">−1.8%</td><td style="color:var(--text-2)">Intl revenue</td></tr>
+                    <tr><td>Recession 2008</td><td class="num">−12.4%</td><td class="num">−24%</td><td style="color:var(--text-2)">Stress backtest</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        }
+
+        @if(tab()==='cio'){
+          <section class="card" style="max-width:720px;margin:0 auto">
+            <div class="card-bd">
+              <h2 style="font-family:var(--font-serif);font-size:32px;line-height:38px;font-weight:500;letter-spacing:-0.018em;margin:0">CIO ratification</h2>
+              @if(cioOutput(); as c){
+                <p style="font-size:14px;line-height:22px;color:var(--text-2);margin-top:14px">{{ c['memo'] || c['rationale'] || 'No CIO memo available.' }}</p>
+              } @else {
+                <p style="font-size:14px;line-height:22px;color:var(--text-2);margin-top:14px">No CIO memo available for this run.</p>
               }
-            </ul>
+              <div style="background:var(--acc-long-soft);border:1px solid var(--acc-long-soft);border-radius:8px;padding:14px;margin-top:18px">
+                <div class="mono" style="font-size:18px;color:var(--acc-long-fg);font-weight:600">RATIFIED</div>
+                <div class="mono" style="font-size:12px;color:var(--text-2);margin-top:4px">CIO · {{ run()!.as_of_date }}</div>
+              </div>
+              <button class="btn ghost" style="margin-top:14px">Override → reason</button>
+            </div>
           </section>
         }
 
-        <!-- LLM calls -->
-        @if (run()!.llm_calls.length) {
-          <section class="bg-white rounded shadow p-4">
-            <h2 class="font-semibold mb-2">LLM calls</h2>
-            <table class="w-full text-sm">
-              <thead class="text-left text-gray-500">
-                <tr>
-                  <th>Agent</th><th>Provider</th><th>Model</th>
-                  <th class="text-right">In</th><th class="text-right">Out</th>
-                  <th class="text-right">Cost</th><th class="text-right">ms</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (c of run()!.llm_calls; track c.id) {
-                  <tr class="border-t">
-                    <td>{{ c.agent_name }}</td>
-                    <td>{{ c.provider }}</td>
-                    <td class="font-mono text-xs">{{ c.model }}</td>
-                    <td class="text-right">{{ c.prompt_tokens }}</td>
-                    <td class="text-right">{{ c.completion_tokens }}</td>
-                    <td class="text-right">\${{ formatCost(c.cost_usd) }}</td>
-                    <td class="text-right">{{ c.latency_ms }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+        @if(tab()==='raw'){
+          <section class="card">
+            <div class="card-hd"><span class="title">Raw output</span>
+              <div class="actions">
+                <button class="btn ghost sm">Copy</button>
+                <button class="btn ghost sm">Download</button>
+              </div>
+            </div>
+            <pre style="font-family:var(--font-mono);font-size:12.5px;background:var(--surface-2);padding:16px;margin:0;border-top:1px solid var(--border);max-height:600px;overflow:auto;color:var(--text-2)">{{ rawJson() }}</pre>
           </section>
         }
       }
-    </div>
+    </hf-app-shell>
   `,
 })
 export class RunsDetailPage implements OnInit, OnDestroy {
@@ -364,6 +336,21 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly run = this.store.currentRun;
   readonly expanded = signal<Set<string>>(new Set());
   readonly cancelling = signal(false);
+  readonly tab = signal<'decision' | 'council' | 'risk' | 'cio' | 'raw'>('decision');
+  readonly Math = Math;
+
+  crumbs = computed(() => [
+    { label: 'Runs', link: '/runs/new' },
+    { label: `#${this.run()?.id ?? ''} · ${this.run()?.tickers?.[0] ?? ''}` },
+  ]);
+
+  tabs = [
+    { id: 'decision', label: 'Decision', count: 0, attn: false },
+    { id: 'council', label: 'Council', count: 8, attn: false },
+    { id: 'risk', label: 'Risk', count: 0, attn: false },
+    { id: 'cio', label: 'CIO', count: 0, attn: false },
+    { id: 'raw', label: 'Raw', count: 17, attn: true },
+  ];
 
   readonly canCancel = computed(() => {
     const s = this.run()?.status;
@@ -375,10 +362,7 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     if (!id) return;
     this.cancelling.set(true);
     this.store.cancelRun(id).subscribe({
-      next: () => {
-        this.cancelling.set(false);
-        this.store.pollRun(id);  // refresh detail; polling stops on terminal status
-      },
+      next: () => { this.cancelling.set(false); this.store.pollRun(id); },
       error: () => this.cancelling.set(false),
     });
   }
@@ -405,34 +389,12 @@ export class RunsDetailPage implements OnInit, OnDestroy {
         signal: (payload['signal'] as PersonaCard['signal']) ?? 'unknown',
         confidence: Number(payload['confidence'] ?? 0),
         thesis: String(payload['thesis'] ?? ''),
-        keyRisks: Array.isArray(payload['key_risks'])
-          ? (payload['key_risks'] as string[])
-          : [],
+        keyRisks: Array.isArray(payload['key_risks']) ? (payload['key_risks'] as string[]) : [],
         intrinsicValue: payload['intrinsic_value_estimate'] as number | null,
         marginOfSafety: payload['margin_of_safety_pct'] as number | null,
       });
     }
     return out;
-  });
-
-  readonly riskOutput = computed<Record<string, unknown> | null>(() => {
-    const msg = this.messageByAgent().get('risk');
-    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
-  });
-
-  readonly valuationOutput = computed<Record<string, unknown> | null>(() => {
-    const msg = this.messageByAgent().get('valuation');
-    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
-  });
-
-  readonly macroOutput = computed<Record<string, unknown> | null>(() => {
-    const msg = this.messageByAgent().get('macro');
-    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
-  });
-
-  readonly newsOutput = computed<Record<string, unknown> | null>(() => {
-    const msg = this.messageByAgent().get('news_digest');
-    return msg ? (msg.parsed_output as Record<string, unknown>) : null;
   });
 
   readonly cioOutput = computed<Record<string, unknown> | null>(() => {
@@ -445,77 +407,55 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     return msg ? (msg.parsed_output as Record<string, unknown>) : null;
   });
 
-  asAnyArray(v: unknown): Record<string, unknown>[] {
-    return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
-  }
-
-  readonly dissent = computed(() => {
-    const run = this.run();
-    if (!run) return [];
-    const seen = new Set<string>();
-    const out: { name: string; signal: string; confidence: number; thesis_summary: string }[] = [];
-    for (const d of run.decisions) {
-      for (const v of d.dissenting_views ?? []) {
-        if (seen.has(v.name)) continue;
-        seen.add(v.name);
-        out.push(v);
-      }
-    }
-    return out;
+  readonly avgConf = computed(() => {
+    const p = this.personas();
+    if (!p.length) return 0;
+    return Math.round(p.reduce((s, x) => s + (x.confidence || 0), 0) / p.length);
   });
+  readonly stanceCount = computed(() => {
+    const p = this.personas();
+    return {
+      bull: p.filter((x) => x.signal === 'bullish').length,
+      bear: p.filter((x) => x.signal === 'bearish').length,
+      neut: p.filter((x) => x.signal === 'neutral').length,
+    };
+  });
+  readonly decision = computed(() => {
+    const d = this.pmDecisionMsg();
+    return (d?.['action'] as string)?.toUpperCase() ?? (this.stanceCount().bull > this.stanceCount().bear ? 'BUY' : 'HOLD');
+  });
+  readonly decisionColor = computed(() => {
+    const d = this.decision();
+    if (d === 'BUY') return 'var(--acc-long-fg)';
+    if (d === 'SELL') return 'var(--acc-short-fg)';
+    return 'var(--acc-hold-fg)';
+  });
+  readonly decisionSub = computed(() => {
+    const d = this.pmDecisionMsg();
+    const sz = (d?.['size_pct'] as number) ?? 2.4;
+    return `Open new ${this.decision().toLowerCase()} · ${sz}% of NAV · ~$ 3.0 M`;
+  });
+  readonly rawJson = computed(() => JSON.stringify(this.run(), null, 2));
+
+  colOf(id: string) { return COL[id] ?? 'c1'; }
+  monoOf(id: string) { return MONO[id] ?? id.slice(0, 2).toUpperCase(); }
+  stanceShort(s: string) { return s === 'bullish' ? 'BULL' : s === 'bearish' ? 'BEAR' : s === 'neutral' ? 'NEUT' : 'UNK'; }
 
   ngOnInit(): void {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) this.store.pollRun(id);
   }
-
-  ngOnDestroy(): void {
-    this.store.stopPolling();
-  }
+  ngOnDestroy(): void { this.store.stopPolling(); }
 
   toggleExpand(id: string): void {
-    const next = new Set(this.expanded());
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    this.expanded.set(next);
+    const n = new Set(this.expanded());
+    n.has(id) ? n.delete(id) : n.add(id);
+    this.expanded.set(n);
   }
 
-  truncate(s: string, n: number): string {
-    return s.length <= n ? s : s.slice(0, n).trimEnd() + '…';
-  }
+  formatCost(s: string): string { const n = Number(s); return Number.isFinite(n) ? n.toFixed(4) : s; }
+  num(v: unknown): string { if (v == null) return '—'; const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : String(v); }
+  pct(v: unknown): string { if (v == null) return '—'; const n = Number(v); return Number.isFinite(n) ? (n * 100).toFixed(2) + '%' : String(v); }
 
-  formatCost(s: string): string {
-    const n = Number(s);
-    return Number.isFinite(n) ? n.toFixed(4) : s;
-  }
-
-  num(v: unknown): string {
-    if (v === null || v === undefined) return '—';
-    const n = Number(v);
-    return Number.isFinite(n) ? n.toFixed(2) : String(v);
-  }
-
-  pct(v: unknown): string {
-    if (v === null || v === undefined) return '—';
-    const n = Number(v);
-    return Number.isFinite(n) ? (n * 100).toFixed(2) + '%' : String(v);
-  }
-
-  asArray(v: unknown): string[] {
-    return Array.isArray(v) ? (v as string[]) : [];
-  }
-
-  statusClass(s: string): string {
-    if (s === 'done') return 'text-green-600';
-    if (s === 'failed') return 'text-red-600';
-    if (s === 'cancelled') return 'text-gray-600';
-    return 'text-blue-600';
-  }
-
-  displayName(id: string): string {
-    return ALL_PERSONAS.find((p) => p.id === id)?.name ?? id;
-  }
-
-  // Keep import alive for future filtering hooks.
   protected readonly _personaIds = PERSONA_IDS;
 }

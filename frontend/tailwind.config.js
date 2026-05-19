@@ -1,6 +1,55 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./src/**/*.{html,ts}'],
-  theme: { extend: {} },
+  darkMode: ['class', '[data-theme="dark"]'],
+  theme: {
+    extend: {
+      colors: {
+        bg: 'var(--bg)',
+        surface: 'var(--surface)',
+        'surface-2': 'var(--surface-2)',
+        'surface-3': 'var(--surface-3)',
+        text: 'var(--text)',
+        'text-2': 'var(--text-2)',
+        'text-3': 'var(--text-3)',
+        border: 'var(--border)',
+        'border-2': 'var(--border-2)',
+        long: 'var(--acc-long)',
+        short: 'var(--acc-short)',
+        hold: 'var(--acc-hold)',
+        info: 'var(--acc-info)',
+        danger: 'var(--acc-danger)',
+        chart: {
+          1: 'var(--c1)', 2: 'var(--c2)', 3: 'var(--c3)', 4: 'var(--c4)',
+          5: 'var(--c5)', 6: 'var(--c6)', 7: 'var(--c7)', 8: 'var(--c8)',
+        },
+      },
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+        mono: ['JetBrains Mono', 'ui-monospace'],
+        serif: ['Source Serif 4', 'Georgia', 'serif'],
+      },
+      fontSize: {
+        '2xs': ['12px', '16px'],
+        xs: ['13px', '18px'],
+        sm: ['14px', '20px'],
+        base: ['16px', '24px'],
+        lg: ['18px', '26px'],
+        xl: ['22px', '28px'],
+        '2xl': ['28px', '34px'],
+        '3xl': ['36px', '42px'],
+        '4xl': ['48px', '54px'],
+      },
+      borderRadius: { xs: '2px', sm: '4px', md: '6px', lg: '8px', xl: '12px' },
+      boxShadow: {
+        1: 'var(--shadow-1)',
+        2: 'var(--shadow-2)',
+        3: 'var(--shadow-3)',
+        focus: 'var(--focus-ring)',
+      },
+      transitionTimingFunction: { ui: 'cubic-bezier(0.2,0.7,0.2,1)' },
+      transitionDuration: { fast: '120ms', base: '180ms', chart: '600ms' },
+    },
+  },
   plugins: [],
 };
