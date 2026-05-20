@@ -109,6 +109,17 @@ class PortfolioStrategy(models.Model):
     # Screener weights (sliders). Higher = more weight in ranking.
     screener_weights = models.JSONField(default=dict, blank=True)
 
+    # Market-neutral (kind=market_neutral) parameters.
+    benchmark_ticker = models.CharField(max_length=16, default="SPY")
+    beta_window_days = models.SmallIntegerField(default=252)
+    neutrality_tolerance_dollar_pct = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.02")
+    )
+    neutrality_tolerance_beta = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.05")
+    )
+    drop_on_unreliable_beta = models.BooleanField(default=False)
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -162,6 +173,11 @@ class PortfolioTarget(models.Model):
     gross_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0"))
     net_pct = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0"))
     sector_exposure = models.JSONField(default=dict)
+    realised_net_pct = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0"))
+    realised_portfolio_beta = models.DecimalField(
+        max_digits=6, decimal_places=3, default=Decimal("0")
+    )
+    beta_diagnostics = models.JSONField(default=dict, blank=True)
     rejected_candidates = models.JSONField(default=list)
     decisions = models.JSONField(default=list)
     screener_ranking = models.ForeignKey(
@@ -190,6 +206,26 @@ class PortfolioTarget(models.Model):
 
     def __str__(self) -> str:
         return f"target s={self.strategy_id} {self.as_of_date} {self.status}"
+
+
+class BetaEstimate(models.Model):
+    """Rolling-window beta cache vs a benchmark (default SPY)."""
+    ticker = models.CharField(max_length=16, db_index=True)
+    benchmark = models.CharField(max_length=16, default="SPY", db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    window_days = models.SmallIntegerField(default=252)
+    beta = models.DecimalField(max_digits=6, decimal_places=3)
+    r_squared = models.DecimalField(max_digits=5, decimal_places=3)
+    n_observations = models.SmallIntegerField()
+    reliable = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("ticker", "benchmark", "as_of_date", "window_days")]
+        indexes = [models.Index(fields=["ticker", "as_of_date"])]
+
+    def __str__(self) -> str:
+        return f"β {self.ticker}/{self.benchmark}@{self.as_of_date} = {self.beta}"
 
 
 class RebalanceOrder(models.Model):

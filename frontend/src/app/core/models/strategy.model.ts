@@ -41,7 +41,7 @@ export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
   long_short:
     'Both sides, directional net. The portfolio holds both long and short positions and the net (longs − shorts) is whatever you set — long-biased, short-biased, or anywhere between. Classic hedge-fund construction; gross > net, so you get some idiosyncratic exposure with reduced market beta.',
   market_neutral:
-    'Both sides, net forced to 0. Longs and shorts are sized to cancel market exposure (target net = 0). Returns come from the long–short spread, not market direction. Highest gross/net ratio — most idiosyncratic, lowest market beta.',
+    'Both sides, dollar- AND beta-neutral. Longs and shorts are sized so that net dollars ≈ 0 and the dollar-weighted portfolio beta vs the benchmark (default SPY) ≈ 0. Returns come from the long–short spread, not from market direction. Uses a trailing 252-day OLS beta per name and a one-knob rescale to cancel the bucket betas after the standard caps.',
 };
 
 export interface Strategy {
@@ -65,6 +65,11 @@ export interface Strategy {
   min_trade_notional_usd: string;
   max_turnover_pct: string;
   screener_weights: Record<string, number>;
+  benchmark_ticker: string;
+  beta_window_days: number;
+  neutrality_tolerance_dollar_pct: string;
+  neutrality_tolerance_beta: string;
+  drop_on_unreliable_beta: boolean;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;
@@ -104,6 +109,8 @@ export interface CycleSummary {
   status: 'queued' | 'running' | 'done' | 'failed';
   gross_pct: string;
   net_pct: string;
+  realised_net_pct?: string;
+  realised_portfolio_beta?: string;
   total_cost_usd: string;
   created_at: string;
   finished_at: string | null;
@@ -111,6 +118,7 @@ export interface CycleSummary {
 
 export interface CycleDetail extends CycleSummary {
   target_weights: Record<string, number>;
+  beta_diagnostics?: Record<string, unknown>;
   sector_exposure: Record<string, number>;
   rejected_candidates: { ticker?: string; reason?: string; [k: string]: unknown }[];
   decisions: {

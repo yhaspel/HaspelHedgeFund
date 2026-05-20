@@ -11,6 +11,7 @@ Output:
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -172,4 +173,128 @@ def construct(
         net_pct=net_pct,
         sector_exposure=sector_exposure,
         rejected=rejected,
+    )
+
+
+@dataclass
+class NeutralResult:
+    target_weights: dict[str, float]
+    gross_pct: float
+    net_pct: float
+    sector_exposure: dict[str, float]
+    rejected: list[dict]
+    portfolio_beta: float
+    diagnostics: dict
+
+
+_ALPHA_MIN = 0.7
+_ALPHA_MAX = 1.4
+
+
+def _portfolio_beta(weights: dict[str, float], betas: dict[str, float]) -> float:
+    return sum(betas.get(t, 1.0) * w for t, w in weights.items())
+
+
+def _bucket_beta(weights: dict[str, float], betas: dict[str, float]) -> float:
+    return sum(betas.get(t, 1.0) * abs(w) for t, w in weights.items())
+
+
+def construct_market_neutral(
+    candidates: list[Candidate],
+    constraints: Constraints,
+    betas: dict[str, float],
+    *,
+    tol_dollar: float = 0.02,
+    tol_beta: float = 0.05,
+) -> NeutralResult:
+    """Dollar- and beta-neutral construction.
+
+    Step 1: build the long/short books with target_net_pct=0 so dollar-
+    neutral by construction.
+    Step 2: one-knob α ∈ [0.7, 1.4] rescale: longs ← α·longs, shorts ← shorts/α
+    so the weighted long-bucket beta and short-bucket beta cancel.
+    Step 3: re-apply per-name + sector caps. One repeat at most.
+    """
+    forced = Constraints(
+        target_gross_pct=constraints.target_gross_pct,
+        target_net_pct=0.0,
+        max_position_pct=constraints.max_position_pct,
+        max_sector_pct=constraints.max_sector_pct,
+        min_position_pct=constraints.min_position_pct,
+    )
+    base = construct(candidates, forced)
+
+    weights = dict(base.target_weights)
+    longs = {t: w for t, w in weights.items() if w > 0}
+    shorts = {t: w for t, w in weights.items() if w < 0}
+
+    diagnostics: dict = {"alpha_clamped": False, "iterations": 0, "unreliable": []}
+
+    def _rescale(longs_in: dict, shorts_in: dict) -> tuple[dict, dict, float]:
+        # bL = Σ β_i · |w_i| on longs (since w_i > 0). bS likewise on shorts.
+        bL = _bucket_beta(longs_in, betas)
+        bS = _bucket_beta(shorts_in, betas)
+        if bL <= 0 or bS <= 0:
+            return longs_in, shorts_in, 1.0
+        # Solve α·bL = bS/α  →  α = sqrt(bS / bL).
+        alpha = math.sqrt(bS / bL)
+        clamped = False
+        if alpha < _ALPHA_MIN:
+            alpha = _ALPHA_MIN
+            clamped = True
+        elif alpha > _ALPHA_MAX:
+            alpha = _ALPHA_MAX
+            clamped = True
+        if clamped:
+            diagnostics["alpha_clamped"] = True
+        new_longs = {t: w * alpha for t, w in longs_in.items()}
+        new_shorts = {t: w / alpha for t, w in shorts_in.items()}
+        return new_longs, new_shorts, alpha
+
+    sector_of = {c.ticker: c.sector for c in candidates}
+
+    for iteration in range(2):
+        diagnostics["iterations"] = iteration + 1
+        if not longs or not shorts:
+            break
+        longs, shorts, _alpha = _rescale(longs, shorts)
+        merged = {**longs, **shorts}
+        merged = _apply_per_name_cap(merged, constraints.max_position_pct)
+        merged, _notes = _apply_sector_cap(merged, sector_of, constraints.max_sector_pct)
+        longs = {t: w for t, w in merged.items() if w > 0}
+        shorts = {t: w for t, w in merged.items() if w < 0}
+        net_d = abs(sum(merged.values()))
+        port_beta = _portfolio_beta(merged, betas)
+        if net_d <= tol_dollar and abs(port_beta) <= tol_beta:
+            break
+
+    weights = {**longs, **shorts}
+    weights = {t: w for t, w in weights.items() if abs(w) >= constraints.min_position_pct}
+
+    sector_exposure: dict[str, float] = {}
+    for t, w in weights.items():
+        s = sector_of.get(t, "")
+        sector_exposure[s] = sector_exposure.get(s, 0.0) + w
+
+    gross_pct = sum(abs(w) for w in weights.values())
+    net_pct = sum(weights.values())
+    port_beta = _portfolio_beta(weights, betas)
+
+    rejected = list(base.rejected)
+    if abs(net_pct) > tol_dollar or abs(port_beta) > tol_beta:
+        rejected.append({
+            "reason": "neutrality_partial_breach",
+            "residual_net_pct": round(net_pct, 6),
+            "residual_portfolio_beta": round(port_beta, 4),
+            "alpha_clamped": diagnostics["alpha_clamped"],
+        })
+
+    return NeutralResult(
+        target_weights=weights,
+        gross_pct=gross_pct,
+        net_pct=net_pct,
+        sector_exposure=sector_exposure,
+        rejected=rejected,
+        portfolio_beta=port_beta,
+        diagnostics=diagnostics,
     )

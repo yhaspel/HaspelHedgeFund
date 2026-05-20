@@ -147,6 +147,25 @@ import { CycleDetail } from '../../core/models/strategy.model';
                 </span>
               </div>
             </div>
+            @if (store.currentStrategy()?.kind === 'market_neutral') {
+              <div class="card-bd" style="display:flex;gap:14px;align-items:center;border-top:1px solid var(--border);padding-top:10px">
+                <span class="eyebrow">Neutrality</span>
+                <span class="mono" [style.color]="netNeutral(c) ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                  net $ {{ c.realised_net_pct || c.net_pct | number: '1.4-4' }}
+                </span>
+                <span class="mono" [style.color]="betaNeutral(c) ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                  β {{ c.realised_portfolio_beta | number: '1.3-3' }}
+                </span>
+                @if (c.beta_diagnostics?.['alpha_clamped']) {
+                  <span class="mono" style="color:var(--acc-short-fg);font-size:11.5px">⚠ α clamped — partial breach</span>
+                }
+                @if (unreliable(c).length) {
+                  <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                    unreliable β: {{ unreliable(c).join(', ') }}
+                  </span>
+                }
+              </div>
+            }
             <div class="card-bd" style="display:flex;flex-direction:column;gap:18px">
               @if (c.error_message) {
                 <p style="color:var(--acc-short-fg);font-size:12px;margin:0">{{ c.error_message }}</p>
@@ -305,6 +324,18 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       .filter(([, w]) => Number(w) < 0)
       .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
       .sort((a, b) => a.weight - b.weight);
+  }
+  netNeutral(c: CycleDetail): boolean {
+    const tol = Number(this.store.currentStrategy()?.neutrality_tolerance_dollar_pct ?? 0.02);
+    return Math.abs(Number(c.realised_net_pct ?? c.net_pct)) <= tol;
+  }
+  unreliable(c: CycleDetail): string[] {
+    const u = (c.beta_diagnostics as Record<string, unknown> | undefined)?.['unreliable'];
+    return Array.isArray(u) ? (u as string[]) : [];
+  }
+  betaNeutral(c: CycleDetail): boolean {
+    const tol = Number(this.store.currentStrategy()?.neutrality_tolerance_beta ?? 0.05);
+    return Math.abs(Number(c.realised_portfolio_beta ?? 0)) <= tol;
   }
   sectorRows() {
     const c = this.cycle(); if (!c) return [];

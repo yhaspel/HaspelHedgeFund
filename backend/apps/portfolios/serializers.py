@@ -60,7 +60,11 @@ class StrategySerializer(serializers.ModelSerializer):
             "top_k_longs", "top_k_shorts",
             "personas", "model_preset", "cost_ceiling_per_cycle_usd",
             "min_trade_notional_usd", "max_turnover_pct",
-            "screener_weights", "is_active", "last_run_at", "created_at",
+            "screener_weights",
+            "benchmark_ticker", "beta_window_days",
+            "neutrality_tolerance_dollar_pct", "neutrality_tolerance_beta",
+            "drop_on_unreliable_beta",
+            "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
 
@@ -96,6 +100,7 @@ class PortfolioTargetSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = PortfolioTarget
         fields = ("id", "as_of_date", "status", "gross_pct", "net_pct",
+                  "realised_net_pct", "realised_portfolio_beta",
                   "total_cost_usd", "created_at", "finished_at")
 
 
@@ -107,7 +112,9 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
         model = PortfolioTarget
         fields = (
             "id", "as_of_date", "status",
-            "target_weights", "gross_pct", "net_pct", "sector_exposure",
+            "target_weights", "gross_pct", "net_pct",
+            "realised_net_pct", "realised_portfolio_beta", "beta_diagnostics",
+            "sector_exposure",
             "rejected_candidates", "decisions",
             "screener_ranking", "orders",
             "total_cost_usd", "error_message",

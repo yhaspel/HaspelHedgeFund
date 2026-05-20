@@ -207,18 +207,20 @@ def _locate_section(
         "char_count": end - start,
     }
 
-    @staticmethod
-    def load_section(record: FilingRecord, section: str) -> str:
-        info = (record.section_index or {}).get(section)
-        if not info or not record.full_text_path:
-            return ""
-        path = os.path.join(settings.MEDIA_ROOT, record.full_text_path)
-        try:
-            with open(path, encoding="utf-8") as f:
-                full = f.read()
-        except OSError:
-            return ""
-        return full[info["start"]: info["end"]]
+def _load_section(record: FilingRecord, section: str) -> str:
+    info = (record.section_index or {}).get(section)
+    if not info or not record.full_text_path:
+        return ""
+    path = os.path.join(settings.MEDIA_ROOT, record.full_text_path)
+    try:
+        with open(path, encoding="utf-8") as f:
+            full = f.read()
+    except OSError:
+        return ""
+    return full[info["start"]: info["end"]]
+
+
+EdgarProvider.load_section = staticmethod(_load_section)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")

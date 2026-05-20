@@ -32,8 +32,9 @@ from hedgefund_agents.graphs.council import build_council_graph
 from hedgefund_agents.registry import get_data_provider, get_filings_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 
+from .beta import compute_betas_for
 from .borrow import StubBorrowProvider
-from .construction import Candidate, Constraints, construct
+from .construction import Candidate, Constraints, construct, construct_market_neutral
 from .models import (
     PortfolioStrategy,
     PortfolioTarget,
@@ -235,13 +236,56 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
             veto_reason=veto_reason,
         ))
 
-    result = construct(cands, Constraints(
+    constraints = Constraints(
         target_gross_pct=float(strategy.target_gross_pct),
         target_net_pct=float(strategy.target_net_pct),
         max_position_pct=float(strategy.max_position_pct),
         max_sector_pct=float(strategy.max_sector_pct),
         min_position_pct=float(strategy.min_position_pct),
-    ))
+    )
+
+    portfolio_beta = 0.0
+    beta_diagnostics: dict = {}
+    if strategy.kind == PortfolioStrategy.KIND_MARKET_NEUTRAL:
+        data_provider = get_data_provider()
+        survivors = [c.ticker for c in cands if c.veto_reason is None]
+        betas_full = compute_betas_for(
+            survivors,
+            benchmark=strategy.benchmark_ticker,
+            as_of=as_of,
+            window_days=int(strategy.beta_window_days),
+            data_provider=data_provider,
+        )
+        beta_map: dict[str, float] = {}
+        unreliable: list[str] = []
+        for t, br in betas_full.items():
+            if not br.reliable:
+                unreliable.append(t)
+                if strategy.drop_on_unreliable_beta:
+                    for c in cands:
+                        if c.ticker == t and c.veto_reason is None:
+                            c.veto_reason = "beta_unreliable"
+                    continue
+                beta_map[t] = 1.0
+            else:
+                beta_map[t] = br.beta
+
+        neutral = construct_market_neutral(
+            cands, constraints, beta_map,
+            tol_dollar=float(strategy.neutrality_tolerance_dollar_pct),
+            tol_beta=float(strategy.neutrality_tolerance_beta),
+        )
+        beta_diagnostics = {
+            **neutral.diagnostics,
+            "unreliable": unreliable,
+            "benchmark": strategy.benchmark_ticker,
+            "window_days": int(strategy.beta_window_days),
+            "n_betas": len(beta_map),
+        }
+        portfolio_beta = neutral.portfolio_beta
+        result = neutral
+    else:
+        result = construct(cands, constraints)
 
     # Pull last close per ticker for the rebalancer.
     data_provider = get_data_provider()
@@ -300,6 +344,9 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.target_weights = {t: round(w, 6) for t, w in result.target_weights.items()}
     target.gross_pct = Decimal(str(round(result.gross_pct, 4)))
     target.net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.realised_portfolio_beta = Decimal(str(round(portfolio_beta, 3)))
+    target.beta_diagnostics = beta_diagnostics
     target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
     target.rejected_candidates = result.rejected
     target.decisions = council_results
