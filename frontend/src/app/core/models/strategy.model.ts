@@ -30,7 +30,8 @@ export type StrategyKind =
   | 'long_short'
   | 'market_neutral'
   | 'concentrated_long'
-  | 'sector_rotation';
+  | 'sector_rotation'
+  | 'global_macro';
 
 export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'long_only', label: 'Long-only' },
@@ -39,6 +40,7 @@ export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'market_neutral', label: 'Market-neutral' },
   { value: 'concentrated_long', label: 'Concentrated long-only' },
   { value: 'sector_rotation', label: 'Sector / thematic ETF rotation' },
+  { value: 'global_macro', label: 'Global macro (ETF expression)' },
 ];
 
 export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
@@ -52,6 +54,8 @@ export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
     'Both sides, dollar- AND beta-neutral. Longs and shorts are sized so that net dollars ≈ 0 and the dollar-weighted portfolio beta vs the benchmark (default SPY) ≈ 0. Returns come from the long–short spread, not from market direction. Uses a trailing 252-day OLS beta per name and a one-knob rescale to cancel the bucket betas after the standard caps.',
   concentrated_long:
     'Activist-style concentrated long-only book: 5–15 high-conviction names, no shorts, larger per-position sizes (typically 5–25% each). A candidate must clear a higher aggregate-confidence bar than a diversified book; if fewer names clear the bar than min_positions, no new target is emitted and the existing book is held (cash beats a 4th-best idea). Sector caps are loose by default because concentration is the point.',
+  global_macro:
+    'Top-down macro allocation across ~14 cross-asset ETFs (equity SPY/QQQ, rates TLT/IEF/SHY, inflation TIP/GLD/DBC, USD UUP/UDN, EM EEM) plus their inverse counterparts (SH, PSQ, TBT) for bearish expressions — no borrow needed. Druckenmiller-style: the Macro agent\'s regime classification (P2b) drives candidate selection deterministically; the council then ratifies. Asset-class caps replace sector caps; conflicting long/inverse pairs on the same underlying (e.g. SPY + SH) are netted to the higher-confidence side. The universe picker should be swapped to the `macro_etfs` universe.',
   sector_rotation:
     'Top-down rotation across sector / thematic ETFs (SPDR sectors + themes like SOXX, ARKK, GDX, KWEB). Council fan-out is per-sector not per-name; the screener ranks ETFs by relative momentum vs SPY, drawdown, and regime-fit (dot product of the P2b macro regime vector with each ETF\'s hand-curated affinities). Long-only by default. Overlapping ETFs (e.g. XLK + SOXX) are de-duped via a holdings-overlap penalty. The universe picker should be swapped to the `sector_etfs` universe; per_etf_cap and max_etfs_held replace single-name max_position_pct.',
 };
@@ -90,6 +94,9 @@ export interface Strategy {
   per_etf_min_pct: string;
   use_sector_council_v2: boolean;
   bearish_veto_threshold: string;
+  asset_class_caps?: Record<string, number>;
+  prefer_inverse_etf_over_short?: boolean;
+  max_inverse_etf_hold_days?: number;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;

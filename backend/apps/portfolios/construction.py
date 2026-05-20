@@ -435,6 +435,158 @@ def construct_sector_rotation(
 
 
 @dataclass
+class GlobalMacroResult:
+    target_weights: dict[str, float]
+    gross_pct: float
+    net_pct: float
+    sector_exposure: dict[str, float]      # by asset_class (re-labelled for UI reuse)
+    asset_class_exposure: dict[str, float]
+    rejected: list[dict]
+    netted_pairs: list[dict]
+
+
+DEFAULT_ASSET_CLASS_CAPS: dict[str, float] = {
+    "equity": 0.50, "rates": 0.50, "commodity": 0.30,
+    "fx_proxy": 0.20, "em": 0.20, "inflation": 0.30,
+}
+
+
+def construct_global_macro(
+    candidates: list[Candidate],
+    *,
+    target_gross_pct: float = 1.00,
+    per_etf_max_pct: float = 0.30,
+    per_etf_min_pct: float = 0.05,
+    max_etfs_held: int = 8,
+    asset_class_caps: dict[str, float] | None = None,
+    asset_class_of: dict[str, str] | None = None,
+    inverse_of: dict[str, str] | None = None,
+) -> GlobalMacroResult:
+    """Long-only macro-ETF allocation.
+
+    candidate.sector is repurposed to carry asset_class; the optional
+    `asset_class_of` map overrides per-ticker when supplied. inverse_of
+    maps an inverse ETF (e.g. SH) → its underlying (SPY) for netting.
+
+    Steps:
+      1. PM action whitelist: only `buy` survives.
+      2. Net conflicting long/inverse positions on the same underlying:
+         keep the higher-confidence side; log the other.
+      3. Per-ETF cap + min-floor + per-position-count ceiling.
+      4. Per-asset-class cap with proportional scale-down.
+    """
+    asset_class_caps = {**DEFAULT_ASSET_CLASS_CAPS, **(asset_class_caps or {})}
+    asset_class_of = asset_class_of or {}
+    inverse_of = inverse_of or {}
+
+    rejected: list[dict] = []
+    survivors: list[Candidate] = []
+    for c in candidates:
+        if c.action in {"open_short", "cover_short"} or c.side == "short":
+            raise PMActionWhitelistError(
+                f"global_macro cannot accept {c.action!r} on {c.ticker} "
+                f"(inverse ETFs are bought, not shorted)"
+            )
+        if c.veto_reason:
+            rejected.append({"ticker": c.ticker, "reason": c.veto_reason})
+            continue
+        if c.action != "buy":
+            rejected.append({"ticker": c.ticker, "reason": f"action={c.action}"})
+            continue
+        survivors.append(c)
+
+    # Step 2: Long/inverse netting. underlying → list of (candidate, is_inverse).
+    netted_pairs: list[dict] = []
+    underlying_groups: dict[str, list[tuple[Candidate, bool]]] = {}
+    for c in survivors:
+        und = inverse_of.get(c.ticker, "") or c.ticker
+        is_inv = bool(inverse_of.get(c.ticker))
+        underlying_groups.setdefault(und, []).append((c, is_inv))
+    deduped: list[Candidate] = []
+    for und, members in underlying_groups.items():
+        has_long = any(not inv for _, inv in members)
+        has_inv = any(inv for _, inv in members)
+        if has_long and has_inv:
+            # Conflict: keep the higher-confidence direction.
+            best = max(members, key=lambda x: x[0].confidence * x[0].quality_weight)
+            for c, _inv in members:
+                if c.ticker != best[0].ticker:
+                    netted_pairs.append({"dropped": c.ticker, "kept": best[0].ticker,
+                                         "underlying": und})
+                    rejected.append({"ticker": c.ticker,
+                                     "reason": f"netted_against_{best[0].ticker}"})
+            deduped.append(best[0])
+        else:
+            for c, _inv in members:
+                deduped.append(c)
+
+    deduped.sort(key=lambda c: c.confidence * c.quality_weight, reverse=True)
+    if per_etf_min_pct > 0:
+        floor_cap = int(target_gross_pct / per_etf_min_pct)
+        max_etfs_held = min(max_etfs_held, max(1, floor_cap))
+    deduped = deduped[:max_etfs_held]
+
+    if not deduped:
+        return GlobalMacroResult(
+            target_weights={}, gross_pct=0.0, net_pct=0.0,
+            sector_exposure={}, asset_class_exposure={},
+            rejected=rejected, netted_pairs=netted_pairs,
+        )
+
+    weights = _bucket_weights(deduped, target_gross_pct)
+    weights = _apply_per_name_cap(weights, per_etf_max_pct)
+
+    # Per-asset-class cap: scale down each class proportionally if it breaches.
+    ac_of = {c.ticker: (asset_class_of.get(c.ticker) or c.sector or "") for c in deduped}
+    by_class: dict[str, float] = {}
+    for t, w in weights.items():
+        by_class[ac_of.get(t, "")] = by_class.get(ac_of.get(t, ""), 0.0) + abs(w)
+    for ac, total in list(by_class.items()):
+        cap = asset_class_caps.get(ac)
+        if cap is not None and total > cap + 1e-9:
+            scale = cap / total
+            for t in list(weights.keys()):
+                if ac_of.get(t, "") == ac:
+                    weights[t] *= scale
+            rejected.append({"reason": "asset_class_scaled", "asset_class": ac,
+                             "scaled_from": round(total, 4), "to": round(cap, 4)})
+
+    # Floor enforcement.
+    if per_etf_min_pct > 0 and weights:
+        below = {t: w for t, w in weights.items() if 0 < w < per_etf_min_pct}
+        if below:
+            extra = sum(per_etf_min_pct - w for w in below.values())
+            for t in below:
+                weights[t] = per_etf_min_pct
+            donors = {t: w for t, w in weights.items()
+                      if w > per_etf_min_pct and t not in below}
+            donor_total = sum(donors.values())
+            if donor_total > extra:
+                for t in donors:
+                    share = (donors[t] / donor_total) * extra
+                    weights[t] = max(per_etf_min_pct, weights[t] - share)
+
+    asset_class_exposure: dict[str, float] = {}
+    for t, w in weights.items():
+        ac = ac_of.get(t, "")
+        asset_class_exposure[ac] = asset_class_exposure.get(ac, 0.0) + w
+
+    gross_pct = sum(abs(w) for w in weights.values())
+    net_pct = sum(weights.values())
+
+    return GlobalMacroResult(
+        target_weights=weights,
+        gross_pct=gross_pct,
+        net_pct=net_pct,
+        # Reuse sector_exposure JSON for the UI heat-map; here it tracks asset class.
+        sector_exposure=dict(asset_class_exposure),
+        asset_class_exposure=asset_class_exposure,
+        rejected=rejected,
+        netted_pairs=netted_pairs,
+    )
+
+
+@dataclass
 class NeutralResult:
     target_weights: dict[str, float]
     gross_pct: float

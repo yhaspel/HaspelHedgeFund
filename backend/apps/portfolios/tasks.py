@@ -40,6 +40,7 @@ from .construction import (
     Constraints,
     construct,
     construct_concentrated_long,
+    construct_global_macro,
     construct_market_neutral,
     construct_sector_rotation,
 )
@@ -268,7 +269,64 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     beta_diagnostics: dict = {}
     cycle_outcome = "target_created"
     per_position_thesis: dict[str, dict] = {}
-    if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
+    if strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO:
+        from .models import MacroETF, MacroRegimeSnapshot
+        from apps.data.models import MacroSnapshot
+        etf_rows = {e.ticker: e for e in MacroETF.objects.filter(is_active=True)}
+        asset_class_of = {t: e.asset_class for t, e in etf_rows.items()}
+        inverse_of = {t: e.inverse_of for t, e in etf_rows.items() if e.inverse_of}
+        result = construct_global_macro(
+            cands,
+            target_gross_pct=float(strategy.target_gross_pct),
+            per_etf_max_pct=float(strategy.per_etf_max_pct),
+            per_etf_min_pct=float(strategy.per_etf_min_pct),
+            max_etfs_held=int(strategy.max_etfs_held),
+            asset_class_caps=strategy.asset_class_caps or None,
+            asset_class_of=asset_class_of,
+            inverse_of=inverse_of,
+        )
+        cycle_outcome = "target_created" if result.target_weights else "held_existing_book"
+        for r in council_results:
+            t = r["ticker"]
+            if t in result.target_weights:
+                decision = r.get("decision") or {}
+                rationale = str(decision.get("rationale") or "").strip()
+                per_position_thesis[t] = {
+                    "ticker": t,
+                    "sector": asset_class_of.get(t, r.get("sector", "")),
+                    "action": decision.get("action", ""),
+                    "aggregate_confidence": int(decision.get("aggregate_confidence", 0)),
+                    "thesis": rationale[:2000],
+                }
+        # Snapshot the regime that drove this cycle (audit trail).
+        snap = (
+            MacroSnapshot.objects.filter(as_of_date__lte=as_of).order_by("-as_of_date").first()
+        )
+        from hedgefund_agents.screener.sector_features import macro_regime_vector
+        regime_vec = macro_regime_vector(snap)
+        MacroRegimeSnapshot.objects.update_or_create(
+            strategy=strategy, as_of_date=as_of,
+            defaults={
+                "growth_score": regime_vec.get("early_cycle", 0.0) + regime_vec.get("mid_cycle", 0.0)
+                - regime_vec.get("recession", 0.0),
+                "inflation_score": regime_vec.get("sticky_inflation", 0.0),
+                "policy_stance": (snap.policy_stance if snap else "neutral"),
+                "yield_curve_state": (snap.yield_curve_state if snap else "flat"),
+                "risk_on_score": regime_vec.get("early_cycle", 0.0) - regime_vec.get("recession", 0.0),
+                "regime_vector": regime_vec,
+                "source_macro_snapshot_id": (snap.id if snap else None),
+                "raw": {
+                    "growth_quadrant": (snap.growth_quadrant if snap else ""),
+                    "inflation_regime": (snap.inflation_regime if snap else ""),
+                },
+            },
+        )
+        beta_diagnostics = {
+            "netted_pairs": result.netted_pairs,
+            "asset_class_exposure": result.asset_class_exposure,
+            "regime_vector": regime_vec,
+        }
+    elif strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
         result = construct_sector_rotation(
             cands,
             target_gross_pct=float(strategy.target_gross_pct),
@@ -469,8 +527,36 @@ def daily_long_short_cycle(
             PortfolioStrategy.KIND_LONG_ONLY,
             PortfolioStrategy.KIND_CONCENTRATED_LONG,
             PortfolioStrategy.KIND_SECTOR_ROTATION,
+            PortfolioStrategy.KIND_GLOBAL_MACRO,
         )
-        if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
+        if strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO:
+            from apps.data.models import MacroSnapshot
+
+            from .models import MacroETF
+            etf_rows = {e.ticker: e for e in MacroETF.objects.filter(is_active=True)}
+            etfs_payload = []
+            for ticker, sector in members:
+                row = etf_rows.get(ticker)
+                etfs_payload.append({
+                    "ticker": ticker,
+                    "sector": (row.asset_class if row else sector),
+                    "theme": (row.direction if row else ""),
+                    "affinities": row.regime_affinities if row else {},
+                })
+            snapshot = (
+                MacroSnapshot.objects.filter(as_of_date__lte=as_of)
+                .order_by("-as_of_date").first()
+            )
+            regime_vec = macro_regime_vector(snapshot)
+            screener_out = run_sector_screener(
+                etfs=etfs_payload,
+                as_of_date=as_of,
+                top_k=int(strategy.max_etfs_held) + 4,
+                benchmark="SPY",
+                regime_vector=regime_vec,
+                weights=strategy.screener_weights or None,
+            )
+        elif strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
             from apps.data.models import MacroSnapshot
 
             from .models import SectorETF
@@ -560,10 +646,13 @@ def daily_long_short_cycle(
     #   (a) explicit opt-in on a sector_rotation strategy (P2h v2), OR
     #   (b) an ETF-only universe regardless of strategy.kind (e.g. L/S on
     #       sector_etfs — the user intends ETF rotation with shorts).
-    from .models import SectorETF
+    from .models import MacroETF, SectorETF
     universe_tickers = [t for t, _ in members]
     etf_tickers = set(
         SectorETF.objects.filter(ticker__in=universe_tickers, is_active=True)
+        .values_list("ticker", flat=True)
+    ) | set(
+        MacroETF.objects.filter(ticker__in=universe_tickers, is_active=True)
         .values_list("ticker", flat=True)
     )
     is_etf_universe = (
@@ -573,7 +662,7 @@ def daily_long_short_cycle(
     use_sector_graph = is_etf_universe or (
         strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION
         and bool(getattr(strategy, "use_sector_council_v2", False))
-    )
+    ) or strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO
 
     if use_sector_graph:
         # Default macro-trio if the user didn't pick personas. Name-centric
@@ -615,7 +704,10 @@ def daily_long_short_cycle(
             "side": (
                 "sector"
                 if (use_sector_graph
-                    and strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION)
+                    and strategy.kind in (
+                        PortfolioStrategy.KIND_SECTOR_ROTATION,
+                        PortfolioStrategy.KIND_GLOBAL_MACRO,
+                    ))
                 else "long"
             ),
             "borrow_veto": False,

@@ -74,6 +74,7 @@ class PortfolioStrategy(models.Model):
     KIND_MARKET_NEUTRAL = "market_neutral"
     KIND_CONCENTRATED_LONG = "concentrated_long"
     KIND_SECTOR_ROTATION = "sector_rotation"
+    KIND_GLOBAL_MACRO = "global_macro"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
@@ -81,6 +82,7 @@ class PortfolioStrategy(models.Model):
         (KIND_MARKET_NEUTRAL, "Market-neutral"),
         (KIND_CONCENTRATED_LONG, "Concentrated long-only"),
         (KIND_SECTOR_ROTATION, "Sector / thematic ETF rotation"),
+        (KIND_GLOBAL_MACRO, "Global macro (ETF expression)"),
     ]
 
     user = models.ForeignKey(
@@ -145,6 +147,11 @@ class PortfolioStrategy(models.Model):
         max_digits=4, decimal_places=3, default=Decimal("0.700")
     )
 
+    # Global macro (kind=global_macro) parameters.
+    asset_class_caps = models.JSONField(default=dict, blank=True)
+    prefer_inverse_etf_over_short = models.BooleanField(default=True)
+    max_inverse_etf_hold_days = models.SmallIntegerField(default=14)
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -170,6 +177,61 @@ class SectorETF(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ticker} ({self.sector})"
+
+
+class MacroETF(models.Model):
+    """Registry of investable macro-expression ETFs (P2i).
+
+    asset_class ∈ {equity, rates, inflation, commodity, fx_proxy, em}
+    direction   ∈ {long, inverse}
+    affinities are encoded on the same 6 axes as SectorETF for reuse with
+    the existing macro_regime_vector helper.
+    """
+    ASSET_CLASS_CHOICES = [
+        ("equity", "Equity"),
+        ("rates", "Rates"),
+        ("inflation", "Inflation"),
+        ("commodity", "Commodity"),
+        ("fx_proxy", "FX proxy"),
+        ("em", "Emerging markets"),
+    ]
+    ticker = models.CharField(max_length=16, unique=True)
+    asset_class = models.CharField(max_length=16, choices=ASSET_CLASS_CHOICES)
+    direction = models.CharField(max_length=8, default="long")
+    inverse_of = models.CharField(max_length=16, blank=True, default="")
+    duration_years = models.FloatField(null=True, blank=True)
+    issuer = models.CharField(max_length=32, default="")
+    expense_ratio_bps = models.SmallIntegerField(default=10)
+    is_active = models.BooleanField(default=True)
+    regime_affinities = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True, default="")
+    tracking_note = models.TextField(blank=True, default="")
+
+    def __str__(self) -> str:
+        return f"{self.ticker} ({self.asset_class}/{self.direction})"
+
+
+class MacroRegimeSnapshot(models.Model):
+    """Frozen view of the macro regime that drove a given cycle (P2i)."""
+    strategy = models.ForeignKey(
+        PortfolioStrategy, related_name="macro_regime_snapshots", on_delete=models.CASCADE
+    )
+    as_of_date = models.DateField(db_index=True)
+    growth_score = models.FloatField(default=0.0)
+    inflation_score = models.FloatField(default=0.0)
+    policy_stance = models.CharField(max_length=16, default="neutral")
+    yield_curve_state = models.CharField(max_length=16, default="flat")
+    risk_on_score = models.FloatField(default=0.0)
+    regime_vector = models.JSONField(default=dict, blank=True)
+    source_macro_snapshot_id = models.IntegerField(null=True, blank=True)
+    raw = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("strategy", "as_of_date")]
+
+    def __str__(self) -> str:
+        return f"regime s={self.strategy_id} {self.as_of_date}"
 
 
 class BorrowQuote(models.Model):

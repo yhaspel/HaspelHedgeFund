@@ -208,6 +208,114 @@ def seed_sector_etf_universe(sender=None, **kwargs):
         UniverseMembership.objects.bulk_create(new)
 
 
+# Macro-expression ETF registry (P2i). Affinities use the same 6-axis encoding
+# as SectorETF so the existing macro_regime_vector helper works unchanged.
+# Axes: early_cycle, mid_cycle, late_cycle, recession, rising_rates, sticky_inflation.
+MACRO_ETF_REGISTRY: list[dict] = [
+    # Equity (broad US)
+    {"ticker": "SPY", "asset_class": "equity", "direction": "long", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.8, "mid_cycle": 0.7, "late_cycle": 0.0,
+                    "recession": -0.7, "rising_rates": -0.2, "sticky_inflation": -0.2}},
+    {"ticker": "QQQ", "asset_class": "equity", "direction": "long", "issuer": "Invesco",
+     "affinities": {"early_cycle": 0.9, "mid_cycle": 0.6, "late_cycle": -0.2,
+                    "recession": -0.7, "rising_rates": -0.6, "sticky_inflation": -0.4}},
+    # Inverse equity (no borrow needed)
+    {"ticker": "SH", "asset_class": "equity", "direction": "inverse", "inverse_of": "SPY",
+     "issuer": "ProShares",
+     "affinities": {"early_cycle": -0.8, "mid_cycle": -0.7, "late_cycle": 0.0,
+                    "recession": 0.7, "rising_rates": 0.2, "sticky_inflation": 0.2},
+     "tracking_note": "Daily-reset inverse ETF; multi-day decay drag."},
+    {"ticker": "PSQ", "asset_class": "equity", "direction": "inverse", "inverse_of": "QQQ",
+     "issuer": "ProShares",
+     "affinities": {"early_cycle": -0.9, "mid_cycle": -0.6, "late_cycle": 0.2,
+                    "recession": 0.7, "rising_rates": 0.6, "sticky_inflation": 0.4},
+     "tracking_note": "Daily-reset inverse ETF; multi-day decay drag."},
+    # Rates / duration
+    {"ticker": "TLT", "asset_class": "rates", "direction": "long", "duration_years": 20.0,
+     "issuer": "iShares",
+     "affinities": {"early_cycle": -0.1, "mid_cycle": -0.2, "late_cycle": 0.4,
+                    "recession": 0.8, "rising_rates": -0.9, "sticky_inflation": -0.5},
+     "tracking_note": "Proxy for 20y+ Treasuries; credit-spread and liquidity drag vs underlying."},
+    {"ticker": "IEF", "asset_class": "rates", "direction": "long", "duration_years": 8.0,
+     "issuer": "iShares",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": -0.1, "late_cycle": 0.3,
+                    "recession": 0.6, "rising_rates": -0.7, "sticky_inflation": -0.4}},
+    {"ticker": "SHY", "asset_class": "rates", "direction": "long", "duration_years": 2.0,
+     "issuer": "iShares",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": 0.0, "late_cycle": 0.1,
+                    "recession": 0.3, "rising_rates": -0.2, "sticky_inflation": -0.1}},
+    {"ticker": "TBT", "asset_class": "rates", "direction": "inverse", "inverse_of": "TLT",
+     "issuer": "ProShares",
+     "affinities": {"early_cycle": 0.1, "mid_cycle": 0.2, "late_cycle": -0.4,
+                    "recession": -0.8, "rising_rates": 0.9, "sticky_inflation": 0.5},
+     "tracking_note": "Daily-reset inverse + 2x leveraged; aggressive decay."},
+    # Inflation hedges
+    {"ticker": "TIP", "asset_class": "inflation", "direction": "long", "issuer": "iShares",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": 0.1, "late_cycle": 0.3,
+                    "recession": 0.0, "rising_rates": -0.4, "sticky_inflation": 0.7}},
+    {"ticker": "GLD", "asset_class": "commodity", "direction": "long", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": 0.0, "late_cycle": 0.3,
+                    "recession": 0.5, "rising_rates": -0.4, "sticky_inflation": 0.8}},
+    {"ticker": "DBC", "asset_class": "commodity", "direction": "long", "issuer": "Invesco",
+     "affinities": {"early_cycle": 0.1, "mid_cycle": 0.4, "late_cycle": 0.6,
+                    "recession": -0.3, "rising_rates": 0.2, "sticky_inflation": 0.8}},
+    # FX proxies
+    {"ticker": "UUP", "asset_class": "fx_proxy", "direction": "long", "issuer": "Invesco",
+     "affinities": {"early_cycle": -0.1, "mid_cycle": 0.0, "late_cycle": 0.3,
+                    "recession": 0.4, "rising_rates": 0.7, "sticky_inflation": 0.2},
+     "tracking_note": "USD Bullish basket; not a true FX position."},
+    {"ticker": "UDN", "asset_class": "fx_proxy", "direction": "long", "issuer": "Invesco",
+     "affinities": {"early_cycle": 0.1, "mid_cycle": 0.0, "late_cycle": -0.3,
+                    "recession": -0.4, "rising_rates": -0.7, "sticky_inflation": -0.2},
+     "tracking_note": "USD Bearish basket."},
+    # EM
+    {"ticker": "EEM", "asset_class": "em", "direction": "long", "issuer": "iShares",
+     "affinities": {"early_cycle": 0.7, "mid_cycle": 0.5, "late_cycle": -0.1,
+                    "recession": -0.7, "rising_rates": -0.5, "sticky_inflation": 0.0}},
+]
+
+
+def seed_macro_etf_universe(sender=None, **kwargs):
+    from .models import MacroETF, Universe, UniverseMembership
+    for entry in MACRO_ETF_REGISTRY:
+        MacroETF.objects.update_or_create(
+            ticker=entry["ticker"],
+            defaults={
+                "asset_class": entry["asset_class"],
+                "direction": entry.get("direction", "long"),
+                "inverse_of": entry.get("inverse_of", ""),
+                "duration_years": entry.get("duration_years"),
+                "issuer": entry.get("issuer", ""),
+                "regime_affinities": entry["affinities"],
+                "tracking_note": entry.get("tracking_note", ""),
+                "is_active": True,
+            },
+        )
+    universe, _ = Universe.objects.get_or_create(
+        name="macro_etfs",
+        defaults={
+            "description": "Curated macro-expression ETFs for global-macro strategies.",
+            "source": "manual",
+            "is_active": True,
+        },
+    )
+    effective = date(2018, 1, 1)
+    existing = set(
+        UniverseMembership.objects.filter(universe=universe).values_list("ticker", flat=True)
+    )
+    new = []
+    for entry in MACRO_ETF_REGISTRY:
+        if entry["ticker"] in existing:
+            continue
+        new.append(UniverseMembership(
+            universe=universe, ticker=entry["ticker"],
+            sector=entry["asset_class"],
+            effective_from=effective, effective_to=None,
+        ))
+    if new:
+        UniverseMembership.objects.bulk_create(new)
+
+
 def seed_default_universe(sender=None, **kwargs):
     from .models import Universe, UniverseMembership
     universe, _ = Universe.objects.get_or_create(
@@ -234,3 +342,4 @@ def seed_default_universe(sender=None, **kwargs):
     if new:
         UniverseMembership.objects.bulk_create(new)
     seed_sector_etf_universe(sender=sender)
+    seed_macro_etf_universe(sender=sender)

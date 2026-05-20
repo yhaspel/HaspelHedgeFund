@@ -67,6 +67,8 @@ class StrategySerializer(serializers.ModelSerializer):
             "max_positions", "min_positions", "min_aggregate_confidence",
             "max_etfs_held", "per_etf_max_pct", "per_etf_min_pct",
             "use_sector_council_v2", "bearish_veto_threshold",
+            "asset_class_caps", "prefer_inverse_etf_over_short",
+            "max_inverse_etf_hold_days",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")

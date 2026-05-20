@@ -111,7 +111,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="ms" type="number" step="0.05" min="0.05" max="0.60" [(ngModel)]="maxSector" />
             </div>
-            @if (kind === 'sector_rotation') {
+            @if (kind === 'sector_rotation' || kind === 'global_macro') {
               <div class="field">
                 <label class="lbl">
                   Max ETFs held
@@ -171,7 +171,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="minC" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="minAggregateConfidence" />
               </div>
             }
-            @if (kind !== 'short_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation') {
+            @if (kind !== 'short_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro') {
               <div class="field">
                 <label class="lbl">
                   Top K longs
@@ -180,7 +180,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="kl" type="number" min="1" max="50" [(ngModel)]="topLongs" />
               </div>
             }
-            @if (kind !== 'long_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation') {
+            @if (kind !== 'long_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro') {
               <div class="field">
                 <label class="lbl">
                   Top K shorts
@@ -316,6 +316,7 @@ export class StrategiesNewPage implements OnInit {
     market_neutral: this.ALL_PERSONAS,
     concentrated_long: this.ALL_PERSONAS,
     sector_rotation: ['druckenmiller', 'damodaran', 'burry'],
+    global_macro: ['druckenmiller', 'damodaran', 'burry'],
   };
   selectedPersonas: string[] = [...this.ALL_PERSONAS];
 
@@ -355,6 +356,18 @@ export class StrategiesNewPage implements OnInit {
       this.maxSector = 1.0;
       const sectorUni = this.store.universes().find((u) => u.name === 'sector_etfs');
       if (sectorUni) this.universe = sectorUni.id;
+    } else if (k === 'global_macro') {
+      this.topLongs = 0;
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.maxPosition = 0.30;
+      this.maxSector = 1.0;
+      this.maxEtfsHeld = 8;
+      this.perEtfMax = 0.30;
+      this.perEtfMin = 0.05;
+      const macroUni = this.store.universes().find((u) => u.name === 'macro_etfs');
+      if (macroUni) this.universe = macroUni.id;
     }
     this.selectedPersonas = [...this.RECOMMENDED_PERSONAS[k]];
   }
@@ -417,6 +430,12 @@ export class StrategiesNewPage implements OnInit {
       payload['per_etf_max_pct'] = String(this.perEtfMax);
       payload['per_etf_min_pct'] = String(this.perEtfMin);
       payload['use_sector_council_v2'] = this.useSectorCouncilV2;
+      payload['bearish_veto_threshold'] = String(this.bearishVetoThreshold);
+    }
+    if (this.kind === 'global_macro') {
+      payload['max_etfs_held'] = this.maxEtfsHeld;
+      payload['per_etf_max_pct'] = String(this.perEtfMax);
+      payload['per_etf_min_pct'] = String(this.perEtfMin);
       payload['bearish_veto_threshold'] = String(this.bearishVetoThreshold);
     }
     this.store.create(payload as any).subscribe({
