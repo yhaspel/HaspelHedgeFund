@@ -10,6 +10,7 @@ import {
 } from 'chart.js';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { ENTRY_ANIMATION, baseLegend, personaColorById, readChartTheme } from '../shared/chart-defaults';
 
 Chart.register(
   LineController, LineElement, PointElement, CategoryScale, LinearScale,
@@ -184,6 +185,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     const canvas = this.equityCanvas?.nativeElement;
     if (!canvas || points.length === 0) return;
     this.equityChartInstance?.destroy();
+    const t = readChartTheme();
     const cfg: ChartConfiguration = {
       type: 'line',
       data: {
@@ -192,24 +194,25 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
           {
             label: 'Portfolio (OOS stitched)',
             data: points.map((p) => p.portfolio_value),
-            borderColor: '#5B8DEF',
-            backgroundColor: 'rgba(91,141,239,0.08)',
+            borderColor: t.info,
+            backgroundColor: t.info + '14',
             tension: 0.1, pointRadius: 0, borderWidth: 1.4,
           },
           {
             label: 'Baseline',
             data: points.map((p) => p.baseline ?? null),
-            borderColor: '#5C6470', borderDash: [5, 5],
+            borderColor: t.axis, borderDash: [5, 5],
             tension: 0.1, pointRadius: 0, borderWidth: 1,
           },
         ],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { color: '#9BA3AF', font: { size: 11 } } } },
+        animation: ENTRY_ANIMATION,
+        plugins: { legend: baseLegend(t) },
         scales: {
-          x: { display: false, grid: { color: '#1A1F28' } },
-          y: { grid: { color: '#1A1F28' }, ticks: { color: '#5C6470', font: { family: 'JetBrains Mono', size: 10 } } },
+          x: { display: false, grid: { color: t.grid } },
+          y: { grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
         },
       },
     };
@@ -221,21 +224,23 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     const canvas = this.deflationCanvas?.nativeElement;
     if (!canvas || !d || d.per_fold.length === 0) return;
     this.deflationChartInstance?.destroy();
+    const t = readChartTheme();
     const cfg: ChartConfiguration = {
       type: 'scatter',
       data: {
         datasets: [{
           label: 'Folds (IS vs OOS Sharpe)',
           data: d.per_fold.map((p) => ({ x: p.is_sharpe, y: p.oos_sharpe })),
-          backgroundColor: '#5B8DEF',
+          backgroundColor: t.info,
         }],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { color: '#9BA3AF', font: { size: 11 } } } },
+        animation: ENTRY_ANIMATION,
+        plugins: { legend: baseLegend(t) },
         scales: {
-          x: { title: { display: true, text: 'IS Sharpe', color: '#5C6470' }, grid: { color: '#1A1F28' }, ticks: { color: '#5C6470', font: { family: 'JetBrains Mono', size: 10 } } },
-          y: { title: { display: true, text: 'OOS Sharpe', color: '#5C6470' }, grid: { color: '#1A1F28' }, ticks: { color: '#5C6470', font: { family: 'JetBrains Mono', size: 10 } } },
+          x: { title: { display: true, text: 'IS Sharpe', color: t.axis }, grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
+          y: { title: { display: true, text: 'OOS Sharpe', color: t.axis }, grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
         },
       },
     };
@@ -250,6 +255,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     const labels = Object.keys(attr);
     if (labels.length === 0) return;
     this.attributionChartInstance?.destroy();
+    const t = readChartTheme();
     const cfg: ChartConfiguration = {
       type: 'bar',
       data: {
@@ -257,15 +263,21 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
         datasets: [{
           label: 'PnL delta if agent neutralized',
           data: labels.map((l) => attr[l]),
-          backgroundColor: labels.map((l) => (attr[l] >= 0 ? '#16A974' : '#E5484D')),
+          backgroundColor: labels.map((l) => {
+            const v = attr[l];
+            if (v === 0) return t.axis;
+            const personaColor = personaColorById(l);
+            return v >= 0 ? personaColor : t.short;
+          }),
         }],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        animation: ENTRY_ANIMATION,
         plugins: { legend: { display: false } },
         scales: {
-          x: { ticks: { color: '#5C6470', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#1A1F28' } },
-          y: { title: { display: true, text: 'USD', color: '#5C6470' }, grid: { color: '#1A1F28' }, ticks: { color: '#5C6470', font: { family: 'JetBrains Mono', size: 10 } } },
+          x: { ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: t.grid } },
+          y: { title: { display: true, text: 'USD', color: t.axis }, grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
         },
       },
     };

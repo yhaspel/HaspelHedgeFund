@@ -4,6 +4,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { RunsStore } from '../../abstraction/runs.store';
 import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
+import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 
 interface PersonaCard {
   id: string;
@@ -20,7 +21,7 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
@@ -88,14 +89,19 @@ interface PersonaCard {
                   <h2 style="font-size:18px;font-weight:600;margin:0">
                     Final order ticket: {{ d.action.toUpperCase() }} {{ d.ticker }}
                   </h2>
-                  <div style="font-size:12px;color:var(--text-3);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                    <span>Confidence {{ d.confidence }}</span>
+                  <div style="font-size:12px;color:var(--text-3);margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                     @if (d.risk_overrides.veto) {
                       <span class="pill err"><span class="dot"></span>RISK VETO</span>
                     }
                     @if (cioOutput()?.['overrode_pm']) {
                       <span class="pill warn"><span class="dot"></span>CIO OVERRIDE</span>
                     }
+                  </div>
+                  <div style="margin-top:10px;max-width:280px">
+                    <hf-confidence-meter
+                      [value]="d.confidence"
+                      [tone]="d.action === 'buy' ? 'buy' : d.action === 'sell' ? 'sell' : 'hold'"
+                      [counts]="stanceCounts()" />
                   </div>
                 </div>
                 <div style="text-align:right;font-size:13px">
@@ -437,6 +443,15 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   asAnyArray(v: unknown): Record<string, unknown>[] {
     return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
   }
+
+  readonly stanceCounts = computed(() => {
+    const cards = this.personas();
+    return {
+      bull: cards.filter((p) => p.signal === 'bullish').length,
+      bear: cards.filter((p) => p.signal === 'bearish').length,
+      neutral: cards.filter((p) => p.signal === 'neutral').length,
+    };
+  });
 
   readonly dissent = computed(() => {
     const run = this.run();
