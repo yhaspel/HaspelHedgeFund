@@ -425,12 +425,14 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
     target.rejected_candidates = result.rejected
     target.decisions = council_results
-    if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
-        target.sector_veto_log = [
-            r["sector_veto_entry"]
-            for r in council_results
-            if r.get("sector_veto_entry")
-        ]
+    # Persist sector council diagnostics whenever the sector graph ran —
+    # i.e. for any candidate whose council emitted a sector_veto_entry,
+    # not just kind=sector_rotation (L/S on ETFs auto-routes through it too).
+    sector_entries = [
+        r["sector_veto_entry"] for r in council_results if r.get("sector_veto_entry")
+    ]
+    if sector_entries:
+        target.sector_veto_log = sector_entries
     target.status = "done"
     target.finished_at = timezone.now()
     target.save()
@@ -551,7 +553,38 @@ def daily_long_short_cycle(
     user_id = strategy.user_id
     target_id = target.pk
 
-    # Borrow quotes for short side.
+    # ETF-universe auto-routing. If the universe is ETF-majority, the equity
+    # council fails (EDGAR has no CIK, fundamentals empty) → route every
+    # candidate (long AND short) through the slim sector council instead, and
+    # apply the symmetric council-as-veto rule in the PM. Triggered by either:
+    #   (a) explicit opt-in on a sector_rotation strategy (P2h v2), OR
+    #   (b) an ETF-only universe regardless of strategy.kind (e.g. L/S on
+    #       sector_etfs — the user intends ETF rotation with shorts).
+    from .models import SectorETF
+    universe_tickers = [t for t, _ in members]
+    etf_tickers = set(
+        SectorETF.objects.filter(ticker__in=universe_tickers, is_active=True)
+        .values_list("ticker", flat=True)
+    )
+    is_etf_universe = (
+        len(universe_tickers) > 0
+        and len(etf_tickers) >= len(universe_tickers) * 0.8
+    )
+    use_sector_graph = is_etf_universe or (
+        strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION
+        and bool(getattr(strategy, "use_sector_council_v2", False))
+    )
+
+    if use_sector_graph:
+        # Default macro-trio if the user didn't pick personas. Name-centric
+        # value personas (Buffett, Graham, Lynch) aren't a good fit for ETFs.
+        personas_for_run = strategy.personas or ["druckenmiller", "damodaran", "burry"]
+    else:
+        personas_for_run = strategy.personas or None
+    bearish_veto_threshold = float(getattr(strategy, "bearish_veto_threshold", 0.70))
+
+    # Borrow quotes for short side (also looked up in ETF mode — synthetics
+    # mark most ETFs as locatable but a few inverse/leveraged ones may not be).
     borrow = StubBorrowProvider()
     short_payloads = []
     for c in short_cands:
@@ -560,37 +593,36 @@ def daily_long_short_cycle(
         short_payloads.append({
             "ticker": c["ticker"],
             "sector": c.get("sector", ""),
+            "theme": c.get("theme", ""),
             "side": "short",
             "borrow_veto": (not info.is_locatable),
             "as_of_date": as_of.isoformat(),
             "model_overrides": overrides,
-            "personas": strategy.personas or None,
+            "personas": personas_for_run,
+            "flavor": "sector_rotation" if use_sector_graph else "",
+            "bearish_veto_threshold": bearish_veto_threshold,
             "portfolio_target_id": target_id,
             "user_id": user_id,
         })
-    # P2h council-v2: opt-in flag flips behaviour for sector_rotation strategies.
-    use_sector_v2 = (
-        strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION
-        and bool(getattr(strategy, "use_sector_council_v2", False))
-    )
-    if use_sector_v2:
-        # Default macro-trio if user hasn't picked personas explicitly.
-        personas_for_run = strategy.personas or ["druckenmiller", "damodaran", "burry"]
-    else:
-        personas_for_run = strategy.personas or None
-    bearish_veto_threshold = float(getattr(strategy, "bearish_veto_threshold", 0.70))
 
     long_payloads = [
         {
             "ticker": c["ticker"],
             "sector": c.get("sector", ""),
             "theme": c.get("theme", ""),
-            "side": "sector" if use_sector_v2 else "long",
+            # Keep "long" for L/S+ETF so the L/S constructor signs the weight
+            # correctly. Only pure sector_rotation flavor uses "sector".
+            "side": (
+                "sector"
+                if (use_sector_graph
+                    and strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION)
+                else "long"
+            ),
             "borrow_veto": False,
             "as_of_date": as_of.isoformat(),
             "model_overrides": overrides,
             "personas": personas_for_run,
-            "flavor": "sector_rotation" if use_sector_v2 else "",
+            "flavor": "sector_rotation" if use_sector_graph else "",
             "bearish_veto_threshold": bearish_veto_threshold,
             "portfolio_target_id": target_id,
             "user_id": user_id,

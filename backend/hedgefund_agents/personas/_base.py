@@ -52,9 +52,16 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             )
             system_prompt = _sector_context_prefix() + "\n\n---\n\n" + spec.prompt
         else:
-            filings = state["filings_provider"].get_recent_filings(
-                ticker, as_of=as_of, form_types=["10-K", "10-Q"], limit=2
-            )
+            # Filings are best-effort. Some providers (EDGAR) raise LookupError
+            # for tickers without a CIK (e.g. ETFs accidentally screened by an
+            # equity strategy). Treat any failure as "no filings available" and
+            # let the persona reason on the rest of the inputs.
+            try:
+                filings = state["filings_provider"].get_recent_filings(
+                    ticker, as_of=as_of, form_types=["10-K", "10-Q"], limit=2
+                )
+            except Exception:
+                filings = []
             filing_block = (
                 "\n\n".join(
                     f"### {f.form_type} filed {f.filed_at.isoformat()} "

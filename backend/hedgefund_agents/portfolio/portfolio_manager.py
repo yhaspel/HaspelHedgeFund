@@ -210,11 +210,15 @@ def aggregate(
         action = "hold"
 
     # Sector-rotation v2: screener-led / council-as-veto override. The screener
-    # already pre-selected this ETF, so the council can only block. Default to
-    # buy unless any persona votes bearish at >= bearish_veto_threshold OR RM
-    # has vetoed. Neutral votes do not block.
+    # already pre-selected this candidate, so the council can only block.
+    # Long side  → default buy, vetoed by bearish persona ≥ threshold.
+    # Short side → default open_short, vetoed by bullish persona ≥ threshold
+    #              (or borrow_veto). Symmetric rule used when an L/S strategy
+    #              auto-routes to the sector council because its universe is
+    #              ETFs (see tasks.py daily_long_short_cycle).
     if cfg.get("flavor") == "sector_rotation":
         threshold_int = int(round(float(cfg["bearish_veto_threshold"]) * 100))
+        opposing = "bullish" if short_side else "bearish"
         blockers = [
             {
                 "persona": name,
@@ -222,10 +226,14 @@ def aggregate(
                 "confidence": int(p.get("confidence", 0)),
             }
             for name, p in persona_outputs.items()
-            if p.get("signal") == "bearish"
+            if p.get("signal") == opposing
             and int(p.get("confidence", 0)) >= threshold_int
         ]
-        action = "hold" if (veto or blockers) else "buy"
+        blocked = veto or blockers or (short_side and borrow_veto)
+        if blocked:
+            action = "hold"
+        else:
+            action = "open_short" if short_side else "buy"
 
     target_weight = compute_target_weight(
         signed, action, agg_conf, cap, cfg, trailing_returns
@@ -272,10 +280,17 @@ def build_sector_veto_entry(
     persona_outputs: dict[str, dict],
     risk: dict[str, Any],
     threshold: float,
+    *,
+    short_side: bool = False,
 ) -> dict[str, Any]:
-    """Diagnostic record explaining why a sector_rotation ETF was kept or
-    vetoed by the council layer. Stored on PortfolioTarget.sector_veto_log."""
+    """Diagnostic record explaining why a screener-picked candidate was kept
+    or vetoed by the council. Stored on PortfolioTarget.sector_veto_log.
+
+    For long-side picks the opposing signal is bearish; for short-side picks
+    (L/S on an ETF universe), the opposing signal is bullish.
+    """
     threshold_int = int(round(threshold * 100))
+    opposing = "bullish" if short_side else "bearish"
     blockers = [
         {
             "persona": name,
@@ -283,15 +298,20 @@ def build_sector_veto_entry(
             "confidence": int(p.get("confidence", 0)),
         }
         for name, p in persona_outputs.items()
-        if p.get("signal") == "bearish"
+        if p.get("signal") == opposing
         and int(p.get("confidence", 0)) >= threshold_int
     ]
     rm_veto = bool(risk.get("veto"))
+    borrow_veto = bool(risk.get("borrow_veto")) and short_side
+    blocked = rm_veto or borrow_veto or bool(blockers)
+    kept_action = "short" if short_side else "buy"
     return {
         "ticker": ticker,
-        "decision": "veto" if (rm_veto or blockers) else "buy",
+        "side": "short" if short_side else "long",
+        "decision": "veto" if blocked else kept_action,
         "reasons": blockers,
         "rm_veto": rm_veto,
+        "borrow_veto": borrow_veto,
         "threshold_pct": threshold_int,
     }
 
@@ -319,6 +339,10 @@ def run_portfolio_manager(state: AgentState) -> AgentState:
     if pm_config.get("flavor") == "sector_rotation":
         threshold = float(pm_config.get("bearish_veto_threshold", 0.70))
         update["sector_veto_entry"] = build_sector_veto_entry(
-            ticker, persona_outputs, state.get("risk") or {}, threshold
+            ticker,
+            persona_outputs,
+            state.get("risk") or {},
+            threshold,
+            short_side=bool(pm_config.get("short_side", False)),
         )
     return update  # type: ignore[return-value]

@@ -150,3 +150,92 @@ def test_sector_council_default_personas():
     g = build_sector_council_graph()
     node_names = set(g.get_graph().nodes.keys())
     assert {"druckenmiller", "damodaran", "burry"}.issubset(node_names)
+
+
+# --- L/S on ETF universe: symmetric short-side veto rule ------------------
+
+
+def _aggregate_short_sector(persona_outputs, risk=None, threshold=0.70):
+    """PM call with sector_rotation flavor + short_side=True (L/S on ETFs)."""
+    return aggregate(
+        ticker="XLK",
+        persona_outputs=persona_outputs,
+        risk=risk or {},
+        valuation={},
+        pm_config={
+            "flavor": "sector_rotation",
+            "bearish_veto_threshold": threshold,
+            "buy_threshold": 0.10,
+            "sell_threshold": -0.10,
+            "short_side": True,
+        },
+        trailing_returns=None,
+        portfolio_value=100_000.0,
+    )
+
+
+def test_short_side_neutral_yields_open_short():
+    """Screener picked XLK as a short; council all-neutral → open_short."""
+    out = _aggregate_short_sector({
+        "druckenmiller": _persona("neutral", 50),
+        "damodaran": _persona("neutral", 55),
+        "burry": _persona("neutral", 60),
+    })
+    assert out.action == "open_short"
+
+
+def test_short_side_bullish_veto_blocks():
+    """A persona bullish ≥ threshold blocks a screener-picked short."""
+    out = _aggregate_short_sector({
+        "druckenmiller": _persona("bullish", 85),  # blocks
+        "damodaran": _persona("neutral", 55),
+        "burry": _persona("bearish", 70),  # agrees with short — not a blocker
+    })
+    assert out.action == "hold"
+
+
+def test_short_side_borrow_veto_blocks():
+    """Borrow veto forces hold even with no opposing persona."""
+    out = _aggregate_short_sector(
+        {"druckenmiller": _persona("neutral", 50)},
+        risk={"borrow_veto": True},
+    )
+    assert out.action == "hold"
+
+
+def test_short_side_bearish_does_not_block():
+    """Bearish votes agree with the short thesis — must not block."""
+    out = _aggregate_short_sector({
+        "druckenmiller": _persona("bearish", 90),
+        "damodaran": _persona("bearish", 80),
+        "burry": _persona("bearish", 95),
+    })
+    assert out.action == "open_short"
+
+
+def test_build_sector_veto_entry_short_side():
+    entry = build_sector_veto_entry(
+        "XLE",
+        {"druckenmiller": _persona("bullish", 80)},
+        risk={},
+        threshold=0.70,
+        short_side=True,
+    )
+    assert entry["side"] == "short"
+    assert entry["decision"] == "veto"
+    assert entry["reasons"][0]["persona"] == "druckenmiller"
+    assert entry["borrow_veto"] is False
+
+
+def test_build_sector_veto_entry_short_kept():
+    """Short with all-bearish persona votes is kept (decision='short')."""
+    entry = build_sector_veto_entry(
+        "XLE",
+        {"druckenmiller": _persona("bearish", 70)},
+        risk={},
+        threshold=0.70,
+        short_side=True,
+    )
+    assert entry["side"] == "short"
+    assert entry["decision"] == "short"
+    assert entry["reasons"] == []
