@@ -1,5 +1,5 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
-import { CommonModule, DecimalPipe } from '@angular/common';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
@@ -8,187 +8,251 @@ import { CycleDetail } from '../../core/models/strategy.model';
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, DecimalPipe, AppShellComponent],
+  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
-      @if(store.currentStrategy(); as s){
-        <div class="page-head">
-          <div>
-            <div class="eyebrow">Strategy · {{ s.kind || 'L/S' }}</div>
-            <h1 style="margin-top:6px">{{ s.name }}</h1>
-            <div class="meta-strip">
-              <div class="meta"><div class="k">Universe</div><div class="v">{{ s.universe_name }}</div></div>
-              <div class="meta"><div class="k">Top-k</div><div class="v">{{ s.top_k_longs }} L · {{ s.top_k_shorts }} S</div></div>
-              <div class="meta"><div class="k">Gross / Net</div><div class="v">{{ s.target_gross_pct }} · {{ s.target_net_pct }}</div></div>
-              <div class="meta"><div class="k">Preset</div><div class="v">{{ s.model_preset }}</div></div>
-            </div>
-          </div>
-          <div class="head-actions">
-            <button class="btn">Edit</button>
-            <button class="btn">Backtest</button>
-            <button class="btn primary" (click)="openEstimate()" [disabled]="running() || estimating()" data-test="run-now">
-              @if(running()){Dispatching…}@else if(estimating()){Estimating…}@else{Run cycle now}
-            </button>
-          </div>
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Strategy</div>
+          <h1 style="margin-top:6px">{{ store.currentStrategy()?.name ?? 'Strategy' }}</h1>
+          <p style="font-size:13px;color:var(--text-2);margin-top:4px">
+            Universe {{ store.currentStrategy()?.universe_name }} ·
+            Gross {{ store.currentStrategy()?.target_gross_pct }} ·
+            Net {{ store.currentStrategy()?.target_net_pct }} ·
+            K {{ store.currentStrategy()?.top_k_longs }}L / {{ store.currentStrategy()?.top_k_shorts }}S
+          </p>
         </div>
-
-        @if(notice()){
-          <div class="pill warn" style="margin-bottom:14px"><span class="dot"></span>{{ notice() }}</div>
-        }
-
-        <!-- KPI row -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px">
-          <div class="kpi"><div class="k">MTD return</div><div class="v" style="color:var(--acc-long-fg)">+2.8%</div><div class="d up">vs SPY +1.4%</div></div>
-          <div class="kpi"><div class="k">YTD return</div><div class="v" style="color:var(--acc-long-fg)">+18.4%</div><div class="d up">vs SPY +9.2%</div></div>
-          <div class="kpi"><div class="k">Sharpe (live)</div><div class="v">1.74</div><div class="d">90d rolling</div></div>
-          <div class="kpi"><div class="k">Max DD (90d)</div><div class="v" style="color:var(--acc-short-fg)">−4.1%</div><div class="d">vs SPY −5.6%</div></div>
+        <div class="head-actions">
+          <button class="btn primary" (click)="openEstimate()" [disabled]="running() || estimating()" data-test="run-now">
+            {{ running() ? 'Dispatching…' : estimating() ? 'Estimating…' : 'Run cycle now' }}
+          </button>
+          <a class="btn ghost" routerLink="/strategies">All strategies</a>
         </div>
+      </div>
 
-        @if(cycle(); as c){
-          <!-- Book grid -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px">
-            <section class="card">
-              <div class="card-hd">
-                <span class="title">Long book</span>
-                <span class="pill ok"><span class="dot"></span>{{ longs().length }} names · gross {{ longGross() | number:'1.1-1' }}%</span>
-              </div>
-              <table class="tbl">
-                <thead><tr><th>#</th><th>Ticker</th><th class="right">Score</th><th>Weight</th><th class="right">P&amp;L</th></tr></thead>
-                <tbody>
-                  @for(r of longs(); track r.ticker; let i = $index){
-                    <tr>
-                      <td class="mono">{{ i+1 }}</td>
-                      <td class="mono" style="color:var(--text)">{{ r.ticker }}</td>
-                      <td class="num">{{ scoreOf(r.ticker) }}</td>
-                      <td>
-                        <div style="background:var(--surface-2);height:8px;border-radius:2px;width:72px;overflow:hidden;display:inline-block;vertical-align:middle">
-                          <div style="height:100%;background:var(--acc-long)" [style.width.%]="Math.min(100, r.weight * 12)"></div>
-                        </div>
-                        <span class="mono" style="font-size:11px;color:var(--text-3);margin-left:6px">{{ r.weight | number:'1.2-2' }}%</span>
-                      </td>
-                      <td class="num"><span class="delta up">▲ +{{ pnlOf(r.ticker) }}%</span></td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </section>
+      @if (estimate(); as est) {
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:16px"
+             (click)="cancelEstimate()">
+          <div class="card" style="max-width:640px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-3)"
+               (click)="$event.stopPropagation()">
+            <div class="card-hd"><span class="title">Confirm cycle dispatch</span></div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+              <p style="font-size:11.5px;color:var(--text-3);margin:0">
+                Preset <span class="mono" style="color:var(--text)">{{ est.preset }}</span> ·
+                {{ est.n_candidates }} candidates · full council per candidate
+              </p>
 
-            <section class="card">
-              <div class="card-hd">
-                <span class="title">Short book</span>
-                <span class="pill err"><span class="dot"></span>{{ shorts().length }} names · gross {{ shortGross() | number:'1.1-1' }}%</span>
-              </div>
-              <table class="tbl">
-                <thead><tr><th>#</th><th>Ticker</th><th class="right">Score</th><th>Weight</th><th class="right">P&amp;L</th></tr></thead>
-                <tbody>
-                  @for(r of shorts(); track r.ticker; let i = $index){
-                    <tr>
-                      <td class="mono">{{ i+1 }}</td>
-                      <td class="mono" style="color:var(--text)">{{ r.ticker }}</td>
-                      <td class="num">{{ scoreOf(r.ticker) }}</td>
-                      <td>
-                        <div style="background:var(--surface-2);height:8px;border-radius:2px;width:72px;overflow:hidden;display:inline-block;vertical-align:middle">
-                          <div style="height:100%;background:var(--acc-short)" [style.width.%]="Math.min(100, Math.abs(r.weight) * 12)"></div>
-                        </div>
-                        <span class="mono" style="font-size:11px;color:var(--text-3);margin-left:6px">{{ Math.abs(r.weight) | number:'1.2-2' }}%</span>
-                      </td>
-                      <td class="num"><span class="delta down">▼ −{{ pnlOf(r.ticker) }}%</span></td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </section>
-          </div>
-
-          <section class="card" style="margin-bottom:18px">
-            <div class="card-hd"><span class="title">Sector exposure</span></div>
-            <div class="card-bd">
-              <table class="tbl">
-                <thead><tr><th>Sector</th><th class="right">Signed weight</th></tr></thead>
-                <tbody>
-                  @for(r of sectorRows(); track r.sector){
-                    <tr>
-                      <td>{{ r.sector || '—' }}</td>
-                      <td class="num" [style.color]="r.weight>0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
-                        {{ r.weight>0 ? '+' : '' }}{{ r.weight | number:'1.2-2' }}%
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="card" style="margin-bottom:18px">
-            <div class="card-hd">
-              <span class="title">Screener weights</span>
-              <div class="actions"><button class="btn ghost sm">Reset to default</button></div>
-            </div>
-            <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px 28px">
-              @for(w of screenerWeights; track w.k){
-                <div>
-                  <div style="display:flex;justify-content:space-between;font-size:12px">
-                    <span style="color:var(--text-2)">{{ w.k }}</span>
-                    <span class="mono" [style.color]="w.v>0 ? 'var(--acc-long-fg)' : w.v<0 ? 'var(--acc-short-fg)' : 'var(--text-3)'">
-                      {{ w.v>0 ? '+' : '' }}{{ w.v.toFixed(2) }}
-                    </span>
-                  </div>
-                  <div style="position:relative;height:8px;background:var(--surface-2);border-radius:2px;margin-top:6px">
-                    <div style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--text-3);opacity:.4"></div>
-                    <div [style.left.%]="50 + (w.v * 40)" style="position:absolute;top:-2px;width:8px;height:12px;border-radius:2px"
-                      [style.background]="w.v>0 ? 'var(--acc-long)' : w.v<0 ? 'var(--acc-short)' : 'var(--text-3)'"></div>
-                  </div>
+              <div
+                style="border:1px solid;border-radius:6px;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:13px"
+                [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'"
+                [style.background]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'">
+                <div>Est. per-call: <span class="mono">$ {{ est.per_call_usd.toFixed(4) }}</span></div>
+                <div>Est. total:
+                  <span class="mono" style="font-weight:600"
+                    [style.color]="est.exceeds_ceiling ? 'var(--acc-short-fg)' : 'var(--text)'">
+                    $ {{ est.est_total_usd.toFixed(2) }}
+                  </span>
                 </div>
+                <div>Cost ceiling: <span class="mono">$ {{ est.cost_ceiling_usd.toFixed(2) }}</span></div>
+                <div>n_candidates: <span class="mono">{{ est.n_candidates }}</span></div>
+              </div>
+
+              @if (est.exceeds_ceiling) {
+                <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
+                  ⚠ Estimate exceeds your cost ceiling. The cycle will trim K_longs/K_shorts before dispatching — raise the ceiling for a full fan-out.
+                </p>
+              }
+
+              <div class="eyebrow">Per-agent model assignment</div>
+              <table class="tbl">
+                <thead><tr>
+                  <th>Agent</th><th>Model</th><th>Tier</th><th class="right">$/call</th>
+                </tr></thead>
+                <tbody>
+                  @for (row of est.per_agent; track row.agent) {
+                    <tr [style.color]="row.model.startsWith('anthropic') ? 'var(--acc-short-fg)' : null">
+                      <td class="mono">{{ row.agent }}</td>
+                      <td class="mono">{{ row.model_name || row.model }}</td>
+                      <td>{{ row.tier }}</td>
+                      <td class="num">{{ row.per_call_usd.toFixed(4) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+
+              @if (anyAnthropic(est)) {
+                <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
+                  ⚠ This cycle will hit Anthropic for at least one agent. If you didn't intend this, change the model in
+                  <a routerLink="/settings/models" style="text-decoration:underline">Settings → Models</a>
+                  or pick a different strategy preset.
+                </p>
+              }
+
+              <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:12px">
+                <button class="btn" (click)="cancelEstimate()">Cancel</button>
+                <button class="btn primary" (click)="confirmRun()" [disabled]="running()" data-test="confirm-run"
+                  [style.background]="est.exceeds_ceiling ? 'var(--acc-hold)' : null"
+                  [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-hold)' : null">
+                  {{ running() ? 'Dispatching…' : 'Confirm & run cycle' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (notice()) {
+        <div class="pill info" style="margin-bottom:14px;height:auto;padding:8px 12px">
+          <span class="dot"></span>{{ notice() }}
+        </div>
+      }
+
+      <div style="display:grid;grid-template-columns:280px 1fr;gap:18px">
+        <section class="card">
+          <div class="card-hd"><span class="title">Cycles</span></div>
+          <div class="card-bd">
+            @if (store.cycles().length === 0) {
+              <p style="font-size:11.5px;color:var(--text-3);margin:0">No cycles yet — click "Run cycle now".</p>
+            } @else {
+              <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:13px">
+                @for (c of store.cycles(); track c.id) {
+                  <li>
+                    <button (click)="openCycle(c.id)"
+                      style="background:transparent;border:0;padding:0;color:var(--acc-info-fg);cursor:pointer;text-align:left">
+                      <span class="mono">{{ c.as_of_date }}</span> · {{ c.status }} · g {{ c.gross_pct }}
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        </section>
+
+        @if (cycle(); as c) {
+          <section class="card">
+            <div class="card-hd">
+              <span class="title">Cycle {{ c.as_of_date }}</span>
+              <span class="pill"
+                [class.ok]="c.status==='done'"
+                [class.warn]="c.status==='running' || c.status==='queued'"
+                [class.err]="c.status==='failed'">
+                <span class="dot"></span>{{ c.status }}
+              </span>
+              <div class="actions">
+                <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                  {{ c.finished_at ? (c.finished_at | date: 'short') : '—' }}
+                </span>
+                <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                  · gross {{ c.gross_pct | number: '1.4-4' }} · net {{ c.net_pct | number: '1.4-4' }}
+                </span>
+              </div>
+            </div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:18px">
+              @if (c.error_message) {
+                <p style="color:var(--acc-short-fg);font-size:12px;margin:0">{{ c.error_message }}</p>
+              }
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+                <div>
+                  <div class="eyebrow" style="color:var(--acc-long-fg);margin-bottom:6px">Long book</div>
+                  @if (longs().length === 0) {
+                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No longs.</p>
+                  } @else {
+                    <table class="tbl">
+                      <tbody>
+                        @for (row of longs(); track row.ticker) {
+                          <tr>
+                            <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
+                            <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                </div>
+                <div>
+                  <div class="eyebrow" style="color:var(--acc-short-fg);margin-bottom:6px">Short book</div>
+                  @if (shorts().length === 0) {
+                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No shorts.</p>
+                  } @else {
+                    <table class="tbl">
+                      <tbody>
+                        @for (row of shorts(); track row.ticker) {
+                          <tr>
+                            <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
+                            <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                </div>
+              </div>
+
+              <div>
+                <div class="eyebrow" style="margin-bottom:6px">Sector exposure (signed)</div>
+                <table class="tbl">
+                  <tbody>
+                    @for (row of sectorRows(); track row.sector) {
+                      <tr>
+                        <td>{{ row.sector || '—' }}</td>
+                        <td class="num"
+                          [style.color]="row.weight > 0 ? 'var(--acc-long-fg)' : row.weight < 0 ? 'var(--acc-short-fg)' : null">
+                          {{ row.weight | number: '1.2-2' }}%
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <div class="eyebrow" style="margin-bottom:6px">Rebalance orders ({{ c.orders.length }})</div>
+                @if (c.orders.length === 0) {
+                  <p style="font-size:11.5px;color:var(--text-3);margin:0">No orders this cycle.</p>
+                } @else {
+                  <table class="tbl">
+                    <thead><tr>
+                      <th>Seq</th><th>Side</th><th>Ticker</th>
+                      <th class="right">Qty</th><th class="right">Limit</th>
+                      <th>Reason</th><th class="right">Notional</th>
+                    </tr></thead>
+                    <tbody>
+                      @for (o of c.orders; track o.id) {
+                        <tr>
+                          <td class="mono">{{ o.sequence }}</td>
+                          <td class="mono"
+                            [style.color]="(o.side === 'buy' || o.side === 'cover') ? 'var(--acc-long-fg)' : (o.side === 'sell' || o.side === 'short') ? 'var(--acc-short-fg)' : null">
+                            {{ o.side }}
+                          </td>
+                          <td class="mono" style="color:var(--text)">{{ o.ticker }}</td>
+                          <td class="num">{{ o.quantity }}</td>
+                          <td class="num">{{ o.limit_price ?? 'mkt' }}</td>
+                          <td style="font-size:11.5px;color:var(--text-2)">{{ o.reason }}</td>
+                          <td class="num">$ {{ o.estimated_notional_usd }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+              </div>
+
+              @if (c.rejected_candidates.length > 0) {
+                <details>
+                  <summary class="eyebrow" style="cursor:pointer">
+                    Rejected candidates ({{ c.rejected_candidates.length }})
+                  </summary>
+                  <ul class="mono" style="margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--text-2)">
+                    @for (r of c.rejected_candidates; track $index) {
+                      <li><span style="color:var(--text)">{{ r.ticker ?? '(sector)' }}</span> — {{ r.reason }}</li>
+                    }
+                  </ul>
+                </details>
               }
             </div>
           </section>
-
-          <section class="card">
-            <div class="card-hd">
-              <span class="title">Rebalance orders</span>
-              <span class="pill"><span class="dot"></span>Next cycle · {{ c.orders.length }} orders</span>
-            </div>
-            @if(c.orders.length === 0){
-              <p style="padding:24px;color:var(--text-3);font-size:13px">No orders this cycle.</p>
-            } @else {
-              <table class="tbl">
-                <thead><tr><th>#</th><th>Ticker</th><th>Side</th><th class="right">Qty</th><th class="right">Limit</th><th class="right">Notional</th><th>Reason</th></tr></thead>
-                <tbody>
-                  @for(o of c.orders; track o.id){
-                    <tr>
-                      <td class="mono">{{ o.sequence }}</td>
-                      <td class="mono" style="color:var(--text)">{{ o.ticker }}</td>
-                      <td><span class="stance"
-                        [class.bull]="o.side==='buy' || o.side==='cover'"
-                        [class.bear]="o.side==='sell' || o.side==='short'">{{ o.side }}</span></td>
-                      <td class="num">{{ o.quantity }}</td>
-                      <td class="num">{{ o.limit_price ?? 'mkt' }}</td>
-                      <td class="num">$ {{ o.estimated_notional_usd }}</td>
-                      <td style="font-size:11.5px;color:var(--text-2)">{{ o.reason }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            }
-            @if(c.rejected_candidates.length > 0){
-              <details style="padding:12px 16px;border-top:1px solid var(--border)">
-                <summary style="cursor:pointer;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);font-weight:500">
-                  Rejected candidates ({{ c.rejected_candidates.length }})
-                </summary>
-                <ul style="list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px">
-                  @for(r of c.rejected_candidates; track $index){
-                    <li class="mono" style="font-size:12px;color:var(--text-2)">
-                      <span style="color:var(--text)">{{ r.ticker ?? '(sector)' }}</span> — {{ r.reason }}
-                    </li>
-                  }
-                </ul>
-              </details>
-            }
-          </section>
         }
-      } @else {
-        <p style="color:var(--text-3)">Loading…</p>
-      }
+      </div>
     </hf-app-shell>
   `,
 })
@@ -196,39 +260,52 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   readonly store = inject(StrategiesStore);
   private readonly route = inject(ActivatedRoute);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
-  readonly Math = Math;
 
   running = signal(false);
   estimating = signal(false);
-  estimate = signal<any>(null);
+  estimate = signal<{
+    n_candidates: number;
+    per_call_usd: number;
+    est_total_usd: number;
+    cost_ceiling_usd: number;
+    exceeds_ceiling: boolean;
+    per_agent: { agent: string; model: string; model_name: string; tier: string; per_call_usd: number }[];
+    overrides: Record<string, string>;
+    preset: string;
+  } | null>(null);
   notice = signal<string | null>(null);
   cycle = signal<CycleDetail | null>(null);
+
+  openEstimate(): void {
+    this.estimating.set(true);
+    this.notice.set(null);
+    this.store.estimate(this.strategyId).subscribe({
+      next: (e) => { this.estimating.set(false); this.estimate.set(e); },
+      error: () => { this.estimating.set(false); this.notice.set('Failed to fetch cost estimate.'); },
+    });
+  }
+  cancelEstimate(): void { this.estimate.set(null); }
+  anyAnthropic(est: { per_agent: { model: string }[] }): boolean {
+    return est.per_agent.some((r) => r.model.startsWith('anthropic'));
+  }
+  confirmRun(): void { this.estimate.set(null); this.runNow(); }
+
   strategyId = 0;
 
-  readonly screenerWeights = [
-    { k: 'Quality moat', v: 0.42 }, { k: 'Growth', v: 0.18 },
-    { k: 'Value (P/E)', v: -0.12 }, { k: 'Value (P/FCF)', v: 0.04 },
-    { k: 'Momentum 12-1', v: 0.36 }, { k: 'Mean reversion 5d', v: -0.08 },
-    { k: 'Insider buying', v: 0.14 }, { k: 'Short interest', v: -0.22 },
-    { k: 'Sentiment', v: 0.16 }, { k: 'Earnings surprise', v: 0.28 },
-    { k: 'Volatility', v: -0.18 },
-  ];
-
-  longs = computed(() => {
+  longs() {
     const c = this.cycle(); if (!c) return [];
-    return Object.entries(c.target_weights).filter(([, w]) => Number(w) > 0)
+    return Object.entries(c.target_weights)
+      .filter(([, w]) => Number(w) > 0)
       .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
       .sort((a, b) => b.weight - a.weight);
-  });
-  shorts = computed(() => {
+  }
+  shorts() {
     const c = this.cycle(); if (!c) return [];
-    return Object.entries(c.target_weights).filter(([, w]) => Number(w) < 0)
+    return Object.entries(c.target_weights)
+      .filter(([, w]) => Number(w) < 0)
       .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
       .sort((a, b) => a.weight - b.weight);
-  });
-  longGross = computed(() => this.longs().reduce((s, x) => s + x.weight, 0));
-  shortGross = computed(() => Math.abs(this.shorts().reduce((s, x) => s + x.weight, 0)));
-
+  }
   sectorRows() {
     const c = this.cycle(); if (!c) return [];
     return Object.entries(c.sector_exposure)
@@ -236,32 +313,36 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
   }
 
-  scoreOf(t: string) { return ((t.charCodeAt(0) * 7) % 30) + 65; }
-  pnlOf(t: string) { return (((t.charCodeAt(0) + t.charCodeAt(t.length - 1)) % 14) + 1).toFixed(1); }
-
-  openEstimate(): void {
-    this.estimating.set(true); this.notice.set(null);
-    this.store.estimate(this.strategyId).subscribe({
-      next: (e) => { this.estimating.set(false); this.estimate.set(e); this.runNow(); },
-      error: () => { this.estimating.set(false); this.notice.set('Failed to fetch cost estimate.'); },
-    });
-  }
-
   ngOnInit(): void {
     this.strategyId = Number(this.route.snapshot.paramMap.get('id'));
     this.store.detail(this.strategyId).subscribe();
-    this.store.listCycles(this.strategyId).subscribe((cs) => {
-      if (cs.length) this.store.cycleDetail(this.strategyId, cs[0].id).subscribe((d) => this.cycle.set(d));
-    });
+    this.refreshCycles();
   }
   ngOnDestroy(): void { if (this.pollHandle) clearInterval(this.pollHandle); }
 
+  refreshCycles(): void {
+    this.store.listCycles(this.strategyId).subscribe((cs) => {
+      if (cs.length) {
+        const c = this.cycle();
+        if (!c) this.openCycle(cs[0].id);
+        else this.openCycle(c.id);
+      }
+    });
+  }
+
+  openCycle(id: number): void {
+    this.store.cycleDetail(this.strategyId, id).subscribe((d) => this.cycle.set(d));
+  }
+
   runNow(): void {
     this.running.set(true);
+    this.notice.set(null);
     this.store.runNow(this.strategyId).subscribe({
       next: (r) => {
         this.running.set(false);
-        this.notice.set(`Cycle dispatched (task ${r.task_id}).`);
+        this.notice.set(`Cycle dispatched (task ${r.task_id}). Refreshing every 5s.`);
+        if (this.pollHandle) clearInterval(this.pollHandle);
+        this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
       },
       error: () => { this.running.set(false); this.notice.set('Failed to dispatch cycle.'); },
     });

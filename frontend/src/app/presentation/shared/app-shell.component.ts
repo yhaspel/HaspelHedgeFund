@@ -1,6 +1,7 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
+import { AuthStore } from '../../abstraction/auth.store';
 
 @Component({
   selector: 'hf-app-shell',
@@ -40,18 +41,13 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
               <span class="sep" *ngIf="!last">/</span>
             </ng-container>
           </nav>
-          <div class="gsearch">
-            <svg width="14" height="14"><use href="/icons.svg#i-search" /></svg>
-            <input type="text" placeholder="Search tickers, runs, strategies…" />
-            <span class="kbd">⌘K</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+            <button class="icon-btn" (click)="toggleTheme()" aria-label="Toggle theme">
+              <svg width="16" height="16"><use href="/icons.svg#i-moon" /></svg>
+            </button>
+            <span *ngIf="auth.user() as u" class="mono" style="font-size:12px;color:var(--text-2)">{{ u.email }}</span>
+            <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
           </div>
-          <button class="icon-btn" (click)="toggleTheme()" aria-label="Theme">
-            <svg width="16" height="16"><use href="/icons.svg#i-moon" /></svg>
-          </button>
-          <button class="icon-btn" aria-label="Notifications">
-            <svg width="16" height="16"><use href="/icons.svg#i-bell" /></svg>
-          </button>
-          <div class="avatar">YV</div>
         </div>
         <div class="page">
           <ng-content></ng-content>
@@ -62,6 +58,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 })
 export class AppShellComponent {
   @Input() crumbs: { label: string; link?: string }[] = [];
+  readonly auth = inject(AuthStore);
 
   toggleTheme() {
     const root = document.documentElement;
