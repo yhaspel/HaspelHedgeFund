@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
@@ -6,19 +6,25 @@ import { AuthStore } from '../../abstraction/auth.store';
 import { MacroStore } from '../../abstraction/macro.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { StrategiesStore } from '../../abstraction/strategies.store';
+import { KpiTileComponent } from '../shared/kpi-tile.component';
+import { GrossNetMeterComponent } from '../shared/gross-net-meter.component';
 
 type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
 
 @Component({
   selector: 'hf-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent],
+  imports: [
+    CommonModule,
+    RouterLink,
+    AppShellComponent,
+    KpiTileComponent,
+    GrossNetMeterComponent,
+  ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Dashboard'}]">
       <div class="page-head">
-        <div>
-          <h1>Dashboard</h1>
-        </div>
+        <div><h1>Dashboard</h1></div>
         <div class="head-actions">
           <a class="btn" routerLink="/backtests/new">
             <svg width="12" height="12"><use href="/icons.svg#i-plus" /></svg> New backtest
@@ -29,145 +35,266 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         </div>
       </div>
 
-      <!-- Macro regime -->
-      <section class="card" style="margin-bottom:18px">
-        <div class="card-hd">
-          <span class="title">Macro regime</span>
-          @if (macro.snapshot(); as s) {
-            <span class="pill"><span class="dot"></span>as of {{ s.as_of_date }}</span>
-          }
-        </div>
-        <div class="card-bd">
-          @if (macro.snapshot(); as s) {
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-              <span class="pill" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
-                [class.warn]="chipKind('growth', s.growth_quadrant)==='warn'"
-                [class.err]="chipKind('growth', s.growth_quadrant)==='err'">
-                <span class="dot"></span>growth · {{ s.growth_quadrant }}
-              </span>
-              <span class="pill" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
-                [class.warn]="chipKind('inflation', s.inflation_regime)==='warn'"
-                [class.err]="chipKind('inflation', s.inflation_regime)==='err'">
-                <span class="dot"></span>inflation · {{ s.inflation_regime }}
-              </span>
-              <span class="pill" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
-                [class.warn]="chipKind('curve', s.yield_curve_state)==='warn'"
-                [class.err]="chipKind('curve', s.yield_curve_state)==='err'">
-                <span class="dot"></span>yield curve · {{ s.yield_curve_state }}
-              </span>
-              <span class="pill" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
-                [class.warn]="chipKind('policy', s.policy_stance)==='warn'"
-                [class.info]="chipKind('policy', s.policy_stance)==='info'">
-                <span class="dot"></span>policy · {{ s.policy_stance }}
-              </span>
-            </div>
-            <p style="font-size:13px;color:var(--text-2);line-height:20px;margin:0">{{ s.narrative }}</p>
-          } @else {
-            <p style="font-size:13px;color:var(--text-3);margin:0">Loading macro snapshot…</p>
-          }
-        </div>
-      </section>
-
-      <!-- Current book -->
-      <section class="card" style="margin-bottom:18px">
-        <div class="card-hd">
-          <span class="title">Current book</span>
-          @if (book(); as b) {
-            <span class="pill"><span class="dot"></span>
-              {{ b.strategy_name }} · {{ b.as_of_date }} · gross {{ b.gross_pct }} · net {{ b.net_pct }}
-            </span>
-          }
-        </div>
-        <div class="card-bd">
-          @if (book(); as b) {
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
-              <div>
-                <div class="eyebrow" style="color:var(--acc-long-fg);margin-bottom:6px">Top longs</div>
-                <table class="tbl">
-                  <tbody>
-                    @for (row of b.longs; track row.ticker) {
-                      <tr>
-                        <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
-                        <td class="num">{{ row.weight.toFixed(2) }}%</td>
-                      </tr>
-                    }
-                    @if (b.longs.length === 0) {
-                      <tr><td colspan="2" style="color:var(--text-3)">— none —</td></tr>
-                    }
-                  </tbody>
-                </table>
+      <!-- KPI row: macro + 3 tiles -->
+      <div class="kpi-row">
+        <!-- Macro tile (wider) -->
+        <section class="card macro">
+          <div class="card-hd">
+            <span class="title">Macro regime</span>
+            @if (macro.snapshot(); as s) {
+              <span class="pill"><span class="dot"></span>as of {{ s.as_of_date }}</span>
+            }
+          </div>
+          <div class="card-bd">
+            @if (macro.snapshot(); as s) {
+              <div class="chips">
+                <span class="pill" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
+                  [class.warn]="chipKind('growth', s.growth_quadrant)==='warn'"
+                  [class.err]="chipKind('growth', s.growth_quadrant)==='err'">
+                  <span class="dot"></span>growth · {{ s.growth_quadrant }}
+                </span>
+                <span class="pill" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
+                  [class.warn]="chipKind('inflation', s.inflation_regime)==='warn'"
+                  [class.err]="chipKind('inflation', s.inflation_regime)==='err'">
+                  <span class="dot"></span>inflation · {{ s.inflation_regime }}
+                </span>
+                <span class="pill" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
+                  [class.warn]="chipKind('curve', s.yield_curve_state)==='warn'"
+                  [class.err]="chipKind('curve', s.yield_curve_state)==='err'">
+                  <span class="dot"></span>curve · {{ s.yield_curve_state }}
+                </span>
+                <span class="pill" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
+                  [class.warn]="chipKind('policy', s.policy_stance)==='warn'"
+                  [class.info]="chipKind('policy', s.policy_stance)==='info'">
+                  <span class="dot"></span>policy · {{ s.policy_stance }}
+                </span>
               </div>
-              <div>
-                <div class="eyebrow" style="color:var(--acc-short-fg);margin-bottom:6px">Top shorts</div>
-                <table class="tbl">
-                  <tbody>
-                    @for (row of b.shorts; track row.ticker) {
-                      <tr>
-                        <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
-                        <td class="num">{{ row.weight.toFixed(2) }}%</td>
-                      </tr>
-                    }
-                    @if (b.shorts.length === 0) {
-                      <tr><td colspan="2" style="color:var(--text-3)">— none —</td></tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          } @else {
-            <p style="font-size:13px;color:var(--text-3);margin:0">
-              No autonomous cycles yet.
-              <a routerLink="/strategies/new" style="color:var(--acc-info-fg)">Create a strategy</a>.
-            </p>
-          }
-        </div>
-      </section>
+              <p class="narrative">{{ s.narrative }}</p>
+            } @else {
+              <p class="muted">Loading macro snapshot…</p>
+            }
+          </div>
+        </section>
 
-      <!-- Quick links -->
-      <section class="card" style="margin-bottom:18px">
-        <div class="card-bd" style="display:flex;flex-wrap:wrap;gap:8px">
-          <a class="btn" routerLink="/strategies" data-test="strategies-link">Strategies</a>
-          <a class="btn" routerLink="/settings/models" data-test="settings-link">Settings</a>
-        </div>
-      </section>
-
-      <!-- Recent runs -->
-      <section class="card">
-        <div class="card-hd"><span class="title">Recent runs</span></div>
-        @if (runs.runs().length === 0) {
-          <div class="card-bd"><p style="font-size:13px;color:var(--text-3);margin:0">
-            No runs yet. Start your first analysis above.
-          </p></div>
+        @if (book(); as b) {
+          <hf-kpi-tile
+            eyebrow="Gross"
+            [value]="b.gross_pct + '%'"
+            [sub]="'Long ' + b.longPct.toFixed(0) + '% · Short ' + b.shortPct.toFixed(0) + '%'" />
+          <hf-kpi-tile
+            eyebrow="Net"
+            [value]="(b.netSigned >= 0 ? '+' : '') + b.netSigned.toFixed(1) + '%'"
+            [tone]="b.netSigned >= 0 ? 'up' : 'down'"
+            [sub]="b.strategy_name + ' · ' + b.as_of_date" />
+          <hf-kpi-tile
+            eyebrow="Positions"
+            [value]="b.positionCount.toString()"
+            [sub]="b.longCount + ' L · ' + b.shortCount + ' S'" />
         } @else {
-          <table class="tbl">
-            <thead><tr>
-              <th>#</th><th>Tickers</th><th>As-of</th><th>Status</th>
-              <th class="right">Cost</th><th></th>
-            </tr></thead>
-            <tbody>
-              @for (r of runs.runs(); track r.id) {
-                <tr>
-                  <td class="mono">{{ r.id }}</td>
-                  <td class="mono" style="color:var(--text)">{{ r.tickers.join(', ') }}</td>
-                  <td class="mono" style="color:var(--text-2)">{{ r.as_of_date }}</td>
-                  <td>
-                    <span class="pill"
-                      [class.ok]="r.status==='done'"
-                      [class.warn]="r.status==='running' || r.status==='queued'"
-                      [class.err]="r.status==='failed'">
-                      <span class="dot"></span>{{ r.status }}
-                    </span>
-                  </td>
-                  <td class="num">$ {{ (+r.total_cost_usd).toFixed(4) }}</td>
-                  <td><a [routerLink]="['/runs', r.id]" style="color:var(--acc-info-fg)">view</a></td>
-                </tr>
-              }
-            </tbody>
-          </table>
+          <section class="card placeholder">
+            <p class="muted">No portfolio yet.
+              <a routerLink="/strategies/new" class="link">Create a strategy →</a>
+            </p>
+          </section>
         }
-      </section>
+      </div>
+
+      <!-- Gross·Net meter (only when we have data) -->
+      @if (book(); as b) {
+        <section class="card" style="margin-bottom:18px">
+          <div class="card-hd">
+            <span class="title">Exposure</span>
+            <span class="pill"><span class="dot"></span>target gross {{ b.target_gross_pct }}% · net {{ b.target_net_pct }}%</span>
+          </div>
+          <div class="card-bd">
+            <hf-gross-net-meter [longPct]="b.longPct" [shortPct]="b.shortPct" />
+            <div class="meter-labels">
+              <span class="long-lbl">Long {{ b.longPct.toFixed(1) }}%</span>
+              <span class="short-lbl">Short {{ b.shortPct.toFixed(1) }}%</span>
+            </div>
+          </div>
+        </section>
+      }
+
+      <!-- 2-col: Active runs + Strategies summary -->
+      <div class="two-col">
+        <section class="card">
+          <div class="card-hd">
+            <span class="title">Active runs</span>
+            <span class="pill"
+              [class.warn]="activeRuns().length > 0"
+              [class.ok]="activeRuns().length === 0">
+              <span class="dot"></span>{{ activeRuns().length }} in flight
+            </span>
+          </div>
+          <div class="card-bd">
+            @if (activeRuns().length === 0) {
+              <p class="muted">No runs in flight.</p>
+            } @else {
+              <ul class="runlist">
+                @for (r of activeRuns(); track r.id) {
+                  <li>
+                    <a [routerLink]="['/runs', r.id]" class="runrow">
+                      <span class="run-id mono">#{{ r.id }}</span>
+                      <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      <span class="pill warn"><span class="dot"></span>{{ r.status }}</span>
+                    </a>
+                  </li>
+                }
+              </ul>
+            }
+            @if (recentDone().length > 0) {
+              <div class="eyebrow recent-eyebrow">Recent</div>
+              <ul class="runlist">
+                @for (r of recentDone(); track r.id) {
+                  <li>
+                    <a [routerLink]="['/runs', r.id]" class="runrow">
+                      <span class="run-id mono">#{{ r.id }}</span>
+                      <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      <span class="pill"
+                        [class.ok]="r.status==='done'"
+                        [class.err]="r.status==='failed' || r.status==='cancelled'">
+                        <span class="dot"></span>{{ r.status }}
+                      </span>
+                      <span class="cost mono">$ {{ (+r.total_cost_usd).toFixed(4) }}</span>
+                    </a>
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-hd">
+            <span class="title">Strategies</span>
+            <a routerLink="/strategies" class="link mono">View all →</a>
+          </div>
+          @if (strategies.strategies().length === 0) {
+            <div class="card-bd">
+              <p class="muted">No strategies yet.
+                <a routerLink="/strategies/new" class="link">Create one →</a>
+              </p>
+            </div>
+          } @else {
+            <table class="tbl">
+              <thead><tr>
+                <th>Name</th><th>Kind</th><th>Universe</th>
+                <th>Status</th><th>Last cycle</th>
+              </tr></thead>
+              <tbody>
+                @for (s of topStrategies(); track s.id) {
+                  <tr>
+                    <td><a [routerLink]="['/strategies', s.id]" class="link">{{ s.name }}</a></td>
+                    <td><span class="pill mono">{{ s.kind }}</span></td>
+                    <td class="mono" style="color:var(--text-2)">{{ s.universe_name }}</td>
+                    <td>
+                      <span class="pill"
+                        [class.ok]="s.is_active"
+                        [class.warn]="!s.is_active">
+                        <span class="dot"></span>{{ s.is_active ? 'active' : 'paused' }}
+                      </span>
+                    </td>
+                    <td class="mono" style="color:var(--text-3)">{{ s.last_run_at ? (s.last_run_at | date:'yyyy-MM-dd') : '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        </section>
+      </div>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      .kpi-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      @media (max-width: 1100px) {
+        .kpi-row { grid-template-columns: 1fr 1fr; }
+        .kpi-row .macro { grid-column: 1 / -1; }
+      }
+      .kpi-row .macro { margin: 0; }
+      .kpi-row .placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        grid-column: span 3;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .narrative {
+        font-size: 13px;
+        color: var(--text-2);
+        line-height: 20px;
+        margin: 0;
+      }
+      .muted { font-size: 13px; color: var(--text-3); margin: 0; }
+      .link { color: var(--acc-info-fg); text-decoration: none; }
+      .link:hover { text-decoration: underline; }
+      .meter-labels {
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        margin-top: 6px;
+      }
+      .long-lbl { color: var(--acc-long-fg); }
+      .short-lbl { color: var(--acc-short-fg); }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 1100px) {
+        .two-col { grid-template-columns: 1fr; }
+      }
+      .runlist {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .runrow {
+        display: grid;
+        grid-template-columns: 56px 1fr auto auto;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: var(--r-6, 6px);
+        text-decoration: none;
+        color: var(--text);
+        transition: background var(--dur-fast, 120ms) var(--ease-out-ui);
+      }
+      .runrow:hover { background: var(--surface-2); }
+      .run-id { color: var(--text-3); font-size: 12px; }
+      .run-tickers {
+        color: var(--text);
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .cost { color: var(--text-2); font-size: 12px; }
+      .recent-eyebrow {
+        margin-top: 14px;
+        margin-bottom: 6px;
+        color: var(--text-3);
+        font-size: 10px;
+      }
+    `,
+  ],
 })
 export class DashboardPage implements OnInit {
   readonly auth = inject(AuthStore);
@@ -180,9 +307,27 @@ export class DashboardPage implements OnInit {
     as_of_date: string;
     gross_pct: string;
     net_pct: string;
+    target_gross_pct: string;
+    target_net_pct: string;
+    longPct: number;
+    shortPct: number;
+    netSigned: number;
+    longCount: number;
+    shortCount: number;
+    positionCount: number;
     longs: { ticker: string; weight: number }[];
     shorts: { ticker: string; weight: number }[];
   } | null>(null);
+
+  activeRuns = computed(() =>
+    this.runs.runs().filter((r) => r.status === 'running' || r.status === 'queued'),
+  );
+  recentDone = computed(() =>
+    this.runs.runs()
+      .filter((r) => r.status !== 'running' && r.status !== 'queued')
+      .slice(0, 5),
+  );
+  topStrategies = computed(() => this.strategies.strategies().slice(0, 5));
 
   ngOnInit(): void {
     this.runs.listRuns().subscribe();
@@ -194,20 +339,29 @@ export class DashboardPage implements OnInit {
         const done = cs.find((c) => c.status === 'done') ?? cs[0];
         if (!done) return;
         this.strategies.cycleDetail(recent.id, done.id).subscribe((d) => {
-          const longs = Object.entries(d.target_weights)
+          const allLongs = Object.entries(d.target_weights)
             .filter(([, w]) => Number(w) > 0)
-            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
-            .sort((a, b) => b.weight - a.weight).slice(0, 5);
-          const shorts = Object.entries(d.target_weights)
+            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+          const allShorts = Object.entries(d.target_weights)
             .filter(([, w]) => Number(w) < 0)
-            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
-            .sort((a, b) => a.weight - b.weight).slice(0, 5);
+            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+          const longPct = allLongs.reduce((a, b) => a + b.weight, 0);
+          const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
           this.book.set({
             strategy_name: recent.name,
             as_of_date: d.as_of_date,
             gross_pct: d.gross_pct,
             net_pct: d.net_pct,
-            longs, shorts,
+            target_gross_pct: recent.target_gross_pct,
+            target_net_pct: recent.target_net_pct,
+            longPct,
+            shortPct,
+            netSigned: longPct - shortPct,
+            longCount: allLongs.length,
+            shortCount: allShorts.length,
+            positionCount: allLongs.length + allShorts.length,
+            longs: allLongs.sort((a, b) => b.weight - a.weight).slice(0, 5),
+            shorts: allShorts.sort((a, b) => a.weight - b.weight).slice(0, 5),
           });
         });
       });
