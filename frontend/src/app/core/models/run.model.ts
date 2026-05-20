@@ -83,16 +83,102 @@ export interface CreateRunRequest {
   personas?: string[];
 }
 
-export const ALL_PERSONAS: { id: string; name: string; optional?: boolean }[] = [
-  { id: 'buffett', name: 'Warren Buffett' },
-  { id: 'munger', name: 'Charlie Munger' },
-  { id: 'graham', name: 'Benjamin Graham' },
-  { id: 'wood', name: 'Cathie Wood' },
-  { id: 'druckenmiller', name: 'Stanley Druckenmiller' },
-  { id: 'burry', name: 'Michael Burry', optional: true },
-  { id: 'damodaran', name: 'Aswath Damodaran', optional: true },
-  { id: 'lynch', name: 'Peter Lynch', optional: true },
+export interface PersonaMeta {
+  id: string;
+  name: string;
+  initials: string;
+  tagline: string;
+  description: string;
+  monogramVariant: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  optional?: boolean;
+}
+
+export const ALL_PERSONAS: PersonaMeta[] = [
+  {
+    id: 'buffett',
+    name: 'Warren Buffett',
+    initials: 'WB',
+    tagline: 'quality moat',
+    description:
+      'Long-term owner of high-quality businesses with durable competitive moats, honest managers, and predictable cash flows bought at a fair price.',
+    monogramVariant: 1,
+  },
+  {
+    id: 'munger',
+    name: 'Charlie Munger',
+    initials: 'CM',
+    tagline: 'mental models',
+    description:
+      'Multidisciplinary mental-models thinker. Favors a small number of great businesses, inverts to find what would make a thesis fail, and avoids stupidity over chasing brilliance.',
+    monogramVariant: 2,
+  },
+  {
+    id: 'graham',
+    name: 'Benjamin Graham',
+    initials: 'BG',
+    tagline: 'deep value',
+    description:
+      'Father of value investing. Demands a margin of safety: pays well below conservative intrinsic value, leans on net-net balance-sheet protection, and treats Mr. Market as a moody business partner.',
+    monogramVariant: 3,
+  },
+  {
+    id: 'wood',
+    name: 'Cathie Wood',
+    initials: 'CW',
+    tagline: 'disruptive growth',
+    description:
+      'Thematic growth investor focused on disruptive innovation — AI, genomics, robotics, energy storage, blockchain. Tolerates volatility for long-duration upside and platform S-curves.',
+    monogramVariant: 4,
+  },
+  {
+    id: 'druckenmiller',
+    name: 'Stanley Druckenmiller',
+    initials: 'SD',
+    tagline: 'macro conviction',
+    description:
+      'Top-down macro generalist. Sizes high-conviction positions against the liquidity and rates cycle, then concentrates capital when the setup is asymmetric.',
+    monogramVariant: 5,
+  },
+  {
+    id: 'burry',
+    name: 'Michael Burry',
+    initials: 'MB',
+    tagline: 'contrarian short',
+    description:
+      'Contrarian deep-value investor and short-seller. Reads filings for hidden risk, fades crowded narratives, and is willing to be early and uncomfortable.',
+    monogramVariant: 6,
+    optional: true,
+  },
+  {
+    id: 'damodaran',
+    name: 'Aswath Damodaran',
+    initials: 'AD',
+    tagline: 'intrinsic valuation',
+    description:
+      'Valuation-first analyst. Builds explicit DCF and relative-value stories with disciplined assumptions on growth, margins, reinvestment, and risk premia.',
+    monogramVariant: 7,
+    optional: true,
+  },
+  {
+    id: 'lynch',
+    name: 'Peter Lynch',
+    initials: 'PL',
+    tagline: 'know what you own',
+    description:
+      'Bottom-up stock picker who buys what he understands. Looks for growth at a reasonable price, ten-baggers in plain sight, and clean balance sheets backing the story.',
+    monogramVariant: 8,
+    optional: true,
+  },
 ];
+
+export function personaById(id: string): PersonaMeta | undefined {
+  return ALL_PERSONAS.find((p) => p.id === id);
+}
+
+export function personaColorVar(id: string): string {
+  const p = personaById(id);
+  return p ? `var(--c${p.monogramVariant})` : 'var(--text-3)';
+}
 
 export const PERSONA_IDS = new Set(ALL_PERSONAS.map((p) => p.id));
 export const DEFAULT_PERSONA_IDS = ALL_PERSONAS.filter((p) => !p.optional).map((p) => p.id);

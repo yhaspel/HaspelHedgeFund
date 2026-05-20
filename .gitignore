@@ -49,3 +49,4 @@ MEMORY.md
 
 # pnpm content-addressable cache (auto-restored from pnpm-lock.yaml)
 frontend/.pnpm-store/
+.tmp-screenshots/

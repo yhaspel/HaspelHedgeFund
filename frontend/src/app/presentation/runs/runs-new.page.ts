@@ -7,11 +7,12 @@ import { ModelsStore } from '../../abstraction/models.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
 import { ModelPanelComponent } from '../shared/model-panel.component';
+import { PersonaCardComponent } from '../shared/persona-card.component';
 
 @Component({
   selector: 'hf-runs-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Runs', link:'/'}, {label:'New'}]">
       <div class="page-head">
@@ -47,16 +48,12 @@ import { ModelPanelComponent } from '../shared/model-panel.component';
             <span class="title">Council personas</span>
             <span class="pill"><span class="dot"></span>{{ selected().size }} of {{ allPersonas.length }}</span>
           </div>
-          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="card-bd persona-grid">
             @for (p of allPersonas; track p.id) {
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);padding:6px 0;cursor:pointer">
-                <input type="checkbox" [checked]="selected().has(p.id)" (change)="toggle(p.id)"
-                  style="accent-color:var(--acc-info)" />
-                <span style="color:var(--text)">{{ p.name }}</span>
-                @if (p.optional) {
-                  <span style="font-size:11px;color:var(--text-3)">(optional)</span>
-                }
-              </label>
+              <hf-persona-card
+                [persona]="p"
+                [selected]="selected().has(p.id)"
+                (toggled)="toggle(p.id)" />
             }
           </div>
         </section>
@@ -76,6 +73,18 @@ import { ModelPanelComponent } from '../shared/model-panel.component';
       </form>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      .persona-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      @media (max-width: 540px) {
+        .persona-grid { grid-template-columns: 1fr; }
+      }
+    `,
+  ],
 })
 export class RunsNewPage implements OnInit {
   readonly runs = inject(RunsStore);
