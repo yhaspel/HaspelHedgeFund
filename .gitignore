@@ -50,3 +50,6 @@ MEMORY.md
 # pnpm content-addressable cache (auto-restored from pnpm-lock.yaml)
 frontend/.pnpm-store/
 .tmp-screenshots/
+
+# Claude Code per-session scheduling lock
+.claude/scheduled_tasks.lock
