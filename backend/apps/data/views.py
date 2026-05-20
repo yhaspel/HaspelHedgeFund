@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import MacroSnapshot, NewsItem
+from .models import DailyBar, MacroSnapshot, NewsItem
 
 
 def _parse_as_of(request: Request) -> dt.date:
@@ -49,6 +49,32 @@ class MacroSnapshotView(APIView):
                 "series_used": snap.series_used,
             }
         )
+
+
+class TickerSparklineView(APIView):
+    """Recent close-price series for a ticker — drives FE sparklines."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, ticker: str) -> Response:
+        as_of = _parse_as_of(request)
+        try:
+            days = int(request.query_params.get("days", 60))
+        except ValueError:
+            days = 60
+        days = max(5, min(365, days))
+        start = as_of - dt.timedelta(days=days)
+        rows = (
+            DailyBar.objects.filter(
+                ticker=ticker.upper(),
+                date__gte=start,
+                date__lte=as_of,
+            )
+            .order_by("date")
+            .values_list("date", "close")
+        )
+        bars = [{"date": d.isoformat(), "close": float(c)} for d, c in rows]
+        return Response({"ticker": ticker.upper(), "as_of": as_of.isoformat(), "bars": bars})
 
 
 class TickerNewsView(APIView):

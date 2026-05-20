@@ -8,11 +8,13 @@ import { RunsStore } from '../../abstraction/runs.store';
 import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
 import { ModelPanelComponent } from '../shared/model-panel.component';
 import { PersonaCardComponent } from '../shared/persona-card.component';
+import { SparklineComponent } from '../shared/sparkline.component';
+import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 
 @Component({
   selector: 'hf-runs-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent],
+  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent, SparklineComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Runs', link:'/'}, {label:'New'}]">
       <div class="page-head">
@@ -27,8 +29,21 @@ import { PersonaCardComponent } from '../shared/persona-card.component';
           <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
             <div class="field">
               <label class="lbl">Ticker</label>
-              <input class="input" name="ticker" [(ngModel)]="ticker" placeholder="AAPL" required
-                style="text-transform:uppercase" />
+              <div style="display:flex;align-items:center;gap:10px">
+                <input class="input" name="ticker" [(ngModel)]="ticker"
+                  (ngModelChange)="onTickerChange($event)"
+                  placeholder="AAPL" required
+                  style="text-transform:uppercase;flex:1" />
+                <hf-sparkline [points]="tickerSpark()" [width]="80" [height]="22" [loading]="sparkLoading()" />
+              </div>
+              @if (tickerSpark() && tickerSpark()!.length >= 2) {
+                <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+                  {{ ticker.toUpperCase() }} · last {{ tickerSpark()!.length }}d ·
+                  <span [style.color]="trendUp() ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                    {{ trendUp() ? '▲' : '▼' }} {{ trendPct() }}%
+                  </span>
+                </div>
+              }
             </div>
             <div class="field">
               <label class="lbl">As-of date</label>
@@ -90,6 +105,7 @@ export class RunsNewPage implements OnInit {
   readonly runs = inject(RunsStore);
   readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
+  private readonly history = inject(TickerHistoryStore);
 
   readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
@@ -98,6 +114,9 @@ export class RunsNewPage implements OnInit {
   error = signal<string | null>(null);
   selected = signal<Set<string>>(new Set(DEFAULT_PERSONA_IDS));
   overrides = signal<Record<string, string>>({});
+  tickerSpark = signal<number[] | null>(null);
+  sparkLoading = signal(false);
+  private sparkDebounce?: ReturnType<typeof setTimeout>;
 
   panelAgents = () => [
     ...Array.from(this.selected()),
@@ -115,6 +134,41 @@ export class RunsNewPage implements OnInit {
 
   ngOnInit(): void {
     this.modelsStore.loadAll().subscribe();
+    this.loadSpark(this.ticker);
+  }
+
+  onTickerChange(v: string): void {
+    if (this.sparkDebounce) clearTimeout(this.sparkDebounce);
+    this.tickerSpark.set(null);
+    const t = (v ?? '').trim();
+    if (t.length < 1) return;
+    this.sparkDebounce = setTimeout(() => this.loadSpark(t), 350);
+  }
+
+  private loadSpark(t: string): void {
+    const key = t.toUpperCase();
+    if (!key) return;
+    this.sparkLoading.set(true);
+    this.history.fetch(key, 60).subscribe({
+      next: (closes) => {
+        this.tickerSpark.set(closes.length ? closes : null);
+        this.sparkLoading.set(false);
+      },
+      error: () => {
+        this.tickerSpark.set(null);
+        this.sparkLoading.set(false);
+      },
+    });
+  }
+
+  trendUp(): boolean {
+    const p = this.tickerSpark();
+    return !!(p && p.length >= 2 && p[p.length - 1] >= p[0]);
+  }
+  trendPct(): string {
+    const p = this.tickerSpark();
+    if (!p || p.length < 2 || p[0] === 0) return '0.00';
+    return (((p[p.length - 1] - p[0]) / p[0]) * 100).toFixed(2);
   }
 
   submit(): void {
