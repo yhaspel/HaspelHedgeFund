@@ -37,6 +37,11 @@ DEFAULTS = {
     "max_weight": 1.0,            # hard cap per name
     "vol_lookback_days": 60,
     "vol_floor": 0.05,
+    # Sector-rotation v2: when "flavor"=="sector_rotation", screener pick
+    # survives unless any persona votes bearish at confidence >= threshold
+    # (0..1 fraction) OR risk manager vetoes. Neutral votes do not block.
+    "flavor": "",
+    "bearish_veto_threshold": 0.70,
 }
 
 
@@ -204,6 +209,24 @@ def aggregate(
     if action == "buy" and (agg_conf / 100.0) < float(cfg["min_confidence"]):
         action = "hold"
 
+    # Sector-rotation v2: screener-led / council-as-veto override. The screener
+    # already pre-selected this ETF, so the council can only block. Default to
+    # buy unless any persona votes bearish at >= bearish_veto_threshold OR RM
+    # has vetoed. Neutral votes do not block.
+    if cfg.get("flavor") == "sector_rotation":
+        threshold_int = int(round(float(cfg["bearish_veto_threshold"]) * 100))
+        blockers = [
+            {
+                "persona": name,
+                "signal": p.get("signal"),
+                "confidence": int(p.get("confidence", 0)),
+            }
+            for name, p in persona_outputs.items()
+            if p.get("signal") == "bearish"
+            and int(p.get("confidence", 0)) >= threshold_int
+        ]
+        action = "hold" if (veto or blockers) else "buy"
+
     target_weight = compute_target_weight(
         signed, action, agg_conf, cap, cfg, trailing_returns
     )
@@ -244,6 +267,35 @@ def aggregate(
     )
 
 
+def build_sector_veto_entry(
+    ticker: str,
+    persona_outputs: dict[str, dict],
+    risk: dict[str, Any],
+    threshold: float,
+) -> dict[str, Any]:
+    """Diagnostic record explaining why a sector_rotation ETF was kept or
+    vetoed by the council layer. Stored on PortfolioTarget.sector_veto_log."""
+    threshold_int = int(round(threshold * 100))
+    blockers = [
+        {
+            "persona": name,
+            "signal": p.get("signal"),
+            "confidence": int(p.get("confidence", 0)),
+        }
+        for name, p in persona_outputs.items()
+        if p.get("signal") == "bearish"
+        and int(p.get("confidence", 0)) >= threshold_int
+    ]
+    rm_veto = bool(risk.get("veto"))
+    return {
+        "ticker": ticker,
+        "decision": "veto" if (rm_veto or blockers) else "buy",
+        "reasons": blockers,
+        "rm_veto": rm_veto,
+        "threshold_pct": threshold_int,
+    }
+
+
 def run_portfolio_manager(state: AgentState) -> AgentState:
     ticker = state["ticker"]
     persona_outputs: dict[str, dict] = {
@@ -253,13 +305,20 @@ def run_portfolio_manager(state: AgentState) -> AgentState:
     }
     portfolio = state.get("portfolio")
     portfolio_value = getattr(portfolio, "total_value", 100_000.0)
+    pm_config = state.get("pm_config") or {}
     out = aggregate(
         ticker=ticker,
         persona_outputs=persona_outputs,
         risk=state.get("risk") or {},  # type: ignore[arg-type]
         valuation=state.get("valuation") or {},  # type: ignore[arg-type]
-        pm_config=state.get("pm_config"),  # type: ignore[arg-type]
+        pm_config=pm_config,  # type: ignore[arg-type]
         trailing_returns=state.get("trailing_returns"),  # type: ignore[arg-type]
         portfolio_value=portfolio_value,
     )
-    return {"decision": out.model_dump()}  # type: ignore[return-value]
+    update: dict[str, Any] = {"decision": out.model_dump()}
+    if pm_config.get("flavor") == "sector_rotation":
+        threshold = float(pm_config.get("bearish_veto_threshold", 0.70))
+        update["sector_veto_entry"] = build_sector_veto_entry(
+            ticker, persona_outputs, state.get("risk") or {}, threshold
+        )
+    return update  # type: ignore[return-value]

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from functools import lru_cache
+from pathlib import Path
 
 from .._persist import record_llm_call
 from ..base import AgentState, pick_model
@@ -19,6 +21,12 @@ from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AGENT_VERSIONS, AgentSpec, register
 
 
+@lru_cache(maxsize=1)
+def _sector_context_prefix() -> str:
+    p = Path(__file__).with_name("sector_context.md")
+    return p.read_text(encoding="utf-8")
+
+
 def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
     register(spec)
     name = spec.agent_name
@@ -26,31 +34,50 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
     def node(state: AgentState) -> AgentState:
         ticker = state["ticker"]
         as_of = state["as_of_date"]
-        filings = state["filings_provider"].get_recent_filings(
-            ticker, as_of=as_of, form_types=["10-K", "10-Q"], limit=2
-        )
-        filing_block = (
-            "\n\n".join(
-                f"### {f.form_type} filed {f.filed_at.isoformat()} "
-                f"(period ending {f.period_end.isoformat()})\n{f.text_excerpt}"
-                for f in filings
+        is_sector = state.get("flavor") == "sector_rotation"
+
+        if is_sector:
+            # ETFs have no per-company filings; persona reasons over sector inputs.
+            ctx = {
+                "technicals": state.get("technicals", {}),
+                "macro": state.get("macro", {}),
+                "news_digest": state.get("news_digest", {}),
+                "sector": state.get("sector", ""),
+                "theme": state.get("theme", ""),
+            }
+            user = (
+                f"Sector / theme ETF: {ticker}\nAs-of: {as_of.isoformat()}\n\n"
+                f"SECTOR INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
+                "Produce your PersonaOutput JSON now."
             )
-            or "(no recent filings available)"
-        )
-        ctx = {
-            "fundamentals": state.get("fundamentals", {}),
-            "technicals": state.get("technicals", {}),
-            "valuation": state.get("valuation", {}),
-            "sentiment": state.get("sentiment", {}),
-            "macro": state.get("macro", {}),
-            "news_digest": state.get("news_digest", {}),
-        }
-        user = (
-            f"Ticker: {ticker}\nAs-of: {as_of.isoformat()}\n\n"
-            f"ANALYTICAL INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
-            f"RECENT FILINGS:\n{filing_block}\n\n"
-            "Produce your PersonaOutput JSON now."
-        )
+            system_prompt = _sector_context_prefix() + "\n\n---\n\n" + spec.prompt
+        else:
+            filings = state["filings_provider"].get_recent_filings(
+                ticker, as_of=as_of, form_types=["10-K", "10-Q"], limit=2
+            )
+            filing_block = (
+                "\n\n".join(
+                    f"### {f.form_type} filed {f.filed_at.isoformat()} "
+                    f"(period ending {f.period_end.isoformat()})\n{f.text_excerpt}"
+                    for f in filings
+                )
+                or "(no recent filings available)"
+            )
+            ctx = {
+                "fundamentals": state.get("fundamentals", {}),
+                "technicals": state.get("technicals", {}),
+                "valuation": state.get("valuation", {}),
+                "sentiment": state.get("sentiment", {}),
+                "macro": state.get("macro", {}),
+                "news_digest": state.get("news_digest", {}),
+            }
+            user = (
+                f"Ticker: {ticker}\nAs-of: {as_of.isoformat()}\n\n"
+                f"ANALYTICAL INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
+                f"RECENT FILINGS:\n{filing_block}\n\n"
+                "Produce your PersonaOutput JSON now."
+            )
+            system_prompt = spec.prompt
         # Honor the global default flip in registry (Haiku 4.5) for personas
         # whose spec.default_model wasn't given a per-spec override. Persona
         # specs hardcode "openrouter:qwen/qwen3.6-27b" historically; treat
@@ -70,7 +97,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             client,
             model=model,
             schema=PersonaOutput,
-            messages=[Message("system", spec.prompt), Message("user", user)],
+            messages=[Message("system", system_prompt), Message("user", user)],
             max_tokens=8192,
             temperature=0.4,
             cache_ctx=make_cache_ctx(state, name),

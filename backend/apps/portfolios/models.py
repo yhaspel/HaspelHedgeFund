@@ -126,15 +126,24 @@ class PortfolioStrategy(models.Model):
 
     # Concentrated long-only (kind=concentrated_long) parameters.
     max_positions = models.SmallIntegerField(default=15)
-    min_positions = models.SmallIntegerField(default=5)
+    min_positions = models.SmallIntegerField(default=3)
     min_aggregate_confidence = models.DecimalField(
-        max_digits=4, decimal_places=3, default=Decimal("0.650")
+        max_digits=4, decimal_places=3, default=Decimal("0.550")
     )
 
     # Sector rotation (kind=sector_rotation) parameters.
     max_etfs_held = models.SmallIntegerField(default=6)
     per_etf_max_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.30"))
     per_etf_min_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.05"))
+    # Council-v2 switch for sector_rotation: when True, screener picks survive
+    # unless a persona votes bearish at >= bearish_veto_threshold OR risk vetoes.
+    # See development-plans/phase-02h-sector-rotation.md "Plan refinement 2".
+    # New strategies opt in; pre-refinement rows are backfilled to False so the
+    # behaviour change is explicit.
+    use_sector_council_v2 = models.BooleanField(default=True)
+    bearish_veto_threshold = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.700")
+    )
 
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
@@ -217,6 +226,9 @@ class PortfolioTarget(models.Model):
     cycle_outcome = models.CharField(max_length=24, blank=True, default="")
     rejected_candidates = models.JSONField(default=list)
     decisions = models.JSONField(default=list)
+    # Sector-rotation v2: per-ETF veto reasoning. Each item:
+    # {ticker, decision: "buy"|"veto", reasons: [{persona, signal, confidence}], rm_veto: bool}
+    sector_veto_log = models.JSONField(default=list, blank=True)
     screener_ranking = models.ForeignKey(
         ScreenerRanking, null=True, blank=True, on_delete=models.SET_NULL
     )

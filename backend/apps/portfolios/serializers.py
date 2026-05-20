@@ -66,6 +66,7 @@ class StrategySerializer(serializers.ModelSerializer):
             "drop_on_unreliable_beta",
             "max_positions", "min_positions", "min_aggregate_confidence",
             "max_etfs_held", "per_etf_max_pct", "per_etf_min_pct",
+            "use_sector_council_v2", "bearish_veto_threshold",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
@@ -118,7 +119,7 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
             "realised_net_pct", "realised_portfolio_beta", "beta_diagnostics",
             "per_position_thesis", "cycle_outcome",
             "sector_exposure",
-            "rejected_candidates", "decisions",
+            "rejected_candidates", "decisions", "sector_veto_log",
             "screener_ranking", "orders",
             "total_cost_usd", "error_message",
             "created_at", "finished_at",

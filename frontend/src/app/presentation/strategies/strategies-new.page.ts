@@ -133,6 +133,20 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 </label>
                 <input class="input" name="pmn" type="number" step="0.01" min="0.01" max="0.20" [(ngModel)]="perEtfMin" />
               </div>
+              <div class="field">
+                <label class="lbl">
+                  Council v2 (screener-led)
+                  <hf-info text="When on: the screener's sector ranking drives selection; the council can only veto on a strongly bearish persona vote (≥ threshold) or risk-manager veto. When off: full per-name council runs on each ETF (legacy P2h behaviour — frequently yields empty books)." />
+                </label>
+                <input class="check" name="scv2" type="checkbox" [(ngModel)]="useSectorCouncilV2" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Bearish veto threshold
+                  <hf-info text="A persona must vote bearish at this confidence (0–1) or higher to veto a screener pick. Default 0.70. Lower = council blocks more often; higher = council rarely blocks." />
+                </label>
+                <input class="input" name="bvt" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="bearishVetoThreshold" [disabled]="!useSectorCouncilV2" />
+              </div>
             }
             @if (kind === 'concentrated_long') {
               <div class="field">
@@ -199,6 +213,32 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
         </section>
 
         <section class="card">
+          <div class="card-hd">
+            <span class="title">Personas</span>
+            <span class="eyebrow" style="margin-left:auto;color:var(--text-3)">
+              {{ selectedPersonas.length }} selected
+            </span>
+          </div>
+          <div class="card-bd">
+            <p style="font-size:11.5px;color:var(--text-3);margin:0 0 10px">
+              Which personas debate each candidate. Leaving all selected = full council.
+              @if (kind === 'sector_rotation') {
+                <span>Sector rotation defaults to the macro trio (Druckenmiller, Damodaran, Burry) — name-centric value investors aren't a great fit for ETF baskets.</span>
+              }
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+              @for (p of ALL_PERSONAS; track p) {
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);cursor:pointer">
+                  <input type="checkbox" [checked]="selectedPersonas.includes(p)"
+                         (change)="togglePersona(p)" [name]="'p_' + p" />
+                  <span style="text-transform:capitalize">{{ p }}</span>
+                </label>
+              }
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
           <div class="card-hd"><span class="title">Screener weights</span></div>
           <div class="card-bd">
             <p style="font-size:11.5px;color:var(--text-3);margin:0 0 10px">
@@ -260,6 +300,30 @@ export class StrategiesNewPage implements OnInit {
   maxEtfsHeld = 6;
   perEtfMax = 0.30;
   perEtfMin = 0.05;
+  useSectorCouncilV2 = true;
+  bearishVetoThreshold = 0.70;
+
+  // Persona picker. Recommended defaults per kind are applied in onKindChange
+  // and on first render via the constructor below.
+  readonly ALL_PERSONAS = [
+    'buffett', 'munger', 'graham', 'lynch',
+    'wood', 'druckenmiller', 'burry', 'damodaran',
+  ];
+  readonly RECOMMENDED_PERSONAS: Record<StrategyKind, string[]> = {
+    long_only: this.ALL_PERSONAS,
+    short_only: this.ALL_PERSONAS,
+    long_short: this.ALL_PERSONAS,
+    market_neutral: this.ALL_PERSONAS,
+    concentrated_long: this.ALL_PERSONAS,
+    sector_rotation: ['druckenmiller', 'damodaran', 'burry'],
+  };
+  selectedPersonas: string[] = [...this.ALL_PERSONAS];
+
+  togglePersona(p: string): void {
+    const i = this.selectedPersonas.indexOf(p);
+    if (i >= 0) this.selectedPersonas.splice(i, 1);
+    else this.selectedPersonas.push(p);
+  }
   weights: Record<string, number> = { ...DEFAULT_SCREENER_WEIGHTS };
   weightKeys = Object.keys(DEFAULT_SCREENER_WEIGHTS);
   submitting = signal(false);
@@ -292,6 +356,7 @@ export class StrategiesNewPage implements OnInit {
       const sectorUni = this.store.universes().find((u) => u.name === 'sector_etfs');
       if (sectorUni) this.universe = sectorUni.id;
     }
+    this.selectedPersonas = [...this.RECOMMENDED_PERSONAS[k]];
   }
 
   label(k: string): string { return SCREENER_WEIGHT_LABELS[k] ?? k; }
@@ -336,6 +401,11 @@ export class StrategiesNewPage implements OnInit {
       cost_ceiling_per_cycle_usd: String(this.costCeiling),
       model_preset: this.modelPreset,
       screener_weights: this.weights,
+      // Empty list = no persona filter on the backend (full default council);
+      // otherwise pass the explicit picks. Either way, the user owns the choice.
+      personas: this.selectedPersonas.length === this.ALL_PERSONAS.length
+        ? []
+        : [...this.selectedPersonas],
     };
     if (this.kind === 'concentrated_long') {
       payload['min_positions'] = this.minPositions;
@@ -346,6 +416,8 @@ export class StrategiesNewPage implements OnInit {
       payload['max_etfs_held'] = this.maxEtfsHeld;
       payload['per_etf_max_pct'] = String(this.perEtfMax);
       payload['per_etf_min_pct'] = String(this.perEtfMin);
+      payload['use_sector_council_v2'] = this.useSectorCouncilV2;
+      payload['bearish_veto_threshold'] = String(this.bearishVetoThreshold);
     }
     this.store.create(payload as any).subscribe({
       next: (s) => this.router.navigate(['/strategies', s.id]),

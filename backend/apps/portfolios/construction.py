@@ -197,9 +197,9 @@ def construct_concentrated_long(
     candidates: list[Candidate],
     constraints: Constraints,
     *,
-    min_positions: int = 5,
+    min_positions: int = 3,
     max_positions: int = 15,
-    min_aggregate_confidence: float = 0.65,
+    min_aggregate_confidence: float = 0.55,
 ) -> ConcentratedResult:
     """Concentrated long-only construction.
 

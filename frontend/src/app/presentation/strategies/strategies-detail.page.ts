@@ -289,6 +289,31 @@ import { CycleDetail } from '../../core/models/strategy.model';
                 </div>
               }
 
+              @if (c.sector_veto_log && c.sector_veto_log.length > 0) {
+                <details open>
+                  <summary class="eyebrow" style="cursor:pointer">
+                    Council review ({{ c.sector_veto_log.length }} ETFs · {{ sectorVetoCount(c) }} vetoed)
+                  </summary>
+                  <ul class="mono" style="margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--text-2)">
+                    @for (v of c.sector_veto_log; track v.ticker) {
+                      <li>
+                        <span style="color:var(--text)">{{ v.ticker }}</span>
+                        @if (v.decision === 'veto') {
+                          <span style="color:#d9826e">— vetoed</span>
+                          @if (v.rm_veto) { <span> · risk-manager veto</span> }
+                          @for (r of v.reasons; track r.persona) {
+                            <span> · {{ r.persona }} {{ r.signal }}@{{ r.confidence }}</span>
+                          }
+                        } @else {
+                          <span style="color:#7ec27e">— approved</span>
+                          <span style="color:var(--text-3)"> (threshold {{ v.threshold_pct }}%)</span>
+                        }
+                      </li>
+                    }
+                  </ul>
+                </details>
+              }
+
               @if (c.rejected_candidates.length > 0) {
                 <details>
                   <summary class="eyebrow" style="cursor:pointer">
@@ -358,6 +383,10 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }))
       .sort((a, b) => a.weight - b.weight);
   }
+  sectorVetoCount(c: CycleDetail): number {
+    return (c.sector_veto_log ?? []).filter(v => v.decision === 'veto').length;
+  }
+
   netNeutral(c: CycleDetail): boolean {
     const tol = Number(this.store.currentStrategy()?.neutrality_tolerance_dollar_pct ?? 0.02);
     return Math.abs(Number(c.realised_net_pct ?? c.net_pct)) <= tol;

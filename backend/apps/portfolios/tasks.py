@@ -28,7 +28,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.models_catalog.presets import expand_preset
-from hedgefund_agents.graphs.council import build_council_graph
+from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
 from hedgefund_agents.registry import get_data_provider, get_filings_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
@@ -167,12 +167,16 @@ def run_candidate_council(payload: dict) -> dict:
     Returns a dict suitable for the chord callback (the decision + side metadata)."""
     ticker = payload["ticker"]
     sector = payload.get("sector", "")
-    side = payload["side"]  # "long" | "short"
+    side = payload["side"]  # "long" | "short" | "sector"
     borrow_veto = payload.get("borrow_veto", False)
     as_of = _resolve_as_of(payload["as_of_date"])
     personas = payload.get("personas") or None
+    flavor = payload.get("flavor", "")
 
-    graph = build_council_graph(personas=personas)
+    if flavor == "sector_rotation":
+        graph = build_sector_council_graph(personas=personas)
+    else:
+        graph = build_council_graph(personas=personas)
     initial_state: dict = {
         "ticker": ticker,
         "as_of_date": as_of,
@@ -193,7 +197,12 @@ def run_candidate_council(payload: dict) -> dict:
             "short_side": (side == "short"),
             "buy_threshold": 0.10,
             "sell_threshold": -0.10,
+            "flavor": flavor,
+            "bearish_veto_threshold": float(payload.get("bearish_veto_threshold", 0.70)),
         },
+        "flavor": flavor,
+        "sector": sector,
+        "theme": payload.get("theme", ""),
         "borrow_veto": borrow_veto,
         "disable_cio": True,
     }
@@ -201,10 +210,12 @@ def run_candidate_council(payload: dict) -> dict:
         final = graph.invoke(initial_state)
         decision = final.get("decision") or {}
         risk = final.get("risk") or {}
+        sector_veto_entry = final.get("sector_veto_entry")
     except Exception as exc:  # pragma: no cover
         log.exception("council failed for %s", ticker)
         decision = {"ticker": ticker, "action": "hold", "rationale": f"council error: {exc}"}
         risk = {}
+        sector_veto_entry = None
     return {
         "ticker": ticker,
         "sector": sector,
@@ -212,6 +223,7 @@ def run_candidate_council(payload: dict) -> dict:
         "borrow_veto": borrow_veto,
         "decision": decision,
         "risk": risk,
+        "sector_veto_entry": sector_veto_entry,
     }
 
 
@@ -413,6 +425,12 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
     target.rejected_candidates = result.rejected
     target.decisions = council_results
+    if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
+        target.sector_veto_log = [
+            r["sector_veto_entry"]
+            for r in council_results
+            if r.get("sector_veto_entry")
+        ]
     target.status = "done"
     target.finished_at = timezone.now()
     target.save()
@@ -550,15 +568,30 @@ def daily_long_short_cycle(
             "portfolio_target_id": target_id,
             "user_id": user_id,
         })
+    # P2h council-v2: opt-in flag flips behaviour for sector_rotation strategies.
+    use_sector_v2 = (
+        strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION
+        and bool(getattr(strategy, "use_sector_council_v2", False))
+    )
+    if use_sector_v2:
+        # Default macro-trio if user hasn't picked personas explicitly.
+        personas_for_run = strategy.personas or ["druckenmiller", "damodaran", "burry"]
+    else:
+        personas_for_run = strategy.personas or None
+    bearish_veto_threshold = float(getattr(strategy, "bearish_veto_threshold", 0.70))
+
     long_payloads = [
         {
             "ticker": c["ticker"],
             "sector": c.get("sector", ""),
-            "side": "long",
+            "theme": c.get("theme", ""),
+            "side": "sector" if use_sector_v2 else "long",
             "borrow_veto": False,
             "as_of_date": as_of.isoformat(),
             "model_overrides": overrides,
-            "personas": strategy.personas or None,
+            "personas": personas_for_run,
+            "flavor": "sector_rotation" if use_sector_v2 else "",
+            "bearish_veto_threshold": bearish_veto_threshold,
             "portfolio_target_id": target_id,
             "user_id": user_id,
         }

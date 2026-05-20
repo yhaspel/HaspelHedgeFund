@@ -53,6 +53,19 @@ class AgentState(TypedDict, total=False):
     disable_cio: bool  # backtests: skip CIO for reproducibility
     pm_config: dict[str, Any]  # backtest sweep overrides for portfolio_manager
     trailing_returns: list[float]  # trailing daily returns for vol-target sizing
+
+    # Flavor tag for prompt/PM rule switching. Set by the dispatcher per task.
+    # When "sector_rotation", personas get the sector-context prompt prefix and
+    # the PM applies the screener-led / council-as-veto rule.
+    flavor: str
+    sector_veto_log: list[dict[str, Any]]
+    # Per-candidate veto record emitted by run_portfolio_manager under
+    # flavor=="sector_rotation"; finalize_cycle collects these into
+    # PortfolioTarget.sector_veto_log.
+    sector_veto_entry: dict[str, Any]
+    # Sector-rotation context that personas read from state (set by dispatcher).
+    sector: str
+    theme: str
     use_llm_cache: bool  # backtests: read/write LLMResponseCache (L2)
     backtest_id: int  # for cache scoping / telemetry
 

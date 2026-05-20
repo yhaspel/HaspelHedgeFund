@@ -88,6 +88,8 @@ export interface Strategy {
   max_etfs_held: number;
   per_etf_max_pct: string;
   per_etf_min_pct: string;
+  use_sector_council_v2: boolean;
+  bearish_veto_threshold: string;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;
@@ -159,6 +161,13 @@ export interface CycleDetail extends CycleSummary {
     dissenting_personas?: { name: string; signal: string; confidence: number; thesis_summary?: string }[];
   }>;
   cycle_outcome?: string;
+  sector_veto_log?: {
+    ticker: string;
+    decision: 'buy' | 'veto';
+    reasons: { persona: string; signal: string; confidence: number }[];
+    rm_veto: boolean;
+    threshold_pct: number;
+  }[];
 }
 
 export const DEFAULT_SCREENER_WEIGHTS: Record<string, number> = {
