@@ -98,6 +98,114 @@ def _seed():
     ]
 
 
+# Sector / thematic ETF registry. Liquidity gates (per plan refinements):
+# minimum AUM ~ $500M, minimum ADV ~ $20M, expense_ratio_bps ≤ 75, no leveraged/
+# inverse products. regime_affinities indexed by:
+#   early_cycle, mid_cycle, late_cycle, recession, rising_rates, sticky_inflation
+# Values are hand-curated priors in [-1, 1]; to be revisited after P2c backtest.
+SECTOR_ETF_REGISTRY: list[dict] = [
+    # SPDR sector ETFs (11)
+    {"ticker": "XLK", "sector": "Technology",        "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.8, "mid_cycle": 0.5, "late_cycle": -0.2,
+                    "recession": -0.4, "rising_rates": -0.5, "sticky_inflation": -0.3}},
+    {"ticker": "XLF", "sector": "Financials",        "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.3, "mid_cycle": 0.6, "late_cycle": 0.4,
+                    "recession": -0.5, "rising_rates": 0.6, "sticky_inflation": 0.0}},
+    {"ticker": "XLE", "sector": "Energy",            "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": 0.4, "late_cycle": 0.7,
+                    "recession": -0.3, "rising_rates": 0.2, "sticky_inflation": 0.8}},
+    {"ticker": "XLV", "sector": "Health Care",       "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.0, "mid_cycle": 0.2, "late_cycle": 0.4,
+                    "recession": 0.5, "rising_rates": -0.1, "sticky_inflation": 0.0}},
+    {"ticker": "XLY", "sector": "Consumer Discretionary", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.7, "mid_cycle": 0.5, "late_cycle": -0.2,
+                    "recession": -0.6, "rising_rates": -0.4, "sticky_inflation": -0.4}},
+    {"ticker": "XLP", "sector": "Consumer Staples",  "issuer": "SPDR",
+     "affinities": {"early_cycle": -0.3, "mid_cycle": 0.0, "late_cycle": 0.3,
+                    "recession": 0.6, "rising_rates": -0.2, "sticky_inflation": 0.1}},
+    {"ticker": "XLI", "sector": "Industrials",       "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.5, "mid_cycle": 0.6, "late_cycle": 0.0,
+                    "recession": -0.5, "rising_rates": 0.1, "sticky_inflation": 0.0}},
+    {"ticker": "XLU", "sector": "Utilities",         "issuer": "SPDR",
+     "affinities": {"early_cycle": -0.4, "mid_cycle": -0.2, "late_cycle": 0.2,
+                    "recession": 0.6, "rising_rates": -0.7, "sticky_inflation": -0.2}},
+    {"ticker": "XLB", "sector": "Materials",         "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.4, "mid_cycle": 0.5, "late_cycle": 0.3,
+                    "recession": -0.4, "rising_rates": 0.0, "sticky_inflation": 0.5}},
+    {"ticker": "XLRE", "sector": "Real Estate",      "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.2, "mid_cycle": 0.3, "late_cycle": -0.1,
+                    "recession": -0.2, "rising_rates": -0.8, "sticky_inflation": -0.1}},
+    {"ticker": "XLC", "sector": "Communication Services", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.5, "mid_cycle": 0.4, "late_cycle": 0.0,
+                    "recession": -0.2, "rising_rates": -0.3, "sticky_inflation": -0.2}},
+    # Thematic adds
+    {"ticker": "SOXX", "sector": "Technology", "theme": "Semiconductors", "issuer": "iShares",
+     "affinities": {"early_cycle": 0.9, "mid_cycle": 0.5, "late_cycle": -0.3,
+                    "recession": -0.6, "rising_rates": -0.5, "sticky_inflation": -0.3}},
+    {"ticker": "ARKK", "sector": "Technology", "theme": "Disruption", "issuer": "ARK",
+     "affinities": {"early_cycle": 0.9, "mid_cycle": 0.2, "late_cycle": -0.5,
+                    "recession": -0.7, "rising_rates": -0.9, "sticky_inflation": -0.6}},
+    {"ticker": "IBB", "sector": "Health Care", "theme": "Biotech", "issuer": "iShares",
+     "affinities": {"early_cycle": 0.4, "mid_cycle": 0.2, "late_cycle": 0.0,
+                    "recession": 0.1, "rising_rates": -0.4, "sticky_inflation": -0.1}},
+    {"ticker": "KRE", "sector": "Financials", "theme": "Regional Banks", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.4, "mid_cycle": 0.6, "late_cycle": 0.0,
+                    "recession": -0.7, "rising_rates": 0.5, "sticky_inflation": -0.1}},
+    {"ticker": "ITB", "sector": "Consumer Discretionary", "theme": "Homebuilders", "issuer": "iShares",
+     "affinities": {"early_cycle": 0.7, "mid_cycle": 0.4, "late_cycle": -0.3,
+                    "recession": -0.6, "rising_rates": -0.8, "sticky_inflation": -0.3}},
+    {"ticker": "GDX", "sector": "Materials", "theme": "Gold Miners", "issuer": "VanEck",
+     "affinities": {"early_cycle": -0.1, "mid_cycle": 0.0, "late_cycle": 0.4,
+                    "recession": 0.5, "rising_rates": -0.4, "sticky_inflation": 0.7}},
+    {"ticker": "XOP", "sector": "Energy", "theme": "Oil & Gas E&P", "issuer": "SPDR",
+     "affinities": {"early_cycle": 0.1, "mid_cycle": 0.4, "late_cycle": 0.7,
+                    "recession": -0.3, "rising_rates": 0.2, "sticky_inflation": 0.8}},
+    {"ticker": "KWEB", "sector": "Communication Services", "theme": "China Internet", "issuer": "KraneShares",
+     "affinities": {"early_cycle": 0.3, "mid_cycle": 0.1, "late_cycle": -0.2,
+                    "recession": -0.3, "rising_rates": -0.4, "sticky_inflation": -0.2}},
+    {"ticker": "TAN", "sector": "Utilities", "theme": "Solar", "issuer": "Invesco",
+     "affinities": {"early_cycle": 0.6, "mid_cycle": 0.3, "late_cycle": -0.2,
+                    "recession": -0.4, "rising_rates": -0.9, "sticky_inflation": -0.3}},
+]
+
+
+def seed_sector_etf_universe(sender=None, **kwargs):
+    from .models import SectorETF, Universe, UniverseMembership
+    for entry in SECTOR_ETF_REGISTRY:
+        SectorETF.objects.update_or_create(
+            ticker=entry["ticker"],
+            defaults={
+                "sector": entry["sector"],
+                "theme": entry.get("theme", ""),
+                "issuer": entry.get("issuer", "SPDR"),
+                "regime_affinities": entry["affinities"],
+                "is_active": True,
+            },
+        )
+    universe, _ = Universe.objects.get_or_create(
+        name="sector_etfs",
+        defaults={
+            "description": "Curated sector + thematic ETFs for sector-rotation strategies.",
+            "source": "manual",
+            "is_active": True,
+        },
+    )
+    effective = date(2018, 1, 1)
+    existing = set(
+        UniverseMembership.objects.filter(universe=universe).values_list("ticker", flat=True)
+    )
+    new = []
+    for entry in SECTOR_ETF_REGISTRY:
+        if entry["ticker"] in existing:
+            continue
+        new.append(UniverseMembership(
+            universe=universe, ticker=entry["ticker"], sector=entry["sector"],
+            effective_from=effective, effective_to=None,
+        ))
+    if new:
+        UniverseMembership.objects.bulk_create(new)
+
+
 def seed_default_universe(sender=None, **kwargs):
     from .models import Universe, UniverseMembership
     universe, _ = Universe.objects.get_or_create(
@@ -123,3 +231,4 @@ def seed_default_universe(sender=None, **kwargs):
         ))
     if new:
         UniverseMembership.objects.bulk_create(new)
+    seed_sector_etf_universe(sender=sender)

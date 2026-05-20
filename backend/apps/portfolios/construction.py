@@ -307,6 +307,134 @@ def construct_concentrated_long(
 
 
 @dataclass
+class SectorRotationResult:
+    target_weights: dict[str, float]
+    gross_pct: float
+    net_pct: float
+    sector_exposure: dict[str, float]
+    rejected: list[dict]
+    overlap_dropped: list[dict]
+
+
+# ETF holdings overlap matrix. ~50% holdings overlap = implicit double bet.
+# Hard-coded for the initial registry — replace with a real holdings snapshot
+# in P3+. Pairs map (ETF_A, ETF_B) → estimated holdings overlap fraction.
+_OVERLAP_PAIRS: dict[tuple[str, str], float] = {
+    ("XLK", "SOXX"): 0.50,
+    ("XLK", "XLC"): 0.20,
+    ("XLF", "KRE"): 0.45,
+    ("XLE", "XOP"): 0.55,
+    ("XLV", "IBB"): 0.40,
+    ("XLY", "ITB"): 0.30,
+}
+
+
+def _overlap_fraction(a: str, b: str) -> float:
+    return _OVERLAP_PAIRS.get((a, b)) or _OVERLAP_PAIRS.get((b, a)) or 0.0
+
+
+def construct_sector_rotation(
+    candidates: list[Candidate],
+    *,
+    target_gross_pct: float = 1.00,
+    per_etf_max_pct: float = 0.30,
+    per_etf_min_pct: float = 0.05,
+    max_etfs_held: int = 6,
+    overlap_threshold: float = 0.40,
+) -> SectorRotationResult:
+    """Long-only ETF allocation across sectors.
+
+    PM action whitelist: only `buy` survives; `hold` and short actions are
+    rejected. Vetoes propagate as in single-name long-only.
+    """
+    rejected: list[dict] = []
+    survivors: list[Candidate] = []
+    for c in candidates:
+        if c.action in {"open_short", "cover_short"} or c.side == "short":
+            raise PMActionWhitelistError(
+                f"sector_rotation cannot accept {c.action!r} on {c.ticker}"
+            )
+        if c.veto_reason:
+            rejected.append({"ticker": c.ticker, "reason": c.veto_reason})
+            continue
+        if c.action != "buy":
+            rejected.append({"ticker": c.ticker, "reason": f"action={c.action}"})
+            continue
+        survivors.append(c)
+
+    # Sort by conviction.
+    survivors.sort(key=lambda c: c.confidence * c.quality_weight, reverse=True)
+
+    # Overlap penalty: drop the lower-conviction member of any high-overlap pair.
+    keep: list[Candidate] = []
+    overlap_dropped: list[dict] = []
+    for c in survivors:
+        clash = next(
+            (
+                k for k in keep
+                if _overlap_fraction(c.ticker, k.ticker) >= overlap_threshold
+            ),
+            None,
+        )
+        if clash:
+            overlap_dropped.append({
+                "ticker": c.ticker,
+                "kept": clash.ticker,
+                "overlap": _overlap_fraction(c.ticker, clash.ticker),
+            })
+            rejected.append({
+                "ticker": c.ticker,
+                "reason": f"holdings_overlap_with_{clash.ticker}",
+            })
+            continue
+        keep.append(c)
+
+    # Enforce position-count ceiling (floor-implied + user max).
+    if per_etf_min_pct > 0:
+        floor_cap = int(target_gross_pct / per_etf_min_pct)
+        max_etfs_held = min(max_etfs_held, max(1, floor_cap))
+    keep = keep[:max_etfs_held]
+
+    if not keep:
+        return SectorRotationResult(
+            target_weights={}, gross_pct=0.0, net_pct=0.0,
+            sector_exposure={}, rejected=rejected, overlap_dropped=overlap_dropped,
+        )
+
+    weights = _bucket_weights(keep, target_gross_pct)
+    weights = _apply_per_name_cap(weights, per_etf_max_pct)
+
+    # Floor enforcement: raise sub-floor weights to floor and pull proportionally
+    # from above-floor donors.
+    if per_etf_min_pct > 0 and weights:
+        below = {t: w for t, w in weights.items() if 0 < w < per_etf_min_pct}
+        if below:
+            extra = sum(per_etf_min_pct - w for w in below.values())
+            for t in below:
+                weights[t] = per_etf_min_pct
+            donors = {t: w for t, w in weights.items() if w > per_etf_min_pct and t not in below}
+            donor_total = sum(donors.values())
+            if donor_total > extra:
+                for t in donors:
+                    share = (donors[t] / donor_total) * extra
+                    weights[t] = max(per_etf_min_pct, weights[t] - share)
+
+    # In sector rotation each ETF IS a sector → sector_exposure mirrors weights.
+    sector_exposure = dict(weights)
+    gross_pct = sum(abs(w) for w in weights.values())
+    net_pct = sum(weights.values())
+
+    return SectorRotationResult(
+        target_weights=weights,
+        gross_pct=gross_pct,
+        net_pct=net_pct,
+        sector_exposure=sector_exposure,
+        rejected=rejected,
+        overlap_dropped=overlap_dropped,
+    )
+
+
+@dataclass
 class NeutralResult:
     target_weights: dict[str, float]
     gross_pct: float

@@ -31,6 +31,7 @@ from apps.models_catalog.presets import expand_preset
 from hedgefund_agents.graphs.council import build_council_graph
 from hedgefund_agents.registry import get_data_provider, get_filings_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
+from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
 
 from .beta import compute_betas_for
 from .borrow import StubBorrowProvider
@@ -40,6 +41,7 @@ from .construction import (
     construct,
     construct_concentrated_long,
     construct_market_neutral,
+    construct_sector_rotation,
 )
 from .models import (
     PortfolioStrategy,
@@ -254,7 +256,29 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     beta_diagnostics: dict = {}
     cycle_outcome = "target_created"
     per_position_thesis: dict[str, dict] = {}
-    if strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG:
+    if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
+        result = construct_sector_rotation(
+            cands,
+            target_gross_pct=float(strategy.target_gross_pct),
+            per_etf_max_pct=float(strategy.per_etf_max_pct),
+            per_etf_min_pct=float(strategy.per_etf_min_pct),
+            max_etfs_held=int(strategy.max_etfs_held),
+        )
+        cycle_outcome = "target_created" if result.target_weights else "held_existing_book"
+        for r in council_results:
+            t = r["ticker"]
+            if t in result.target_weights:
+                decision = r.get("decision") or {}
+                rationale = str(decision.get("rationale") or "").strip()
+                per_position_thesis[t] = {
+                    "ticker": t,
+                    "sector": r.get("sector", ""),
+                    "action": decision.get("action", ""),
+                    "aggregate_confidence": int(decision.get("aggregate_confidence", 0)),
+                    "thesis": rationale[:2000],
+                }
+        beta_diagnostics = {"overlap_dropped": result.overlap_dropped}
+    elif strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG:
         # PM action whitelist + confidence-gated construction. Refuses to over-
         # diversify when fewer than min_positions clear the bar.
         result = construct_concentrated_long(
@@ -424,19 +448,45 @@ def daily_long_short_cycle(
         is_long_only_flavor = strategy.kind in (
             PortfolioStrategy.KIND_LONG_ONLY,
             PortfolioStrategy.KIND_CONCENTRATED_LONG,
+            PortfolioStrategy.KIND_SECTOR_ROTATION,
         )
-        screener_out = run_screener(
-            members=members,
-            as_of_date=as_of,
-            top_k_longs=(
-                int(strategy.max_positions)
-                if strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG
-                else strategy.top_k_longs
-            ),
-            top_k_shorts=0 if is_long_only_flavor else strategy.top_k_shorts,
-            weights=strategy.screener_weights or None,
-            long_only=is_long_only_flavor,
-        )
+        if strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
+            from apps.data.models import MacroSnapshot
+
+            from .models import SectorETF
+            etf_rows = {e.ticker: e for e in SectorETF.objects.filter(is_active=True)}
+            etfs_payload = []
+            for ticker, sector in members:
+                row = etf_rows.get(ticker)
+                etfs_payload.append({
+                    "ticker": ticker,
+                    "sector": sector or (row.sector if row else ""),
+                    "theme": row.theme if row else "",
+                    "affinities": row.regime_affinities if row else {},
+                })
+            snapshot = MacroSnapshot.objects.filter(as_of_date__lte=as_of).order_by("-as_of_date").first()
+            regime_vec = macro_regime_vector(snapshot)
+            screener_out = run_sector_screener(
+                etfs=etfs_payload,
+                as_of_date=as_of,
+                top_k=int(strategy.max_etfs_held) + 4,
+                benchmark="SPY",
+                regime_vector=regime_vec,
+                weights=strategy.screener_weights or None,
+            )
+        else:
+            screener_out = run_screener(
+                members=members,
+                as_of_date=as_of,
+                top_k_longs=(
+                    int(strategy.max_positions)
+                    if strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG
+                    else strategy.top_k_longs
+                ),
+                top_k_shorts=0 if is_long_only_flavor else strategy.top_k_shorts,
+                weights=strategy.screener_weights or None,
+                long_only=is_long_only_flavor,
+            )
     except ScreenerAbort as exc:
         raise RuntimeError(str(exc)) from exc
 

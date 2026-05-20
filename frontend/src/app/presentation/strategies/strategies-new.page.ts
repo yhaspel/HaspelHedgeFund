@@ -111,6 +111,29 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="ms" type="number" step="0.05" min="0.05" max="0.60" [(ngModel)]="maxSector" />
             </div>
+            @if (kind === 'sector_rotation') {
+              <div class="field">
+                <label class="lbl">
+                  Max ETFs held
+                  <hf-info text="Maximum number of sector / thematic ETFs the rotation book can hold at once. Default 6." />
+                </label>
+                <input class="input" name="me" type="number" min="2" max="20" [(ngModel)]="maxEtfsHeld" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Per-ETF max %
+                  <hf-info text="Hard cap per ETF as a fraction of gross. Default 0.30 (30%)." />
+                </label>
+                <input class="input" name="pmx" type="number" step="0.05" min="0.10" max="0.60" [(ngModel)]="perEtfMax" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Per-ETF min %
+                  <hf-info text="Floor per ETF. ETFs below this floor are raised to it (and excess pulled from larger positions). Default 0.05 (5%)." />
+                </label>
+                <input class="input" name="pmn" type="number" step="0.01" min="0.01" max="0.20" [(ngModel)]="perEtfMin" />
+              </div>
+            }
             @if (kind === 'concentrated_long') {
               <div class="field">
                 <label class="lbl">
@@ -134,7 +157,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="minC" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="minAggregateConfidence" />
               </div>
             }
-            @if (kind !== 'short_only' && kind !== 'concentrated_long') {
+            @if (kind !== 'short_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation') {
               <div class="field">
                 <label class="lbl">
                   Top K longs
@@ -143,7 +166,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="kl" type="number" min="1" max="50" [(ngModel)]="topLongs" />
               </div>
             }
-            @if (kind !== 'long_only' && kind !== 'concentrated_long') {
+            @if (kind !== 'long_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation') {
               <div class="field">
                 <label class="lbl">
                   Top K shorts
@@ -234,6 +257,9 @@ export class StrategiesNewPage implements OnInit {
   minPositions = 5;
   maxPositions = 10;
   minAggregateConfidence = 0.65;
+  maxEtfsHeld = 6;
+  perEtfMax = 0.30;
+  perEtfMin = 0.05;
   weights: Record<string, number> = { ...DEFAULT_SCREENER_WEIGHTS };
   weightKeys = Object.keys(DEFAULT_SCREENER_WEIGHTS);
   submitting = signal(false);
@@ -256,6 +282,15 @@ export class StrategiesNewPage implements OnInit {
       this.targetNet = 1.0;
       this.maxPosition = 0.25;
       this.maxSector = 0.60;
+    } else if (k === 'sector_rotation') {
+      this.topLongs = 0;
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.maxPosition = 0.30;
+      this.maxSector = 1.0;
+      const sectorUni = this.store.universes().find((u) => u.name === 'sector_etfs');
+      if (sectorUni) this.universe = sectorUni.id;
     }
   }
 
@@ -306,6 +341,11 @@ export class StrategiesNewPage implements OnInit {
       payload['min_positions'] = this.minPositions;
       payload['max_positions'] = this.maxPositions;
       payload['min_aggregate_confidence'] = String(this.minAggregateConfidence);
+    }
+    if (this.kind === 'sector_rotation') {
+      payload['max_etfs_held'] = this.maxEtfsHeld;
+      payload['per_etf_max_pct'] = String(this.perEtfMax);
+      payload['per_etf_min_pct'] = String(this.perEtfMin);
     }
     this.store.create(payload as any).subscribe({
       next: (s) => this.router.navigate(['/strategies', s.id]),

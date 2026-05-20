@@ -73,12 +73,14 @@ class PortfolioStrategy(models.Model):
     KIND_LONG_SHORT = "long_short"
     KIND_MARKET_NEUTRAL = "market_neutral"
     KIND_CONCENTRATED_LONG = "concentrated_long"
+    KIND_SECTOR_ROTATION = "sector_rotation"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
         (KIND_LONG_SHORT, "Long/Short"),
         (KIND_MARKET_NEUTRAL, "Market-neutral"),
         (KIND_CONCENTRATED_LONG, "Concentrated long-only"),
+        (KIND_SECTOR_ROTATION, "Sector / thematic ETF rotation"),
     ]
 
     user = models.ForeignKey(
@@ -129,12 +131,36 @@ class PortfolioStrategy(models.Model):
         max_digits=4, decimal_places=3, default=Decimal("0.650")
     )
 
+    # Sector rotation (kind=sector_rotation) parameters.
+    max_etfs_held = models.SmallIntegerField(default=6)
+    per_etf_max_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.30"))
+    per_etf_min_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.05"))
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
         return f"{self.name} ({self.universe.name})"
+
+
+class SectorETF(models.Model):
+    """Registry of investable sector / theme ETFs (P2h)."""
+    ticker = models.CharField(max_length=16, unique=True)
+    sector = models.CharField(max_length=64)
+    theme = models.CharField(max_length=64, blank=True, default="")
+    issuer = models.CharField(max_length=32, default="SPDR")
+    aum_usd = models.BigIntegerField(default=0)
+    avg_daily_volume_usd = models.BigIntegerField(default=0)
+    expense_ratio_bps = models.SmallIntegerField(default=10)
+    is_active = models.BooleanField(default=True)
+    # 6-dim regime affinity: early_cycle, mid_cycle, late_cycle, recession,
+    # rising_rates, sticky_inflation. Each in [-1, 1].
+    regime_affinities = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True, default="")
+
+    def __str__(self) -> str:
+        return f"{self.ticker} ({self.sector})"
 
 
 class BorrowQuote(models.Model):

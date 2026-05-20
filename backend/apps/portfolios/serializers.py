@@ -65,6 +65,7 @@ class StrategySerializer(serializers.ModelSerializer):
             "neutrality_tolerance_dollar_pct", "neutrality_tolerance_beta",
             "drop_on_unreliable_beta",
             "max_positions", "min_positions", "min_aggregate_confidence",
+            "max_etfs_held", "per_etf_max_pct", "per_etf_min_pct",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
