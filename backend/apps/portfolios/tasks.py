@@ -464,7 +464,10 @@ def daily_long_short_cycle(
                     "theme": row.theme if row else "",
                     "affinities": row.regime_affinities if row else {},
                 })
-            snapshot = MacroSnapshot.objects.filter(as_of_date__lte=as_of).order_by("-as_of_date").first()
+            snapshot = (
+                MacroSnapshot.objects.filter(as_of_date__lte=as_of)
+                .order_by("-as_of_date").first()
+            )
             regime_vec = macro_regime_vector(snapshot)
             screener_out = run_sector_screener(
                 etfs=etfs_payload,

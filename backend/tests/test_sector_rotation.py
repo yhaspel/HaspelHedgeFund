@@ -1,8 +1,6 @@
 """P2h — sector / thematic ETF rotation tests."""
 from __future__ import annotations
 
-from datetime import date
-
 import pytest
 
 from apps.portfolios.construction import (
@@ -11,7 +9,6 @@ from apps.portfolios.construction import (
     construct_sector_rotation,
 )
 from hedgefund_agents.screener.sector_features import (
-    REGIME_AXES,
     SectorFeatures,
     macro_regime_vector,
     sector_score,

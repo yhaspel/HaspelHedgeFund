@@ -166,7 +166,8 @@ def sector_score(f: SectorFeatures, weights: dict[str, float] | None = None) -> 
         w["relative_momentum_3m"] * f.relative_momentum_3m
         + w["relative_momentum_1m"] * f.relative_momentum_1m
         + w["relative_momentum_6m"] * f.relative_momentum_6m
-        + w["drawdown_from_high"] * (-(-f.drawdown_from_high))  # negative dd hurts
+        # drawdown is negative; bigger drawdown lowers the score
+        + w["drawdown_from_high"] * f.drawdown_from_high
         + w["regime_fit"] * f.regime_fit
     )
 
