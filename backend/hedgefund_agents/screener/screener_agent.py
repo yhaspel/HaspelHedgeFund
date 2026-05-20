@@ -60,6 +60,7 @@ def run_screener(
     top_k_longs: int,
     top_k_shorts: int,
     weights: dict[str, float] | None = None,
+    long_only: bool = False,
 ) -> dict:
     if len(members) > MAX_UNIVERSE:
         raise ScreenerAbort(
@@ -82,17 +83,20 @@ def run_screener(
         for f, s in longs[:top_k_longs] if s > -1e8
     ]
 
-    shorts = [(f, short_score(f, weights)) for f in feats]
-    shorts.sort(key=lambda x: x[1], reverse=True)
-    chosen_long_tickers = {c["ticker"] for c in long_candidates}
-    short_candidates = [
-        {
-            "ticker": f.ticker, "sector": f.sector, "score": round(s, 4),
-            "features": asdict(f), "rationale": _rationale("short", f, s),
-        }
-        for f, s in shorts
-        if s > -1e8 and f.ticker not in chosen_long_tickers
-    ][:top_k_shorts]
+    if long_only or top_k_shorts <= 0:
+        short_candidates: list[dict] = []
+    else:
+        shorts = [(f, short_score(f, weights)) for f in feats]
+        shorts.sort(key=lambda x: x[1], reverse=True)
+        chosen_long_tickers = {c["ticker"] for c in long_candidates}
+        short_candidates = [
+            {
+                "ticker": f.ticker, "sector": f.sector, "score": round(s, 4),
+                "features": asdict(f), "rationale": _rationale("short", f, s),
+            }
+            for f, s in shorts
+            if s > -1e8 and f.ticker not in chosen_long_tickers
+        ][:top_k_shorts]
 
     return {
         "as_of_date": as_of_date.isoformat(),

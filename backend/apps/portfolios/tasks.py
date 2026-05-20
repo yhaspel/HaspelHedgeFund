@@ -34,7 +34,13 @@ from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 
 from .beta import compute_betas_for
 from .borrow import StubBorrowProvider
-from .construction import Candidate, Constraints, construct, construct_market_neutral
+from .construction import (
+    Candidate,
+    Constraints,
+    construct,
+    construct_concentrated_long,
+    construct_market_neutral,
+)
 from .models import (
     PortfolioStrategy,
     PortfolioTarget,
@@ -246,7 +252,34 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
 
     portfolio_beta = 0.0
     beta_diagnostics: dict = {}
-    if strategy.kind == PortfolioStrategy.KIND_MARKET_NEUTRAL:
+    cycle_outcome = "target_created"
+    per_position_thesis: dict[str, dict] = {}
+    if strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG:
+        # PM action whitelist + confidence-gated construction. Refuses to over-
+        # diversify when fewer than min_positions clear the bar.
+        result = construct_concentrated_long(
+            cands,
+            constraints,
+            min_positions=int(strategy.min_positions),
+            max_positions=int(strategy.max_positions),
+            min_aggregate_confidence=float(strategy.min_aggregate_confidence),
+        )
+        cycle_outcome = result.outcome
+        # Capture thesis excerpts for the survivors only (the ones with weight).
+        for r in council_results:
+            t = r["ticker"]
+            if t in result.target_weights:
+                decision = r.get("decision") or {}
+                rationale = str(decision.get("rationale") or "").strip()
+                per_position_thesis[t] = {
+                    "ticker": t,
+                    "sector": r.get("sector", ""),
+                    "action": decision.get("action", ""),
+                    "aggregate_confidence": int(decision.get("aggregate_confidence", 0)),
+                    "thesis": rationale[:2000],
+                    "dissenting_personas": decision.get("dissenting_personas", []),
+                }
+    elif strategy.kind == PortfolioStrategy.KIND_MARKET_NEUTRAL:
         data_provider = get_data_provider()
         survivors = [c.ticker for c in cands if c.veto_reason is None]
         betas_full = compute_betas_for(
@@ -318,16 +351,20 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         last_close.get(p.ticker, float(p.avg_cost)) * float(p.quantity) for p in
         Position.objects.filter(portfolio=portfolio)
     )
-    orders = compute_orders(
-        current,
-        result.target_weights,
-        RebalanceConfig(
-            portfolio_value=max(1.0, portfolio_value),
-            last_close=last_close,
-            min_trade_notional_usd=float(strategy.min_trade_notional_usd),
-            max_turnover_pct=float(strategy.max_turnover_pct),
-        ),
-    )
+    if cycle_outcome == "held_existing_book":
+        # No-action cycle: do not produce orders. The existing book is held.
+        orders = []
+    else:
+        orders = compute_orders(
+            current,
+            result.target_weights,
+            RebalanceConfig(
+                portfolio_value=max(1.0, portfolio_value),
+                last_close=last_close,
+                min_trade_notional_usd=float(strategy.min_trade_notional_usd),
+                max_turnover_pct=float(strategy.max_turnover_pct),
+            ),
+        )
 
     RebalanceOrder.objects.filter(target=target).delete()
     RebalanceOrder.objects.bulk_create([
@@ -347,6 +384,8 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
     target.realised_portfolio_beta = Decimal(str(round(portfolio_beta, 3)))
     target.beta_diagnostics = beta_diagnostics
+    target.per_position_thesis = per_position_thesis
+    target.cycle_outcome = cycle_outcome
     target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
     target.rejected_candidates = result.rejected
     target.decisions = council_results
@@ -382,12 +421,21 @@ def daily_long_short_cycle(
         raise RuntimeError("Universe has no active members on as_of date.")
 
     try:
+        is_long_only_flavor = strategy.kind in (
+            PortfolioStrategy.KIND_LONG_ONLY,
+            PortfolioStrategy.KIND_CONCENTRATED_LONG,
+        )
         screener_out = run_screener(
             members=members,
             as_of_date=as_of,
-            top_k_longs=strategy.top_k_longs,
-            top_k_shorts=strategy.top_k_shorts,
+            top_k_longs=(
+                int(strategy.max_positions)
+                if strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG
+                else strategy.top_k_longs
+            ),
+            top_k_shorts=0 if is_long_only_flavor else strategy.top_k_shorts,
             weights=strategy.screener_weights or None,
+            long_only=is_long_only_flavor,
         )
     except ScreenerAbort as exc:
         raise RuntimeError(str(exc)) from exc

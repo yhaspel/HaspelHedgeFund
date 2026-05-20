@@ -176,6 +176,136 @@ def construct(
     )
 
 
+class PMActionWhitelistError(ValueError):
+    """Raised when PM emits an action that's not allowed in a flavor."""
+
+
+@dataclass
+class ConcentratedResult:
+    target_weights: dict[str, float]
+    gross_pct: float
+    net_pct: float
+    sector_exposure: dict[str, float]
+    rejected: list[dict]
+    outcome: str  # "target_created" | "held_existing_book"
+
+
+_CONCENTRATED_LONG_ALLOWED = {"buy", "hold"}
+
+
+def construct_concentrated_long(
+    candidates: list[Candidate],
+    constraints: Constraints,
+    *,
+    min_positions: int = 5,
+    max_positions: int = 15,
+    min_aggregate_confidence: float = 0.65,
+) -> ConcentratedResult:
+    """Concentrated long-only construction.
+
+    Steps:
+      1. Hard whitelist: any short-side decision or open_short/cover_short action raises.
+      2. Drop holds and short candidates.
+      3. Drop candidates below min_aggregate_confidence (0..1, vs confidence 0..100).
+      4. Sort by confidence × quality, take top max_positions.
+      5. If survivors < min_positions: return outcome=held_existing_book, no weights.
+      6. Weight by confidence × quality, normalise to target_gross_pct.
+      7. Apply per-name cap with overflow redistribution.
+      8. Apply min_position_pct floor: weights below floor are raised to floor;
+         excess is taken proportionally from the largest positions.
+      9. Optional sector cap.
+    """
+    # Step 1 — whitelist guard. open_short / cover_short here is a programming
+    # error in the cycle dispatcher, not a candidate rejection.
+    for c in candidates:
+        if c.action in {"open_short", "cover_short"} or c.side == "short":
+            raise PMActionWhitelistError(
+                f"concentrated_long flavor cannot accept {c.action!r} on {c.ticker} "
+                f"(side={c.side!r})"
+            )
+
+    rejected: list[dict] = []
+    survivors: list[Candidate] = []
+    threshold_int = int(round(min_aggregate_confidence * 100))
+    for c in candidates:
+        if c.veto_reason:
+            rejected.append({"ticker": c.ticker, "reason": c.veto_reason})
+            continue
+        if c.action != "buy":
+            rejected.append({"ticker": c.ticker, "reason": f"action={c.action}"})
+            continue
+        if c.confidence < threshold_int:
+            rejected.append({
+                "ticker": c.ticker,
+                "reason": f"below_confidence_threshold ({c.confidence} < {threshold_int})",
+            })
+            continue
+        survivors.append(c)
+
+    survivors.sort(key=lambda c: c.confidence * c.quality_weight, reverse=True)
+    # Hard ceiling implied by the floor: max names that can each clear floor.
+    if constraints.min_position_pct > 0:
+        floor_cap = int(constraints.target_gross_pct / constraints.min_position_pct)
+        max_positions = min(max_positions, max(1, floor_cap))
+    survivors = survivors[:max_positions]
+
+    if len(survivors) < min_positions:
+        rejected.append({
+            "reason": "insufficient_high_conviction_candidates",
+            "n_survivors": len(survivors),
+            "min_required": min_positions,
+        })
+        return ConcentratedResult(
+            target_weights={},
+            gross_pct=0.0,
+            net_pct=0.0,
+            sector_exposure={},
+            rejected=rejected,
+            outcome="held_existing_book",
+        )
+
+    target_total = constraints.target_gross_pct
+    weights = _bucket_weights(survivors, target_total)
+
+    cap = constraints.max_position_pct
+    weights = _apply_per_name_cap(weights, cap)
+
+    floor = constraints.min_position_pct
+    if floor > 0 and weights:
+        below = {t: w for t, w in weights.items() if 0 < w < floor}
+        if below:
+            extra_needed = sum(floor - w for w in below.values())
+            for t in below:
+                weights[t] = floor
+            donors = {t: w for t, w in weights.items() if w > floor and t not in below}
+            donor_total = sum(donors.values())
+            if donor_total > extra_needed:
+                for t in donors:
+                    share = (donors[t] / donor_total) * extra_needed
+                    weights[t] = max(floor, weights[t] - share)
+
+    sector_of = {c.ticker: c.sector for c in survivors}
+    if constraints.max_sector_pct and constraints.max_sector_pct > 0:
+        weights, _notes = _apply_sector_cap(weights, sector_of, constraints.max_sector_pct)
+
+    sector_exposure: dict[str, float] = {}
+    for t, w in weights.items():
+        s = sector_of.get(t, "")
+        sector_exposure[s] = sector_exposure.get(s, 0.0) + w
+
+    gross_pct = sum(abs(w) for w in weights.values())
+    net_pct = sum(weights.values())
+
+    return ConcentratedResult(
+        target_weights=weights,
+        gross_pct=gross_pct,
+        net_pct=net_pct,
+        sector_exposure=sector_exposure,
+        rejected=rejected,
+        outcome="target_created",
+    )
+
+
 @dataclass
 class NeutralResult:
     target_weights: dict[str, float]

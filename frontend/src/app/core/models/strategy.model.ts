@@ -24,13 +24,19 @@ export interface Position {
   opened_at: string;
 }
 
-export type StrategyKind = 'long_only' | 'short_only' | 'long_short' | 'market_neutral';
+export type StrategyKind =
+  | 'long_only'
+  | 'short_only'
+  | 'long_short'
+  | 'market_neutral'
+  | 'concentrated_long';
 
 export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'long_only', label: 'Long-only' },
   { value: 'short_only', label: 'Short-only' },
   { value: 'long_short', label: 'Long/Short' },
   { value: 'market_neutral', label: 'Market-neutral' },
+  { value: 'concentrated_long', label: 'Concentrated long-only' },
 ];
 
 export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
@@ -42,6 +48,8 @@ export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
     'Both sides, directional net. The portfolio holds both long and short positions and the net (longs − shorts) is whatever you set — long-biased, short-biased, or anywhere between. Classic hedge-fund construction; gross > net, so you get some idiosyncratic exposure with reduced market beta.',
   market_neutral:
     'Both sides, dollar- AND beta-neutral. Longs and shorts are sized so that net dollars ≈ 0 and the dollar-weighted portfolio beta vs the benchmark (default SPY) ≈ 0. Returns come from the long–short spread, not from market direction. Uses a trailing 252-day OLS beta per name and a one-knob rescale to cancel the bucket betas after the standard caps.',
+  concentrated_long:
+    'Activist-style concentrated long-only book: 5–15 high-conviction names, no shorts, larger per-position sizes (typically 5–25% each). A candidate must clear a higher aggregate-confidence bar than a diversified book; if fewer names clear the bar than min_positions, no new target is emitted and the existing book is held (cash beats a 4th-best idea). Sector caps are loose by default because concentration is the point.',
 };
 
 export interface Strategy {
@@ -70,6 +78,9 @@ export interface Strategy {
   neutrality_tolerance_dollar_pct: string;
   neutrality_tolerance_beta: string;
   drop_on_unreliable_beta: boolean;
+  max_positions: number;
+  min_positions: number;
+  min_aggregate_confidence: string;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;
@@ -132,6 +143,15 @@ export interface CycleDetail extends CycleSummary {
   screener_ranking: ScreenerRanking | null;
   orders: RebalanceOrder[];
   error_message: string;
+  per_position_thesis?: Record<string, {
+    ticker: string;
+    sector: string;
+    action: string;
+    aggregate_confidence: number;
+    thesis: string;
+    dissenting_personas?: { name: string; signal: string; confidence: number; thesis_summary?: string }[];
+  }>;
+  cycle_outcome?: string;
 }
 
 export const DEFAULT_SCREENER_WEIGHTS: Record<string, number> = {

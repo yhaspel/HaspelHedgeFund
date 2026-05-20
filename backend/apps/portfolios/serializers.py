@@ -64,6 +64,7 @@ class StrategySerializer(serializers.ModelSerializer):
             "benchmark_ticker", "beta_window_days",
             "neutrality_tolerance_dollar_pct", "neutrality_tolerance_beta",
             "drop_on_unreliable_beta",
+            "max_positions", "min_positions", "min_aggregate_confidence",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
@@ -114,6 +115,7 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
             "id", "as_of_date", "status",
             "target_weights", "gross_pct", "net_pct",
             "realised_net_pct", "realised_portfolio_beta", "beta_diagnostics",
+            "per_position_thesis", "cycle_outcome",
             "sector_exposure",
             "rejected_candidates", "decisions",
             "screener_ranking", "orders",

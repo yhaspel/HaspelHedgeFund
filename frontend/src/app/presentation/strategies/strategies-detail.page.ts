@@ -256,6 +256,39 @@ import { CycleDetail } from '../../core/models/strategy.model';
                 }
               </div>
 
+              @if (store.currentStrategy()?.kind === 'concentrated_long' && c.cycle_outcome === 'held_existing_book') {
+                <div class="pill warn" style="height:auto;padding:8px 12px">
+                  <span class="dot"></span>
+                  No-action cycle: fewer than min_positions cleared the confidence bar. Existing book held; no new target produced.
+                </div>
+              }
+
+              @if (theses().length > 0) {
+                <div>
+                  <div class="eyebrow" style="margin-bottom:6px">Per-position thesis ({{ theses().length }})</div>
+                  <div style="display:flex;flex-direction:column;gap:10px">
+                    @for (t of theses(); track t.ticker) {
+                      <div class="card" data-test="position-thesis"
+                        style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--surface-1)">
+                        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+                          <span class="mono" style="color:var(--text);font-weight:600">{{ t.ticker }}</span>
+                          <span style="font-size:11.5px;color:var(--text-3)">{{ t.sector || '—' }}</span>
+                          <span class="mono" style="font-size:11.5px;color:var(--acc-long-fg)">
+                            {{ t.weight | number: '1.2-2' }}%
+                          </span>
+                          <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                            confidence {{ t.aggregate_confidence }}
+                          </span>
+                        </div>
+                        <p style="font-size:12.5px;color:var(--text-2);margin:6px 0 0;white-space:pre-wrap;word-break:break-word">
+                          {{ t.thesis }}
+                        </p>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+
               @if (c.rejected_candidates.length > 0) {
                 <details>
                   <summary class="eyebrow" style="cursor:pointer">
@@ -336,6 +369,18 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   betaNeutral(c: CycleDetail): boolean {
     const tol = Number(this.store.currentStrategy()?.neutrality_tolerance_beta ?? 0.05);
     return Math.abs(Number(c.realised_portfolio_beta ?? 0)) <= tol;
+  }
+  theses() {
+    const c = this.cycle(); if (!c) return [];
+    const pt = c.per_position_thesis || {};
+    return Object.entries(pt).map(([ticker, v]) => ({
+      ticker,
+      sector: v.sector,
+      action: v.action,
+      aggregate_confidence: v.aggregate_confidence,
+      thesis: v.thesis,
+      weight: (Number(c.target_weights[ticker] || 0)) * 100,
+    })).sort((a, b) => b.weight - a.weight);
   }
   sectorRows() {
     const c = this.cycle(); if (!c) return [];

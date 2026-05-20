@@ -72,18 +72,20 @@ class PortfolioStrategy(models.Model):
     KIND_SHORT_ONLY = "short_only"
     KIND_LONG_SHORT = "long_short"
     KIND_MARKET_NEUTRAL = "market_neutral"
+    KIND_CONCENTRATED_LONG = "concentrated_long"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
         (KIND_LONG_SHORT, "Long/Short"),
         (KIND_MARKET_NEUTRAL, "Market-neutral"),
+        (KIND_CONCENTRATED_LONG, "Concentrated long-only"),
     ]
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=80)
-    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_LONG_SHORT)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_LONG_SHORT)
     universe = models.ForeignKey(Universe, on_delete=models.PROTECT)
     portfolio = models.ForeignKey(Portfolio, on_delete=models.PROTECT)
 
@@ -119,6 +121,13 @@ class PortfolioStrategy(models.Model):
         max_digits=5, decimal_places=4, default=Decimal("0.05")
     )
     drop_on_unreliable_beta = models.BooleanField(default=False)
+
+    # Concentrated long-only (kind=concentrated_long) parameters.
+    max_positions = models.SmallIntegerField(default=15)
+    min_positions = models.SmallIntegerField(default=5)
+    min_aggregate_confidence = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.650")
+    )
 
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
@@ -178,6 +187,8 @@ class PortfolioTarget(models.Model):
         max_digits=6, decimal_places=3, default=Decimal("0")
     )
     beta_diagnostics = models.JSONField(default=dict, blank=True)
+    per_position_thesis = models.JSONField(default=dict, blank=True)
+    cycle_outcome = models.CharField(max_length=24, blank=True, default="")
     rejected_candidates = models.JSONField(default=list)
     decisions = models.JSONField(default=list)
     screener_ranking = models.ForeignKey(

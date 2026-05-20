@@ -88,7 +88,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="g" type="number" step="0.05" min="0.5" max="3.0" [(ngModel)]="targetGross" />
             </div>
-            @if (kind !== 'market_neutral') {
+            @if (kind !== 'market_neutral' && kind !== 'concentrated_long') {
               <div class="field">
                 <label class="lbl">
                   Target net
@@ -102,7 +102,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 Max position pct
                 <hf-info text="No single name can exceed this fraction of portfolio value. 0.03 = 3% per name. Overflow above the cap is redistributed to other names." />
               </label>
-              <input class="input" name="mp" type="number" step="0.005" min="0.005" max="0.20" [(ngModel)]="maxPosition" />
+              <input class="input" name="mp" type="number" step="0.005" min="0.005" max="0.30" [(ngModel)]="maxPosition" />
             </div>
             <div class="field">
               <label class="lbl">
@@ -111,7 +111,30 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="ms" type="number" step="0.05" min="0.05" max="0.60" [(ngModel)]="maxSector" />
             </div>
-            @if (kind !== 'short_only') {
+            @if (kind === 'concentrated_long') {
+              <div class="field">
+                <label class="lbl">
+                  Min positions
+                  <hf-info text="Minimum number of high-conviction names that must clear the confidence bar before the strategy emits any target. If fewer clear, no new target is emitted and the existing book is held — concentrated managers would rather hold cash than buy a 4th-best idea." />
+                </label>
+                <input class="input" name="minP" type="number" min="1" max="20" [(ngModel)]="minPositions" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Max positions
+                  <hf-info text="Hard cap on the book size. Plan default is 15 (Buffett/Ackman territory)." />
+                </label>
+                <input class="input" name="maxP" type="number" min="2" max="25" [(ngModel)]="maxPositions" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Min aggregate confidence
+                  <hf-info text="A candidate's council aggregate confidence must clear this bar (0–1) to enter the book. Default 0.65 — higher than a diversified book because each position is larger." />
+                </label>
+                <input class="input" name="minC" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="minAggregateConfidence" />
+              </div>
+            }
+            @if (kind !== 'short_only' && kind !== 'concentrated_long') {
               <div class="field">
                 <label class="lbl">
                   Top K longs
@@ -120,7 +143,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="kl" type="number" min="1" max="50" [(ngModel)]="topLongs" />
               </div>
             }
-            @if (kind !== 'long_only') {
+            @if (kind !== 'long_only' && kind !== 'concentrated_long') {
               <div class="field">
                 <label class="lbl">
                   Top K shorts
@@ -208,6 +231,9 @@ export class StrategiesNewPage implements OnInit {
   topShorts = 5;
   costCeiling = 2.0;
   modelPreset = 'frugal';
+  minPositions = 5;
+  maxPositions = 10;
+  minAggregateConfidence = 0.65;
   weights: Record<string, number> = { ...DEFAULT_SCREENER_WEIGHTS };
   weightKeys = Object.keys(DEFAULT_SCREENER_WEIGHTS);
   submitting = signal(false);
@@ -224,6 +250,12 @@ export class StrategiesNewPage implements OnInit {
       if (this.targetNet > 0) this.targetNet = -Math.abs(this.targetNet);
     } else if (k === 'market_neutral') {
       this.targetNet = 0;
+    } else if (k === 'concentrated_long') {
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.maxPosition = 0.25;
+      this.maxSector = 0.60;
     }
   }
 
@@ -255,7 +287,7 @@ export class StrategiesNewPage implements OnInit {
     }
     this.error.set(null);
     this.submitting.set(true);
-    this.store.create({
+    const payload: Record<string, unknown> = {
       name: this.name,
       kind: this.kind,
       universe: this.universe,
@@ -269,7 +301,13 @@ export class StrategiesNewPage implements OnInit {
       cost_ceiling_per_cycle_usd: String(this.costCeiling),
       model_preset: this.modelPreset,
       screener_weights: this.weights,
-    }).subscribe({
+    };
+    if (this.kind === 'concentrated_long') {
+      payload['min_positions'] = this.minPositions;
+      payload['max_positions'] = this.maxPositions;
+      payload['min_aggregate_confidence'] = String(this.minAggregateConfidence);
+    }
+    this.store.create(payload as any).subscribe({
       next: (s) => this.router.navigate(['/strategies', s.id]),
       error: (e) => {
         this.submitting.set(false);
