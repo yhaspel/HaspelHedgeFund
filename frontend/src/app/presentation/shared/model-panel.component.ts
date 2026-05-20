@@ -21,38 +21,37 @@ import {
   standalone: true,
   imports: [FormsModule],
   template: `
-    <section class="border rounded bg-white p-4 space-y-3">
-      <div class="flex items-center justify-between">
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
         <div>
-          <div class="text-sm font-medium">Models</div>
-          <div class="text-xs text-gray-500">
-            Preset: <span class="font-mono">{{ activePreset() }}</span>
+          <div class="eyebrow">Models</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:4px">
+            Preset: <span class="mono" style="color:var(--text-2)">{{ activePreset() }}</span>
             · Est. per-ticker cost:
-            <span class="font-mono">\${{ totalCost().toFixed(4) }}</span>
+            <span class="mono" style="color:var(--text-2)">$ {{ totalCost().toFixed(4) }}</span>
             @if (multiplier() > 1) {
-              <span> · ×{{ multiplier() }} ≈ \${{ (totalCost() * multiplier()).toFixed(2) }}</span>
+              <span> · ×{{ multiplier() }} ≈ <span class="mono" style="color:var(--text-2)">$ {{ (totalCost() * multiplier()).toFixed(2) }}</span></span>
             }
           </div>
         </div>
         <button
           type="button"
           (click)="expanded.set(!expanded())"
-          class="text-blue-600 text-sm hover:underline"
+          class="btn ghost sm"
           data-test="model-panel-expand"
+          style="color:var(--acc-info-fg)"
         >
           {{ expanded() ? 'Collapse' : 'Expand' }}
         </button>
       </div>
 
-      <div class="flex flex-wrap gap-2">
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
         @for (p of presets; track p) {
           <button
             type="button"
             (click)="applyPreset(p)"
-            [class.bg-blue-600]="activePreset() === p"
-            [class.text-white]="activePreset() === p"
-            [class.bg-gray-100]="activePreset() !== p"
-            class="px-3 py-1 rounded text-xs"
+            class="btn sm"
+            [class.primary]="activePreset() === p"
             [attr.data-test]="'preset-' + p"
           >
             {{ p }}
@@ -61,12 +60,13 @@ import {
       </div>
 
       @if (expanded()) {
-        <div class="border-t pt-3 space-y-2 max-h-96 overflow-y-auto">
+        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:8px;max-height:384px;overflow-y:auto">
           @for (a of agents(); track a) {
-            <div class="grid grid-cols-3 gap-2 items-center text-sm">
-              <div>{{ display(a) }}</div>
+            <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;align-items:center;font-size:13px">
+              <div style="color:var(--text-2)">{{ display(a) }}</div>
               <select
-                class="col-span-2 border rounded px-2 py-1 text-xs"
+                class="input sans"
+                style="height:28px;font-size:11.5px;padding:0 8px"
                 [ngModel]="currentFor(a)"
                 (ngModelChange)="setOverride(a, $event)"
                 [attr.data-test]="'select-' + a"
@@ -74,7 +74,7 @@ import {
                 @for (m of store.models(); track m.id) {
                   <option [value]="m.id" [disabled]="!m.available">
                     {{ m.display_name }} · {{ m.tier }} ·
-                    \${{ estimate(a, m.id).toFixed(4) }}
+                    $ {{ estimate(a, m.id).toFixed(4) }}
                     {{ m.available ? '' : ' (no key)' }}
                   </option>
                 }
