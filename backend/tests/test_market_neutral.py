@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from apps.portfolios.beta import _daily_returns, _ols_beta, compute_beta
+from apps.portfolios.beta import _ols_beta, compute_beta
 from apps.portfolios.construction import (
     Candidate,
     Constraints,
