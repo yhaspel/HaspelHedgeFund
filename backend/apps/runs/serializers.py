@@ -30,14 +30,38 @@ class DecisionSerializer(serializers.ModelSerializer):
             "id", "ticker", "action", "confidence",
             "rationale", "dissenting_views",
             "target_quantity", "target_weight_pct", "risk_overrides",
+            "side", "target_weight_signed",
             "created_at",
         )
+
+
+def _strategy_backlink(run: Run) -> dict | None:
+    """Return strategy/cycle metadata for a strategy-sourced run.
+
+    Returns None for ad-hoc runs. Resolved lazily to avoid extra joins
+    when the field isn't relevant.
+    """
+    if run.source != Run.STRATEGY or run.portfolio_target_id is None:
+        return None
+    target = run.portfolio_target
+    if target is None:
+        return None
+    return {
+        "portfolio_target_id": target.id,
+        "portfolio_target_status": target.status,
+        "as_of_date": target.as_of_date.isoformat() if target.as_of_date else None,
+        "strategy_id": target.strategy_id,
+        "strategy_name": target.strategy.name if target.strategy_id else "",
+        "strategy_kind": target.strategy.kind if target.strategy_id else "",
+    }
 
 
 class RunDetailSerializer(serializers.ModelSerializer):
     messages = AgentMessageSerializer(many=True, read_only=True)
     decisions = DecisionSerializer(many=True, read_only=True)
     llm_calls = LLMCallSerializer(many=True, read_only=True)
+    portfolio_target = serializers.IntegerField(source="portfolio_target_id", read_only=True)
+    strategy_backlink = serializers.SerializerMethodField()
 
     class Meta:
         model = Run
@@ -45,17 +69,28 @@ class RunDetailSerializer(serializers.ModelSerializer):
             "id", "tickers", "status", "model_overrides", "as_of_date",
             "personas", "agent_versions",
             "created_at", "finished_at", "total_cost_usd", "error_message",
+            "source", "portfolio_target", "strategy_backlink",
             "messages", "decisions", "llm_calls",
         )
 
+    def get_strategy_backlink(self, run: Run) -> dict | None:
+        return _strategy_backlink(run)
+
 
 class RunListSerializer(serializers.ModelSerializer):
+    portfolio_target = serializers.IntegerField(source="portfolio_target_id", read_only=True)
+    strategy_backlink = serializers.SerializerMethodField()
+
     class Meta:
         model = Run
         fields = (
             "id", "tickers", "status", "as_of_date",
             "created_at", "finished_at", "total_cost_usd",
+            "source", "portfolio_target", "strategy_backlink",
         )
+
+    def get_strategy_backlink(self, run: Run) -> dict | None:
+        return _strategy_backlink(run)
 
 
 class RunCreateSerializer(serializers.ModelSerializer):

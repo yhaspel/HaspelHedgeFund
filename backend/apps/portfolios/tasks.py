@@ -171,11 +171,23 @@ def _trim_k_for_budget(strategy: PortfolioStrategy, n_longs: int, n_shorts: int)
     return new_longs, new_shorts
 
 
-@shared_task
-def run_candidate_council(payload: dict) -> dict:
+@shared_task(bind=True)
+def run_candidate_council(self, payload: dict) -> dict:
     """Sub-task: run the full council on one candidate.
 
-    Returns a dict suitable for the chord callback (the decision + side metadata)."""
+    Returns a dict suitable for the chord callback (the decision + side metadata).
+
+    P2l: if `payload['run_id']` is set, claim that Run row, mark it running,
+    snapshot agent versions, and persist AgentMessage/Decision rows when the
+    graph completes. The same return contract as before is preserved so
+    finalize_cycle keeps working.
+    """
+    from apps.runs.models import Run
+    from hedgefund_agents.personas import ALL_PERSONAS
+    from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
+
+    from . import runs_bridge
+
     ticker = payload["ticker"]
     sector = payload.get("sector", "")
     side = payload["side"]  # "long" | "short" | "sector"
@@ -183,6 +195,38 @@ def run_candidate_council(payload: dict) -> dict:
     as_of = _resolve_as_of(payload["as_of_date"])
     personas = payload.get("personas") or None
     flavor = payload.get("flavor", "")
+    run_id = payload.get("run_id")
+
+    # Claim the queued Run row, if one was created for this candidate.
+    run: Run | None = None
+    selected_personas: list[str] = list(personas or ALL_PERSONAS)
+    if run_id:
+        try:
+            run = Run.objects.get(pk=run_id)
+        except Run.DoesNotExist:
+            run = None
+    if run is not None:
+        if run.status == Run.CANCELLED:
+            # User cancelled before this candidate started: emit a benign
+            # hold so the chord can still finalize.
+            return {
+                "ticker": ticker, "sector": sector, "side": side,
+                "borrow_veto": borrow_veto, "run_id": run_id,
+                "decision": {
+                    "ticker": ticker, "action": "hold",
+                    "rationale": "cancelled before council started",
+                },
+                "risk": {}, "sector_veto_entry": None,
+            }
+        ensure_versions_synced()
+        run.status = Run.RUNNING
+        run.celery_task_id = str(getattr(self.request, "id", "") or "")
+        run.agent_versions = snapshot_versions(selected_personas + [
+            "fundamentals", "technicals", "valuation", "sentiment",
+            "macro", "news_digest",
+            "risk_manager", "portfolio_manager", "cio",
+        ])
+        run.save(update_fields=["status", "celery_task_id", "agent_versions"])
 
     if flavor == "sector_rotation":
         graph = build_sector_council_graph(personas=personas)
@@ -195,9 +239,11 @@ def run_candidate_council(payload: dict) -> dict:
         "data_provider": get_data_provider(),
         "filings_provider": get_filings_provider(),
         # Cost attribution: every LLMCall this council emits will be linked
-        # to the parent PortfolioTarget, so PortfolioTarget.total_cost_usd
-        # aggregates real spend rather than a per-candidate guess.
+        # to BOTH the parent PortfolioTarget AND this run, so two independent
+        # rollups stay correct (Run.total_cost_usd for the transcript view,
+        # PortfolioTarget.total_cost_usd for the cycle view).
         "portfolio_target_id": payload.get("portfolio_target_id"),
+        "run_id": run_id,
         "user_id": payload.get("user_id"),
         # P2e: tell PM/RM this is a short candidate so the action mapping
         # produces open_short instead of just sell, and so the borrow veto
@@ -217,6 +263,7 @@ def run_candidate_council(payload: dict) -> dict:
         "borrow_veto": borrow_veto,
         "disable_cio": True,
     }
+    failed = False
     try:
         final = graph.invoke(initial_state)
         decision = final.get("decision") or {}
@@ -227,11 +274,36 @@ def run_candidate_council(payload: dict) -> dict:
         decision = {"ticker": ticker, "action": "hold", "rationale": f"council error: {exc}"}
         risk = {}
         sector_veto_entry = None
+        final = {}
+        failed = True
+
+    if run is not None:
+        # Persist transcript rows even on failure so the Run detail page
+        # shows what we have. update_or_create makes this idempotent under
+        # Celery retries.
+        try:
+            runs_bridge.persist_council_outputs(
+                run=run, state=final, selected_personas=selected_personas, side=side,
+            )
+            runs_bridge.reconcile_run_cost(run)
+        except Exception:  # pragma: no cover
+            log.exception("persisting council outputs failed for run %s", run.pk)
+        # Re-read status: the user may have cancelled mid-flight via the
+        # /reject/ endpoint. Don't clobber a cancelled run with done/failed.
+        current = Run.objects.filter(pk=run.pk).values_list("status", flat=True).first()
+        if current != Run.CANCELLED:
+            runs_bridge.mark_run(
+                run,
+                Run.FAILED if failed else Run.DONE,
+                error_message=(decision.get("rationale", "") if failed else ""),
+            )
+
     return {
         "ticker": ticker,
         "sector": sector,
         "side": side,
         "borrow_veto": borrow_veto,
+        "run_id": run_id,
         "decision": decision,
         "risk": risk,
         "sector_veto_entry": sector_veto_entry,
@@ -246,6 +318,17 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     strategy = target.strategy
     portfolio = strategy.portfolio
     as_of = target.as_of_date
+
+    # P2l: a target cancelled mid-fan-out should not be revived by the
+    # callback writing target weights. Persist the council_results for audit
+    # then return — the user's reject already marked candidate runs cancelled.
+    if target.status == PortfolioTarget.CANCELLED:
+        return {"target_id": target.pk, "status": "cancelled"}
+
+    # Move into constructing state so the UI can distinguish "council still
+    # running" from "constructor running" while we crunch numbers.
+    PortfolioTarget.objects.filter(pk=target.pk).update(status=PortfolioTarget.CONSTRUCTING)
+    target.status = PortfolioTarget.CONSTRUCTING
 
     # Build Constructor input.
     cands = []
@@ -748,12 +831,34 @@ def _run_pairs_cycle(
     council_log: list[dict] = []
     accepted: list = []
     if council_on and top_pool:
+        from decimal import Decimal as _Dec
+
+        from apps.runs.models import AgentMessage as _AgentMessage
+        from apps.runs.models import Decision as _Decision
+        from apps.runs.models import Run as _Run
         from hedgefund_agents.pairs_council import debate_pair
         from hedgefund_agents.registry import get_news_service
+
+        from .models import PortfolioTargetRun as _PortfolioTargetRun
         min_conf = float(strategy.pair_council_min_confidence)
         overrides = _resolve_model_overrides(strategy)
         personas = list(strategy.personas or [])
         news_service = get_news_service()
+        # Ensure a target row exists so we can link Runs to it. The cycle's
+        # target row is created later below via update_or_create — for pair
+        # councils we need it earlier so audit Runs have a parent.
+        with transaction.atomic():
+            audit_target, _ = PortfolioTarget.objects.update_or_create(
+                strategy=strategy, as_of_date=as_of,
+                defaults={
+                    "status": PortfolioTarget.RUNNING_COUNCIL,
+                    "target_weights": {},
+                    "rejected_candidates": [],
+                    "decisions": [],
+                    "error_message": "",
+                    "finished_at": None,
+                },
+            )
         # Cache per-ticker headline lists across pairs in this cycle so we
         # only hit the news providers once per name even when a name appears
         # in several candidate pairs.
@@ -779,13 +884,101 @@ def _run_pairs_cycle(
                 c.leg_a: _headlines_for(c.leg_a),
                 c.leg_b: _headlines_for(c.leg_b),
             }
-            decision = debate_pair(
-                leg_a=c.leg_a, leg_b=c.leg_b, sector=c.sector, as_of=as_of,
-                z_current=c.z_current, correlation=c.correlation, p_value=c.p_value,
-                personas=personas, model_overrides=overrides,
-                user_id=strategy.user_id,
-                news_by_ticker=news_for_pair,
+
+            # P2l: wrap each debate_pair call in a Run audit row so the
+            # transcript is reachable from the Runs UI. Idempotent on
+            # (target, candidate_key, side='pair').
+            pair_key = f"{c.leg_a}/{c.leg_b}"
+            existing_link = (
+                _PortfolioTargetRun.objects.select_related("run")
+                .filter(target=audit_target, candidate_key=pair_key, side="pair")
+                .first()
             )
+            if existing_link is not None:
+                audit_run = existing_link.run
+            else:
+                audit_run = _Run.objects.create(
+                    user_id=strategy.user_id,
+                    tickers=[c.leg_a, c.leg_b],
+                    status=_Run.RUNNING,
+                    model_overrides=overrides,
+                    as_of_date=as_of,
+                    personas=personas,
+                    source=_Run.STRATEGY,
+                    portfolio_target=audit_target,
+                )
+                _PortfolioTargetRun.objects.create(
+                    target=audit_target,
+                    run=audit_run,
+                    candidate_key=pair_key,
+                    primary_ticker=c.leg_a,
+                    side="pair",
+                    borrow_veto=False,
+                    screener_rank=len(council_log) + 1,
+                    screener_score=float(c.z_current),
+                    sector=c.sector,
+                    candidate_payload={
+                        "leg_a": c.leg_a, "leg_b": c.leg_b,
+                        "sector": c.sector,
+                        "z_current": float(c.z_current),
+                        "correlation": float(c.correlation),
+                        "p_value": float(c.p_value),
+                    },
+                )
+
+            try:
+                decision = debate_pair(
+                    leg_a=c.leg_a, leg_b=c.leg_b, sector=c.sector, as_of=as_of,
+                    z_current=c.z_current, correlation=c.correlation, p_value=c.p_value,
+                    personas=personas, model_overrides=overrides,
+                    user_id=strategy.user_id,
+                    portfolio_target_id=audit_target.id,
+                    run_id=audit_run.id,
+                    news_by_ticker=news_for_pair,
+                )
+            except Exception as exc:
+                log.exception("pair council failed for %s/%s", c.leg_a, c.leg_b)
+                audit_run.status = _Run.FAILED
+                audit_run.error_message = f"pair council error: {exc}"[:2000]
+                audit_run.finished_at = timezone.now()
+                audit_run.save(update_fields=["status", "error_message", "finished_at"])
+                continue
+
+            # Persist the council output on the audit Run: one AgentMessage
+            # carrying the votes + thesis, one Decision with action enter/skip.
+            _AgentMessage.objects.update_or_create(
+                run=audit_run, agent_name="pair_council",
+                defaults={
+                    "parsed_output": {
+                        "votes": [v.model_dump() for v in decision.votes],
+                        "thesis": decision.thesis,
+                        "enter_count": decision.enter_count,
+                        "skip_count": decision.skip_count,
+                        "aggregate_confidence": decision.aggregate_confidence,
+                        "news_counts": {
+                            c.leg_a: len(news_for_pair[c.leg_a]),
+                            c.leg_b: len(news_for_pair[c.leg_b]),
+                        },
+                    },
+                    "status": "ok",
+                },
+            )
+            _Decision.objects.update_or_create(
+                run=audit_run, ticker=pair_key,
+                defaults={
+                    "action": decision.action,
+                    "confidence": int(round(decision.aggregate_confidence * 100)),
+                    "rationale": decision.thesis,
+                    "side": "pair",
+                    "target_weight_signed": _Dec("0"),
+                },
+            )
+            from . import runs_bridge as _rb
+            _rb.reconcile_run_cost(audit_run)
+            audit_run.status = _Run.DONE
+            audit_run.finished_at = timezone.now()
+            audit_run.save(update_fields=["status", "finished_at"])
+
             council_log.append({
                 "leg_a": c.leg_a, "leg_b": c.leg_b,
                 "action": decision.action,
@@ -797,6 +990,7 @@ def _run_pairs_cycle(
                     c.leg_a: len(news_for_pair[c.leg_a]),
                     c.leg_b: len(news_for_pair[c.leg_b]),
                 },
+                "run_id": audit_run.id,
             })
             if decision.action != "enter":
                 continue
@@ -1033,11 +1227,27 @@ def daily_long_short_cycle(
     as_of = _resolve_as_of(as_of_date)
 
     if not force:
+        # P2l: an awaiting_review target is also "in flight" — don't start
+        # a fresh cycle while the user has one open for the same day.
         existing = PortfolioTarget.objects.filter(
-            strategy=strategy, as_of_date=as_of, status="done"
+            strategy=strategy, as_of_date=as_of,
+            status__in=(
+                PortfolioTarget.DONE,
+                PortfolioTarget.AWAITING_REVIEW,
+                PortfolioTarget.RUNNING_COUNCIL,
+                PortfolioTarget.CONSTRUCTING,
+                PortfolioTarget.RUNNING,
+            ),
         ).first()
         if existing:
             return {"target_id": existing.pk, "status": "reused"}
+    else:
+        # force=True: cancel any non-terminal existing target so the partial
+        # unique constraint allows a fresh row.
+        PortfolioTarget.objects.filter(
+            strategy=strategy, as_of_date=as_of,
+            status__in=tuple(PortfolioTarget.ACTIVE_STATUSES),
+        ).update(status=PortfolioTarget.CANCELLED, finished_at=timezone.now())
 
     members = _active_members(strategy, as_of)
     if not members:
@@ -1130,9 +1340,9 @@ def daily_long_short_cycle(
         raise RuntimeError(str(exc)) from exc
 
     # One transaction so the ranking row + target row appear atomically.
-    # The unique constraint on (strategy, as_of_date) means a concurrent
-    # dispatch lands in update_or_create's UPDATE branch instead of creating
-    # a duplicate row.
+    # The partial unique constraint on (strategy, as_of_date) means a
+    # concurrent dispatch lands in update_or_create's UPDATE branch instead
+    # of creating a duplicate row.
     with transaction.atomic():
         ranking = ScreenerRanking.objects.create(
             strategy=strategy,
@@ -1144,39 +1354,52 @@ def daily_long_short_cycle(
         target, _ = PortfolioTarget.objects.update_or_create(
             strategy=strategy, as_of_date=as_of,
             defaults={
-                "status": "running",
+                "status": PortfolioTarget.SCREENING,
                 "screener_ranking": ranking,
                 "target_weights": {},
                 "rejected_candidates": [],
                 "decisions": [],
                 "error_message": "",
                 "finished_at": None,
+                "total_cost_usd": Decimal("0"),
             },
         )
 
-    # Cost-ceiling trim.
-    n_l = len(screener_out["long_candidates"])
-    n_s = len(screener_out["short_candidates"])
-    new_l, new_s = _trim_k_for_budget(strategy, n_l, n_s)
-    long_cands = screener_out["long_candidates"][:new_l]
-    short_cands = screener_out["short_candidates"][:new_s]
+    # P2l: stop here if the user wants a review gate. The cycle persists
+    # the ScreenerRanking + target in `awaiting_review` and waits for the
+    # approval endpoint to dispatch council.
+    if not bool(getattr(strategy, "auto_run_council", True)):
+        PortfolioTarget.objects.filter(pk=target.pk).update(
+            status=PortfolioTarget.AWAITING_REVIEW
+        )
+        return {
+            "target_id": target.pk,
+            "status": "awaiting_review",
+            "n_long_candidates": len(screener_out["long_candidates"]),
+            "n_short_candidates": len(screener_out["short_candidates"]),
+        }
 
-    # Resolve model overrides up front so every council call uses the user's
-    # configured default (or the strategy preset) instead of the registry
-    # fallback, which still routes some agents to Anthropic.
-    overrides = _resolve_model_overrides(strategy)
+    # Auto-run path: cost-trim, build candidate Runs + payloads, dispatch.
+    return _dispatch_council_chord(
+        strategy=strategy,
+        target=target,
+        as_of=as_of,
+        ranking=ranking,
+        members=members,
+        approved_longs=None,
+        approved_shorts=None,
+    )
 
-    user_id = strategy.user_id
-    target_id = target.pk
 
-    # ETF-universe auto-routing. If the universe is ETF-majority, the equity
-    # council fails (EDGAR has no CIK, fundamentals empty) → route every
-    # candidate (long AND short) through the slim sector council instead, and
-    # apply the symmetric council-as-veto rule in the PM. Triggered by either:
-    #   (a) explicit opt-in on a sector_rotation strategy (P2h v2), OR
-    #   (b) an ETF-only universe regardless of strategy.kind (e.g. L/S on
-    #       sector_etfs — the user intends ETF rotation with shorts).
+def _resolve_flavor_and_personas(
+    strategy: PortfolioStrategy, members: list[tuple[str, str]]
+) -> tuple[bool, str, list[str] | None, float]:
+    """Centralised ETF-graph + persona selection used by the cycle dispatcher.
+
+    Returns (use_sector_graph, flavor_string, personas_for_run, bearish_veto_threshold).
+    """
     from .models import MacroETF, SectorETF
+
     universe_tickers = [t for t, _ in members]
     etf_tickers = set(
         SectorETF.objects.filter(ticker__in=universe_tickers, is_active=True)
@@ -1195,75 +1418,145 @@ def daily_long_short_cycle(
     ) or strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO
 
     if use_sector_graph:
-        # Default macro-trio if the user didn't pick personas. Name-centric
-        # value personas (Buffett, Graham, Lynch) aren't a good fit for ETFs.
         personas_for_run = strategy.personas or ["druckenmiller", "damodaran", "burry"]
     else:
         personas_for_run = strategy.personas or None
     bearish_veto_threshold = float(getattr(strategy, "bearish_veto_threshold", 0.70))
+    flavor = "sector_rotation" if use_sector_graph else ""
+    return use_sector_graph, flavor, personas_for_run, bearish_veto_threshold
 
-    # Borrow quotes for short side (also looked up in ETF mode — synthetics
-    # mark most ETFs as locatable but a few inverse/leveraged ones may not be).
-    borrow = StubBorrowProvider()
-    short_payloads = []
-    for c in short_cands:
-        info = borrow.quote(c["ticker"], as_of)
-        borrow.persist(info)
-        short_payloads.append({
-            "ticker": c["ticker"],
-            "sector": c.get("sector", ""),
-            "theme": c.get("theme", ""),
-            "side": "short",
-            "borrow_veto": (not info.is_locatable),
-            "as_of_date": as_of.isoformat(),
-            "model_overrides": overrides,
-            "personas": personas_for_run,
-            "flavor": "sector_rotation" if use_sector_graph else "",
-            "bearish_veto_threshold": bearish_veto_threshold,
-            "portfolio_target_id": target_id,
-            "user_id": user_id,
-        })
 
-    long_payloads = [
-        {
-            "ticker": c["ticker"],
-            "sector": c.get("sector", ""),
-            "theme": c.get("theme", ""),
-            # Keep "long" for L/S+ETF so the L/S constructor signs the weight
-            # correctly. Only pure sector_rotation flavor uses "sector".
-            "side": (
-                "sector"
-                if (use_sector_graph
-                    and strategy.kind in (
-                        PortfolioStrategy.KIND_SECTOR_ROTATION,
-                        PortfolioStrategy.KIND_GLOBAL_MACRO,
-                    ))
-                else "long"
-            ),
-            "borrow_veto": False,
-            "as_of_date": as_of.isoformat(),
-            "model_overrides": overrides,
-            "personas": personas_for_run,
-            "flavor": "sector_rotation" if use_sector_graph else "",
-            "bearish_veto_threshold": bearish_veto_threshold,
-            "portfolio_target_id": target_id,
-            "user_id": user_id,
-        }
-        for c in long_cands
-    ]
+def _dispatch_council_chord(
+    *,
+    strategy: PortfolioStrategy,
+    target: PortfolioTarget,
+    as_of: date_cls,
+    ranking: ScreenerRanking,
+    members: list[tuple[str, str]],
+    approved_longs: list[str] | None,
+    approved_shorts: list[str] | None,
+) -> dict:
+    """P2l: create per-candidate Run rows + dispatch the council chord.
 
-    payloads = long_payloads + short_payloads
-    if not payloads:
+    Idempotent: if PortfolioTargetRun rows already exist for this target,
+    reuse them rather than creating duplicates.
+
+    `approved_longs` / `approved_shorts`:
+      - None on the auto-run path → use the full trimmed candidate set.
+      - lists on the manual-gate path → restrict to the approved subset.
+    """
+    from . import runs_bridge
+
+    use_sector_graph, flavor, personas_for_run, bearish_veto_threshold = (
+        _resolve_flavor_and_personas(strategy, members)
+    )
+
+    # Cost-ceiling trim only applies to auto-run; manual approval already
+    # passed its own budget check at the endpoint.
+    long_entries = list(ranking.long_candidates or [])
+    short_entries = list(ranking.short_candidates or [])
+    if approved_longs is None and approved_shorts is None:
+        n_l = len(long_entries)
+        n_s = len(short_entries)
+        new_l, new_s = _trim_k_for_budget(strategy, n_l, n_s)
+        long_entries = long_entries[:new_l]
+        short_entries = short_entries[:new_s]
+        long_subset = None
+        short_subset = None
+    else:
+        long_subset = approved_longs
+        short_subset = approved_shorts
+
+    # Override the side string for pure sector / global-macro flavors.
+    is_sector_flavor = (
+        use_sector_graph
+        and strategy.kind in (
+            PortfolioStrategy.KIND_SECTOR_ROTATION,
+            PortfolioStrategy.KIND_GLOBAL_MACRO,
+        )
+    )
+
+    # Re-package long/short into a CandidateSpec list via the bridge.
+    # We build a synthetic ranking snapshot that respects any trimming.
+    long_subset_keys = (
+        [str(e.get("ticker", "")).upper() for e in long_entries]
+        if long_subset is None
+        else list(long_subset)
+    )
+    short_subset_keys = (
+        [str(e.get("ticker", "")).upper() for e in short_entries]
+        if short_subset is None
+        else list(short_subset)
+    )
+    candidates, unknown = runs_bridge.candidates_from_ranking(
+        ranking,
+        long_subset=long_subset_keys,
+        short_subset=short_subset_keys,
+        is_sector_flavor=is_sector_flavor,
+    )
+    if unknown:
+        # Should never happen on the auto-run path — defensive.
+        log.warning("unknown candidates skipped on dispatch: %s", unknown)
+
+    if not candidates:
         # Nothing actionable. Finalize with empty decisions so the UI still
         # shows a row.
         return finalize_cycle.run([], target.pk)
 
-    # Celery-chord parallel fan-out: each council call is a separate task;
-    # `finalize_cycle` runs once all sub-tasks complete.
+    overrides = _resolve_model_overrides(strategy)
+
+    payloads, _runs = runs_bridge.create_candidate_runs(
+        strategy=strategy,
+        target=target,
+        candidates=candidates,
+        as_of=as_of,
+        overrides=overrides,
+        personas_for_run=personas_for_run,
+        flavor=flavor,
+        bearish_veto_threshold=bearish_veto_threshold,
+    )
+
+    PortfolioTarget.objects.filter(pk=target.pk).update(
+        status=PortfolioTarget.RUNNING_COUNCIL
+    )
     cb = finalize_cycle.s(target_id=target.pk)
     header = [run_candidate_council.s(p) for p in payloads]
     async_result = chord(header)(cb)
     PortfolioTarget.objects.filter(pk=target.pk).update(
         celery_task_id=str(async_result.id or "")
     )
-    return {"target_id": target.pk, "status": "dispatched", "n_candidates": len(payloads)}
+    return {
+        "target_id": target.pk,
+        "status": "dispatched",
+        "n_candidates": len(payloads),
+        "run_ids": [p["run_id"] for p in payloads],
+    }
+
+
+def dispatch_approved_cycle(
+    *,
+    strategy: PortfolioStrategy,
+    target: PortfolioTarget,
+    approved_longs: list[str],
+    approved_shorts: list[str],
+) -> dict:
+    """Public entry point used by the approve-council API.
+
+    Pre-conditions (the view enforces these and returns 4xx if they fail):
+      - target.status == awaiting_review
+      - target.screener_ranking is not None
+      - approval budget check has already passed
+    """
+    if target.screener_ranking_id is None:
+        raise RuntimeError("target has no persisted ScreenerRanking to approve from")
+    ranking = target.screener_ranking
+    members = _active_members(strategy, target.as_of_date)
+    return _dispatch_council_chord(
+        strategy=strategy,
+        target=target,
+        as_of=target.as_of_date,
+        ranking=ranking,
+        members=members,
+        approved_longs=approved_longs,
+        approved_shorts=approved_shorts,
+    )

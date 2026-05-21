@@ -1,5 +1,19 @@
 export type RunStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
+/** P2l: ad-hoc Run Console runs vs strategy-cycle-sourced runs. */
+export type RunSource = 'adhoc' | 'strategy';
+
+/** P2l: covers single-name + pair + sector + short-side actions emitted by
+ * the council across all strategy flavors. */
+export type DecisionAction =
+  | 'buy'
+  | 'sell'
+  | 'hold'
+  | 'open_short'
+  | 'cover_short'
+  | 'enter'
+  | 'skip';
+
 export interface ModelOption {
   id: string;
   name: string;
@@ -34,13 +48,17 @@ export interface RiskOverrides {
 export interface DecisionRow {
   id: number;
   ticker: string;
-  action: 'buy' | 'hold' | 'sell';
+  action: DecisionAction;
   confidence: number;
   rationale: string;
   dissenting_views: DissentingPersona[];
   target_quantity: string;
   target_weight_pct: string;
   risk_overrides: RiskOverrides;
+  /** P2l: 'long' / 'short' / 'sector' / 'pair'. */
+  side?: string;
+  /** Signed % of NAV — negative for shorts, positive for longs. */
+  target_weight_signed?: string;
   created_at: string;
 }
 
@@ -56,6 +74,15 @@ export interface LLMCallRow {
   created_at: string;
 }
 
+export interface StrategyBacklink {
+  portfolio_target_id: number;
+  portfolio_target_status: string;
+  as_of_date: string | null;
+  strategy_id: number;
+  strategy_name: string;
+  strategy_kind: string;
+}
+
 export interface RunSummary {
   id: number;
   tickers: string[];
@@ -64,6 +91,12 @@ export interface RunSummary {
   created_at: string;
   finished_at: string | null;
   total_cost_usd: string;
+  /** P2l: ad-hoc vs strategy-cycle-sourced. */
+  source?: RunSource;
+  /** P2l: parent PortfolioTarget id for strategy-sourced runs. */
+  portfolio_target?: number | null;
+  /** P2l: strategy + cycle metadata for back-linking; null for ad-hoc. */
+  strategy_backlink?: StrategyBacklink | null;
 }
 
 export interface RunDetail extends RunSummary {

@@ -183,6 +183,18 @@ class PortfolioStrategy(models.Model):
         max_digits=4, decimal_places=3, default=Decimal("0.500")
     )
 
+    # P2l: gate council fan-out behind explicit user approval.
+    # default=True preserves existing behavior; set False to stop the cycle at
+    # `awaiting_review` after the cheap screener pass.
+    auto_run_council = models.BooleanField(
+        default=True,
+        help_text=(
+            "When true, dispatch council tasks immediately after screening. "
+            "When false, stop at awaiting_review until the user approves the "
+            "screened candidates."
+        ),
+    )
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -295,17 +307,35 @@ class ScreenerRanking(models.Model):
 
 
 class PortfolioTarget(models.Model):
+    QUEUED = "queued"
+    SCREENING = "screening"
+    AWAITING_REVIEW = "awaiting_review"
+    RUNNING_COUNCIL = "running_council"
+    CONSTRUCTING = "constructing"
+    # Legacy "running" preserved for back-compat with rows written before P2l.
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
     STATUS_CHOICES = [
-        ("queued", "Queued"),
-        ("running", "Running"),
-        ("done", "Done"),
-        ("failed", "Failed"),
+        (QUEUED, "Queued"),
+        (SCREENING, "Screening"),
+        (AWAITING_REVIEW, "Awaiting review"),
+        (RUNNING_COUNCIL, "Running council"),
+        (CONSTRUCTING, "Constructing"),
+        (RUNNING, "Running"),
+        (DONE, "Done"),
+        (FAILED, "Failed"),
+        (CANCELLED, "Cancelled"),
     ]
+    # Non-terminal: still progressing. Terminal: done|failed|cancelled.
+    ACTIVE_STATUSES = {QUEUED, SCREENING, AWAITING_REVIEW, RUNNING_COUNCIL, CONSTRUCTING, RUNNING}
+
     strategy = models.ForeignKey(
         PortfolioStrategy, related_name="targets", on_delete=models.CASCADE
     )
     as_of_date = models.DateField()
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="queued")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued")
     target_weights = models.JSONField(default=dict)  # {ticker: signed_weight_pct}
     gross_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0"))
     net_pct = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0"))
@@ -334,20 +364,70 @@ class PortfolioTarget(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["strategy", "-as_of_date"])]
-        # Race-safe idempotency: two concurrent dispatches for the same
-        # (strategy, as_of_date) cannot both succeed at the DB level.
-        # Combined with the transactional get-or-create in tasks.py, this
-        # collapses retries onto the existing target instead of creating a
-        # duplicate cycle.
+        # P2l: partial unique constraint. Cancelled cycles are terminal
+        # history and must not block a same-day rerun. Race-safety on the
+        # active branch is preserved by the partial unique + update_or_create.
         constraints = [
             models.UniqueConstraint(
                 fields=["strategy", "as_of_date"],
-                name="uniq_strategy_target_per_day",
+                condition=~models.Q(status="cancelled"),
+                name="uniq_active_strategy_target_per_day",
             ),
         ]
 
     def __str__(self) -> str:
         return f"target s={self.strategy_id} {self.as_of_date} {self.status}"
+
+
+class PortfolioTargetRun(models.Model):
+    """P2l: links one strategy-cycle candidate to its transcript Run."""
+    target = models.ForeignKey(
+        PortfolioTarget,
+        related_name="candidate_run_links",
+        on_delete=models.CASCADE,
+    )
+    run = models.OneToOneField(
+        "runs.Run",
+        related_name="portfolio_target_run_link",
+        on_delete=models.CASCADE,
+    )
+
+    # For normal strategies this is the ticker. For pair council it is
+    # "LEG_A/LEG_B"; Run.tickers stores the actual legs.
+    candidate_key = models.CharField(max_length=64)
+    primary_ticker = models.CharField(max_length=16, blank=True, default="")
+    side = models.CharField(max_length=12)  # long | short | sector | pair
+    borrow_veto = models.BooleanField(default=False)
+    screener_rank = models.PositiveIntegerField()
+    screener_score = models.FloatField(null=True, blank=True)
+    sector = models.CharField(max_length=64, blank=True, default="")
+    candidate_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target", "candidate_key", "side"],
+                name="uniq_target_candidate_side",
+            ),
+            models.UniqueConstraint(
+                fields=["target", "run"],
+                name="uniq_target_candidate_run",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["target", "screener_rank"],
+                name="ptr_target_rank_idx",
+            ),
+            models.Index(
+                fields=["target", "candidate_key"],
+                name="ptr_target_key_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"target={self.target_id} run={self.run_id} {self.candidate_key}({self.side})"
 
 
 class BetaEstimate(models.Model):

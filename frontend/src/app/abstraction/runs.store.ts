@@ -28,8 +28,16 @@ export class RunsStore {
     );
   }
 
-  listRuns(): Observable<RunSummary[]> {
-    return this.api.get<RunSummary[]>('/runs/').pipe(
+  listRuns(opts?: { source?: 'all' | 'adhoc' | 'strategy'; portfolioTarget?: number }): Observable<RunSummary[]> {
+    const params: string[] = [];
+    if (opts?.source && opts.source !== 'all') {
+      params.push(`source=${encodeURIComponent(opts.source)}`);
+    }
+    if (opts?.portfolioTarget !== undefined && opts?.portfolioTarget !== null) {
+      params.push(`portfolio_target=${opts.portfolioTarget}`);
+    }
+    const qs = params.length ? `?${params.join('&')}` : '';
+    return this.api.get<RunSummary[]>(`/runs/${qs}`).pipe(
       tap((r) => this._runs.set(Array.isArray(r) ? r : [])),
     );
   }

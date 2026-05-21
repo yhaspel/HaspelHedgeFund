@@ -3,7 +3,7 @@ import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
-import { CycleDetail } from '../../core/models/strategy.model';
+import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
 
 @Component({
   selector: 'hf-strategies-detail',
@@ -134,8 +134,9 @@ import { CycleDetail } from '../../core/models/strategy.model';
               <span class="title">Cycle {{ c.as_of_date }}</span>
               <span class="pill"
                 [class.ok]="c.status==='done'"
-                [class.warn]="c.status==='running' || c.status==='queued'"
-                [class.err]="c.status==='failed'">
+                [class.warn]="c.status==='running' || c.status==='queued' || c.status==='screening' || c.status==='running_council' || c.status==='constructing'"
+                [class.info]="c.status==='awaiting_review'"
+                [class.err]="c.status==='failed' || c.status==='cancelled'">
                 <span class="dot"></span>{{ c.status }}
               </span>
               <div class="actions">
@@ -147,6 +148,140 @@ import { CycleDetail } from '../../core/models/strategy.model';
                 </span>
               </div>
             </div>
+
+            @if (c.status === 'awaiting_review') {
+              <div class="card-bd" style="display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span class="eyebrow" data-test="review-panel-title">Review screener picks</span>
+                  <span style="font-size:11.5px;color:var(--text-3)">
+                    The cycle stopped after the cheap screener pass. Pick which names should get the full council debate, then approve.
+                  </span>
+                </div>
+
+                @if (reviewLongs(c).length > 0) {
+                  <div>
+                    <div class="eyebrow" style="color:var(--acc-long-fg);margin-bottom:6px">
+                      Long candidates ({{ reviewLongsSelected().size }} / {{ reviewLongs(c).length }} selected)
+                    </div>
+                    <table class="tbl">
+                      <thead><tr>
+                        <th style="width:36px">Run?</th>
+                        <th>Ticker</th><th>Sector</th>
+                        <th class="right">Score</th>
+                        <th style="font-size:11.5px;color:var(--text-3)">Why</th>
+                      </tr></thead>
+                      <tbody>
+                        @for (cand of reviewLongs(c); track cand.ticker) {
+                          <tr>
+                            <td>
+                              <input type="checkbox" [checked]="reviewLongsSelected().has(cand.ticker)"
+                                     (change)="toggleReviewLong(cand.ticker)"
+                                     [attr.data-test]="'review-long-' + cand.ticker" />
+                            </td>
+                            <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
+                            <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
+                            <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
+                            <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                }
+
+                @if (reviewShorts(c).length > 0) {
+                  <div>
+                    <div class="eyebrow" style="color:var(--acc-short-fg);margin-bottom:6px">
+                      Short candidates ({{ reviewShortsSelected().size }} / {{ reviewShorts(c).length }} selected)
+                    </div>
+                    <table class="tbl">
+                      <thead><tr>
+                        <th style="width:36px">Run?</th>
+                        <th>Ticker</th><th>Sector</th>
+                        <th class="right">Score</th>
+                        <th style="font-size:11.5px;color:var(--text-3)">Why</th>
+                      </tr></thead>
+                      <tbody>
+                        @for (cand of reviewShorts(c); track cand.ticker) {
+                          <tr>
+                            <td>
+                              <input type="checkbox" [checked]="reviewShortsSelected().has(cand.ticker)"
+                                     (change)="toggleReviewShort(cand.ticker)"
+                                     [attr.data-test]="'review-short-' + cand.ticker" />
+                            </td>
+                            <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
+                            <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
+                            <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
+                            <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                }
+
+                @if (reviewError()) {
+                  <p style="color:var(--acc-short-fg);font-size:12px;margin:0" data-test="review-error">{{ reviewError() }}</p>
+                }
+
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <button class="btn primary" (click)="approveCouncil(c)" [disabled]="approving()"
+                          data-test="approve-council">
+                    {{ approving() ? 'Approving…' : 'Approve & run council (' + reviewSelectedCount() + ')' }}
+                  </button>
+                  <button class="btn ghost" (click)="rejectCycle(c)" [disabled]="approving() || rejecting()"
+                          data-test="reject-cycle">
+                    {{ rejecting() ? 'Cancelling…' : 'Reject' }}
+                  </button>
+                  <span style="font-size:11.5px;color:var(--text-3)">
+                    · cost ceiling
+                    <span class="mono">$ {{ store.currentStrategy()?.cost_ceiling_per_cycle_usd }}</span>
+                  </span>
+                </div>
+              </div>
+            }
+
+            @if (c.candidate_runs && c.candidate_runs.length > 0) {
+              <div class="card-bd" style="border-bottom:1px solid var(--border)">
+                <div class="eyebrow" style="margin-bottom:6px">
+                  Candidate runs ({{ c.candidate_runs.length }})
+                </div>
+                <table class="tbl">
+                  <thead><tr>
+                    <th>#</th><th>Ticker</th><th>Side</th><th>Status</th>
+                    <th class="right">Cost</th><th>Transcript</th>
+                  </tr></thead>
+                  <tbody>
+                    @for (cr of c.candidate_runs; track cr.run_id) {
+                      <tr>
+                        <td class="mono">{{ cr.screener_rank }}</td>
+                        <td class="mono" style="color:var(--text)">{{ cr.candidate_key }}</td>
+                        <td class="mono"
+                            [style.color]="cr.side === 'short' ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'">
+                          {{ cr.side }}
+                        </td>
+                        <td>
+                          <span class="pill"
+                            [class.ok]="cr.run_status === 'done'"
+                            [class.warn]="cr.run_status === 'queued' || cr.run_status === 'running'"
+                            [class.err]="cr.run_status === 'failed' || cr.run_status === 'cancelled'"
+                            style="height:auto;padding:2px 6px;font-size:11px">
+                            {{ cr.run_status }}
+                          </span>
+                        </td>
+                        <td class="num mono">$ {{ cr.run_cost_usd }}</td>
+                        <td>
+                          <a [routerLink]="['/runs', cr.run_id]"
+                             style="color:var(--acc-info-fg)" data-test="candidate-run-link">
+                            Open run #{{ cr.run_id }} →
+                          </a>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
             @if (store.currentStrategy()?.kind === 'market_neutral') {
               <div class="card-bd" style="display:flex;gap:14px;align-items:center;border-top:1px solid var(--border);padding-top:10px">
                 <span class="eyebrow">Neutrality</span>
@@ -487,6 +622,15 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   notice = signal<string | null>(null);
   cycle = signal<CycleDetail | null>(null);
 
+  // P2l: review-panel state. Refresh whenever a new awaiting_review cycle loads.
+  approving = signal(false);
+  rejecting = signal(false);
+  reviewError = signal<string | null>(null);
+  private readonly _reviewLongs = signal<Set<string>>(new Set());
+  private readonly _reviewShorts = signal<Set<string>>(new Set());
+  reviewLongsSelected = this._reviewLongs.asReadonly();
+  reviewShortsSelected = this._reviewShorts.asReadonly();
+
   openEstimate(): void {
     this.estimating.set(true);
     this.notice.set(null);
@@ -647,16 +791,48 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
 
   refreshCycles(): void {
     this.store.listCycles(this.strategyId).subscribe((cs) => {
-      if (cs.length) {
-        const c = this.cycle();
-        if (!c) this.openCycle(cs[0].id);
-        else this.openCycle(c.id);
+      if (cs.length === 0) return;
+      const open = this.cycle();
+      // If the user manually opened an older cycle, keep refreshing it;
+      // otherwise always prefer the most recently created row so a freshly
+      // dispatched cycle appears on the page after run-now.
+      if (!open || open.id === cs[0].id) {
+        this.openCycle(cs[0].id);
+      } else {
+        this.openCycle(open.id);
       }
     });
   }
 
   openCycle(id: number): void {
-    this.store.cycleDetail(this.strategyId, id).subscribe((d) => this.cycle.set(d));
+    this.store.cycleDetail(this.strategyId, id).subscribe((d) => {
+      const prev = this.cycle();
+      this.cycle.set(d);
+      // Seed review selections whenever a cycle BECOMES awaiting_review
+      // (covers fresh-load, cycle-switch, and same-row resurrection where
+      // a cancelled target is reused on the same day).
+      const becameAwaitingReview =
+        d.status === 'awaiting_review'
+        && (!prev || prev.id !== d.id || prev.status !== 'awaiting_review');
+      if (becameAwaitingReview) {
+        this._reviewLongs.set(new Set(
+          (d.screener_ranking?.long_candidates ?? []).map((c) => c.ticker),
+        ));
+        this._reviewShorts.set(new Set(
+          (d.screener_ranking?.short_candidates ?? []).map((c) => c.ticker),
+        ));
+        this.reviewError.set(null);
+      }
+      // Auto-poll non-terminal cycles every 5s.
+      if (CYCLE_ACTIVE_STATUSES.includes(d.status as CycleStatus)) {
+        if (!this.pollHandle) {
+          this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
+        }
+      } else if (this.pollHandle) {
+        clearInterval(this.pollHandle);
+        this.pollHandle = null;
+      }
+    });
   }
 
   runNow(): void {
@@ -670,6 +846,75 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
         this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
       },
       error: () => { this.running.set(false); this.notice.set('Failed to dispatch cycle.'); },
+    });
+  }
+
+  // ---- P2l review helpers ------------------------------------------------
+
+  reviewLongs(c: CycleDetail): ScreenerCandidate[] {
+    return c.screener_ranking?.long_candidates ?? [];
+  }
+  reviewShorts(c: CycleDetail): ScreenerCandidate[] {
+    return c.screener_ranking?.short_candidates ?? [];
+  }
+  reviewSelectedCount(): number {
+    return this._reviewLongs().size + this._reviewShorts().size;
+  }
+  toggleReviewLong(ticker: string): void {
+    const next = new Set(this._reviewLongs());
+    if (next.has(ticker)) next.delete(ticker);
+    else next.add(ticker);
+    this._reviewLongs.set(next);
+  }
+  toggleReviewShort(ticker: string): void {
+    const next = new Set(this._reviewShorts());
+    if (next.has(ticker)) next.delete(ticker);
+    else next.add(ticker);
+    this._reviewShorts.set(next);
+  }
+
+  approveCouncil(c: CycleDetail): void {
+    if (this.reviewSelectedCount() === 0) {
+      this.reviewError.set('Pick at least one candidate to send to the council.');
+      return;
+    }
+    this.approving.set(true);
+    this.reviewError.set(null);
+    this.store.approveCouncil(this.strategyId, c.id, {
+      long_tickers: Array.from(this._reviewLongs()),
+      short_tickers: Array.from(this._reviewShorts()),
+    }).subscribe({
+      next: (r) => {
+        this.approving.set(false);
+        this.notice.set(`Approved — ${r.n_candidates} candidate run${r.n_candidates === 1 ? '' : 's'} dispatched.`);
+        this.openCycle(c.id);
+      },
+      error: (e) => {
+        this.approving.set(false);
+        this.reviewError.set(
+          e?.error?.detail
+            || (e?.error?.estimate?.exceeds_ceiling
+                  ? `Approved set exceeds your cost ceiling ($${e.error.estimate.est_total_usd}).`
+                  : null)
+            || 'Failed to approve cycle.',
+        );
+      },
+    });
+  }
+
+  rejectCycle(c: CycleDetail): void {
+    this.rejecting.set(true);
+    this.reviewError.set(null);
+    this.store.rejectCycle(this.strategyId, c.id).subscribe({
+      next: () => {
+        this.rejecting.set(false);
+        this.notice.set('Cycle cancelled.');
+        this.refreshCycles();
+      },
+      error: (e) => {
+        this.rejecting.set(false);
+        this.reviewError.set(e?.error?.detail || 'Failed to cancel cycle.');
+      },
     });
   }
 }

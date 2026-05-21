@@ -18,7 +18,18 @@ from .tasks import execute_run
 
 class RunListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
-        return Run.objects.filter(user=self.request.user).order_by("-created_at")
+        qs = Run.objects.filter(user=self.request.user)
+        # P2l: optional source filter. "all" or missing = no filter.
+        source = (self.request.query_params.get("source") or "").lower()
+        if source in (Run.ADHOC, Run.STRATEGY):
+            qs = qs.filter(source=source)
+        target_id = self.request.query_params.get("portfolio_target")
+        if target_id:
+            try:
+                qs = qs.filter(portfolio_target_id=int(target_id))
+            except (TypeError, ValueError):
+                pass
+        return qs.select_related("portfolio_target__strategy").order_by("-created_at")
 
     def get_serializer_class(self):
         return RunCreateSerializer if self.request.method == "POST" else RunListSerializer
@@ -33,8 +44,10 @@ class RunDetailView(generics.RetrieveAPIView):
     serializer_class = RunDetailSerializer
 
     def get_queryset(self):
-        return Run.objects.filter(user=self.request.user).prefetch_related(
-            "messages", "decisions", "llm_calls"
+        return (
+            Run.objects.filter(user=self.request.user)
+            .select_related("portfolio_target__strategy")
+            .prefetch_related("messages", "decisions", "llm_calls")
         )
 
 

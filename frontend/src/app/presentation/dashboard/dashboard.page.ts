@@ -126,6 +126,15 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               [class.ok]="activeRuns().length === 0">
               <span class="dot"></span>{{ activeRuns().length }} in flight
             </span>
+            <!-- P2l source filter -->
+            <div class="actions" style="gap:4px;align-items:center">
+              <button class="chip" [class.chip-on]="runSource() === 'all'"
+                      (click)="setRunSource('all')" data-test="runs-filter-all">All</button>
+              <button class="chip" [class.chip-on]="runSource() === 'adhoc'"
+                      (click)="setRunSource('adhoc')" data-test="runs-filter-adhoc">Manual</button>
+              <button class="chip" [class.chip-on]="runSource() === 'strategy'"
+                      (click)="setRunSource('strategy')" data-test="runs-filter-strategy">Strategy</button>
+            </div>
           </div>
           <div class="card-bd">
             @if (activeRuns().length === 0) {
@@ -137,6 +146,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                     <a [routerLink]="['/runs', r.id]" class="runrow">
                       <span class="run-id mono">#{{ r.id }}</span>
                       <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      @if (r.source === 'strategy' && r.strategy_backlink) {
+                        <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
+                          via {{ r.strategy_backlink.strategy_name }}
+                        </span>
+                      }
                       <span class="pill warn"><span class="dot"></span>{{ r.status }}</span>
                     </a>
                   </li>
@@ -151,6 +165,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                     <a [routerLink]="['/runs', r.id]" class="runrow">
                       <span class="run-id mono">#{{ r.id }}</span>
                       <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      @if (r.source === 'strategy' && r.strategy_backlink) {
+                        <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
+                          via {{ r.strategy_backlink.strategy_name }}
+                        </span>
+                      }
                       <span class="pill"
                         [class.ok]="r.status==='done'"
                         [class.err]="r.status==='failed' || r.status==='cancelled'">
@@ -293,6 +312,22 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         color: var(--text-3);
         font-size: 10px;
       }
+      .chip {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-2);
+        font-size: 11px;
+        line-height: 1;
+        padding: 4px 8px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .chip:hover { background: var(--surface-2); }
+      .chip-on {
+        background: var(--surface-2);
+        color: var(--text);
+        border-color: var(--text-3);
+      }
     `,
   ],
 })
@@ -319,6 +354,9 @@ export class DashboardPage implements OnInit {
     shorts: { ticker: string; weight: number }[];
   } | null>(null);
 
+  // P2l: source filter for the runs list. 'all' shows both.
+  runSource = signal<'all' | 'adhoc' | 'strategy'>('all');
+
   activeRuns = computed(() =>
     this.runs.runs().filter((r) => r.status === 'running' || r.status === 'queued'),
   );
@@ -328,6 +366,11 @@ export class DashboardPage implements OnInit {
       .slice(0, 5),
   );
   topStrategies = computed(() => this.strategies.strategies().slice(0, 5));
+
+  setRunSource(s: 'all' | 'adhoc' | 'strategy'): void {
+    this.runSource.set(s);
+    this.runs.listRuns({ source: s }).subscribe();
+  }
 
   ngOnInit(): void {
     this.runs.listRuns().subscribe();

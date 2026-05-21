@@ -7,6 +7,7 @@ from .models import (
     Portfolio,
     PortfolioStrategy,
     PortfolioTarget,
+    PortfolioTargetRun,
     Position,
     RebalanceOrder,
     ScreenerRanking,
@@ -75,6 +76,7 @@ class StrategySerializer(serializers.ModelSerializer):
             "pair_cointegration_p_max", "pair_lookback_days",
             "pair_correlation_min",
             "enable_pair_council", "pair_council_min_confidence",
+            "auto_run_council",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
@@ -115,9 +117,28 @@ class PortfolioTargetSummarySerializer(serializers.ModelSerializer):
                   "total_cost_usd", "created_at", "finished_at")
 
 
+class PortfolioTargetRunSummarySerializer(serializers.ModelSerializer):
+    """P2l: one-row summary for the cycle detail's candidate-run table."""
+    run_id = serializers.IntegerField(source="run.id", read_only=True)
+    run_status = serializers.CharField(source="run.status", read_only=True)
+    tickers = serializers.JSONField(source="run.tickers", read_only=True)
+    run_cost_usd = serializers.DecimalField(
+        source="run.total_cost_usd", max_digits=10, decimal_places=6, read_only=True,
+    )
+
+    class Meta:
+        model = PortfolioTargetRun
+        fields = (
+            "run_id", "run_status", "tickers", "run_cost_usd",
+            "candidate_key", "primary_ticker", "side",
+            "screener_rank", "screener_score", "sector", "borrow_veto",
+        )
+
+
 class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
     orders = RebalanceOrderSerializer(many=True, read_only=True)
     screener_ranking = ScreenerRankingSerializer(read_only=True)
+    candidate_runs = serializers.SerializerMethodField()
 
     class Meta:
         model = PortfolioTarget
@@ -129,9 +150,18 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
             "sector_exposure",
             "rejected_candidates", "decisions", "sector_veto_log",
             "screener_ranking", "orders",
+            "candidate_runs",
             "total_cost_usd", "error_message",
             "created_at", "finished_at",
         )
+
+    def get_candidate_runs(self, target: PortfolioTarget) -> list[dict]:
+        links = (
+            PortfolioTargetRun.objects.filter(target=target)
+            .select_related("run")
+            .order_by("screener_rank", "candidate_key")
+        )
+        return PortfolioTargetRunSummarySerializer(links, many=True).data
 
 
 class BorrowQuoteSerializer(serializers.ModelSerializer):

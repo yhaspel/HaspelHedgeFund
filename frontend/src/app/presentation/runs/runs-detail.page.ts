@@ -44,6 +44,28 @@ interface PersonaCard {
       @if (!run()) {
         <p style="color:var(--text-3)">Loading…</p>
       } @else {
+        @if (run()!.source === 'strategy' && run()!.strategy_backlink; as link) {
+          <div class="card" style="margin-bottom:14px;background:var(--surface-1)" data-test="strategy-backlink">
+            <div class="card-bd" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
+              <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 8px">
+                <span class="dot"></span>Strategy cycle
+              </span>
+              <span style="color:var(--text-2)">
+                Triggered by
+                <a [routerLink]="['/strategies', link.strategy_id]" style="color:var(--acc-info-fg);text-decoration:none;font-weight:600">
+                  {{ link.strategy_name }}
+                </a>
+                · cycle <span class="mono">{{ link.as_of_date }}</span>
+                ·
+                <a [routerLink]="['/strategies', link.strategy_id]"
+                   [queryParams]="{ cycle: link.portfolio_target_id }"
+                   style="color:var(--acc-info-fg);text-decoration:none">
+                  open cycle →
+                </a>
+              </span>
+            </div>
+          </div>
+        }
         <!-- Status strip -->
         <section class="card" style="margin-bottom:14px">
           <div class="card-bd" style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px">

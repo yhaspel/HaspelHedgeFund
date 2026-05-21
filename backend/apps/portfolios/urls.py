@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     BorrowLookupView,
+    CycleApproveCouncilView,
+    CycleRejectView,
     PortfolioListCreateView,
     PositionsView,
     StrategyCycleDetailView,
@@ -31,6 +33,17 @@ urlpatterns = [
          name="strategy-cycles"),
     path("strategies/<int:pk>/cycles/<int:target_id>/", StrategyCycleDetailView.as_view(),
          name="strategy-cycle-detail"),
+    # P2l: manual-gate cycle approve / reject.
+    path(
+        "strategies/<int:pk>/cycles/<int:target_id>/approve-council/",
+        CycleApproveCouncilView.as_view(),
+        name="strategy-cycle-approve-council",
+    ),
+    path(
+        "strategies/<int:pk>/cycles/<int:target_id>/reject/",
+        CycleRejectView.as_view(),
+        name="strategy-cycle-reject",
+    ),
 
     path("borrow/<str:ticker>/", BorrowLookupView.as_view(), name="borrow-lookup"),
 ]

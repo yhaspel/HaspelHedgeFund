@@ -78,6 +78,39 @@ export class StrategiesStore {
       `/strategies/${id}/run-now/`, {},
     );
   }
+  /** P2l: approve a subset of the persisted screener candidates and dispatch
+   *  the council chord. Returns the chord summary + cost estimate. */
+  approveCouncil(
+    strategyId: number,
+    targetId: number,
+    body: {
+      long_tickers?: string[];
+      short_tickers?: string[];
+      sector_tickers?: string[];
+      pair_keys?: string[];
+    },
+  ): Observable<{
+    target_id: number;
+    status: string;
+    n_candidates: number;
+    run_ids: number[];
+    estimate: { est_total_usd: number; cost_ceiling_usd: number; exceeds_ceiling: boolean };
+  }> {
+    return this.api.post(
+      `/strategies/${strategyId}/cycles/${targetId}/approve-council/`,
+      body,
+    );
+  }
+  /** P2l: cancel an awaiting_review / running_council / constructing target. */
+  rejectCycle(
+    strategyId: number,
+    targetId: number,
+  ): Observable<{ target_id: number; status: string; cancelled_runs: number }> {
+    return this.api.post(
+      `/strategies/${strategyId}/cycles/${targetId}/reject/`,
+      {},
+    );
+  }
   listCycles(id: number): Observable<CycleSummary[]> {
     return this.api.get<CycleSummary[]>(`/strategies/${id}/cycles/`).pipe(
       tap((r) => this._cycles.set(Array.isArray(r) ? r : [])),

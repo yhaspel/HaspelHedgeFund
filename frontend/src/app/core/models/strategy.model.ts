@@ -118,6 +118,12 @@ export interface Strategy {
   pair_correlation_min?: string;
   enable_pair_council?: boolean;
   pair_council_min_confidence?: string;
+  /**
+   * P2l: gate the council fan-out behind a human review of screener picks.
+   * Default true (preserves auto behavior). Set false to stop the cycle in
+   * `awaiting_review` until the user approves a budget-valid subset.
+   */
+  auto_run_council: boolean;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;
@@ -151,10 +157,35 @@ export interface ScreenerRanking {
   created_at: string;
 }
 
+/**
+ * P2l: expanded lifecycle.
+ *   - queued / screening: pre-council
+ *   - awaiting_review:    auto_run_council=false stops here
+ *   - running_council:    candidates dispatched, transcripts being produced
+ *   - constructing:       chord callback running Constructor + Rebalancer
+ *   - done / failed / cancelled: terminal
+ *   - running:            legacy state preserved for back-compat
+ */
+export type CycleStatus =
+  | 'queued'
+  | 'screening'
+  | 'awaiting_review'
+  | 'running_council'
+  | 'constructing'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export const CYCLE_ACTIVE_STATUSES: CycleStatus[] = [
+  'queued', 'screening', 'awaiting_review',
+  'running_council', 'constructing', 'running',
+];
+
 export interface CycleSummary {
   id: number;
   as_of_date: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
+  status: CycleStatus;
   gross_pct: string;
   net_pct: string;
   realised_net_pct?: string;
@@ -162,6 +193,20 @@ export interface CycleSummary {
   total_cost_usd: string;
   created_at: string;
   finished_at: string | null;
+}
+
+export interface CandidateRunSummary {
+  run_id: number;
+  run_status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  tickers: string[];
+  run_cost_usd: string;
+  candidate_key: string;
+  primary_ticker: string;
+  side: 'long' | 'short' | 'sector' | 'pair';
+  screener_rank: number;
+  screener_score: number | null;
+  sector: string;
+  borrow_veto: boolean;
 }
 
 export interface CycleDetail extends CycleSummary {
@@ -176,9 +221,12 @@ export interface CycleDetail extends CycleSummary {
     borrow_veto: boolean;
     decision: { action: string; rationale: string; aggregate_confidence?: number };
     risk: Record<string, unknown>;
+    run_id?: number;
   }[];
   screener_ranking: ScreenerRanking | null;
   orders: RebalanceOrder[];
+  /** P2l: one row per candidate run linked to this target. */
+  candidate_runs?: CandidateRunSummary[];
   error_message: string;
   per_position_thesis?: Record<string, {
     ticker: string;

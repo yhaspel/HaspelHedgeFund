@@ -19,6 +19,13 @@ class Run(models.Model):
     ]
     ACTIVE_STATUSES = {QUEUED, RUNNING}
 
+    ADHOC = "adhoc"
+    STRATEGY = "strategy"
+    SOURCE_CHOICES = [
+        (ADHOC, "Ad-hoc"),
+        (STRATEGY, "Strategy cycle"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="runs", on_delete=models.CASCADE
     )
@@ -38,6 +45,17 @@ class Run(models.Model):
     agent_versions = models.JSONField(default=dict, blank=True)
     # Celery task id, so /cancel/ can revoke + terminate the worker subprocess.
     celery_task_id = models.CharField(max_length=64, blank=True, default="")
+    # P2l: ad-hoc runs vs strategy-cycle-sourced runs. Strategy-sourced runs
+    # carry portfolio_target back-link so the UI can deep-link both directions.
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=ADHOC)
+    portfolio_target = models.ForeignKey(
+        "portfolios.PortfolioTarget",
+        null=True,
+        blank=True,
+        related_name="strategy_runs",
+        on_delete=models.SET_NULL,
+        db_index=True,
+    )
 
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"

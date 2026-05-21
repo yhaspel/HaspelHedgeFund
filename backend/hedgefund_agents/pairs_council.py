@@ -192,6 +192,7 @@ def debate_pair(
     model_overrides: dict[str, str] | None = None,
     user_id: int | None = None,
     portfolio_target_id: int | None = None,
+    run_id: int | None = None,
     news_by_ticker: dict[str, list[str]] | None = None,
 ) -> PairAggregateDecision:
     """Run a per-persona LLM debate over one pair candidate."""
@@ -234,7 +235,7 @@ def debate_pair(
             )
             votes.append(parsed)
             record_llm_call(
-                run_id=None, backtest_id=None,
+                run_id=run_id, backtest_id=None,
                 portfolio_target_id=portfolio_target_id,
                 agent_name=f"pair_council:{persona_name}", resp=resp,
             )

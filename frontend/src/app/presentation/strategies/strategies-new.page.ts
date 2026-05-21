@@ -308,6 +308,22 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <option value="quality">quality</option>
               </select>
             </div>
+            <div class="field" style="grid-column:1 / -1">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);cursor:pointer">
+                <input type="checkbox" name="autoRunCouncil" [(ngModel)]="autoRunCouncil" />
+                <span>
+                  Automatically run the council after screening
+                  <hf-info text="When ON, the cycle screens and immediately dispatches the council on every shortlisted name (default behavior). When OFF, the cycle stops after screening — you'll see a 'Review' panel on the strategy page where you can approve a subset before any LLM cost is incurred." />
+                </span>
+              </label>
+              <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0 22px">
+                @if (autoRunCouncil) {
+                  The cycle will spend up to your cost ceiling running the council on every screened candidate.
+                } @else {
+                  The cycle stops at <em>awaiting review</em> after the cheap screener pass. You approve a subset before any LLM cost is incurred.
+                }
+              </p>
+            </div>
           </div>
         </section>
 
@@ -414,6 +430,9 @@ export class StrategiesNewPage implements OnInit {
   pairCorrelationMin = 0.70;
   enablePairCouncil = false;
   pairCouncilMinConfidence = 0.50;
+  /** P2l: false → cycle pauses at awaiting_review, true → council fans out
+   *  immediately after screening (default — preserves pre-P2l behavior). */
+  autoRunCouncil = true;
 
   // Persona picker. Recommended defaults per kind are applied in onKindChange
   // and on first render via the constructor below.
@@ -544,6 +563,7 @@ export class StrategiesNewPage implements OnInit {
       top_k_shorts: this.topShorts,
       cost_ceiling_per_cycle_usd: String(this.costCeiling),
       model_preset: this.modelPreset,
+      auto_run_council: this.autoRunCouncil,
       screener_weights: this.weights,
       // Empty list = no persona filter on the backend (full default council);
       // otherwise pass the explicit picks. Either way, the user owns the choice.
