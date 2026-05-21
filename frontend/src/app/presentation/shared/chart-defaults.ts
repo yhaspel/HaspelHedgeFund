@@ -24,7 +24,7 @@ export function readChartTheme(): ChartTheme {
     axis: readVar('--chart-axis', '#5C6470'),
     tipBg: readVar('--chart-tip-bg', '#161A21'),
     tipBorder: readVar('--chart-tip-bd', '#2C313D'),
-    textMuted: readVar('--text-3', '#9BA3AF'),
+    textMuted: readVar('--text-3', '#8B95A4'),
     long: readVar('--acc-long', '#16A974'),
     short: readVar('--acc-short', '#E5484D'),
     info: readVar('--acc-info', '#5B8DEF'),

@@ -358,8 +358,16 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         min_position_pct=float(strategy.min_position_pct),
     )
 
+    # P2m: optional Markov regime exposure scaler. Off by default. When on,
+    # constraints' target_net_pct (or target_gross_pct) is multiplied by a
+    # clipped function of the configured ticker's bull_prob_1d - bear_prob_1d.
+    from .regime_scaling import apply_regime_scaler
+    constraints, regime_scaler_audit = apply_regime_scaler(
+        strategy, constraints, as_of=as_of
+    )
+
     portfolio_beta = 0.0
-    beta_diagnostics: dict = {}
+    beta_diagnostics: dict = {"regime_scaler": regime_scaler_audit.to_dict()}
     cycle_outcome = "target_created"
     per_position_thesis: dict[str, dict] = {}
     if strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO:
@@ -425,6 +433,7 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
             "netted_pairs": result.netted_pairs,
             "asset_class_exposure": result.asset_class_exposure,
             "regime_vector": regime_vec,
+            "regime_scaler": regime_scaler_audit.to_dict(),
         }
     elif strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
         result = construct_sector_rotation(
@@ -447,7 +456,10 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
                     "aggregate_confidence": int(decision.get("aggregate_confidence", 0)),
                     "thesis": rationale[:2000],
                 }
-        beta_diagnostics = {"overlap_dropped": result.overlap_dropped}
+        beta_diagnostics = {
+            "overlap_dropped": result.overlap_dropped,
+            "regime_scaler": regime_scaler_audit.to_dict(),
+        }
     elif strategy.kind == PortfolioStrategy.KIND_CONCENTRATED_LONG:
         # PM action whitelist + confidence-gated construction. Refuses to over-
         # diversify when fewer than min_positions clear the bar.
@@ -508,6 +520,7 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
             "benchmark": strategy.benchmark_ticker,
             "window_days": int(strategy.beta_window_days),
             "n_betas": len(beta_map),
+            "regime_scaler": regime_scaler_audit.to_dict(),
         }
         portfolio_beta = neutral.portfolio_beta
         result = neutral
@@ -626,12 +639,18 @@ def _run_risk_parity_cycle(
                 float(p.avg_cost) * float(p.quantity) / portfolio_value_pre
             )
 
+    # P2m: optional Markov regime gate excludes sleeves whose 5-day bear
+    # probability exceeds the configured threshold. Off by default.
+    from .regime_scaling import regime_gate_excluded_sleeves
+    markov_excluded = regime_gate_excluded_sleeves(strategy, members, as_of=as_of)
+
     result = construct_risk_parity(
         members,
         vols,
         target_gross_pct=float(strategy.target_gross_pct or 1.0),
         per_sleeve_max_pct=float(strategy.per_etf_max_pct or 0.50),
         per_sleeve_min_pct=float(strategy.per_etf_min_pct or 0.02),
+        excluded=markov_excluded or None,
         current_weights=current_weights or None,
         rebalance_band_pct=float(strategy.rebalance_band_pct),
     )
@@ -718,6 +737,9 @@ def _run_risk_parity_cycle(
         "within_band": result.within_band,
         "max_drift": round(result.max_drift, 4),
         "rebalance_band_pct": float(strategy.rebalance_band_pct),
+        "markov_gate_enabled": bool(strategy.enable_markov_regime_gate),
+        "markov_bear_prob_5d_threshold": float(strategy.markov_bear_prob_5d_threshold),
+        "markov_excluded_sleeves": markov_excluded,
     }
     target.cycle_outcome = cycle_outcome
     target.decisions = []

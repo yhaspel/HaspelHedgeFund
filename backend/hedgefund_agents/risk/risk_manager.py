@@ -110,6 +110,18 @@ def run_risk_manager(state: AgentState) -> AgentState:
     if borrow_veto:
         triggered = list(triggered) + ["borrow_not_locatable"]
 
+    # P2m: deterministic Markov persistence check (no LLM cost). Surfaces as
+    # context for the LLM narrative and as a structured field on the output.
+    from .tools.markov_persistence import markov_persistence_change
+    try:
+        markov_check = markov_persistence_change(
+            ticker="SPY", as_of=state.get("as_of_date"),
+        )
+    except Exception:  # pragma: no cover - defensive guard
+        markov_check = {"status": "unavailable", "reason": "exception"}
+    if markov_check.get("risk_flag"):
+        triggered = list(triggered) + ["markov_persistence_shift"]
+
     # LLM narrative (pure text). Pass the deterministic result so it can't
     # contradict the rules.
     default = DEFAULT_MODELS.get("risk_manager", ("openrouter", "qwen/qwen3.6-27b"))
@@ -133,6 +145,7 @@ def run_risk_manager(state: AgentState) -> AgentState:
         f"Current position_pct: {portfolio.position_pct(ticker):.4f}\n"
         f"Sector exposure_pct ({portfolio.sector}): {portfolio.sector_pct(portfolio.sector):.4f}\n"
         f"Recent volatility (atr_pct): {technicals.get('atr_pct', 0.0):.2f}\n"
+        f"Markov persistence check (SPY): {markov_check}\n"
     )
     from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
@@ -156,4 +169,5 @@ def run_risk_manager(state: AgentState) -> AgentState:
     )
     out["veto"] = bool(out.get("veto")) or veto
     out["borrow_veto"] = borrow_veto
+    out["markov_persistence_check"] = markov_check
     return {"risk": out}  # type: ignore[return-value]

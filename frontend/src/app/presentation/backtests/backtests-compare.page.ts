@@ -23,6 +23,7 @@ import {
   Legend,
 } from 'chart.js';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { readChartTheme } from '../shared/chart-defaults';
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend);
 
@@ -145,13 +146,14 @@ export class BacktestsComparePage implements OnInit, AfterViewInit, OnDestroy {
     const mapA = new Map(d.a.points.map((p) => [p.date, p.portfolio_value]));
     const mapB = new Map(d.b.points.map((p) => [p.date, p.portfolio_value]));
     this.chart?.destroy();
+    const theme = readChartTheme();
     const cfg: ChartConfiguration = {
       type: 'line',
       data: {
         labels: sorted,
         datasets: [
-          { label: `A — ${d.a.name}`, data: sorted.map((x) => mapA.get(x) ?? null), borderColor: '#2563eb', pointRadius: 0, tension: 0.1 },
-          { label: `B — ${d.b.name}`, data: sorted.map((x) => mapB.get(x) ?? null), borderColor: '#16a34a', pointRadius: 0, tension: 0.1 },
+          { label: `A — ${d.a.name}`, data: sorted.map((x) => mapA.get(x) ?? null), borderColor: theme.info, pointRadius: 0, tension: 0.1 },
+          { label: `B — ${d.b.name}`, data: sorted.map((x) => mapB.get(x) ?? null), borderColor: theme.long, pointRadius: 0, tension: 0.1 },
         ],
       },
       options: {

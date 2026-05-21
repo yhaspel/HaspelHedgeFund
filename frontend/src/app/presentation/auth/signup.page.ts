@@ -11,10 +11,9 @@ import { AuthStore } from '../../abstraction/auth.store';
     <div style="min-height:100vh;display:grid;place-items:center;background:var(--bg)">
       <section style="width:100%;max-width:420px;padding:40px">
         <div style="display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:13px;margin-bottom:18px">
-          <div style="width:28px;height:28px;background:var(--surface-2);border:1px solid var(--border-2);border-radius:6px;display:grid;place-items:center">
-            <svg width="16" height="16"><use href="/icons.svg#i-logo" /></svg>
-          </div>
-          <span>Haspel</span>
+          <img src="/icon-large.svg" alt="" width="28" height="28"
+               style="display:block;border:1px solid var(--border-2);border-radius:6px" />
+          <span>Haspel Hedge Fund</span>
         </div>
 
         <h1 style="font-size:28px;line-height:34px;font-weight:600;letter-spacing:-0.018em;margin:0 0 18px">Sign up</h1>

@@ -1,6 +1,6 @@
-"""Read-only API: macro snapshot + ticker news digest.
+"""Read-only API: macro snapshot + Markov regime + ticker news digest.
 
-Both are bare-minimum: backend computes/caches; frontend renders.
+Bare-minimum: backend computes/caches; frontend renders.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import DailyBar, MacroSnapshot, NewsItem
+from .models import DailyBar, MacroSnapshot, NewsItem, RegimeSnapshot
 
 
 def _parse_as_of(request: Request) -> dt.date:
@@ -19,6 +19,11 @@ def _parse_as_of(request: Request) -> dt.date:
     if not raw:
         return dt.date.today()
     return dt.date.fromisoformat(raw)
+
+
+def _parse_model_type(request: Request) -> str:
+    raw = request.query_params.get("model_type") or "labelled_markov"
+    return raw if raw in {"labelled_markov", "gaussian_hmm"} else "labelled_markov"
 
 
 class MacroSnapshotView(APIView):
@@ -47,6 +52,173 @@ class MacroSnapshotView(APIView):
                 "narrative": snap.narrative,
                 "sector_implications": snap.sector_implications,
                 "series_used": snap.series_used,
+                "markov_consensus": snap.markov_consensus,
+            }
+        )
+
+
+def _snapshot_payload(snap: RegimeSnapshot) -> dict:
+    return {
+        "ticker": snap.ticker,
+        "as_of_date": snap.as_of_date.isoformat(),
+        "model_type": snap.model_type,
+        "config_hash": snap.config_hash,
+        "last_price_date": snap.last_price_date.isoformat(),
+        "current_state": snap.current_state,
+        "current_return": snap.current_return,
+        "current_state_persistence": snap.current_state_persistence,
+        "bull_persistence": snap.bull_persistence,
+        "sideways_persistence": snap.sideways_persistence,
+        "bear_persistence": snap.bear_persistence,
+        "bull_prob_1d": snap.bull_prob_1d,
+        "sideways_prob_1d": snap.sideways_prob_1d,
+        "bear_prob_1d": snap.bear_prob_1d,
+        "bull_prob_5d": snap.bull_prob_5d,
+        "sideways_prob_5d": snap.sideways_prob_5d,
+        "bear_prob_5d": snap.bear_prob_5d,
+        "bull_minus_bear_1d": snap.bull_minus_bear_1d,
+        "prior_current_state": snap.prior_current_state,
+        "current_state_persistence_delta": snap.current_state_persistence_delta,
+        "bull_persistence_delta": snap.bull_persistence_delta,
+        "bear_persistence_delta": snap.bear_persistence_delta,
+        "state_changed_from_prior": snap.state_changed_from_prior,
+        "stale": snap.stale,
+    }
+
+
+class RegimeSnapshotView(APIView):
+    """Latest persisted ``RegimeSnapshot`` for one ticker.
+
+    Never refits on demand — read-only against the prewarm-managed table.
+    Future ``as_of`` values degrade to the latest available snapshot with
+    ``stale=true`` instead of returning an error.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, ticker: str) -> Response:
+        from hedgefund_agents.macro.regime_persistence import (
+            DEFAULT_STALENESS_DAYS,
+            get_latest_snapshot,
+        )
+
+        as_of = _parse_as_of(request)
+        model_type = _parse_model_type(request)
+        snap = get_latest_snapshot(
+            ticker.upper(),
+            as_of_date=as_of,
+            model_type=model_type,
+            staleness_days=DEFAULT_STALENESS_DAYS,
+        )
+        if snap is None:
+            return Response(
+                {
+                    "ticker": ticker.upper(),
+                    "as_of": as_of.isoformat(),
+                    "snapshot": None,
+                    "reason": "no_snapshot",
+                }
+            )
+        return Response(
+            {
+                "ticker": ticker.upper(),
+                "as_of": as_of.isoformat(),
+                "snapshot": _snapshot_payload(snap),
+            }
+        )
+
+
+class RegimeBatchView(APIView):
+    """Batch read of regime snapshots — one entry per requested ticker.
+
+    Missing / failed fits return ``{ticker, snapshot: null, reason}``
+    rather than a 5xx so the dashboard can degrade gracefully.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        from hedgefund_agents.macro.regime_persistence import (
+            DEFAULT_STALENESS_DAYS,
+            get_latest_snapshot,
+        )
+
+        as_of = _parse_as_of(request)
+        model_type = _parse_model_type(request)
+        raw = request.query_params.get("tickers") or ""
+        tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+        items: list[dict] = []
+        for ticker in tickers:
+            snap = get_latest_snapshot(
+                ticker,
+                as_of_date=as_of,
+                model_type=model_type,
+                staleness_days=DEFAULT_STALENESS_DAYS,
+            )
+            if snap is None:
+                items.append(
+                    {"ticker": ticker, "snapshot": None, "reason": "no_snapshot"}
+                )
+                continue
+            items.append({"ticker": ticker, "snapshot": _snapshot_payload(snap)})
+        return Response(
+            {
+                "as_of": as_of.isoformat(),
+                "model_type": model_type,
+                "items": items,
+            }
+        )
+
+
+class RegimeHistoryView(APIView):
+    """Historical snapshots in a date range. Drives the sparkline widget."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, ticker: str) -> Response:
+        model_type = _parse_model_type(request)
+        try:
+            frm = dt.date.fromisoformat(request.query_params.get("from") or "")
+        except ValueError:
+            frm = dt.date.today() - dt.timedelta(days=60)
+        try:
+            to = dt.date.fromisoformat(request.query_params.get("to") or "")
+        except ValueError:
+            to = dt.date.today()
+        rows = (
+            RegimeSnapshot.objects.filter(
+                ticker=ticker.upper(),
+                model_type=model_type,
+                as_of_date__gte=frm,
+                as_of_date__lte=to,
+            )
+            .order_by("as_of_date")
+            .values(
+                "as_of_date", "current_state",
+                "bull_prob_1d", "sideways_prob_1d", "bear_prob_1d",
+                "bull_minus_bear_1d",
+                "current_state_persistence",
+            )
+        )
+        items = [
+            {
+                "as_of_date": r["as_of_date"].isoformat(),
+                "current_state": r["current_state"],
+                "bull_prob_1d": r["bull_prob_1d"],
+                "sideways_prob_1d": r["sideways_prob_1d"],
+                "bear_prob_1d": r["bear_prob_1d"],
+                "bull_minus_bear_1d": r["bull_minus_bear_1d"],
+                "current_state_persistence": r["current_state_persistence"],
+            }
+            for r in rows
+        ]
+        return Response(
+            {
+                "ticker": ticker.upper(),
+                "model_type": model_type,
+                "from": frm.isoformat(),
+                "to": to.isoformat(),
+                "items": items,
             }
         )
 

@@ -4,6 +4,7 @@ import {
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { TokenStorage } from '../core/auth/token-storage';
 import { AuthStore } from './auth.store';
 
@@ -20,13 +21,22 @@ describe('AuthStore', () => {
   let store: AuthStore;
   let http: HttpTestingController;
   let tokens: FakeTokenStorage;
+  let navigatedTo: string[];
 
   beforeEach(() => {
     tokens = new FakeTokenStorage();
+    navigatedTo = [];
+    const router = {
+      navigateByUrl: (url: string) => {
+        navigatedTo.push(url);
+        return Promise.resolve(true);
+      },
+    };
     TestBed.configureTestingModule({
       providers: [
         AuthStore,
         { provide: TokenStorage, useValue: tokens },
+        { provide: Router, useValue: router },
         provideHttpClient(),
         provideHttpClientTesting(),
       ],
@@ -51,11 +61,12 @@ describe('AuthStore', () => {
     expect(tokens.getAccess()).toBe('a');
   });
 
-  it('logout clears tokens and user', () => {
+  it('logout clears tokens and user and redirects to login', () => {
     tokens.set('a', 'r');
     store.logout();
     expect(tokens.getAccess()).toBeNull();
     expect(store.user()).toBeNull();
+    expect(navigatedTo).toContain('/login');
   });
 
   it('refreshMe with an expired token logs the user out', () => {

@@ -11,11 +11,11 @@
   --n-300: #232833;
   --n-400: #2c313d;
   --n-500: #3a4150;
-  --n-600: #5c6470;
-  --n-700: #9ba3af;
-  --n-800: #c4cad3;
-  --n-900: #e6e8ec;
-  --n-1000: #f5f6f8;
+  --n-600: #8b95a4;
+  --n-700: #c8cfd9;
+  --n-800: #e4e8ee;
+  --n-900: #f6f8fb;
+  --n-1000: #ffffff;
 
   --bg: var(--n-50);
   --surface: var(--n-100);
@@ -24,17 +24,21 @@
   --text: var(--n-900);
   --text-2: var(--n-700);
   --text-3: var(--n-600);
+  --text-inv: #0e1116;
   --border: #1f242e;
   --border-2: var(--n-400);
+  --border-strong: var(--n-500);
   --hover: rgba(255, 255, 255, 0.03);
   --hover-strong: rgba(255, 255, 255, 0.05);
   --selected: rgba(91, 141, 239, 0.1);
 
   /* Semantic */
   --acc-long: #16a974;
+  --acc-long-2: #1ac489;
   --acc-long-fg: #6de2b5;
   --acc-long-soft: rgba(22, 169, 116, 0.12);
   --acc-short: #e5484d;
+  --acc-short-2: #f26367;
   --acc-short-fg: #ff9396;
   --acc-short-soft: rgba(229, 72, 77, 0.12);
   --acc-hold: #d4a24c;
@@ -65,6 +69,10 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-serif: 'Source Serif 4', Georgia, serif;
+
+  --tracking-tight: -0.018em;
+  --tracking-base: 0em;
+  --tracking-wide: 0.04em;
   --tracking-mono: -0.005em;
 
   --fs-48: 48px;
@@ -107,12 +115,12 @@
   --r-6: 6px;
   --r-8: 8px;
   --r-12: 12px;
-  --r-full: 999px;
+  --r-full: 9999px;
 
   /* Shadows */
-  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.18);
-  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-3: 0 24px 60px rgba(0, 0, 0, 0.55), 0 6px 18px rgba(0, 0, 0, 0.4);
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 20px -8px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 18px 40px -12px rgba(0, 0, 0, 0.65), 0 6px 12px -4px rgba(0, 0, 0, 0.4);
 
   /* Focus ring */
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc-info);
@@ -133,17 +141,19 @@
 }
 
 :root[data-theme='light'] {
+  color-scheme: light;
+
   --n-0: #f4f2ec;
   --n-50: #fafaf7;
   --n-100: #ffffff;
   --n-150: #f6f5f0;
-  --n-200: #efede5;
+  --n-200: #ffffff;
   --n-300: #efede5;
   --n-400: #e2dfd5;
-  --n-500: #c8c4b7;
-  --n-600: #6b7280;
+  --n-500: #c8c5ba;
+  --n-600: #8a93a0;
   --n-700: #4a5260;
-  --n-800: #232833;
+  --n-800: #2a3140;
   --n-900: #0e1116;
   --n-1000: #000000;
 
@@ -154,18 +164,22 @@
   --text: var(--n-900);
   --text-2: var(--n-700);
   --text-3: var(--n-600);
+  --text-inv: #ffffff;
   --border: #e6e2d6;
   --border-2: var(--n-400);
-  --hover: rgba(0, 0, 0, 0.03);
-  --hover-strong: rgba(0, 0, 0, 0.05);
-  --selected: rgba(43, 99, 210, 0.1);
+  --border-strong: var(--n-500);
+  --hover: rgba(14, 17, 22, 0.035);
+  --hover-strong: rgba(14, 17, 22, 0.06);
+  --selected: rgba(43, 99, 210, 0.08);
 
   --acc-long: #0f8a5c;
+  --acc-long-2: #0b7b51;
   --acc-long-fg: #0b6644;
-  --acc-long-soft: rgba(15, 138, 92, 0.12);
+  --acc-long-soft: rgba(15, 138, 92, 0.1);
   --acc-short: #c8332c;
+  --acc-short-2: #b22b25;
   --acc-short-fg: #9e1e18;
-  --acc-short-soft: rgba(200, 51, 44, 0.12);
+  --acc-short-soft: rgba(200, 51, 44, 0.1);
   --acc-hold: #a77620;
   --acc-hold-fg: #7a5310;
   --acc-hold-soft: rgba(167, 118, 32, 0.12);
@@ -184,10 +198,14 @@
   --c6: #2a8595;
   --c7: #a45470;
   --c8: #5e7b33;
-  --chart-grid: #ece9dd;
-  --chart-axis: #6b7280;
+  --chart-grid: #ece9df;
+  --chart-axis: #8a93a0;
   --chart-tip-bg: #ffffff;
   --chart-tip-bd: #e2dfd5;
+
+  --shadow-1: 0 1px 0 rgba(14, 17, 22, 0.04);
+  --shadow-2: 0 8px 24px -10px rgba(14, 17, 22, 0.15), 0 2px 6px -2px rgba(14, 17, 22, 0.08);
+  --shadow-3: 0 20px 50px -16px rgba(14, 17, 22, 0.22), 0 8px 14px -4px rgba(14, 17, 22, 0.1);
 }
 
 /* Base resets */
@@ -207,6 +225,7 @@ body {
   line-height: var(--lh-14);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   font-feature-settings: 'ss01', 'cv11';
 }
 a {
@@ -238,10 +257,14 @@ textarea {
 .eyebrow {
   font-size: var(--fs-11);
   line-height: 16px;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--text-3);
   font-weight: 500;
+}
+
+::selection {
+  background: var(--acc-info-soft);
 }
 
 :focus-visible {

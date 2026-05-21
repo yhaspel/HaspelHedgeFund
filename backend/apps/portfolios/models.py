@@ -183,6 +183,36 @@ class PortfolioStrategy(models.Model):
         max_digits=4, decimal_places=3, default=Decimal("0.500")
     )
 
+    # P2m: optional Markov regime exposure scaler (off by default). When on,
+    # the long-short cycle multiplies target_net_pct (or target_gross_pct) by
+    # a clipped function of (bull_prob_1d - bear_prob_1d) for the configured
+    # ticker. See development-plans/phase-02m-markov-regime-classifier.md.
+    REGIME_SCALER_OFF = "off"
+    REGIME_SCALER_NET = "scale_net"
+    REGIME_SCALER_GROSS = "scale_gross"
+    REGIME_SCALER_CHOICES = [
+        (REGIME_SCALER_OFF, "Off"),
+        (REGIME_SCALER_NET, "Scale net"),
+        (REGIME_SCALER_GROSS, "Scale gross"),
+    ]
+    regime_exposure_scaler = models.CharField(
+        max_length=16,
+        choices=REGIME_SCALER_CHOICES,
+        default=REGIME_SCALER_OFF,
+    )
+    regime_scaler_floor = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.2000")
+    )
+    regime_scaler_ceiling = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("1.0000")
+    )
+    regime_scaler_ticker = models.CharField(max_length=16, default="SPY")
+    regime_scaler_allow_negative_net = models.BooleanField(default=False)
+    enable_markov_regime_gate = models.BooleanField(default=False)
+    markov_bear_prob_5d_threshold = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.850")
+    )
+
     # P2l: gate council fan-out behind explicit user approval.
     # default=True preserves existing behavior; set False to stop the cycle at
     # `awaiting_review` after the cheap screener pass.

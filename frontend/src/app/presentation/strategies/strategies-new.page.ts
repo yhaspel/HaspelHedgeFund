@@ -9,11 +9,13 @@ import {
   STRATEGY_KIND_DESCRIPTIONS, STRATEGY_KIND_OPTIONS, StrategyKind,
 } from '../../core/models/strategy.model';
 import { InfoTooltipComponent } from '../shared/info-tooltip.component';
+import { PersonaCardComponent } from '../shared/persona-card.component';
+import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
 
 @Component({
   selector: 'hf-strategies-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, InfoTooltipComponent, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, InfoTooltipComponent, AppShellComponent, PersonaCardComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label:'New'}]">
       <div class="page-head">
@@ -29,9 +31,10 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
             <div class="field">
               <label class="lbl">
                 Name
-                <hf-info text="A human-friendly label for this strategy. Used in the dashboard and the strategies list — doesn't affect behaviour." />
+                <hf-info text="Auto-suggested from the strategy kind, universe, and the time you opened this page — and re-suggested whenever you change kind or universe. Type your own name any time to keep it. Used in the dashboard and the strategies list; doesn't affect behaviour." />
               </label>
-              <input class="input sans" name="name" [(ngModel)]="name" required />
+              <input class="input sans" name="name" [(ngModel)]="name"
+                     (ngModelChange)="onNameChange($event)" required />
             </div>
 
             <div class="field">
@@ -53,7 +56,8 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                   Universe
                   <hf-info text="The investable pool of tickers the screener evaluates each cycle. Pick a named universe (e.g. sp500_top_200) — only its active members on the as-of date are scored." />
                 </label>
-                <select class="input sans" name="universe" [(ngModel)]="universe" required>
+                <select class="input sans" name="universe" [(ngModel)]="universe"
+                        (ngModelChange)="onUniverseChange()" required>
                   @for (u of store.universes(); track u.id) {
                     <option [value]="u.id">{{ u.name }} ({{ u.member_count }})</option>
                   }
@@ -330,9 +334,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
         <section class="card">
           <div class="card-hd">
             <span class="title">Personas</span>
-            <span class="eyebrow" style="margin-left:auto;color:var(--text-3)">
-              {{ selectedPersonas.length }} selected
-            </span>
+            <span class="pill"><span class="dot"></span>{{ selectedPersonas.length }} of {{ ALL_PERSONAS.length }}</span>
           </div>
           <div class="card-bd">
             <p style="font-size:11.5px;color:var(--text-3);margin:0 0 10px">
@@ -341,13 +343,12 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <span>Sector rotation defaults to the macro trio (Druckenmiller, Damodaran, Burry) — name-centric value investors aren't a great fit for ETF baskets.</span>
               }
             </p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
-              @for (p of ALL_PERSONAS; track p) {
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);cursor:pointer">
-                  <input type="checkbox" [checked]="selectedPersonas.includes(p)"
-                         (change)="togglePersona(p)" [name]="'p_' + p" />
-                  <span style="text-transform:capitalize">{{ p }}</span>
-                </label>
+            <div class="persona-grid">
+              @for (p of personaMeta; track p.id) {
+                <hf-persona-card
+                  [persona]="p"
+                  [selected]="selectedPersonas.includes(p.id)"
+                  (toggled)="togglePersona(p.id)" />
               }
             </div>
           </div>
@@ -391,12 +392,32 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
       </form>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      .persona-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      @media (max-width: 540px) {
+        .persona-grid { grid-template-columns: 1fr; }
+      }
+    `,
+  ],
 })
 export class StrategiesNewPage implements OnInit {
   readonly store = inject(StrategiesStore);
   private readonly router = inject(Router);
 
-  name = 'Daily L/S 100/50';
+  /** Auto-suggested from kind + universe + nameStamp until the user edits it. */
+  name = '';
+  /** Last value produced by buildAutoName(); while `name` still equals it the
+   *  field is considered untouched and keeps re-suggesting on kind/universe changes. */
+  private autoName = '';
+  /** Flips true once the user types their own name — auto-naming then stops. */
+  private nameIsCustom = false;
+  /** Timestamp suffix, fixed when the page opens so it stays stable while editing. */
+  private readonly nameStamp = this.buildStamp();
   kind: StrategyKind = 'long_short';
   readonly kindOptions = STRATEGY_KIND_OPTIONS;
   universe: number | null = null;
@@ -435,11 +456,11 @@ export class StrategiesNewPage implements OnInit {
   autoRunCouncil = true;
 
   // Persona picker. Recommended defaults per kind are applied in onKindChange
-  // and on first render via the constructor below.
-  readonly ALL_PERSONAS = [
-    'buffett', 'munger', 'graham', 'lynch',
-    'wood', 'druckenmiller', 'burry', 'damodaran',
-  ];
+  // and on first render via the field initializer below. personaMeta drives the
+  // rich persona cards; ALL_PERSONAS is the id list used by the per-kind
+  // recommendation logic and the submit payload.
+  readonly personaMeta = PERSONA_META;
+  readonly ALL_PERSONAS = PERSONA_META.map((p) => p.id);
   readonly RECOMMENDED_PERSONAS: Record<StrategyKind, string[]> = {
     long_only: this.ALL_PERSONAS,
     short_only: this.ALL_PERSONAS,
@@ -464,6 +485,43 @@ export class StrategiesNewPage implements OnInit {
   error = signal<string | null>(null);
 
   kindDescription(): string { return STRATEGY_KIND_DESCRIPTIONS[this.kind]; }
+
+  /** Compact, stable timestamp suffix, e.g. "2026-05-21 14:32". */
+  private buildStamp(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** Suggested strategy name: "<kind> · <universe> · <timestamp>". */
+  private buildAutoName(): string {
+    const kindLabel = this.kindOptions.find((o) => o.value === this.kind)?.label ?? this.kind;
+    const uni = this.universe === null
+      ? null
+      : this.store.universes().find((u) => u.id === this.universe);
+    const parts = [kindLabel];
+    if (uni) parts.push(uni.name);
+    parts.push(this.nameStamp);
+    return parts.join(' · ');
+  }
+
+  /** Re-suggest the name from kind + universe, unless the user has overridden it. */
+  private refreshAutoName(): void {
+    if (this.nameIsCustom) return;
+    this.autoName = this.buildAutoName();
+    this.name = this.autoName;
+  }
+
+  /** The Name field becomes the user's own once it differs from the suggestion;
+   *  clearing it hands control back to the auto-suggester. */
+  onNameChange(value: string): void {
+    this.nameIsCustom = value.trim().length > 0 && value !== this.autoName;
+  }
+
+  /** Universe changed in the dropdown — refresh the suggested name. */
+  onUniverseChange(): void {
+    this.refreshAutoName();
+  }
 
   onKindChange(k: StrategyKind): void {
     if (k === 'long_only') {
@@ -520,14 +578,17 @@ export class StrategiesNewPage implements OnInit {
       if (rpUni) this.universe = rpUni.id;
     }
     this.selectedPersonas = [...this.RECOMMENDED_PERSONAS[k]];
+    this.refreshAutoName();
   }
 
   label(k: string): string { return SCREENER_WEIGHT_LABELS[k] ?? k; }
   tooltip(k: string): string { return SCREENER_WEIGHT_TOOLTIPS[k] ?? ''; }
 
   ngOnInit(): void {
+    this.refreshAutoName();
     this.store.loadUniverses().subscribe((us) => {
       if (us.length && this.universe === null) this.universe = us[0].id;
+      this.refreshAutoName();
     });
     this.store.loadPortfolios().subscribe((ps) => {
       if (ps.length && this.portfolio === null) this.portfolio = ps[0].id;

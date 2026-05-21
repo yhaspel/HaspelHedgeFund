@@ -10,8 +10,8 @@ import { AuthStore } from '../../abstraction/auth.store';
   template: `
     <div class="app">
       <aside class="sidebar">
-        <div class="logo" aria-label="Haspel">
-          <svg width="16" height="16"><use href="/icons.svg#i-logo" /></svg>
+        <div class="logo" aria-label="Haspel Hedge Fund" title="Haspel Hedge Fund">
+          <img src="/icon.svg" alt="" width="30" height="30" />
         </div>
         <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}" routerLinkActive="active" data-tip="Dashboard">
           <svg width="18" height="18"><use href="/icons.svg#i-home" /></svg>
@@ -33,7 +33,7 @@ import { AuthStore } from '../../abstraction/auth.store';
       <main>
         <div class="topbar">
           <nav class="crumbs">
-            <a routerLink="/">Haspel</a>
+            <a routerLink="/">Haspel Hedge Fund</a>
             <span class="sep">/</span>
             <ng-container *ngFor="let c of crumbs; let last = last">
               <a *ngIf="!last" [routerLink]="c.link">{{ c.label }}</a>

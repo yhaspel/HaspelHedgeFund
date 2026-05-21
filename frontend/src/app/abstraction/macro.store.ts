@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
+import { MarkovConsensus } from '../core/models/regime.model';
 
 export interface MacroSnapshot {
   as_of_date: string;
@@ -11,6 +12,7 @@ export interface MacroSnapshot {
   narrative: string;
   sector_implications: Record<string, 'overweight' | 'neutral' | 'underweight'>;
   series_used: Record<string, number | null>;
+  markov_consensus?: MarkovConsensus | null;
 }
 
 export interface NewsItem {

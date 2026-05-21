@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { TestBed } from '@angular/core/testing';
-import { Router, UrlTree } from '@angular/router';
+import { Router, UrlTree, provideRouter } from '@angular/router';
 import { authGuard } from './auth.guard';
 import { TokenStorage } from './token-storage';
 
@@ -26,6 +26,7 @@ describe('authGuard', () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
+        provideRouter([{ path: 'login', children: [] }]),
         { provide: TokenStorage, useValue: tokens },
       ],
     });

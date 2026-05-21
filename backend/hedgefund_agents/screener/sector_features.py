@@ -34,6 +34,11 @@ class SectorFeatures:
     relative_momentum_6m: float = 0.0
     drawdown_from_high: float = 0.0
     regime_fit: float = 0.0
+    # P2m: deterministic per-sector-ETF Markov regime score. Additive feature
+    # alongside regime_fit; stale/missing snapshots contribute 0.
+    markov_regime_score: float = 0.0
+    markov_regime_state: str = "unavailable"
+    markov_regime_stale: bool = True
     breadth_quality: str = "missing"  # exact | approximate | missing
     last_close: float = 0.0
     available: bool = True
@@ -42,10 +47,11 @@ class SectorFeatures:
 
 DEFAULT_SECTOR_WEIGHTS: dict[str, float] = {
     "relative_momentum_3m": 0.30,
-    "relative_momentum_1m": 0.20,
+    "relative_momentum_1m": 0.15,
     "relative_momentum_6m": 0.15,
-    "drawdown_from_high": 0.15,    # less drawdown → higher score
-    "regime_fit": 0.20,
+    "drawdown_from_high": 0.10,    # less drawdown → higher score
+    "regime_fit": 0.15,
+    "markov_regime_score": 0.15,
 }
 
 
@@ -109,6 +115,25 @@ def _etf_momentum(provider: FmpProvider, ticker: str, as_of: date) -> tuple[list
     return [], False
 
 
+def _markov_score_for(ticker: str, as_of: date) -> tuple[float, str, bool]:
+    """Read the latest persisted Markov snapshot for ``ticker``.
+
+    Returns (score, state, stale). ``score`` is ``bull_minus_bear_1d`` for
+    fresh snapshots (already in [-1, 1]); stale or missing snapshots
+    contribute 0 and ``stale=True``. Never fits on demand.
+    """
+    try:
+        from hedgefund_agents.macro.regime_persistence import get_latest_snapshot
+    except Exception:
+        return 0.0, "unavailable", True
+    snap = get_latest_snapshot(ticker.upper(), as_of_date=as_of)
+    if snap is None:
+        return 0.0, "unavailable", True
+    if snap.stale:
+        return 0.0, snap.current_state, True
+    return float(snap.bull_minus_bear_1d), snap.current_state, False
+
+
 def compute_sector_features(
     ticker: str,
     sector: str,
@@ -142,6 +167,10 @@ def compute_sector_features(
     feat.relative_momentum_3m = m3 - bench.get("3m", 0.0)
     feat.relative_momentum_6m = m6 - bench.get("6m", 0.0)
     feat.regime_fit = _regime_fit(affinities, regime_vector or {})
+    score, state, stale = _markov_score_for(ticker, as_of)
+    feat.markov_regime_score = score
+    feat.markov_regime_state = state
+    feat.markov_regime_stale = stale
     feat.breadth_quality = "missing"  # exact/approximate gated on holdings feed (P3+).
     feat.available = True
     return feat
@@ -169,6 +198,7 @@ def sector_score(f: SectorFeatures, weights: dict[str, float] | None = None) -> 
         # drawdown is negative; bigger drawdown lowers the score
         + w["drawdown_from_high"] * f.drawdown_from_high
         + w["regime_fit"] * f.regime_fit
+        + w.get("markov_regime_score", 0.0) * f.markov_regime_score
     )
 
 

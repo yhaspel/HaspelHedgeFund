@@ -41,7 +41,7 @@ import { CommonModule } from '@angular/common';
         height: 8px;
         background: var(--surface-2);
         border: 1px solid var(--border);
-        border-radius: var(--r-full, 99px);
+        border-radius: var(--r-full, 9999px);
         overflow: hidden;
       }
       .fill {

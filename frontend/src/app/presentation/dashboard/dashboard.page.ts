@@ -48,28 +48,57 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
           <div class="card-bd">
             @if (macro.snapshot(); as s) {
               <div class="chips">
-                <span class="pill" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
+                <span class="pill help" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
                   [class.warn]="chipKind('growth', s.growth_quadrant)==='warn'"
-                  [class.err]="chipKind('growth', s.growth_quadrant)==='err'">
+                  [class.err]="chipKind('growth', s.growth_quadrant)==='err'"
+                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
                   <span class="dot"></span>growth · {{ s.growth_quadrant }}
+                  <span class="tip">{{ chipTooltip('growth', s.growth_quadrant) }}</span>
                 </span>
-                <span class="pill" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
+                <span class="pill help" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
                   [class.warn]="chipKind('inflation', s.inflation_regime)==='warn'"
-                  [class.err]="chipKind('inflation', s.inflation_regime)==='err'">
+                  [class.err]="chipKind('inflation', s.inflation_regime)==='err'"
+                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
                   <span class="dot"></span>inflation · {{ s.inflation_regime }}
+                  <span class="tip">{{ chipTooltip('inflation', s.inflation_regime) }}</span>
                 </span>
-                <span class="pill" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
+                <span class="pill help" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
                   [class.warn]="chipKind('curve', s.yield_curve_state)==='warn'"
-                  [class.err]="chipKind('curve', s.yield_curve_state)==='err'">
+                  [class.err]="chipKind('curve', s.yield_curve_state)==='err'"
+                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
                   <span class="dot"></span>curve · {{ s.yield_curve_state }}
+                  <span class="tip">{{ chipTooltip('curve', s.yield_curve_state) }}</span>
                 </span>
-                <span class="pill" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
+                <span class="pill help" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
                   [class.warn]="chipKind('policy', s.policy_stance)==='warn'"
-                  [class.info]="chipKind('policy', s.policy_stance)==='info'">
+                  [class.info]="chipKind('policy', s.policy_stance)==='info'"
+                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
                   <span class="dot"></span>policy · {{ s.policy_stance }}
+                  <span class="tip">{{ chipTooltip('policy', s.policy_stance) }}</span>
                 </span>
+                @if (s.markov_consensus; as mc) {
+                  @if (mc.consensus_state !== 'unavailable') {
+                    <span class="pill help"
+                          [class.ok]="mc.consensus_state==='bull'"
+                          [class.warn]="mc.consensus_state==='sideways'"
+                          [class.err]="mc.consensus_state==='bear'"
+                          (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                      <span class="dot"></span>markov · {{ mc.consensus_state }} ({{ (mc.consensus_strength*100).toFixed(0) }}%)
+                      <span class="tip">{{ markovTooltip(mc) }}</span>
+                    </span>
+                  }
+                }
               </div>
               <p class="narrative">{{ s.narrative }}</p>
+              @if (s.markov_consensus; as mc) {
+                @if (mc.available_count > 0) {
+                  <p class="muted" style="font-size:11.5px;margin-top:4px">
+                    Markov consensus: {{ mc.vote.bull || 0 }} bull · {{ mc.vote.sideways || 0 }} sideways · {{ mc.vote.bear || 0 }} bear
+                    across {{ mc.available_count }} always-modelled ETFs
+                    @if (mc.stale_count > 0) { · {{ mc.stale_count }} stale }
+                  </p>
+                }
+              }
             } @else {
               <p class="muted">Loading macro snapshot…</p>
             }
@@ -249,7 +278,63 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         flex-wrap: wrap;
         gap: 6px;
         margin-bottom: 10px;
+        position: relative;
       }
+      .chips .pill.help {
+        cursor: help;
+        text-decoration: underline dotted;
+        text-decoration-color: var(--text-3, rgba(255, 255, 255, 0.25));
+        text-underline-offset: 3px;
+        position: relative;
+      }
+      .chips .pill.help .tip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 0;
+        z-index: 50;
+        width: 320px;
+        max-width: 90vw;
+        padding: 10px 12px;
+        background: var(--surface-2, #161a21);
+        color: var(--text, #f6f8fb);
+        border: 1px solid var(--border-2, #2c313d);
+        border-radius: 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 1.55;
+        text-align: left;
+        text-decoration: none;
+        white-space: pre-line;
+        letter-spacing: normal;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(2px);
+        transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+        pointer-events: none;
+      }
+      .chips .pill.help:hover .tip,
+      .chips .pill.help:focus-visible .tip {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+      /* Viewport-aware: flip the tooltip below the chip when there's no
+         room above. positionTip() toggles these classes on mouseenter. */
+      .chips .pill.help.tip-below .tip {
+        bottom: auto;
+        top: calc(100% + 8px);
+        transform: translateY(-2px);
+      }
+      .chips .pill.help.tip-below:hover .tip,
+      .chips .pill.help.tip-below:focus-visible .tip {
+        transform: translateY(0);
+      }
+      .chips .pill.help.tip-right-aligned .tip {
+        left: auto;
+        right: 0;
+      }
+      .card.macro { overflow: visible; }
       .narrative {
         font-size: 13px;
         color: var(--text-2);
@@ -319,7 +404,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         font-size: 11px;
         line-height: 1;
         padding: 4px 8px;
-        border-radius: 999px;
+        border-radius: var(--r-full);
         cursor: pointer;
       }
       .chip:hover { background: var(--surface-2); }
@@ -419,5 +504,101 @@ export class DashboardPage implements OnInit {
       policy: { easing: 'info', neutral: '', tightening: 'warn' },
     };
     return map[kind]?.[value] ?? '';
+  }
+
+  /**
+   * Hover tooltip for each macro chip. Format: header explaining what the
+   * metric is, then a line decoding the current value. Values + thresholds
+   * mirror `hedgefund_agents.macro.macro_agent.classify_regime`.
+   */
+  chipTooltip(kind: string, value: string): string {
+    const HEADERS: Record<string, string> = {
+      growth:
+        'Growth quadrant — derived from unemployment (UNRATE) and industrial production (INDPRO).',
+      inflation: 'Inflation regime — based on CPI level (CPIAUCSL).',
+      curve: 'Yield curve — 10-year minus 2-year Treasury spread (T10Y2Y).',
+      policy: 'Policy stance — Federal Funds effective rate (FEDFUNDS).',
+    };
+    const VALUES: Record<string, Record<string, string>> = {
+      growth: {
+        expansion: 'Expansion: unemployment ≤4% and INDPRO ≥100. Healthy growth — risk-on tilt favoured.',
+        recovery: 'Recovery: improving labour market, INDPRO climbing back. Early-cycle conditions.',
+        slowdown: 'Slowdown: unemployment ≥4.5%. Late-cycle deceleration — trim cyclicals, watch credit.',
+        recession: 'Recession: unemployment ≥5.5% and INDPRO ≤100. Defensive tilt; growth contracting.',
+      },
+      inflation: {
+        low: 'Low: CPI <290. Disinflationary backdrop — supports long duration / growth equities.',
+        moderate: 'Moderate: CPI 290–320. Mid-range price pressures — broad-market neutral.',
+        high: 'High: CPI ≥320. Persistent inflation — favours commodities, value, short duration.',
+        accelerating: 'Accelerating: inflation rising fast — defensive tilt, reduce long duration.',
+      },
+      curve: {
+        normal: 'Normal: 10y−2y ≥0.5pp. Healthy term premium; no recession signal from the curve.',
+        flat: 'Flat: 10y−2y in (0, 0.5pp). Late-cycle warning — curve is compressing.',
+        inverted: 'Inverted: 10y−2y <0. Historically a recession leading indicator (12–18mo lag).',
+      },
+      policy: {
+        easing: 'Easing: Fed Funds ≤2%. Stimulative monetary policy — supports risk assets and duration.',
+        neutral: 'Neutral: Fed Funds 2–4.5%. Neither restrictive nor stimulative.',
+        tightening: 'Tightening: Fed Funds ≥4.5%. Restrictive policy — headwind for duration and growth.',
+      },
+    };
+    const header = HEADERS[kind] ?? '';
+    const explanation = VALUES[kind]?.[value] ?? `Current value: ${value}.`;
+    return header ? `${header}\n\n${explanation}` : explanation;
+  }
+
+  /**
+   * Viewport-aware tooltip positioning. Called on hover/focus of a chip.
+   * Measures the chip's bounding rect against the tooltip's natural size
+   * and toggles `.tip-below` / `.tip-right-aligned` classes so the tip
+   * never gets clipped by the top or right edge of the viewport.
+   */
+  positionTip(event: Event): void {
+    const chip = event.currentTarget as HTMLElement | null;
+    if (!chip) return;
+    const tip = chip.querySelector('.tip') as HTMLElement | null;
+    if (!tip) return;
+    // Temporarily reveal off-screen to measure (display:block makes
+    // getBoundingClientRect honest while opacity/visibility still hide it).
+    const prevVis = tip.style.visibility;
+    const prevDisp = tip.style.display;
+    tip.style.visibility = 'hidden';
+    tip.style.display = 'block';
+    const tipRect = tip.getBoundingClientRect();
+    tip.style.display = prevDisp;
+    tip.style.visibility = prevVis;
+
+    const chipRect = chip.getBoundingClientRect();
+    const margin = 12;
+    const flipBelow = chipRect.top - tipRect.height - margin < 0;
+    chip.classList.toggle('tip-below', flipBelow);
+
+    const overflowRight = chipRect.left + tipRect.width + margin > window.innerWidth;
+    chip.classList.toggle('tip-right-aligned', overflowRight);
+  }
+
+  /** Hover tooltip for the Markov consensus chip. */
+  markovTooltip(mc: {
+    consensus_state: string;
+    consensus_strength: number;
+    vote: Record<string, number>;
+    available_count: number;
+    stale_count: number;
+  }): string {
+    const header =
+      'Markov regime consensus — deterministic, price-based regime detector ' +
+      'run nightly on SPY, QQQ, the 11 SPDR sector ETFs, and TLT/GLD/UUP.';
+    const winner = mc.consensus_state;
+    const strength = (mc.consensus_strength * 100).toFixed(0);
+    const tally =
+      `${mc.vote['bull'] ?? 0} bull · ${mc.vote['sideways'] ?? 0} sideways · ` +
+      `${mc.vote['bear'] ?? 0} bear (out of ${mc.available_count} fresh snapshots` +
+      (mc.stale_count > 0 ? `, ${mc.stale_count} stale` : '') +
+      ').';
+    return (
+      `${header}\n\nCurrent: ${winner} at ${strength}% agreement.\n${tally}\n\n` +
+      'Disagreement with the LLM macro classification is itself a signal — see the strategy detail page widget.'
+    );
   }
 }

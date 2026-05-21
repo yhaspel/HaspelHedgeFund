@@ -1,4 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { Observable, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import { TokenStorage } from '../core/auth/token-storage';
@@ -8,6 +9,7 @@ import { AuthTokens, User } from '../core/models/user.model';
 export class AuthStore {
   private readonly api = inject(ApiClient);
   private readonly tokens = inject(TokenStorage);
+  private readonly router = inject(Router);
 
   private readonly _user = signal<User | null>(null);
   readonly user = this._user.asReadonly();
@@ -37,5 +39,6 @@ export class AuthStore {
   logout(): void {
     this.tokens.clear();
     this._user.set(null);
+    this.router.navigateByUrl('/login');
   }
 }

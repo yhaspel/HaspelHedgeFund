@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 
@@ -83,10 +85,134 @@ class MacroSnapshot(models.Model):
     narrative = models.TextField()
     sector_implications = models.JSONField(default=dict, blank=True)
     series_used = models.JSONField(default=dict, blank=True)
+    # P2m: deterministic Markov regime context computed from the always-modelled
+    # universe. Optional — populated when prewarm has fresh snapshots; never
+    # required by the macro agent.
+    markov_consensus = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
         return f"Macro {self.as_of_date} {self.growth_quadrant}/{self.inflation_regime}"
+
+
+class RegimeModel(models.Model):
+    """A fitted Markov regime model as of a point in time (P2m).
+
+    One row per (ticker, as_of_date, model_type, config_hash). Always
+    walk-forward: only daily bars whose `date < as_of_date` contribute to
+    the fit, and `training_end_date` records the latest bar used.
+    """
+
+    LABELLED_MARKOV = "labelled_markov"
+    GAUSSIAN_HMM = "gaussian_hmm"
+    MODEL_TYPE_CHOICES = [
+        (LABELLED_MARKOV, "Labelled Markov chain"),
+        (GAUSSIAN_HMM, "Gaussian HMM"),
+    ]
+
+    ticker = models.CharField(max_length=16, db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    model_type = models.CharField(
+        max_length=24, choices=MODEL_TYPE_CHOICES, default=LABELLED_MARKOV
+    )
+    config_hash = models.CharField(max_length=64, db_index=True)
+
+    return_window_days = models.SmallIntegerField(default=20)
+    bull_threshold_return = models.DecimalField(
+        max_digits=6, decimal_places=4, default=Decimal("0.0500")
+    )
+    bear_threshold_return = models.DecimalField(
+        max_digits=6, decimal_places=4, default=Decimal("-0.0500")
+    )
+    price_field = models.CharField(max_length=24, default="adjusted_close")
+
+    # Fitted parameters. transition_matrix is a 3x3 row-stochastic list-of-lists
+    # ordered as [bear, sideways, bull]. state_labels echoes that ordering for
+    # the HMM where we map structure→label by mean ordering.
+    transition_matrix = models.JSONField()
+    state_means = models.JSONField(null=True, blank=True)
+    state_stds = models.JSONField(null=True, blank=True)
+    state_labels = models.JSONField()
+    stationary_distribution = models.JSONField()
+
+    fit_observations = models.IntegerField()
+    observations_available = models.IntegerField()
+    fit_lookback_observations = models.IntegerField(default=2520)
+    training_start_date = models.DateField()
+    training_end_date = models.DateField()
+    log_likelihood = models.FloatField(null=True, blank=True)
+    fit_metadata = models.JSONField(default=dict, blank=True)
+    fitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [
+            ("ticker", "as_of_date", "model_type", "config_hash")
+        ]
+        indexes = [models.Index(fields=["ticker", "as_of_date"])]
+
+    def __str__(self) -> str:
+        return f"RegimeModel {self.ticker}@{self.as_of_date} {self.model_type}"
+
+
+class RegimeSnapshot(models.Model):
+    """Consumable summary derived from a RegimeModel (P2m).
+
+    One row per (ticker, as_of_date, model_type, config_hash). Downstream
+    code (strategies, dashboards, risk manager) reads this rather than the
+    raw RegimeModel.
+    """
+
+    ticker = models.CharField(max_length=16, db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    model_type = models.CharField(
+        max_length=24,
+        choices=RegimeModel.MODEL_TYPE_CHOICES,
+        default=RegimeModel.LABELLED_MARKOV,
+    )
+    config_hash = models.CharField(max_length=64, db_index=True)
+    source_model = models.ForeignKey(
+        RegimeModel, related_name="snapshots", on_delete=models.CASCADE
+    )
+
+    last_price_date = models.DateField()
+    current_state = models.CharField(max_length=12)  # bull | sideways | bear
+    current_return = models.FloatField(null=True, blank=True)
+    current_state_persistence = models.FloatField()
+    bull_persistence = models.FloatField()
+    sideways_persistence = models.FloatField()
+    bear_persistence = models.FloatField()
+
+    bull_prob_1d = models.FloatField()
+    sideways_prob_1d = models.FloatField()
+    bear_prob_1d = models.FloatField()
+    bull_prob_5d = models.FloatField()
+    sideways_prob_5d = models.FloatField()
+    bear_prob_5d = models.FloatField()
+    bull_minus_bear_1d = models.FloatField()
+
+    prior_snapshot = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="successors",
+    )
+    prior_current_state = models.CharField(max_length=12, blank=True, default="")
+    current_state_persistence_delta = models.FloatField(null=True, blank=True)
+    bull_persistence_delta = models.FloatField(null=True, blank=True)
+    bear_persistence_delta = models.FloatField(null=True, blank=True)
+    state_changed_from_prior = models.BooleanField(default=False)
+    stale = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [
+            ("ticker", "as_of_date", "model_type", "config_hash")
+        ]
+        indexes = [
+            models.Index(fields=["as_of_date", "model_type"]),
+            models.Index(fields=["ticker", "as_of_date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"RegimeSnap {self.ticker}@{self.as_of_date}={self.current_state}"
 
 
 class NewsItem(models.Model):

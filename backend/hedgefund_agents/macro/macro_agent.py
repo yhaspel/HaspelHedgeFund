@@ -139,10 +139,16 @@ def compute_snapshot(
         for sid, o in obs.items()
     }
 
+    # P2m: pull the deterministic Markov consensus (cheap read; never refits).
+    # Empty when prewarm hasn't run yet; the LLM sees that explicitly.
+    from .regime_persistence import compute_markov_consensus
+    markov_consensus = compute_markov_consensus(as_of_date=as_of)
+
     narrative, sector_tilts = _llm_narrative(
         as_of=as_of,
         regime=regime,
         series_used=series_used,
+        markov_consensus=markov_consensus,
         state=state,
         run_id=run_id,
         backtest_id=backtest_id,
@@ -155,6 +161,7 @@ def compute_snapshot(
             "narrative": narrative,
             "sector_implications": sector_tilts,
             "series_used": series_used,
+            "markov_consensus": markov_consensus,
         },
     )
     return snapshot
@@ -162,6 +169,7 @@ def compute_snapshot(
 
 def _llm_narrative(
     *, as_of, regime: dict[str, str], series_used: dict[str, float | None],
+    markov_consensus: dict | None = None,
     state: dict | None = None,
     run_id: int | None = None,
     backtest_id: int | None = None,
@@ -173,12 +181,22 @@ def _llm_narrative(
         "You are a macro strategist. The growth/inflation/yield-curve/policy "
         "regime is ALREADY classified deterministically — do not re-classify. "
         "Write a 3-5 sentence narrative tying the four states together, then "
-        "suggest sector tilts. Return MacroOutput JSON."
+        "suggest sector tilts. A deterministic Markov regime consensus across "
+        "16 broad-market ETFs is included as price-action context: treat it "
+        "as a cheap cross-check on your macro thesis (agreement reinforces; "
+        "disagreement is itself a signal, not a thing to argue with). "
+        "Return MacroOutput JSON."
+    )
+    markov_block = (
+        json.dumps(markov_consensus, indent=2)
+        if markov_consensus
+        else "(no Markov consensus available — prewarm has not run for this date)"
     )
     user = (
         f"As-of date: {as_of.isoformat()}\n"
         f"CLASSIFIED REGIME:\n{json.dumps(regime, indent=2)}\n\n"
         f"RAW SERIES (latest as known on as_of):\n{json.dumps(series_used, indent=2)}\n\n"
+        f"MARKOV REGIME CONSENSUS (price-action, deterministic):\n{markov_block}\n\n"
         "Suggest sector_implications for at least: technology, financials, "
         "energy, healthcare, consumer_staples, consumer_discretionary, "
         "utilities, industrials."

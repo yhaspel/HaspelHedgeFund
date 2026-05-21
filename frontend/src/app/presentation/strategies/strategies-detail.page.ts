@@ -4,11 +4,12 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
+import { RegimeContextWidgetComponent } from './regime-context-widget.component';
 
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent],
+  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, RegimeContextWidgetComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
       <div class="page-head">
@@ -33,37 +34,42 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
       @if (estimate(); as est) {
         <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:16px"
              (click)="cancelEstimate()">
-          <div class="card" style="max-width:640px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-3)"
-               (click)="$event.stopPropagation()">
-            <div class="card-hd"><span class="title">Confirm cycle dispatch</span></div>
-            <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
-              <p style="font-size:11.5px;color:var(--text-3);margin:0">
-                Preset <span class="mono" style="color:var(--text)">{{ est.preset }}</span> ·
-                {{ est.n_candidates }} candidates · full council per candidate
-              </p>
+          <div class="card est-modal" (click)="$event.stopPropagation()">
 
-              <div
-                style="border:1px solid;border-radius:6px;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:13px"
-                [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'"
-                [style.background]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'">
-                <div>Est. per-call: <span class="mono">$ {{ est.per_call_usd.toFixed(4) }}</span></div>
-                <div>Est. total:
-                  <span class="mono" style="font-weight:600"
-                    [style.color]="est.exceeds_ceiling ? 'var(--acc-short-fg)' : 'var(--text)'">
-                    $ {{ est.est_total_usd.toFixed(2) }}
-                  </span>
-                </div>
-                <div>Cost ceiling: <span class="mono">$ {{ est.cost_ceiling_usd.toFixed(2) }}</span></div>
-                <div>n_candidates: <span class="mono">{{ est.n_candidates }}</span></div>
-              </div>
-
-              @if (est.exceeds_ceiling) {
-                <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
-                  ⚠ Estimate exceeds your cost ceiling. The cycle will trim K_longs/K_shorts before dispatching — raise the ceiling for a full fan-out.
+            <div class="est-modal__head">
+              <div class="card-hd"><span class="title">Confirm cycle dispatch</span></div>
+              <div class="est-modal__head-bd">
+                <p style="font-size:11.5px;color:var(--text-3);margin:0">
+                  Preset <span class="mono" style="color:var(--text)">{{ est.preset }}</span> ·
+                  {{ est.n_candidates }} candidates · full council per candidate
                 </p>
-              }
 
-              <div class="eyebrow">Per-agent model assignment</div>
+                <div
+                  style="border:1px solid;border-radius:6px;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:13px"
+                  [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'"
+                  [style.background]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'">
+                  <div>Est. per-call: <span class="mono">$ {{ est.per_call_usd.toFixed(4) }}</span></div>
+                  <div>Est. total:
+                    <span class="mono" style="font-weight:600"
+                      [style.color]="est.exceeds_ceiling ? 'var(--acc-short-fg)' : 'var(--text)'">
+                      $ {{ est.est_total_usd.toFixed(2) }}
+                    </span>
+                  </div>
+                  <div>Cost ceiling: <span class="mono">$ {{ est.cost_ceiling_usd.toFixed(2) }}</span></div>
+                  <div>n_candidates: <span class="mono">{{ est.n_candidates }}</span></div>
+                </div>
+
+                @if (est.exceeds_ceiling) {
+                  <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
+                    ⚠ Estimate exceeds your cost ceiling. The cycle will trim K_longs/K_shorts before dispatching — raise the ceiling for a full fan-out.
+                  </p>
+                }
+
+                <div class="eyebrow">Per-agent model assignment</div>
+              </div>
+            </div>
+
+            <div class="est-modal__scroll scroll-area">
               <table class="tbl">
                 <thead><tr>
                   <th>Agent</th><th>Model</th><th>Tier</th><th class="right">$/call</th>
@@ -79,7 +85,9 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
                   }
                 </tbody>
               </table>
+            </div>
 
+            <div class="est-modal__foot">
               @if (anyAnthropic(est)) {
                 <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
                   ⚠ This cycle will hit Anthropic for at least one agent. If you didn't intend this, change the model in
@@ -87,8 +95,7 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
                   or pick a different strategy preset.
                 </p>
               }
-
-              <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:12px">
+              <div class="est-modal__actions">
                 <button class="btn" (click)="cancelEstimate()">Cancel</button>
                 <button class="btn primary" (click)="confirmRun()" [disabled]="running()" data-test="confirm-run"
                   [style.background]="est.exceeds_ceiling ? 'var(--acc-hold)' : null"
@@ -97,6 +104,7 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
                 </button>
               </div>
             </div>
+
           </div>
         </div>
       }
@@ -128,6 +136,10 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
           </div>
         </section>
 
+        <div>
+          <hf-regime-context-widget
+            [benchmark]="store.currentStrategy()?.benchmark_ticker || 'SPY'"
+            [asOf]="cycle()?.as_of_date" />
         @if (cycle(); as c) {
           <section class="card">
             <div class="card-hd">
@@ -568,13 +580,13 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
                       <li>
                         <span style="color:var(--text)">{{ v.ticker }}</span>
                         @if (v.decision === 'veto') {
-                          <span style="color:#d9826e">— vetoed</span>
+                          <span style="color:var(--acc-short-fg)">— vetoed</span>
                           @if (v.rm_veto) { <span> · risk-manager veto</span> }
                           @for (r of v.reasons; track r.persona) {
                             <span> · {{ r.persona }} {{ r.signal }}@{{ r.confidence }}</span>
                           }
                         } @else {
-                          <span style="color:#7ec27e">— approved</span>
+                          <span style="color:var(--acc-long-fg)">— approved</span>
                           <span style="color:var(--text-3)"> (threshold {{ v.threshold_pct }}%)</span>
                         }
                       </li>
@@ -598,9 +610,55 @@ import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } fr
             </div>
           </section>
         }
+        </div>
       </div>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      /* Confirm-cycle modal — fixed header + footer, only the agent list scrolls. */
+      .est-modal {
+        max-width: 640px;
+        width: 100%;
+        max-height: 90vh;
+        box-shadow: var(--shadow-3);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .est-modal__head {
+        flex: 0 0 auto;
+      }
+      .est-modal__head-bd {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      /* Only the agent list scrolls; the table header (.tbl thead th, already
+         position: sticky) pins to the top of this region. */
+      .est-modal__scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 16px;
+      }
+      .est-modal__foot {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+      }
+      .est-modal__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+    `,
+  ],
 })
 export class StrategiesDetailPage implements OnInit, OnDestroy {
   readonly store = inject(StrategiesStore);
