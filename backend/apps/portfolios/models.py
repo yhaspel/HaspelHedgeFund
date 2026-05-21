@@ -388,6 +388,21 @@ class VolEstimate(models.Model):
         return f"vol {self.ticker}@{self.as_of_date} σ={self.daily_vol}"
 
 
+class PairZHistory(models.Model):
+    """Per-day z-score / spread for an open pair. One row per Pair per cycle."""
+    pair = models.ForeignKey("Pair", related_name="z_history", on_delete=models.CASCADE)
+    as_of_date = models.DateField(db_index=True)
+    z = models.FloatField()
+    spread = models.FloatField()
+    leg_a_close = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    leg_b_close = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("pair", "as_of_date")]
+        indexes = [models.Index(fields=["pair", "as_of_date"])]
+
+
 class Pair(models.Model):
     """A candidate / open / closed pairs-trading pair (P2k)."""
     STATUS_CHOICES = [
@@ -421,6 +436,7 @@ class Pair(models.Model):
     council_thesis = models.TextField(blank=True, default="")
     council_votes = models.JSONField(default=list, blank=True)
     consecutive_coint_failures = models.SmallIntegerField(default=0)
+    hedge_ratio_drift_pct = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

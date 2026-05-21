@@ -49,6 +49,9 @@ select = ["E", "F", "I", "UP", "B", "DJ"]
 DJANGO_SETTINGS_MODULE = "hedgefund.settings.test"
 python_files = ["test_*.py"]
 pythonpath = ["."]
+markers = [
+    "live_llm: opt-in tests that call a real LLM (set RUN_LIVE_LLM_TESTS=1)",
+]
 
 [tool.mypy]
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]

@@ -274,6 +274,7 @@ import { CycleDetail } from '../../core/models/strategy.model';
                         <th class="right">Entry gap (z)</th>
                         <th class="right">Co-move</th>
                         <th class="right">Fit (p)</th>
+                        <th>z trend (30d)</th>
                         @if (councilEnabled()) {
                           <th>Council</th><th class="right">Conf.</th>
                         }
@@ -288,6 +289,21 @@ import { CycleDetail } from '../../core/models/strategy.model';
                             <td class="num">{{ p.entry_z | number: '1.2-2' }}</td>
                             <td class="num">{{ p.correlation | number: '1.2-2' }}</td>
                             <td class="num">{{ p.p_value | number: '1.3-3' }}</td>
+                            <td>
+                              @if (p.z_history.length >= 2) {
+                                <svg [attr.width]="sparkW" [attr.height]="sparkH"
+                                  [attr.viewBox]="'0 0 ' + sparkW + ' ' + sparkH"
+                                  style="display:block;overflow:visible">
+                                  <path [attr.d]="sparkPath(p.z_history)"
+                                        fill="none" stroke="var(--acc-info-fg)" stroke-width="1.2" />
+                                  <line x1="0" [attr.x2]="sparkW"
+                                        [attr.y1]="sparkMidY(p.z_history)" [attr.y2]="sparkMidY(p.z_history)"
+                                        stroke="var(--text-3)" stroke-width="0.5" stroke-dasharray="2,2" />
+                                </svg>
+                              } @else {
+                                <span style="font-size:11px;color:var(--text-3)">—</span>
+                              }
+                            </td>
                             @if (councilEnabled()) {
                               <td class="mono"
                                 [style.color]="p.council_action === 'enter' ? 'var(--acc-long-fg)' : 'var(--text-3)'">
@@ -529,12 +545,15 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       weight: (Number(c.target_weights[ticker] || 0)) * 100,
     })).sort((a, b) => b.weight - a.weight);
   }
+  readonly sparkW = 88;
+  readonly sparkH = 22;
   openPairs(): {
     leg_a: string; leg_b: string; sector: string;
     hedge_ratio: number; entry_z: number;
     correlation: number; p_value: number;
     council_action: string; council_confidence: number | null;
     council_thesis: string;
+    z_history: number[];
   }[] {
     const c = this.cycle(); if (!c) return [];
     const arr = (c.beta_diagnostics as Record<string, unknown> | undefined)?.['open_pairs'];
@@ -550,7 +569,24 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       council_action: String(p['council_action'] ?? ''),
       council_confidence: p['council_confidence'] == null ? null : Number(p['council_confidence']),
       council_thesis: String(p['council_thesis'] ?? ''),
+      z_history: Array.isArray(p['z_history']) ? (p['z_history'] as number[]).map(Number) : [],
     }));
+  }
+  sparkPath(zs: number[]): string {
+    if (zs.length < 2) return '';
+    const w = this.sparkW, h = this.sparkH;
+    const lo = Math.min(...zs), hi = Math.max(...zs);
+    const range = Math.max(0.001, hi - lo);
+    const xs = zs.map((_, i) => (i * w) / (zs.length - 1));
+    const ys = zs.map((v) => h - ((v - lo) / range) * h);
+    return xs.map((x, i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${ys[i].toFixed(1)}`).join(' ');
+  }
+  sparkMidY(zs: number[]): number {
+    if (zs.length < 2) return this.sparkH / 2;
+    const lo = Math.min(...zs), hi = Math.max(...zs);
+    if (lo >= 0 || hi <= 0) return this.sparkH / 2;
+    const range = Math.max(0.001, hi - lo);
+    return this.sparkH - ((0 - lo) / range) * this.sparkH;
   }
   closedPairs(): { leg_a: string; leg_b: string; reason: string; z: number | null }[] {
     const c = this.cycle(); if (!c) return [];

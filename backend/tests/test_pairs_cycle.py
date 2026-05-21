@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 
 from apps.portfolios.models import (
     Pair,
+    PairZHistory,
     Portfolio,
     PortfolioStrategy,
     PortfolioTarget,
@@ -185,6 +186,140 @@ def pairs_strategy(db):
     return strategy, pf
 
 
+def test_borrow_unlocatable_short_leg_drops_entire_pair(monkeypatch, pairs_strategy):
+    """If the short leg is on the HTB list, the whole pair must be rejected
+    (long-only orphans are not allowed in pairs trading)."""
+    strategy, pf = pairs_strategy
+    # Make the universe include an HTB ticker so it can appear in a screen result.
+    UniverseMembership.objects.create(
+        universe=strategy.universe, ticker="GME", sector="X",
+        effective_from=date(2020, 1, 1),
+    )
+
+    # Force the screener to return a single candidate with GME as leg_b.
+    from apps.portfolios import tasks, pairs as pairs_mod
+    fake_candidate = pairs_mod.PairCandidate(
+        leg_a="A", leg_b="GME", sector="X",
+        hedge_ratio=1.0, spread_mean=0.0, spread_std=0.1,
+        z_current=-3.0, p_value=0.01, correlation=0.95,
+        n_obs=200, synthetic=False,
+    )
+    monkeypatch.setattr(
+        tasks, "screen_pairs",
+        lambda *_a, **_kw: ([fake_candidate], {"n_pairs_evaluated": 1,
+                                               "n_pairs_cointegrated": 1,
+                                               "n_pairs_above_entry_z": 1,
+                                               "synthetic_tickers": []}),
+    )
+    from apps.portfolios import tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
+
+    members = tasks._active_members(strategy, date(2024, 12, 2))
+    res = tasks._run_pairs_cycle(strategy, date(2024, 12, 2), members)
+
+    # No Pair row was created for the vetoed pair.
+    assert Pair.objects.filter(strategy=strategy, status="open").count() == 0
+    # Borrow veto was logged in cycle diagnostics.
+    target = PortfolioTarget.objects.get(pk=res["target_id"])
+    veto_log = target.beta_diagnostics.get("borrow_vetoed_pairs") or []
+    assert any(e["leg_a"] == "A" and e["leg_b"] == "GME" for e in veto_log), \
+        f"expected GME borrow veto in diagnostics, got {veto_log}"
+
+
+def test_z_history_accumulates_across_cycles(monkeypatch, pairs_strategy):
+    """Each cycle that runs with an open pair writes one PairZHistory row;
+    consecutive cycles accumulate; the cycle diagnostics expose a z_history slice."""
+    strategy, pf = pairs_strategy
+    # Seed an open pair (no closes — leg prices yield z mid-band so it just holds).
+    pair = Pair.objects.create(
+        strategy=strategy,
+        leg_a_ticker="A", leg_b_ticker="B", sector="X",
+        cointegration_p_value=0.01, correlation=0.95,
+        hedge_ratio=1.0,
+        spread_mean=-0.05, spread_std=0.05,    # synthetic stats designed so z ≈ -1.5
+        spread_window_days=120,
+        entry_date=date(2024, 11, 1), entry_z=2.4,
+        status="open",
+    )
+    from apps.portfolios import tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
+    # Skip new-candidate screening for speed.
+    monkeypatch.setattr(
+        tasks_mod, "screen_pairs",
+        lambda *_a, **_kw: ([], {"n_pairs_evaluated": 0, "n_pairs_cointegrated": 0,
+                                  "n_pairs_above_entry_z": 0, "synthetic_tickers": []}),
+    )
+
+    members = tasks_mod._active_members(strategy, date(2024, 12, 2))
+    res1 = tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 2), members)
+    res2 = tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 3), members)
+
+    history = PairZHistory.objects.filter(pair=pair).order_by("as_of_date")
+    assert history.count() == 2, f"expected 2 z-history rows, got {history.count()}"
+    # Diagnostics expose a non-empty z_history array for the pair.
+    target = PortfolioTarget.objects.get(pk=res2["target_id"])
+    op = (target.beta_diagnostics.get("open_pairs") or [])
+    assert len(op) == 1
+    assert len(op[0].get("z_history") or []) >= 1
+
+
+class _DriftedDataProvider:
+    """Synthetic prices where leg A and leg B no longer move with the
+    entry β. We pick offsets such that:
+      • the regression of ln(A) on ln(B) over the window gives β_now ≈ 1.5
+        (entry β was 1.0 → drift = +50%)
+      • today's spread = ln(A_today) − 1.0·ln(B_today) ≈ 0, so |z| ≈ 0
+        and the cycle closes the pair as 'reverted', exercising the
+        drift-computation code path."""
+
+    def get_daily_bars(self, ticker, start, end, *, as_of):
+        # Final values chosen so ln(A_final) = ln(B_final) → spread@today = 0.
+        bars = []
+        for i in range(260):
+            if ticker == "A":
+                # log(A) = 2.870 + 1.5·(i·0.001); A_final = exp(3.2585)
+                bars.append(_FakeBar(close=math.exp(2.870 + 1.5 * i * 0.001)))
+            elif ticker == "B":
+                # log(B) = 3.000 + (i·0.001); B_final = exp(3.259)
+                bars.append(_FakeBar(close=math.exp(3.000 + i * 0.001)))
+            else:
+                bars.append(_FakeBar(close=100.0))
+        return bars
+
+
+def test_hedge_ratio_drift_recorded_on_close(monkeypatch, pairs_strategy):
+    """A pair whose underlying β has materially shifted by the time it
+    closes must record a non-trivial `hedge_ratio_drift_pct`."""
+    strategy, pf = pairs_strategy
+    pair = Pair.objects.create(
+        strategy=strategy,
+        leg_a_ticker="A", leg_b_ticker="B", sector="X",
+        cointegration_p_value=0.01, correlation=0.95,
+        hedge_ratio=1.0,                          # entry β
+        spread_mean=0.0, spread_std=0.5,
+        spread_window_days=120,
+        entry_date=date(2024, 10, 1), entry_z=2.5,
+        status="open",
+    )
+    from apps.portfolios import tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _DriftedDataProvider())
+    monkeypatch.setattr(
+        tasks_mod, "screen_pairs",
+        lambda *_a, **_kw: ([], {"n_pairs_evaluated": 0, "n_pairs_cointegrated": 0,
+                                  "n_pairs_above_entry_z": 0, "synthetic_tickers": []}),
+    )
+    members = tasks_mod._active_members(strategy, date(2024, 12, 2))
+    tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 2), members)
+
+    pair.refresh_from_db()
+    assert pair.status == "closed"
+    assert pair.hedge_ratio_drift_pct is not None
+    # Entry β=1.0, current β≈1.5 → drift ≈ +50%. Allow generous tolerance for
+    # numerical residuals in the synthetic series.
+    assert pair.hedge_ratio_drift_pct > 0.20, \
+        f"expected material positive drift, got {pair.hedge_ratio_drift_pct}"
+
+
 def test_atomic_close_emits_paired_sequence_zero_orders(monkeypatch, pairs_strategy):
     """Open pair whose current z is within exit threshold must close both legs
     atomically: two RebalanceOrders, both sequence=0, both pointing at the
@@ -207,8 +342,8 @@ def test_atomic_close_emits_paired_sequence_zero_orders(monkeypatch, pairs_strat
                             avg_cost=Decimal("55"), sector="X")
 
     # Stub the provider used by tasks.py.
-    from hedgefund_agents import registry as agent_registry
-    monkeypatch.setattr(agent_registry, "get_data_provider", lambda: _FakeDataProvider())
+    from apps.portfolios import tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
 
     from apps.portfolios.tasks import _run_pairs_cycle
     from apps.portfolios.tasks import _active_members

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import math
+from datetime import date
+
+import pytest
 
 from apps.portfolios.pairs import (
     _adf_like_p,
@@ -30,19 +33,21 @@ def _ou_pair(n: int = 300, beta: float = 1.0, sigma_noise: float = 0.02, seed: i
 
 
 def test_ols_recovers_known_hedge_ratio():
-    la, lb = _ou_pair(n=400, beta=1.0)
-    alpha, beta_hat = _ols_alpha_beta(la, lb)
-    assert abs(beta_hat - 1.0) < 0.1, f"recovered β={beta_hat}"
+    """Plan bar: OLS β within ±10% of the known synthetic β."""
+    la, lb = _ou_pair(n=400, beta=1.0, sigma_noise=0.015)
+    _alpha, beta_hat = _ols_alpha_beta(la, lb)
+    assert abs(beta_hat - 1.0) < 0.10, f"recovered β={beta_hat}"
 
 
 def test_cointegrated_pair_passes_screen():
-    la, lb = _ou_pair(n=400, beta=1.0)
+    """Plan bar: an OU-driven cointegrated pair must score ADF p<0.05 and
+    recover a hedge ratio in [0.90, 1.10] for known β=1.0."""
+    la, lb = _ou_pair(n=400, beta=1.0, sigma_noise=0.015)
     cand = evaluate_pair("A", "B", "Tech", la, lb, synthetic_pair=False)
     assert cand is not None
-    # Cointegrated, mean-reverting → p-value should be small.
-    assert cand.p_value < 0.20, f"p_value={cand.p_value} too high for cointegrated pair"
+    assert cand.p_value < 0.05, f"p_value={cand.p_value} too high for cointegrated pair"
     assert cand.correlation > 0.80
-    assert cand.hedge_ratio > 0.5
+    assert 0.90 <= cand.hedge_ratio <= 1.10, f"β={cand.hedge_ratio}"
 
 
 def test_independent_random_walks_fail_to_cointegrate():
@@ -57,6 +62,25 @@ def test_independent_random_walks_fail_to_cointegrate():
     # Either reject outright, or yield a large ADF-like p-value.
     if cand is not None:
         assert cand.p_value > 0.30 or abs(cand.correlation) < 0.5
+
+
+def test_screener_aborts_when_candidate_count_exceeds_guardrail():
+    """A mis-configured single-sector universe with too many names produces
+    O(N²) candidate pairs; the screener must refuse to run rather than
+    silently exhaust the LLM budget."""
+    from apps.portfolios.pairs import screen_pairs
+
+    # 320 names in ONE sector → 320·319/2 = 51,040 > 50,000.
+    members = [(f"T{i:04d}", "X") for i in range(320)]
+
+    class _NoopProvider:
+        def get_daily_bars(self, *_a, **_kw):
+            return []
+
+    with pytest.raises(RuntimeError, match="max_candidates_total"):
+        screen_pairs(members, date.today(), data_provider=_NoopProvider(),
+                     lookback_days=120, p_max=0.05, corr_min=0.7,
+                     entry_z=2.0, max_candidates_total=50000)
 
 
 def test_adf_like_p_low_for_stationary_series():

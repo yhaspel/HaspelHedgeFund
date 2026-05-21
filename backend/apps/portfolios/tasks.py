@@ -46,9 +46,15 @@ from .construction import (
     construct_sector_rotation,
 )
 from .vol import compute_vols_for
-from .pairs import decide_open_pair_action, gather_log_prices, screen_pairs
+from .pairs import (
+    _ols_alpha_beta,
+    decide_open_pair_action,
+    gather_log_prices,
+    screen_pairs,
+)
 from .models import (
     Pair,
+    PairZHistory,
     PortfolioStrategy,
     PortfolioTarget,
     Position,
@@ -680,14 +686,25 @@ def _run_pairs_cycle(
                                "leg_a": p.leg_a_ticker, "leg_b": p.leg_b_ticker})
             continue
         if action in ("stopped", "reverted", "regime_break"):
+            # Hedge-ratio drift: re-fit β on current prices and compare to entry β.
+            drift_pct: float | None = None
+            la = bundle.log_prices.get(p.leg_a_ticker) or []
+            lb = bundle.log_prices.get(p.leg_b_ticker) or []
+            n = min(len(la), len(lb))
+            if n >= 60 and float(p.hedge_ratio) > 0:
+                _alpha, beta_now = _ols_alpha_beta(la[-n:], lb[-n:])
+                if beta_now > 0:
+                    drift_pct = (beta_now / float(p.hedge_ratio)) - 1.0
             p.status = "closed"
             p.exit_z = z
             p.exit_date = as_of
             p.exit_reason = action
+            p.hedge_ratio_drift_pct = drift_pct
             p.save()
             closes_log.append({
                 "pair_id": p.pk, "reason": action, "z": round(z or 0.0, 3),
                 "leg_a": p.leg_a_ticker, "leg_b": p.leg_b_ticker,
+                "hedge_ratio_drift_pct": (round(drift_pct, 4) if drift_pct is not None else None),
             })
             continue
         # action == "hold": persist the consecutive-failure counter for next cycle.
@@ -781,7 +798,24 @@ def _run_pairs_cycle(
     else:
         accepted = [(c, None) for c in top_pool[:available_slots]]
 
-    # 4) Persist new Pair rows.
+    # 4) Borrow-locate veto on the short leg. If the short leg can't be
+    #    located, the whole pair is rejected — pairs trading needs both legs.
+    borrow = StubBorrowProvider()
+    borrow_log: list[dict] = []
+    locatable_accepted: list = []
+    for c, decision in accepted:
+        quote = borrow.quote(c.leg_b, as_of)
+        borrow.persist(quote)
+        if not quote.is_locatable:
+            borrow_log.append({
+                "leg_a": c.leg_a, "leg_b": c.leg_b,
+                "reason": "borrow_not_locatable", "fee_pct_annual": float(quote.fee_pct_annual),
+            })
+            continue
+        locatable_accepted.append((c, decision))
+    accepted = locatable_accepted
+
+    # 5) Persist new Pair rows.
     new_pair_rows: list[Pair] = []
     for c, decision in accepted:
         z_entry = c.z_current
@@ -817,6 +851,36 @@ def _run_pairs_cycle(
         _add_leg(target_weights, p.leg_b_ticker, leg_b_w)
         pair_legs.append((p, p.leg_a_ticker, leg_a_w))
         pair_legs.append((p, p.leg_b_ticker, leg_b_w))
+
+    # Snapshot today's z + spread per active pair (UI sparkline / post-mortem).
+    z_history_by_pair: dict[int, list[float]] = {}
+    for p in all_active:
+        la = bundle.log_prices.get(p.leg_a_ticker) or []
+        lb = bundle.log_prices.get(p.leg_b_ticker) or []
+        if not la or not lb or p.spread_std <= 0:
+            continue
+        spread_today = la[-1] - float(p.hedge_ratio) * lb[-1]
+        z_today = (spread_today - float(p.spread_mean)) / float(p.spread_std)
+        try:
+            import math
+            PairZHistory.objects.update_or_create(
+                pair=p, as_of_date=as_of,
+                defaults={
+                    "z": z_today,
+                    "spread": spread_today,
+                    "leg_a_close": Decimal(str(round(math.exp(la[-1]), 4))),
+                    "leg_b_close": Decimal(str(round(math.exp(lb[-1]), 4))),
+                },
+            )
+        except Exception as exc:
+            log.warning("z-history write failed for pair %s: %s", p.pk, exc)
+        # 30-day rolling slice for the UI sparkline.
+        recent = list(
+            PairZHistory.objects.filter(pair=p)
+            .order_by("-as_of_date")[:30]
+            .values_list("z", flat=True)
+        )
+        z_history_by_pair[p.pk] = list(reversed([float(v) for v in recent]))
 
     # 5) Persist PortfolioTarget + orders.
     with transaction.atomic():
@@ -922,6 +986,7 @@ def _run_pairs_cycle(
         "closes": closes_log,
         "council_enabled": council_on,
         "council_log": council_log,
+        "borrow_vetoed_pairs": borrow_log,
         "open_pairs": [
             {
                 "id": p.pk,
@@ -934,6 +999,7 @@ def _run_pairs_cycle(
                 "council_action": p.council_action,
                 "council_confidence": p.council_confidence,
                 "council_thesis": p.council_thesis,
+                "z_history": z_history_by_pair.get(p.pk, []),
             }
             for p in all_active
         ],
