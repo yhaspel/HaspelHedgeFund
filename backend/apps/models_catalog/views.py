@@ -146,5 +146,16 @@ class MyProviderKeysView(APIView):
             pk.set_key("openai", data["openai_api_key"])
         if "ollama_host" in data:
             pk.ollama_host = data["ollama_host"] or ""
+        if "fmp_api_key" in data:
+            pk.set_key("fmp", data["fmp_api_key"])
+        if "tiingo_api_key" in data:
+            pk.set_key("tiingo", data["tiingo_api_key"])
+        if "fred_api_key" in data:
+            pk.set_key("fred", data["fred_api_key"])
         pk.save()
+        # P2n: clear factory caches so a freshly saved key takes effect on the
+        # next provider call (the cache key includes api_key, so this is mostly
+        # belt-and-suspenders, but a deliberate clear makes the test path crisp).
+        from apps.data.providers.factory import _reset_caches_for_tests
+        _reset_caches_for_tests()
         return Response(ProviderKeyStatusSerializer(pk).data)

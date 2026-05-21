@@ -26,6 +26,10 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
             <p style="font-size:11.5px;color:var(--text-3);margin:0">
               Keys are stored Fernet-encrypted on your user row. P4a will replace this with a multi-tenant vault.
             </p>
+
+            <div class="eyebrow" style="border-bottom:1px solid var(--border);padding-bottom:6px">
+              LLM providers
+            </div>
             @for (p of providers; track p.field) {
               <div class="field">
                 <label class="lbl" style="display:flex;justify-content:space-between">
@@ -35,6 +39,7 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
                   </span>
                 </label>
                 <input class="input mono" type="password" [(ngModel)]="keyEdits[p.field]" [name]="p.field"
+                  [attr.data-test]="'llm-key-' + p.field"
                   placeholder="•••• paste to replace, blank to keep" />
               </div>
             }
@@ -43,12 +48,35 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
               <input class="input mono" type="text" [(ngModel)]="ollamaHost" name="ollama"
                 placeholder="http://localhost:11434" data-test="ollama-host" />
             </div>
+
+            <div class="eyebrow" style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:6px">
+              Data providers
+            </div>
+            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+              P2n BYOK: FMP and Tiingo require user-supplied keys (no platform fallback in prod). FRED is optional — free public data falls back to a shared platform key.
+            </p>
+            @for (p of dataProviders; track p.field) {
+              <div class="field">
+                <label class="lbl" style="display:flex;justify-content:space-between">
+                  <span>{{ p.label }}</span>
+                  <span class="pill" [class.ok]="statusOf(p.field) === 'set'">
+                    <span class="dot"></span>{{ statusOf(p.field) }}
+                  </span>
+                </label>
+                <input class="input mono" type="password" [(ngModel)]="keyEdits[p.field]" [name]="p.field"
+                  [attr.data-test]="'data-key-' + p.field"
+                  placeholder="•••• paste to replace, blank to keep" />
+                <p style="font-size:11px;color:var(--text-3);margin:2px 0 0">{{ p.note }}</p>
+              </div>
+            }
+
             <button type="button" class="btn primary" (click)="saveKeys()" [disabled]="savingKeys()"
+              data-test="save-keys"
               style="height:32px;justify-content:center">
               {{ savingKeys() ? 'Saving…' : 'Save provider keys' }}
             </button>
             @if (keysMsg()) {
-              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0">{{ keysMsg() }}</p>
+              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="keys-msg">{{ keysMsg() }}</p>
             }
           </div>
         </section>
@@ -174,9 +202,29 @@ export class SettingsModelsPage implements OnInit {
     { field: 'openrouter', label: 'OpenRouter API key' },
     { field: 'openai', label: 'OpenAI API key' },
   ] as const;
+  readonly dataProviders = [
+    {
+      field: 'fmp',
+      label: 'FMP API key',
+      note: 'Required for backtests and live agent runs. Sign up at financialmodelingprep.com.',
+    },
+    {
+      field: 'tiingo',
+      label: 'Tiingo API key',
+      note: 'Required for news features. Free tier available at tiingo.com.',
+    },
+    {
+      field: 'fred',
+      label: 'FRED API key',
+      note: 'Optional — defaults to a shared platform key. Set your own for isolation or higher rate limits.',
+    },
+  ] as const;
   readonly presets = PRESET_NAMES;
 
-  keyEdits: Record<string, string> = { anthropic: '', openrouter: '', openai: '' };
+  keyEdits: Record<string, string> = {
+    anthropic: '', openrouter: '', openai: '',
+    fmp: '', tiingo: '', fred: '',
+  };
   ollamaHost = '';
   preset = 'research';
   ceiling: number | null = 5;
@@ -266,14 +314,21 @@ export class SettingsModelsPage implements OnInit {
   saveKeys(): void {
     this.savingKeys.set(true);
     const body: Record<string, string> = { ollama_host: this.ollamaHost };
-    for (const f of ['anthropic', 'openrouter', 'openai']) {
+    const allFields = [
+      'anthropic', 'openrouter', 'openai',
+      'fmp', 'tiingo', 'fred',
+    ];
+    for (const f of allFields) {
       if (this.keyEdits[f]) body[`${f}_api_key`] = this.keyEdits[f];
     }
     this.store.saveKeys(body).subscribe({
       next: () => {
         this.savingKeys.set(false);
         this.keysMsg.set('Saved. Reloading models…');
-        this.keyEdits = { anthropic: '', openrouter: '', openai: '' };
+        this.keyEdits = {
+          anthropic: '', openrouter: '', openai: '',
+          fmp: '', tiingo: '', fred: '',
+        };
         this.store.loadModels().subscribe();
       },
       error: () => { this.savingKeys.set(false); this.keysMsg.set('Failed to save'); },

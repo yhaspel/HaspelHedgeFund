@@ -65,10 +65,12 @@ def test_prime_agent_cache_aborts_when_budget_exhausted(monkeypatch):
         "hedgefund_agents.versioning.snapshot_versions", lambda *_a, **_k: {}
     )
     monkeypatch.setattr(
-        "hedgefund_agents.registry.get_data_provider", lambda: object()
+        "apps.data.providers.factory.get_fmp_provider",
+        lambda *a, **kw: object(),
     )
     monkeypatch.setattr(
-        "hedgefund_agents.registry.get_filings_provider", lambda: object()
+        "apps.data.providers.factory.get_edgar_provider",
+        lambda *a, **kw: object(),
     )
     # close_old_connections() inside the loop tears down the test transaction.
     monkeypatch.setattr("django.db.close_old_connections", lambda: None)

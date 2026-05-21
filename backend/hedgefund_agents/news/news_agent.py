@@ -20,13 +20,14 @@ import re
 
 from apps.data.models import FilingRecord, NewsItem
 from apps.data.providers.edgar import EdgarProvider
+from apps.data.providers.factory import get_news_service
 
 from .._persist import record_llm_call
 from ..base import AgentState, pick_model
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import MaterialEvent, NewsOutput
-from ..registry import DEFAULT_MODELS, get_llm, get_news_service
+from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AgentSpec, register
 
 log = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def run_news(state: AgentState) -> AgentState:
     as_of = state["as_of_date"]
     run_id = state.get("run_id")
 
-    service = get_news_service()
+    service = get_news_service(user=state.get("user_id"))
     raw = service.fetch_and_persist(ticker, as_of=as_of, lookback_days=30)
     items = _select_items(raw)
     risk_factors = _risk_factors_excerpt(ticker, as_of=as_of)

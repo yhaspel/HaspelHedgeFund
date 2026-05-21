@@ -213,7 +213,7 @@ def test_borrow_unlocatable_short_leg_drops_entire_pair(monkeypatch, pairs_strat
                                                "synthetic_tickers": []}),
     )
     from apps.portfolios import tasks as tasks_mod
-    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
+    monkeypatch.setattr(tasks_mod, "get_fmp_provider", lambda *a, **kw: _FakeDataProvider())
 
     members = tasks._active_members(strategy, date(2024, 12, 2))
     res = tasks._run_pairs_cycle(strategy, date(2024, 12, 2), members)
@@ -243,7 +243,7 @@ def test_z_history_accumulates_across_cycles(monkeypatch, pairs_strategy):
         status="open",
     )
     from apps.portfolios import tasks as tasks_mod
-    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
+    monkeypatch.setattr(tasks_mod, "get_fmp_provider", lambda *a, **kw: _FakeDataProvider())
     # Skip new-candidate screening for speed.
     monkeypatch.setattr(
         tasks_mod, "screen_pairs",
@@ -303,7 +303,7 @@ def test_hedge_ratio_drift_recorded_on_close(monkeypatch, pairs_strategy):
         status="open",
     )
     from apps.portfolios import tasks as tasks_mod
-    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _DriftedDataProvider())
+    monkeypatch.setattr(tasks_mod, "get_fmp_provider", lambda *a, **kw: _DriftedDataProvider())
     monkeypatch.setattr(
         tasks_mod, "screen_pairs",
         lambda *_a, **_kw: ([], {"n_pairs_evaluated": 0, "n_pairs_cointegrated": 0,
@@ -344,7 +344,7 @@ def test_atomic_close_emits_paired_sequence_zero_orders(monkeypatch, pairs_strat
 
     # Stub the provider used by tasks.py.
     from apps.portfolios import tasks as tasks_mod
-    monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
+    monkeypatch.setattr(tasks_mod, "get_fmp_provider", lambda *a, **kw: _FakeDataProvider())
 
     from apps.portfolios.tasks import _active_members, _run_pairs_cycle
     members = _active_members(strategy, date(2024, 12, 2))

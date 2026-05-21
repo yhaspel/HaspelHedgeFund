@@ -7,10 +7,6 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-from apps.data.providers import EdgarProvider, FmpProvider
-from apps.data.providers.fred import FredProvider
-from apps.data.providers.news import NewsService
-
 from .llm.adapters import AnthropicClient, OllamaClient, OpenRouterClient
 from .llm.client import LLMClient
 
@@ -61,22 +57,6 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
                 source = "user"
     log.info("llm_client provider=%s user_id=%s key_source=%s", provider, user_id, source)
     return _make_client(provider, user_id if source == "user" else None, api_key, host)
-
-
-def get_data_provider() -> FmpProvider:
-    return FmpProvider()
-
-
-def get_filings_provider() -> EdgarProvider:
-    return EdgarProvider()
-
-
-def get_macro_provider() -> FredProvider:
-    return FredProvider()
-
-
-def get_news_service() -> NewsService:
-    return NewsService()
 
 
 # Default (provider, model) per agent — used unless run.model_overrides says otherwise.

@@ -26,20 +26,20 @@ def _dedup_key(headline: str, published_at: dt.datetime) -> str:
 
 
 class NewsService:
-    """Combines Tiingo + FMP, persists, returns deduped NewsItems for a ticker."""
+    """Combines Tiingo + FMP, persists, returns deduped NewsItems for a ticker.
+
+    P2n: provider instances must be supplied by the caller (typically via
+    ``apps.data.providers.factory.get_news_service``). When ``None`` is passed,
+    that provider is silently skipped — the BYOK gate is enforced in the
+    factory, not here.
+    """
 
     def __init__(
         self,
         tiingo: TiingoNewsProvider | None = None,
         fmp: FmpNewsProvider | None = None,
     ) -> None:
-        self._providers = []
-        for p_cls, instance in [(TiingoNewsProvider, tiingo), (FmpNewsProvider, fmp)]:
-            try:
-                self._providers.append(instance or p_cls())
-            except RuntimeError:
-                # Missing key — skip that provider rather than failing the run.
-                continue
+        self._providers = [p for p in (tiingo, fmp) if p is not None]
 
     def fetch_and_persist(
         self, ticker: str, *, as_of: dt.date, lookback_days: int = 30

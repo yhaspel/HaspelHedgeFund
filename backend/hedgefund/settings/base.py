@@ -122,6 +122,12 @@ FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# P2n: BYOK gate for paid data providers (FMP, Tiingo). When False, the
+# resolver in apps.data.providers.factory refuses to fall back to the env var
+# and raises with an actionable error pointing the user at /settings/models.
+# FRED is exempt — it's free public-data per data-licensing.md.
+ALLOW_PLATFORM_DATA_KEYS = os.environ.get("ALLOW_PLATFORM_DATA_KEYS", "0") == "1"
+
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"
 

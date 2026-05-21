@@ -29,6 +29,9 @@ class ProviderKeyStatusSerializer(serializers.Serializer):
     openrouter = serializers.SerializerMethodField()
     openai = serializers.SerializerMethodField()
     ollama_host = serializers.CharField(allow_blank=True)
+    fmp = serializers.SerializerMethodField()
+    tiingo = serializers.SerializerMethodField()
+    fred = serializers.SerializerMethodField()
 
     def get_anthropic(self, obj: ProviderKey) -> str:
         return "set" if obj.has_key("anthropic") else "unset"
@@ -39,9 +42,21 @@ class ProviderKeyStatusSerializer(serializers.Serializer):
     def get_openai(self, obj: ProviderKey) -> str:
         return "set" if obj.has_key("openai") else "unset"
 
+    def get_fmp(self, obj: ProviderKey) -> str:
+        return "set" if obj.has_key("fmp") else "unset"
+
+    def get_tiingo(self, obj: ProviderKey) -> str:
+        return "set" if obj.has_key("tiingo") else "unset"
+
+    def get_fred(self, obj: ProviderKey) -> str:
+        return "set" if obj.has_key("fred") else "unset"
+
 
 class ProviderKeyWriteSerializer(serializers.Serializer):
     anthropic_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     openrouter_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     openai_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     ollama_host = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    fmp_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    tiingo_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    fred_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)

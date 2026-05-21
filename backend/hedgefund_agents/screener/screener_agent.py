@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date
 
+from apps.data.providers.fmp import FmpProvider
+
 from .features import (
     DEFAULT_WEIGHTS,
     ScreenerFeatures,
@@ -59,6 +61,7 @@ def run_screener(
     as_of_date: date,
     top_k_longs: int,
     top_k_shorts: int,
+    provider: FmpProvider,
     weights: dict[str, float] | None = None,
     long_only: bool = False,
 ) -> dict:
@@ -70,7 +73,7 @@ def run_screener(
     weights = {**DEFAULT_WEIGHTS, **(weights or {})}
 
     feats: list[ScreenerFeatures] = [
-        compute_features(t, s, as_of_date) for t, s in members
+        compute_features(t, s, as_of_date, provider=provider) for t, s in members
     ]
 
     longs = [(f, long_score(f, weights)) for f in feats]

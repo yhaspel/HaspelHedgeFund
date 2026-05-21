@@ -14,9 +14,9 @@ from decimal import Decimal
 
 import pytest
 
+from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
 from hedgefund_agents.graphs.single_persona import build_graph
 from hedgefund_agents.models import LLMCall
-from hedgefund_agents.registry import get_data_provider, get_filings_provider
 
 
 def _run(model_overrides: dict[str, str]) -> dict:
@@ -24,8 +24,8 @@ def _run(model_overrides: dict[str, str]) -> dict:
     state = {
         "ticker": "AAPL",
         "as_of_date": dt.date(2024, 12, 31),
-        "data_provider": get_data_provider(),
-        "filings_provider": get_filings_provider(),
+        "data_provider": get_fmp_provider(force_platform=True),
+        "filings_provider": get_edgar_provider(),
         "model_overrides": model_overrides,
     }
     return graph.invoke(state)

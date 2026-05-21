@@ -16,7 +16,7 @@ from hedgefund_agents.graphs.council import (
 )
 from hedgefund_agents.models import LLMCall
 from hedgefund_agents.personas import ALL_PERSONAS
-from hedgefund_agents.registry import get_data_provider, get_filings_provider
+from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
 from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
 from .models import AgentMessage, Decision, Run
@@ -88,8 +88,8 @@ def execute_run(run_id: int) -> None:
 
     selected_personas = list(run.personas or ALL_PERSONAS)
     graph = build_council_graph(personas=selected_personas)
-    data_provider = get_data_provider()
-    filings_provider = get_filings_provider()
+    data_provider = get_fmp_provider(user=run.user)
+    filings_provider = get_edgar_provider()
 
     ensure_versions_synced()
     run.agent_versions = snapshot_versions(

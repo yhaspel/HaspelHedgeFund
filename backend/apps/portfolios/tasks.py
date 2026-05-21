@@ -29,7 +29,11 @@ from django.utils import timezone
 
 from apps.models_catalog.presets import expand_preset
 from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
-from hedgefund_agents.registry import get_data_provider, get_filings_provider
+from apps.data.providers.factory import (
+    get_edgar_provider,
+    get_fmp_provider,
+    get_news_service,
+)
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
 
@@ -232,12 +236,13 @@ def run_candidate_council(self, payload: dict) -> dict:
         graph = build_sector_council_graph(personas=personas)
     else:
         graph = build_council_graph(personas=personas)
+    council_user_id = payload.get("user_id")
     initial_state: dict = {
         "ticker": ticker,
         "as_of_date": as_of,
         "model_overrides": payload.get("model_overrides", {}),
-        "data_provider": get_data_provider(),
-        "filings_provider": get_filings_provider(),
+        "data_provider": get_fmp_provider(user=council_user_id),
+        "filings_provider": get_edgar_provider(),
         # Cost attribution: every LLMCall this council emits will be linked
         # to BOTH the parent PortfolioTarget AND this run, so two independent
         # rollups stay correct (Run.total_cost_usd for the transcript view,
@@ -486,7 +491,7 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
                     "dissenting_personas": decision.get("dissenting_personas", []),
                 }
     elif strategy.kind == PortfolioStrategy.KIND_MARKET_NEUTRAL:
-        data_provider = get_data_provider()
+        data_provider = get_fmp_provider(user=strategy.user)
         survivors = [c.ticker for c in cands if c.veto_reason is None]
         betas_full = compute_betas_for(
             survivors,
@@ -528,7 +533,7 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         result = construct(cands, constraints)
 
     # Pull last close per ticker for the rebalancer.
-    data_provider = get_data_provider()
+    data_provider = get_fmp_provider(user=strategy.user)
     last_close: dict[str, float] = {}
     existing_tickers = list(
         Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True)
@@ -616,7 +621,7 @@ def _run_risk_parity_cycle(
     strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]]
 ) -> dict:
     """Deterministic inverse-vol cycle. No LLM, no screener."""
-    data_provider = get_data_provider()
+    data_provider = get_fmp_provider(user=strategy.user)
     tickers = [t for t, _ in members]
     vols_map = compute_vols_for(
         tickers, as_of,
@@ -760,7 +765,7 @@ def _run_pairs_cycle(
     with top |z| new candidates. target_weights collapses paired legs into
     signed per-ticker weights (long_a positive, short_b = - hedge_ratio·notional).
     """
-    data_provider = get_data_provider()
+    data_provider = get_fmp_provider(user=strategy.user)
     lookback = int(strategy.pair_lookback_days)
     portfolio = strategy.portfolio
 
@@ -859,13 +864,12 @@ def _run_pairs_cycle(
         from apps.runs.models import Decision as _Decision
         from apps.runs.models import Run as _Run
         from hedgefund_agents.pairs_council import debate_pair
-        from hedgefund_agents.registry import get_news_service
 
         from .models import PortfolioTargetRun as _PortfolioTargetRun
         min_conf = float(strategy.pair_council_min_confidence)
         overrides = _resolve_model_overrides(strategy)
         personas = list(strategy.personas or [])
-        news_service = get_news_service()
+        news_service = get_news_service(user=strategy.user)
         # Ensure a target row exists so we can link Runs to it. The cycle's
         # target row is created later below via update_or_create — for pair
         # councils we need it earlier so audit Runs have a parent.
@@ -1285,6 +1289,8 @@ def daily_long_short_cycle(
         return _run_pairs_cycle(strategy, as_of, members)
 
     try:
+        # P2n: every screener call routes through a user-keyed FMP provider.
+        screener_provider = get_fmp_provider(user=strategy.user)
         is_long_only_flavor = strategy.kind in (
             PortfolioStrategy.KIND_LONG_ONLY,
             PortfolioStrategy.KIND_CONCENTRATED_LONG,
@@ -1314,6 +1320,7 @@ def daily_long_short_cycle(
                 etfs=etfs_payload,
                 as_of_date=as_of,
                 top_k=int(strategy.max_etfs_held) + 4,
+                provider=screener_provider,
                 benchmark="SPY",
                 regime_vector=regime_vec,
                 weights=strategy.screener_weights or None,
@@ -1341,6 +1348,7 @@ def daily_long_short_cycle(
                 etfs=etfs_payload,
                 as_of_date=as_of,
                 top_k=int(strategy.max_etfs_held) + 4,
+                provider=screener_provider,
                 benchmark="SPY",
                 regime_vector=regime_vec,
                 weights=strategy.screener_weights or None,
@@ -1355,6 +1363,7 @@ def daily_long_short_cycle(
                     else strategy.top_k_longs
                 ),
                 top_k_shorts=0 if is_long_only_flavor else strategy.top_k_shorts,
+                provider=screener_provider,
                 weights=strategy.screener_weights or None,
                 long_only=is_long_only_flavor,
             )

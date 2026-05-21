@@ -501,16 +501,15 @@ def test_sector_features_include_markov_score(monkeypatch):
         current_state="bull", bull_minus_bear_1d=0.45,
     )
 
-    # Patch the FMP provider used by compute_sector_features so the function
-    # doesn't try real HTTP. We just need it to fall back to synthetic bars.
+    # Stub the FMP provider injected into compute_sector_features so we don't
+    # do real HTTP and the function falls back to synthetic bars.
     class _StubFmp:
         def get_daily_bars(self, *args, **kwargs):
             return []
 
-    monkeypatch.setattr(sf, "FmpProvider", lambda: _StubFmp())
-
     feat = sf.compute_sector_features(
         "XLK", "Technology", "tech", {}, as_of,
+        provider=_StubFmp(),
         benchmark_returns={"1m": 0.0, "3m": 0.0, "6m": 0.0},
     )
     assert feat.markov_regime_score == pytest.approx(0.45, abs=1e-6)

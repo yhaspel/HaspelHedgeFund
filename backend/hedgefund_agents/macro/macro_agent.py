@@ -17,7 +17,9 @@ from ..base import AgentState
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import MacroOutput
-from ..registry import DEFAULT_MODELS, get_llm, get_macro_provider
+from apps.data.providers.factory import get_fred_provider
+
+from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AgentSpec, register
 
 MACRO_SERIES = [
@@ -131,7 +133,11 @@ def compute_snapshot(
     if cached:
         return cached
 
-    provider = provider or get_macro_provider()
+    if provider is None:
+        user_id = (state or {}).get("user_id") if state else None
+        # FRED is public-data — force_platform=True keeps the prewarm path
+        # working in prod without weakening the gate for paid providers.
+        provider = get_fred_provider(user=user_id, force_platform=True)
     obs = _fetch_observations(provider, as_of)
     regime = classify_regime(obs)
     series_used = {

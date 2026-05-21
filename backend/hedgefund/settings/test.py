@@ -21,3 +21,8 @@ ANTHROPIC_API_KEY = "test-anthropic-key"
 EDGAR_USER_AGENT = "AIHedgeFund Tests tests@example.com"
 FRED_API_KEY = "test-fred-key"
 TIINGO_API_KEY = "test-tiingo-key"
+
+# P2n: tests use the env-var fallback path by default so existing cassettes
+# (which expect FmpProvider() to work without a per-user key) keep passing.
+# Tests that exercise the prod-deny path flip this to False with override_settings.
+ALLOW_PLATFORM_DATA_KEYS = True

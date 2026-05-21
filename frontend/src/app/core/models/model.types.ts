@@ -46,6 +46,9 @@ export interface ProviderKeyStatus {
   openrouter: 'set' | 'unset';
   openai: 'set' | 'unset';
   ollama_host: string;
+  fmp: 'set' | 'unset';
+  tiingo: 'set' | 'unset';
+  fred: 'set' | 'unset';
 }
 
 export const PRESET_NAMES = ['dev', 'research', 'quality', 'frugal', 'hybrid'] as const;

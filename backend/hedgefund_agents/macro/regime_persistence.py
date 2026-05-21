@@ -14,9 +14,11 @@ This module is the integration layer between the deterministic fitter in
 * ``compute_markov_consensus`` — vote-aggregation across the
   always-modelled universe for ``MacroSnapshot.markov_consensus``.
 
-The fit path uses the registered data provider (``get_data_provider``) so
-backtest replay providers stay honest. Callers must pass an ``as_of_date``
-- there's no implicit "today" magic.
+The fit path uses the factory-supplied FMP provider so backtest replay
+providers stay honest. Callers must pass an ``as_of_date`` - there's no
+implicit "today" magic. The prewarm Celery task passes ``force_platform=True``
+because it fits the always-modelled universe ahead of any user-triggered
+access (see data-licensing.md trade-off in P2n risk #3).
 """
 from __future__ import annotations
 
@@ -71,9 +73,13 @@ def _fetch_bars(
     to weekends/holidays. Returns the raw Bar dataclasses unchanged.
     """
     if data_provider is None:
-        from hedgefund_agents.registry import get_data_provider
+        from apps.data.providers.factory import get_fmp_provider
 
-        data_provider = get_data_provider()
+        # No user context inside the regime fitter — callers (prewarm task,
+        # portfolio cycles) own the user-keyed provider and inject it.
+        # Default falls back to a platform-keyed provider when policy allows
+        # (dev/test, or prod via force_platform from prewarm).
+        data_provider = get_fmp_provider(force_platform=True)
     days_needed = int((lookback_observations + window_days) * 1.6) + 30
     start = as_of_date - dt.timedelta(days=days_needed)
     end = as_of_date - dt.timedelta(days=1)

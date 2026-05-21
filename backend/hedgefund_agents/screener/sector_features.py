@@ -141,11 +141,10 @@ def compute_sector_features(
     affinities: dict,
     as_of: date,
     *,
+    provider: FmpProvider,
     benchmark_returns: dict[str, float] | None = None,
     regime_vector: dict[str, float] | None = None,
-    provider: FmpProvider | None = None,
 ) -> SectorFeatures:
-    provider = provider or FmpProvider()
     feat = SectorFeatures(ticker=ticker, sector=sector, theme=theme)
     closes, real = _etf_momentum(provider, ticker, as_of)
     if real:
@@ -222,11 +221,11 @@ def run_sector_screener(
     etfs: list[dict],   # [{ticker, sector, theme, affinities}, ...]
     as_of_date: date,
     top_k: int,
+    provider: FmpProvider,
     benchmark: str = "SPY",
     regime_vector: dict[str, float] | None = None,
     weights: dict[str, float] | None = None,
 ) -> dict:
-    provider = FmpProvider()
     bench = benchmark_returns(provider, benchmark, as_of_date)
     feats: list[SectorFeatures] = []
     for e in etfs:

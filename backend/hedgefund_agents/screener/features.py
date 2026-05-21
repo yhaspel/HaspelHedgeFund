@@ -79,14 +79,17 @@ def _synthetic_fallback(ticker: str, as_of: date) -> ScreenerFeatures:
 
 
 def compute_features(
-    ticker: str, sector: str, as_of: date, provider: FmpProvider | None = None
+    ticker: str, sector: str, as_of: date, *, provider: FmpProvider
 ) -> ScreenerFeatures:
     """Try the FMP cache; on anything missing/failing, fall back to a
     deterministic synthetic feature so the screener keeps producing a
     full ranking. The result is always reproducible for a given (ticker,
     as_of) pair, which is what the idempotency acceptance criterion needs.
+
+    P2n: ``provider`` is now required — callers must obtain one from
+    ``apps.data.providers.factory.get_fmp_provider(user=...)`` so the BYOK
+    gate covers every read path.
     """
-    provider = provider or FmpProvider()
     feats = ScreenerFeatures(ticker=ticker, sector=sector)
     closes: list[float] = []
     try:

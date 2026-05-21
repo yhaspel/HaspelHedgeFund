@@ -3,6 +3,14 @@
 Schedule these via Celery beat (or trigger manually) so the live dashboard
 always has today's MacroSnapshot + regime snapshots ready without making a
 user wait.
+
+P2n BYOK note: these tasks have no per-user context. They rely on the
+platform-keyed providers via the factory's ``force_platform=True`` path
+(applied implicitly by ``_fetch_bars`` and ``compute_snapshot`` when no
+provider is injected). FRED is always-allowed (public data); FMP runs on
+the platform key because the always-modelled regime universe warms a shared
+cache. Trade-off documented in phase-02n-byok-data-providers.md risk #3 —
+revisit before P4a multi-tenant.
 """
 from __future__ import annotations
 

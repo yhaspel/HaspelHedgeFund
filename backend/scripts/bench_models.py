@@ -42,7 +42,7 @@ from apps.data.models import DailyBar  # noqa: E402
 from hedgefund_agents.graphs.council import ANALYTICAL_NODES, build_council_graph  # noqa: E402
 from hedgefund_agents.models import LLMCall  # noqa: E402
 from hedgefund_agents.personas import ALL_PERSONAS  # noqa: E402
-from hedgefund_agents.registry import get_data_provider, get_filings_provider  # noqa: E402
+from apps.data.providers.factory import get_edgar_provider, get_fmp_provider  # noqa: E402
 
 UNIVERSE = ["AAPL", "MSFT", "JPM"]
 N_DAYS = 5
@@ -93,8 +93,8 @@ def action_bucket(persona_out: dict) -> str:
 def run_one(provider: str, model: str, days: list[dt.date]) -> dict:
     print(f"\n=== {provider}:{model} ===", flush=True)
     graph = build_council_graph(personas=list(ALL_PERSONAS))
-    dp = get_data_provider()
-    fp = get_filings_provider()
+    dp = get_fmp_provider(force_platform=True)
+    fp = get_edgar_provider()
     overrides = force_overrides(provider, model)
 
     t0_id = LLMCall.objects.order_by("-id").values_list("id", flat=True).first() or 0

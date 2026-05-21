@@ -16,6 +16,7 @@ from apps.portfolios.rebalance import (
     RebalanceConfig,
     compute_orders,
 )
+from apps.data.providers.factory import get_fmp_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 
 
@@ -132,17 +133,19 @@ def test_screener_universe_cost_guardrail():
     members = [(f"T{i}", "X") for i in range(2001)]
     with pytest.raises(ScreenerAbort):
         run_screener(members=members, as_of_date=date(2024, 1, 1),
-                     top_k_longs=10, top_k_shorts=5)
+                     top_k_longs=10, top_k_shorts=5,
+                     provider=get_fmp_provider(force_platform=True))
 
 
 def test_screener_idempotent_synthetic():
     # The provider has nothing for these tickers, so the synthetic fallback
     # kicks in and the ranking is byte-stable for a given as_of_date.
     members = [(f"FAKE{i}", "X") for i in range(50)]
+    provider = get_fmp_provider(force_platform=True)
     a = run_screener(members=members, as_of_date=date(2024, 1, 2),
-                     top_k_longs=10, top_k_shorts=5)
+                     top_k_longs=10, top_k_shorts=5, provider=provider)
     b = run_screener(members=members, as_of_date=date(2024, 1, 2),
-                     top_k_longs=10, top_k_shorts=5)
+                     top_k_longs=10, top_k_shorts=5, provider=provider)
     assert [c["ticker"] for c in a["long_candidates"]] == [
         c["ticker"] for c in b["long_candidates"]
     ]

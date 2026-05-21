@@ -215,7 +215,7 @@ def prime_agent_cache(
         build_council_graph,
     )
     from hedgefund_agents.personas import ALL_PERSONAS
-    from hedgefund_agents.registry import get_data_provider, get_filings_provider
+    from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
     from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
     ensure_versions_synced()
@@ -228,8 +228,8 @@ def prime_agent_cache(
     bt.save(update_fields=["agent_versions"])
 
     graph = build_council_graph(personas=selected_personas)
-    data_provider = get_data_provider()
-    filings_provider = get_filings_provider()
+    data_provider = get_fmp_provider(user=bt.user)
+    filings_provider = get_edgar_provider()
 
     universe = list(bt.universe)
     days = trading_days(start, end, universe)
