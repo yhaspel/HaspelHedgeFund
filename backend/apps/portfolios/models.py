@@ -402,6 +402,9 @@ class PairZHistory(models.Model):
         unique_together = [("pair", "as_of_date")]
         indexes = [models.Index(fields=["pair", "as_of_date"])]
 
+    def __str__(self) -> str:
+        return f"z {self.pair_id}@{self.as_of_date} z={self.z:.2f}"
+
 
 class Pair(models.Model):
     """A candidate / open / closed pairs-trading pair (P2k)."""

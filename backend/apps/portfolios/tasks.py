@@ -45,13 +45,6 @@ from .construction import (
     construct_risk_parity,
     construct_sector_rotation,
 )
-from .vol import compute_vols_for
-from .pairs import (
-    _ols_alpha_beta,
-    decide_open_pair_action,
-    gather_log_prices,
-    screen_pairs,
-)
 from .models import (
     Pair,
     PairZHistory,
@@ -62,7 +55,14 @@ from .models import (
     ScreenerRanking,
     UniverseMembership,
 )
+from .pairs import (
+    _ols_alpha_beta,
+    decide_open_pair_action,
+    gather_log_prices,
+    screen_pairs,
+)
 from .rebalance import CurrentPosition, RebalanceConfig, compute_orders
+from .vol import compute_vols_for
 
 log = logging.getLogger(__name__)
 
@@ -280,8 +280,9 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     cycle_outcome = "target_created"
     per_position_thesis: dict[str, dict] = {}
     if strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO:
-        from .models import MacroETF, MacroRegimeSnapshot
         from apps.data.models import MacroSnapshot
+
+        from .models import MacroETF, MacroRegimeSnapshot
         etf_rows = {e.ticker: e for e in MacroETF.objects.filter(is_active=True)}
         asset_class_of = {t: e.asset_class for t, e in etf_rows.items()}
         inverse_of = {t: e.inverse_of for t, e in etf_rows.items() if e.inverse_of}
@@ -317,12 +318,18 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         MacroRegimeSnapshot.objects.update_or_create(
             strategy=strategy, as_of_date=as_of,
             defaults={
-                "growth_score": regime_vec.get("early_cycle", 0.0) + regime_vec.get("mid_cycle", 0.0)
-                - regime_vec.get("recession", 0.0),
+                "growth_score": (
+                    regime_vec.get("early_cycle", 0.0)
+                    + regime_vec.get("mid_cycle", 0.0)
+                    - regime_vec.get("recession", 0.0)
+                ),
                 "inflation_score": regime_vec.get("sticky_inflation", 0.0),
                 "policy_stance": (snap.policy_stance if snap else "neutral"),
                 "yield_curve_state": (snap.yield_curve_state if snap else "flat"),
-                "risk_on_score": regime_vec.get("early_cycle", 0.0) - regime_vec.get("recession", 0.0),
+                "risk_on_score": (
+                    regime_vec.get("early_cycle", 0.0)
+                    - regime_vec.get("recession", 0.0)
+                ),
                 "regime_vector": regime_vec,
                 "source_macro_snapshot_id": (snap.id if snap else None),
                 "raw": {
@@ -734,7 +741,8 @@ def _run_pairs_cycle(
     available_slots = max(0, int(strategy.pair_max_held) - len(held_pairs))
     # Take a wider top-K when the council is on so we can survive skips.
     council_on = bool(getattr(strategy, "enable_pair_council", False))
-    top_pool = candidates[: max(available_slots * 3, available_slots) if council_on else available_slots]
+    pool_size = max(available_slots * 3, available_slots) if council_on else available_slots
+    top_pool = candidates[:pool_size]
 
     # 3) Optional council: vet each candidate; drop skips + low-confidence enters.
     council_log: list[dict] = []

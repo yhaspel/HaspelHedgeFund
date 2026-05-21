@@ -335,7 +335,10 @@ def seed_risk_parity_universe(sender=None, **kwargs):
     universe, _ = Universe.objects.get_or_create(
         name="risk_parity_sleeves",
         defaults={
-            "description": "Curated multi-asset sleeves (sector ETFs + bond proxy + gold) for risk-parity strategies.",
+            "description": (
+                "Curated multi-asset sleeves (sector ETFs + bond proxy + gold) "
+                "for risk-parity strategies."
+            ),
             "source": "manual",
             "is_active": True,
         },

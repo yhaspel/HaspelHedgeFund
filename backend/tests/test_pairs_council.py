@@ -22,7 +22,6 @@ from hedgefund_agents.pairs_council import (
 )
 from tests.fixtures.trap_pairs import FAIR_PAIRS, TRAP_PAIRS
 
-
 # ---------- Aggregator unit tests ---------------------------------------
 
 def test_aggregator_skip_when_majority_skip_votes():

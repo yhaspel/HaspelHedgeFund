@@ -197,7 +197,8 @@ def test_borrow_unlocatable_short_leg_drops_entire_pair(monkeypatch, pairs_strat
     )
 
     # Force the screener to return a single candidate with GME as leg_b.
-    from apps.portfolios import tasks, pairs as pairs_mod
+    from apps.portfolios import pairs as pairs_mod
+    from apps.portfolios import tasks
     fake_candidate = pairs_mod.PairCandidate(
         leg_a="A", leg_b="GME", sector="X",
         hedge_ratio=1.0, spread_mean=0.0, spread_std=0.1,
@@ -251,7 +252,7 @@ def test_z_history_accumulates_across_cycles(monkeypatch, pairs_strategy):
     )
 
     members = tasks_mod._active_members(strategy, date(2024, 12, 2))
-    res1 = tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 2), members)
+    tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 2), members)
     res2 = tasks_mod._run_pairs_cycle(strategy, date(2024, 12, 3), members)
 
     history = PairZHistory.objects.filter(pair=pair).order_by("as_of_date")
@@ -345,8 +346,7 @@ def test_atomic_close_emits_paired_sequence_zero_orders(monkeypatch, pairs_strat
     from apps.portfolios import tasks as tasks_mod
     monkeypatch.setattr(tasks_mod, "get_data_provider", lambda: _FakeDataProvider())
 
-    from apps.portfolios.tasks import _run_pairs_cycle
-    from apps.portfolios.tasks import _active_members
+    from apps.portfolios.tasks import _active_members, _run_pairs_cycle
     members = _active_members(strategy, date(2024, 12, 2))
     res = _run_pairs_cycle(strategy, date(2024, 12, 2), members)
 
