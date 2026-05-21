@@ -256,6 +256,124 @@ import { CycleDetail } from '../../core/models/strategy.model';
                 }
               </div>
 
+              @if (store.currentStrategy()?.kind === 'pairs') {
+                <div>
+                  <div class="eyebrow" style="margin-bottom:6px">
+                    Open pairs ({{ openPairs().length }})
+                    @if (councilEnabled()) {
+                      <span style="font-size:11.5px;color:var(--text-3);margin-left:8px">· AI council ON</span>
+                    }
+                  </div>
+                  @if (openPairs().length === 0) {
+                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No open pairs.</p>
+                  } @else {
+                    <table class="tbl">
+                      <thead><tr>
+                        <th>Long</th><th>Short</th><th>Sector</th>
+                        <th class="right">Hedge β</th>
+                        <th class="right">Entry gap (z)</th>
+                        <th class="right">Co-move</th>
+                        <th class="right">Fit (p)</th>
+                        @if (councilEnabled()) {
+                          <th>Council</th><th class="right">Conf.</th>
+                        }
+                      </tr></thead>
+                      <tbody>
+                        @for (p of openPairs(); track $index) {
+                          <tr>
+                            <td class="mono" style="color:var(--acc-long-fg)">{{ p.leg_a }}</td>
+                            <td class="mono" style="color:var(--acc-short-fg)">{{ p.leg_b }}</td>
+                            <td style="font-size:11.5px;color:var(--text-2)">{{ p.sector || '—' }}</td>
+                            <td class="num">{{ p.hedge_ratio | number: '1.2-3' }}</td>
+                            <td class="num">{{ p.entry_z | number: '1.2-2' }}</td>
+                            <td class="num">{{ p.correlation | number: '1.2-2' }}</td>
+                            <td class="num">{{ p.p_value | number: '1.3-3' }}</td>
+                            @if (councilEnabled()) {
+                              <td class="mono"
+                                [style.color]="p.council_action === 'enter' ? 'var(--acc-long-fg)' : 'var(--text-3)'">
+                                {{ p.council_action || '—' }}
+                              </td>
+                              <td class="num">{{ p.council_confidence ?? '—' }}</td>
+                            }
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                    @if (councilEnabled()) {
+                      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+                        @for (p of openPairs(); track $index) {
+                          @if (p.council_thesis) {
+                            <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface-1)">
+                              <div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--text-3)">
+                                <span class="mono" style="color:var(--text);font-weight:600">{{ p.leg_a }} / {{ p.leg_b }}</span>
+                                <span>· council {{ p.council_action }} @ {{ p.council_confidence }}</span>
+                              </div>
+                              <p style="font-size:12.5px;color:var(--text-2);margin:4px 0 0;white-space:pre-wrap;word-break:break-word">{{ p.council_thesis }}</p>
+                            </div>
+                          }
+                        }
+                      </div>
+                    }
+                  }
+                </div>
+
+                @if (closedPairs().length > 0) {
+                  <div>
+                    <div class="eyebrow" style="margin-bottom:6px">Pairs closed this cycle ({{ closedPairs().length }})</div>
+                    <table class="tbl">
+                      <thead><tr>
+                        <th>Long leg</th><th>Short leg</th>
+                        <th>Reason</th>
+                        <th class="right">Exit gap (z)</th>
+                      </tr></thead>
+                      <tbody>
+                        @for (cp of closedPairs(); track $index) {
+                          <tr>
+                            <td class="mono">{{ cp.leg_a || '—' }}</td>
+                            <td class="mono">{{ cp.leg_b || '—' }}</td>
+                            <td style="font-size:11.5px"
+                              [style.color]="cp.reason === 'reverted' ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                              {{ cp.reason === 'reverted' ? 'mean-reverted (profit-take)'
+                                 : cp.reason === 'stopped' ? 'bail-out (gap kept widening)'
+                                 : cp.reason }}
+                            </td>
+                            <td class="num">{{ cp.z ?? '—' }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                }
+
+                @if (councilSkipped().length > 0) {
+                  <details>
+                    <summary class="eyebrow" style="cursor:pointer">
+                      Council skipped ({{ councilSkipped().length }})
+                    </summary>
+                    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                      @for (sk of councilSkipped(); track $index) {
+                        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-1)">
+                          <div style="font-size:11.5px;color:var(--text-3)">
+                            <span class="mono" style="color:var(--text)">{{ sk.leg_a }} / {{ sk.leg_b }}</span>
+                            · {{ sk.enter_count }} enter / {{ sk.skip_count }} skip · confidence {{ sk.confidence }}
+                          </div>
+                          <p style="font-size:12px;color:var(--text-2);margin:4px 0 0">{{ sk.thesis_excerpt }}</p>
+                        </div>
+                      }
+                    </div>
+                  </details>
+                }
+
+                @if (pairsDiag(); as d) {
+                  <p style="font-size:11.5px;color:var(--text-3);margin:0">
+                    Screener: evaluated {{ d.n_pairs_evaluated }} same-sector pairs ·
+                    {{ d.n_pairs_cointegrated }} statistically fit ·
+                    {{ d.n_pairs_above_entry_z }} above the open-trade trigger ·
+                    {{ d.n_new_pairs }} opened this cycle.
+                  </p>
+                }
+              }
+
               @if (store.currentStrategy()?.kind === 'concentrated_long' && c.cycle_outcome === 'held_existing_book') {
                 <div class="pill warn" style="height:auto;padding:8px 12px">
                   <span class="dot"></span>
@@ -410,6 +528,72 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       thesis: v.thesis,
       weight: (Number(c.target_weights[ticker] || 0)) * 100,
     })).sort((a, b) => b.weight - a.weight);
+  }
+  openPairs(): {
+    leg_a: string; leg_b: string; sector: string;
+    hedge_ratio: number; entry_z: number;
+    correlation: number; p_value: number;
+    council_action: string; council_confidence: number | null;
+    council_thesis: string;
+  }[] {
+    const c = this.cycle(); if (!c) return [];
+    const arr = (c.beta_diagnostics as Record<string, unknown> | undefined)?.['open_pairs'];
+    if (!Array.isArray(arr)) return [];
+    return (arr as Record<string, unknown>[]).map((p) => ({
+      leg_a: String(p['leg_a'] ?? ''),
+      leg_b: String(p['leg_b'] ?? ''),
+      sector: String(p['sector'] ?? ''),
+      hedge_ratio: Number(p['hedge_ratio'] ?? 0),
+      entry_z: Number(p['entry_z'] ?? 0),
+      correlation: Number(p['correlation'] ?? 0),
+      p_value: Number(p['p_value'] ?? 0),
+      council_action: String(p['council_action'] ?? ''),
+      council_confidence: p['council_confidence'] == null ? null : Number(p['council_confidence']),
+      council_thesis: String(p['council_thesis'] ?? ''),
+    }));
+  }
+  closedPairs(): { leg_a: string; leg_b: string; reason: string; z: number | null }[] {
+    const c = this.cycle(); if (!c) return [];
+    const arr = (c.beta_diagnostics as Record<string, unknown> | undefined)?.['closes'];
+    if (!Array.isArray(arr)) return [];
+    return (arr as Record<string, unknown>[]).map((cl) => ({
+      leg_a: String(cl['leg_a'] ?? ''),
+      leg_b: String(cl['leg_b'] ?? ''),
+      reason: String(cl['reason'] ?? ''),
+      z: cl['z'] == null ? null : Number(cl['z']),
+    }));
+  }
+  councilEnabled(): boolean {
+    const c = this.cycle(); if (!c) return false;
+    return Boolean((c.beta_diagnostics as Record<string, unknown> | undefined)?.['council_enabled']);
+  }
+  councilSkipped(): { leg_a: string; leg_b: string; confidence: number;
+                      enter_count: number; skip_count: number; thesis_excerpt: string }[] {
+    const c = this.cycle(); if (!c) return [];
+    const arr = (c.beta_diagnostics as Record<string, unknown> | undefined)?.['council_log'];
+    if (!Array.isArray(arr)) return [];
+    return (arr as Record<string, unknown>[])
+      .filter((r) => r['action'] !== 'enter')
+      .map((r) => ({
+        leg_a: String(r['leg_a'] ?? ''),
+        leg_b: String(r['leg_b'] ?? ''),
+        confidence: Number(r['confidence'] ?? 0),
+        enter_count: Number(r['enter_count'] ?? 0),
+        skip_count: Number(r['skip_count'] ?? 0),
+        thesis_excerpt: String(r['thesis_excerpt'] ?? ''),
+      }));
+  }
+  pairsDiag(): { n_pairs_evaluated: number; n_pairs_cointegrated: number;
+                  n_pairs_above_entry_z: number; n_new_pairs: number } | null {
+    const c = this.cycle(); if (!c) return null;
+    const d = c.beta_diagnostics as Record<string, unknown> | undefined;
+    if (!d) return null;
+    return {
+      n_pairs_evaluated: Number(d['n_pairs_evaluated'] ?? 0),
+      n_pairs_cointegrated: Number(d['n_pairs_cointegrated'] ?? 0),
+      n_pairs_above_entry_z: Number(d['n_pairs_above_entry_z'] ?? 0),
+      n_new_pairs: Number(d['n_new_pairs'] ?? 0),
+    };
   }
   sectorRows() {
     const c = this.cycle(); if (!c) return [];

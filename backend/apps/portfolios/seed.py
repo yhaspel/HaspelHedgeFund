@@ -316,6 +316,46 @@ def seed_macro_etf_universe(sender=None, **kwargs):
         UniverseMembership.objects.bulk_create(new)
 
 
+# Risk-parity sleeve universe (P2j). Mix of equity-sector ETFs + bond + gold
+# so the inverse-vol weighter has assets with materially different volatility.
+RISK_PARITY_SLEEVES: list[tuple[str, str]] = [
+    ("XLK", "Technology"),
+    ("XLF", "Financials"),
+    ("XLE", "Energy"),
+    ("XLV", "Health Care"),
+    ("XLY", "Consumer Discretionary"),
+    ("XLP", "Consumer Staples"),
+    ("TLT", "Rates"),
+    ("GLD", "Commodity"),
+]
+
+
+def seed_risk_parity_universe(sender=None, **kwargs):
+    from .models import Universe, UniverseMembership
+    universe, _ = Universe.objects.get_or_create(
+        name="risk_parity_sleeves",
+        defaults={
+            "description": "Curated multi-asset sleeves (sector ETFs + bond proxy + gold) for risk-parity strategies.",
+            "source": "manual",
+            "is_active": True,
+        },
+    )
+    effective = date(2018, 1, 1)
+    existing = set(
+        UniverseMembership.objects.filter(universe=universe).values_list("ticker", flat=True)
+    )
+    new = []
+    for ticker, group in RISK_PARITY_SLEEVES:
+        if ticker in existing:
+            continue
+        new.append(UniverseMembership(
+            universe=universe, ticker=ticker, sector=group,
+            effective_from=effective, effective_to=None,
+        ))
+    if new:
+        UniverseMembership.objects.bulk_create(new)
+
+
 def seed_default_universe(sender=None, **kwargs):
     from .models import Universe, UniverseMembership
     universe, _ = Universe.objects.get_or_create(
@@ -343,3 +383,4 @@ def seed_default_universe(sender=None, **kwargs):
         UniverseMembership.objects.bulk_create(new)
     seed_sector_etf_universe(sender=sender)
     seed_macro_etf_universe(sender=sender)
+    seed_risk_parity_universe(sender=sender)

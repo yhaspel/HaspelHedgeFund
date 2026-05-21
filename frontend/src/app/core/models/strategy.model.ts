@@ -31,7 +31,9 @@ export type StrategyKind =
   | 'market_neutral'
   | 'concentrated_long'
   | 'sector_rotation'
-  | 'global_macro';
+  | 'global_macro'
+  | 'risk_parity'
+  | 'pairs';
 
 export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'long_only', label: 'Long-only' },
@@ -41,23 +43,29 @@ export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'concentrated_long', label: 'Concentrated long-only' },
   { value: 'sector_rotation', label: 'Sector / thematic ETF rotation' },
   { value: 'global_macro', label: 'Global macro (ETF expression)' },
+  { value: 'risk_parity', label: 'Risk-parity / multi-asset lite' },
+  { value: 'pairs', label: 'Pairs trading (cointegration)' },
 ];
 
 export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
   long_only:
-    'Buys only. The screener surfaces long candidates and the portfolio holds positive positions; no shorting. Target net ≈ target gross. Use when you want directional upside without the borrow costs, locate risk, or short-side drawdown tail.',
+    'Only buys stocks — never sells short. The portfolio is always pointed up: when the picks rise, the book makes money; when they fall, it loses. Simplest, cheapest setup; no borrowing fees and no short-side surprises, but no built-in cushion when the whole market drops.',
   short_only:
-    'Shorts only. The screener surfaces short candidates and the portfolio holds negative positions; no longs. Target net is negative (≈ −target gross). Use when you want a dedicated bearish book — pays borrow fees and is gated by locate availability.',
+    'Only sells stocks short — never buys. Short-selling means borrowing a stock, selling it now, and hoping to buy it back cheaper later. The book makes money when its picks fall and loses when they rise. Pays a borrow fee on every short and can be blocked if the broker has no shares to lend.',
   long_short:
-    'Both sides, directional net. The portfolio holds both long and short positions and the net (longs − shorts) is whatever you set — long-biased, short-biased, or anywhere between. Classic hedge-fund construction; gross > net, so you get some idiosyncratic exposure with reduced market beta.',
+    'Buys some stocks and short-sells others at the same time. The "long" side bets on winners, the "short" side bets against losers. Because winners and losers tend to move with the market, the two sides partially cancel — the book makes money mostly from the gap between them rather than from the market direction itself. The classic hedge-fund recipe.',
   market_neutral:
-    'Both sides, dollar- AND beta-neutral. Longs and shorts are sized so that net dollars ≈ 0 and the dollar-weighted portfolio beta vs the benchmark (default SPY) ≈ 0. Returns come from the long–short spread, not from market direction. Uses a trailing 252-day OLS beta per name and a one-knob rescale to cancel the bucket betas after the standard caps.',
+    'A long/short book deliberately balanced so the dollars on each side are equal and the overall market sensitivity is close to zero. If the whole market jumps 5%, the book is designed to barely move — gains and losses come purely from whether the picked longs beat the picked shorts. Returns are smaller but much steadier; a real cushion in a crash.',
   concentrated_long:
-    'Activist-style concentrated long-only book: 5–15 high-conviction names, no shorts, larger per-position sizes (typically 5–25% each). A candidate must clear a higher aggregate-confidence bar than a diversified book; if fewer names clear the bar than min_positions, no new target is emitted and the existing book is held (cash beats a 4th-best idea). Sector caps are loose by default because concentration is the point.',
+    'A small, high-conviction long-only book: typically 5–15 stocks total, each a meaningful 5–25% of the portfolio. If fewer ideas pass the high-confidence bar than the minimum you set, the strategy refuses to add a weak pick and just holds cash. Style of an activist or "best ideas" manager — fewer bets, bigger bets, more idiosyncratic results.',
   global_macro:
-    'Top-down macro allocation across ~14 cross-asset ETFs (equity SPY/QQQ, rates TLT/IEF/SHY, inflation TIP/GLD/DBC, USD UUP/UDN, EM EEM) plus their inverse counterparts (SH, PSQ, TBT) for bearish expressions — no borrow needed. Druckenmiller-style: the Macro agent\'s regime classification (P2b) drives candidate selection deterministically; the council then ratifies. Asset-class caps replace sector caps; conflicting long/inverse pairs on the same underlying (e.g. SPY + SH) are netted to the higher-confidence side. The universe picker should be swapped to the `macro_etfs` universe.',
+    'A top-down view of the world expressed through broad-market ETFs instead of individual stocks. The macro agent classifies the current regime (growth/inflation/policy stance, etc.) and the strategy buys ETFs that fit that regime — e.g. long-duration bonds when growth slows, gold when inflation sticks, broad equity when expansion is on. To bet against a market it buys an "inverse" ETF rather than short-selling, so it never needs to borrow shares.',
+  risk_parity:
+    'A multi-asset basket (stocks + bonds + gold) where each sleeve is sized so that risk is roughly equal across sleeves — not dollars. Calmer assets like bonds get a bigger dollar slice, more volatile assets like tech a smaller one, so no single sleeve dominates the book\'s ups and downs. Fully mechanical and very cheap to run; rebalances only when allocations have drifted enough to be worth the trading cost.',
+  pairs:
+    'Picks pairs of stocks in the same industry that historically move together — like Coke and Pepsi, or Visa and Mastercard — and trades the gap between them. When one stock rallies far ahead of its partner and history says the gap usually closes again, the strategy buys the laggard and short-sells the leader, betting the two will re-converge. Because both legs are in the same sector, broad market moves cancel out: profit or loss comes almost entirely from the gap narrowing (good) or widening further (bad). Pre-set rules close each pair when the gap has reverted to normal, or force-close it if it keeps widening past a "this isn\'t reverting — get out" threshold. An optional AI-council sanity-check vets each candidate to filter out cases where the divergence has a real reason (earnings miss, lawsuit) and isn\'t just noise.',
   sector_rotation:
-    'Top-down rotation across sector / thematic ETFs (SPDR sectors + themes like SOXX, ARKK, GDX, KWEB). Council fan-out is per-sector not per-name; the screener ranks ETFs by relative momentum vs SPY, drawdown, and regime-fit (dot product of the P2b macro regime vector with each ETF\'s hand-curated affinities). Long-only by default. Overlapping ETFs (e.g. XLK + SOXX) are de-duped via a holdings-overlap penalty. The universe picker should be swapped to the `sector_etfs` universe; per_etf_cap and max_etfs_held replace single-name max_position_pct.',
+    'Buys a handful of sector / theme ETFs (e.g. tech, banks, energy, semiconductors, gold-miners, biotech) instead of individual stocks. Each cycle the strategy ranks ETFs by recent strength, drawdown, and how well they fit the current macro regime, then concentrates in the top few. Long-only by default; overlapping ETFs (e.g. broad tech + semiconductors) are de-duplicated so you don\'t accidentally double-bet the same theme.',
 };
 
 export interface Strategy {
@@ -97,6 +105,19 @@ export interface Strategy {
   asset_class_caps?: Record<string, number>;
   prefer_inverse_etf_over_short?: boolean;
   max_inverse_etf_hold_days?: number;
+  vol_window_days?: number;
+  rebalance_band_pct?: string;
+  enable_council_veto?: boolean;
+  pair_entry_z?: string;
+  pair_exit_z?: string;
+  pair_stop_z?: string;
+  pair_max_held?: number;
+  pair_notional_pct?: string;
+  pair_cointegration_p_max?: string;
+  pair_lookback_days?: number;
+  pair_correlation_min?: string;
+  enable_pair_council?: boolean;
+  pair_council_min_confidence?: string;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;

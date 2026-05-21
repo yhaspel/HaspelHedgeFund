@@ -37,7 +37,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
             <div class="field">
               <label class="lbl">
                 Strategy kind
-                <hf-info text="Long-only: longs only (no shorts). Short-only: shorts only (no longs). Long/Short: both sides, directional net. Market-neutral: both sides, net=0." />
+                <hf-info text="Pick the overall flavor of the strategy. The description right below this dropdown updates to explain the one you've picked in plain language." />
               </label>
               <select class="input sans" name="kind" [(ngModel)]="kind" (ngModelChange)="onKindChange($event)">
                 @for (k of kindOptions; track k.value) {
@@ -88,7 +88,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="g" type="number" step="0.05" min="0.5" max="3.0" [(ngModel)]="targetGross" />
             </div>
-            @if (kind !== 'market_neutral' && kind !== 'concentrated_long') {
+            @if (kind !== 'market_neutral' && kind !== 'concentrated_long' && kind !== 'pairs') {
               <div class="field">
                 <label class="lbl">
                   Target net
@@ -111,7 +111,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
               </label>
               <input class="input" name="ms" type="number" step="0.05" min="0.05" max="0.60" [(ngModel)]="maxSector" />
             </div>
-            @if (kind === 'sector_rotation' || kind === 'global_macro') {
+            @if (kind === 'sector_rotation' || kind === 'global_macro' || kind === 'risk_parity') {
               <div class="field">
                 <label class="lbl">
                   Max ETFs held
@@ -133,6 +133,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 </label>
                 <input class="input" name="pmn" type="number" step="0.01" min="0.01" max="0.20" [(ngModel)]="perEtfMin" />
               </div>
+              @if (kind !== 'risk_parity') {
               <div class="field">
                 <label class="lbl">
                   Council v2 (screener-led)
@@ -147,6 +148,104 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 </label>
                 <input class="input" name="bvt" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="bearishVetoThreshold" [disabled]="!useSectorCouncilV2" />
               </div>
+              }
+            }
+            @if (kind === 'risk_parity') {
+              <div class="field">
+                <label class="lbl">
+                  Vol lookback (days)
+                  <hf-info text="Trailing-window size used to estimate each sleeve's daily-return volatility. Default 60." />
+                </label>
+                <input class="input" name="vw" type="number" min="20" max="252" [(ngModel)]="volWindowDays" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Rebalance band (relative)
+                  <hf-info text="Sleeves are not re-traded unless any sleeve has drifted more than this fraction from its target. 0.05 = 5%. Keeps turnover low (vol drifts daily, weights drift daily; without a band you trade every day and die by costs)." />
+                </label>
+                <input class="input" name="rb" type="number" step="0.01" min="0.01" max="0.30" [(ngModel)]="rebalanceBand" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Council veto enabled
+                  <hf-info text="Off (default): pure deterministic inverse-vol — zero LLM cost, identical to a baseline 'just inverse-vol weight a sector basket' strategy. On: the trimmed council may vote to exclude a sleeve with a reason (sleeve's weight is redistributed across the rest)." />
+                </label>
+                <input class="check" name="ecv" type="checkbox" [(ngModel)]="enableCouncilVeto" />
+              </div>
+            }
+            @if (kind === 'pairs') {
+              <div class="field">
+                <label class="lbl">
+                  Open-trade trigger
+                  <hf-info text="How unusually wide the gap between the two stocks has to be before opening a trade — measured in 'how many normal-day-sized moves' the gap currently is. 2.0 means open when the gap is twice its typical size. Higher = wait for a bigger dislocation (fewer trades, but each one is more dramatic). Default 2.0." />
+                </label>
+                <input class="input" name="pez" type="number" step="0.1" min="0.5" max="5.0" [(ngModel)]="pairEntryZ" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Close-trade trigger
+                  <hf-info text="How close the gap has to be back to its normal size before the trade is closed and profit taken. 0.5 = close once the gap is half a normal-day-move from average. Lower = waits for fuller mean-reversion (bigger wins per trade but holds longer). Default 0.5." />
+                </label>
+                <input class="input" name="pxz" type="number" step="0.1" min="0.0" max="2.0" [(ngModel)]="pairExitZ" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Bail-out trigger
+                  <hf-info text="If the gap keeps widening instead of closing, this is the 'admit defeat' line. 4.0 means once the gap is 4× its normal size, the trade is force-closed at a loss — the assumption is the relationship has broken and waiting longer only hurts more. Default 4.0." />
+                </label>
+                <input class="input" name="psz" type="number" step="0.5" min="2.0" max="10.0" [(ngModel)]="pairStopZ" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Max simultaneous pairs
+                  <hf-info text="The most pairs the strategy will hold open at the same time. More pairs = more diversification but more trading. Default 8." />
+                </label>
+                <input class="input" name="pmh" type="number" min="1" max="30" [(ngModel)]="pairMaxHeld" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Capital per pair
+                  <hf-info text="How much of the portfolio each pair gets (split between its two legs). 0.05 = 5% of the account per pair, so 8 pairs ≈ 40% long + 40% short = 80% gross exposure. Default 0.05 (5%)." />
+                </label>
+                <input class="input" name="pnp" type="number" step="0.01" min="0.01" max="0.30" [(ngModel)]="pairNotionalPct" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Statistical-fit cutoff
+                  <hf-info text="A numerical sanity check: how confident the math has to be that this pair's gap actually mean-reverts (rather than drifting apart forever). Lower = stricter, fewer false positives. 0.05 = roughly 'less than 5% chance this is a spurious match.' Default 0.05." />
+                </label>
+                <input class="input" name="ppm" type="number" step="0.01" min="0.01" max="0.50" [(ngModel)]="pairCointegrationPMax" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  Minimum co-movement
+                  <hf-info text="How tightly the two stocks have to have moved together historically. 0.70 means 'their day-to-day returns are 70%+ correlated.' Higher = only the very tightest pairs qualify. Default 0.70." />
+                </label>
+                <input class="input" name="pcm" type="number" step="0.05" min="0.30" max="0.99" [(ngModel)]="pairCorrelationMin" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  History window (days)
+                  <hf-info text="How many trading days of past prices to look at when measuring how tightly the pair moves together and what the 'normal' gap is. 252 ≈ one year. More days = more stable estimates but slower to react to a changed relationship. Default 252." />
+                </label>
+                <input class="input" name="pld" type="number" min="60" max="504" [(ngModel)]="pairLookbackDays" />
+              </div>
+              <div class="field">
+                <label class="lbl">
+                  AI council sanity-check
+                  <hf-info text="Off (default): the strategy is fully mechanical, no LLM cost. On: before opening each pair, an AI panel reads the news and earnings on both companies and votes 'trade' (the gap is just noise) or 'skip' (one company has a real problem driving the gap — it won't close). Skipped candidates are dropped. Adds LLM cost per cycle but filters out trap trades." />
+                </label>
+                <input class="check" name="epc" type="checkbox" [(ngModel)]="enablePairCouncil" />
+              </div>
+              @if (enablePairCouncil) {
+                <div class="field">
+                  <label class="lbl">
+                    Council confidence floor
+                    <hf-info text="How sure the AI council has to be before a 'trade' verdict counts. 0.50 = simple majority by confidence. Higher = the council has to really agree before a pair is opened. Default 0.50." />
+                  </label>
+                  <input class="input" name="pcc" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="pairCouncilMinConfidence" />
+                </div>
+              }
             }
             @if (kind === 'concentrated_long') {
               <div class="field">
@@ -171,7 +270,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="minC" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="minAggregateConfidence" />
               </div>
             }
-            @if (kind !== 'short_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro') {
+            @if (kind !== 'short_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro' && kind !== 'risk_parity' && kind !== 'pairs') {
               <div class="field">
                 <label class="lbl">
                   Top K longs
@@ -180,7 +279,7 @@ import { InfoTooltipComponent } from '../shared/info-tooltip.component';
                 <input class="input" name="kl" type="number" min="1" max="50" [(ngModel)]="topLongs" />
               </div>
             }
-            @if (kind !== 'long_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro') {
+            @if (kind !== 'long_only' && kind !== 'concentrated_long' && kind !== 'sector_rotation' && kind !== 'global_macro' && kind !== 'risk_parity' && kind !== 'pairs') {
               <div class="field">
                 <label class="lbl">
                   Top K shorts
@@ -302,6 +401,19 @@ export class StrategiesNewPage implements OnInit {
   perEtfMin = 0.05;
   useSectorCouncilV2 = true;
   bearishVetoThreshold = 0.70;
+  volWindowDays = 60;
+  rebalanceBand = 0.05;
+  enableCouncilVeto = false;
+  pairEntryZ = 2.0;
+  pairExitZ = 0.5;
+  pairStopZ = 4.0;
+  pairMaxHeld = 8;
+  pairNotionalPct = 0.05;
+  pairCointegrationPMax = 0.05;
+  pairLookbackDays = 252;
+  pairCorrelationMin = 0.70;
+  enablePairCouncil = false;
+  pairCouncilMinConfidence = 0.50;
 
   // Persona picker. Recommended defaults per kind are applied in onKindChange
   // and on first render via the constructor below.
@@ -317,6 +429,8 @@ export class StrategiesNewPage implements OnInit {
     concentrated_long: this.ALL_PERSONAS,
     sector_rotation: ['druckenmiller', 'damodaran', 'burry'],
     global_macro: ['druckenmiller', 'damodaran', 'burry'],
+    risk_parity: ['buffett', 'druckenmiller', 'burry'],
+    pairs: this.ALL_PERSONAS,
   };
   selectedPersonas: string[] = [...this.ALL_PERSONAS];
 
@@ -368,6 +482,23 @@ export class StrategiesNewPage implements OnInit {
       this.perEtfMin = 0.05;
       const macroUni = this.store.universes().find((u) => u.name === 'macro_etfs');
       if (macroUni) this.universe = macroUni.id;
+    } else if (k === 'pairs') {
+      this.topLongs = 0;
+      this.topShorts = 0;
+      this.targetGross = 0.50;
+      this.targetNet = 0.0;
+      this.maxPosition = 0.05;
+      this.maxSector = 1.0;
+    } else if (k === 'risk_parity') {
+      this.topLongs = 0;
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.perEtfMax = 0.50;
+      this.perEtfMin = 0.02;
+      this.maxEtfsHeld = 12;
+      const rpUni = this.store.universes().find((u) => u.name === 'risk_parity_sleeves');
+      if (rpUni) this.universe = rpUni.id;
     }
     this.selectedPersonas = [...this.RECOMMENDED_PERSONAS[k]];
   }
@@ -437,6 +568,25 @@ export class StrategiesNewPage implements OnInit {
       payload['per_etf_max_pct'] = String(this.perEtfMax);
       payload['per_etf_min_pct'] = String(this.perEtfMin);
       payload['bearish_veto_threshold'] = String(this.bearishVetoThreshold);
+    }
+    if (this.kind === 'risk_parity') {
+      payload['per_etf_max_pct'] = String(this.perEtfMax);
+      payload['per_etf_min_pct'] = String(this.perEtfMin);
+      payload['vol_window_days'] = this.volWindowDays;
+      payload['rebalance_band_pct'] = String(this.rebalanceBand);
+      payload['enable_council_veto'] = this.enableCouncilVeto;
+    }
+    if (this.kind === 'pairs') {
+      payload['pair_entry_z'] = String(this.pairEntryZ);
+      payload['pair_exit_z'] = String(this.pairExitZ);
+      payload['pair_stop_z'] = String(this.pairStopZ);
+      payload['pair_max_held'] = this.pairMaxHeld;
+      payload['pair_notional_pct'] = String(this.pairNotionalPct);
+      payload['pair_cointegration_p_max'] = String(this.pairCointegrationPMax);
+      payload['pair_correlation_min'] = String(this.pairCorrelationMin);
+      payload['pair_lookback_days'] = this.pairLookbackDays;
+      payload['enable_pair_council'] = this.enablePairCouncil;
+      payload['pair_council_min_confidence'] = String(this.pairCouncilMinConfidence);
     }
     this.store.create(payload as any).subscribe({
       next: (s) => this.router.navigate(['/strategies', s.id]),

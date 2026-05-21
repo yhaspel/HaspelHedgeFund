@@ -69,6 +69,12 @@ class StrategySerializer(serializers.ModelSerializer):
             "use_sector_council_v2", "bearish_veto_threshold",
             "asset_class_caps", "prefer_inverse_etf_over_short",
             "max_inverse_etf_hold_days",
+            "vol_window_days", "rebalance_band_pct", "enable_council_veto",
+            "pair_entry_z", "pair_exit_z", "pair_stop_z",
+            "pair_max_held", "pair_notional_pct",
+            "pair_cointegration_p_max", "pair_lookback_days",
+            "pair_correlation_min",
+            "enable_pair_council", "pair_council_min_confidence",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")

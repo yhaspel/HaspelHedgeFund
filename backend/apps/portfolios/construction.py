@@ -587,6 +587,118 @@ def construct_global_macro(
 
 
 @dataclass
+class RiskParityResult:
+    target_weights: dict[str, float]
+    gross_pct: float
+    net_pct: float
+    sector_exposure: dict[str, float]
+    rejected: list[dict]
+    within_band: bool
+    max_drift: float
+    diagnostics: dict
+
+
+def construct_risk_parity(
+    sleeves: list[tuple[str, str]],   # [(ticker, sector_or_asset_class), ...]
+    vols: dict[str, float],
+    *,
+    target_gross_pct: float = 1.0,
+    per_sleeve_max_pct: float = 0.50,
+    per_sleeve_min_pct: float = 0.02,
+    excluded: dict[str, str] | None = None,
+    current_weights: dict[str, float] | None = None,
+    rebalance_band_pct: float = 0.05,
+) -> RiskParityResult:
+    """Inverse-volatility weighting (risk parity lite).
+
+    raw_w_i = 1 / σ_i over surviving sleeves; normalise to target_gross_pct;
+    apply per-sleeve max and min floors; compute drift vs current_weights to
+    decide whether trades are actually needed today.
+    """
+    excluded = excluded or {}
+    rejected: list[dict] = []
+    survivors: list[tuple[str, str]] = []
+    for ticker, group in sleeves:
+        if ticker in excluded:
+            rejected.append({"ticker": ticker, "reason": excluded[ticker]})
+            continue
+        sigma = vols.get(ticker, 0.0)
+        if not sigma or sigma <= 0:
+            rejected.append({"ticker": ticker, "reason": "vol_unavailable"})
+            continue
+        survivors.append((ticker, group))
+
+    if not survivors:
+        return RiskParityResult(
+            target_weights={}, gross_pct=0.0, net_pct=0.0,
+            sector_exposure={}, rejected=rejected,
+            within_band=False, max_drift=0.0, diagnostics={},
+        )
+
+    raw = {t: 1.0 / vols[t] for t, _g in survivors}
+    s = sum(raw.values())
+    weights = {t: (r / s) * target_gross_pct for t, r in raw.items()}
+
+    weights = _apply_per_name_cap(weights, per_sleeve_max_pct)
+
+    if per_sleeve_min_pct > 0 and weights:
+        below = {t: w for t, w in weights.items() if 0 < w < per_sleeve_min_pct}
+        if below:
+            extra = sum(per_sleeve_min_pct - w for w in below.values())
+            for t in below:
+                weights[t] = per_sleeve_min_pct
+            donors = {
+                t: w for t, w in weights.items()
+                if w > per_sleeve_min_pct and t not in below
+            }
+            donor_total = sum(donors.values())
+            if donor_total > extra:
+                for t in donors:
+                    share = (donors[t] / donor_total) * extra
+                    weights[t] = max(per_sleeve_min_pct, weights[t] - share)
+
+    sector_exposure: dict[str, float] = {}
+    group_of = {t: g for t, g in survivors}
+    for t, w in weights.items():
+        g = group_of.get(t, "")
+        sector_exposure[g] = sector_exposure.get(g, 0.0) + w
+
+    gross_pct = sum(abs(w) for w in weights.values())
+    net_pct = sum(weights.values())
+
+    # Drift / rebalance band check vs current weights.
+    cur = current_weights or {}
+    drifts = []
+    for t, w in weights.items():
+        if w == 0:
+            continue
+        c = float(cur.get(t, 0.0))
+        drifts.append(abs(c - w) / max(abs(w), 1e-9))
+    max_drift = max(drifts) if drifts else 1.0
+    cold_start = not cur
+    within_band = (not cold_start) and (max_drift <= rebalance_band_pct)
+
+    diagnostics = {
+        "vols": {t: round(vols[t], 6) for t, _g in survivors},
+        "annualised_vols": {t: round(vols[t] * (252 ** 0.5), 4) for t, _g in survivors},
+        "n_survivors": len(survivors),
+        "n_excluded": len(excluded),
+        "cold_start": cold_start,
+    }
+
+    return RiskParityResult(
+        target_weights=weights,
+        gross_pct=gross_pct,
+        net_pct=net_pct,
+        sector_exposure=sector_exposure,
+        rejected=rejected,
+        within_band=within_band,
+        max_drift=max_drift,
+        diagnostics=diagnostics,
+    )
+
+
+@dataclass
 class NeutralResult:
     target_weights: dict[str, float]
     gross_pct: float

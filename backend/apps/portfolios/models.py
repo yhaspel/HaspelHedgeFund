@@ -75,6 +75,8 @@ class PortfolioStrategy(models.Model):
     KIND_CONCENTRATED_LONG = "concentrated_long"
     KIND_SECTOR_ROTATION = "sector_rotation"
     KIND_GLOBAL_MACRO = "global_macro"
+    KIND_RISK_PARITY = "risk_parity"
+    KIND_PAIRS = "pairs"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
@@ -83,6 +85,8 @@ class PortfolioStrategy(models.Model):
         (KIND_CONCENTRATED_LONG, "Concentrated long-only"),
         (KIND_SECTOR_ROTATION, "Sector / thematic ETF rotation"),
         (KIND_GLOBAL_MACRO, "Global macro (ETF expression)"),
+        (KIND_RISK_PARITY, "Risk-parity / multi-asset lite"),
+        (KIND_PAIRS, "Pairs trading (cointegration)"),
     ]
 
     user = models.ForeignKey(
@@ -151,6 +155,33 @@ class PortfolioStrategy(models.Model):
     asset_class_caps = models.JSONField(default=dict, blank=True)
     prefer_inverse_etf_over_short = models.BooleanField(default=True)
     max_inverse_etf_hold_days = models.SmallIntegerField(default=14)
+
+    # Risk-parity (kind=risk_parity) parameters.
+    vol_window_days = models.SmallIntegerField(default=60)
+    rebalance_band_pct = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.05")
+    )
+    enable_council_veto = models.BooleanField(default=False)
+
+    # Pairs trading (kind=pairs) parameters.
+    pair_entry_z = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("2.0"))
+    pair_exit_z = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.5"))
+    pair_stop_z = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("4.0"))
+    pair_max_held = models.SmallIntegerField(default=8)
+    pair_notional_pct = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.05")
+    )
+    pair_cointegration_p_max = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.05")
+    )
+    pair_lookback_days = models.SmallIntegerField(default=252)
+    pair_correlation_min = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.700")
+    )
+    enable_pair_council = models.BooleanField(default=False)
+    pair_council_min_confidence = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.500")
+    )
 
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
@@ -339,6 +370,66 @@ class BetaEstimate(models.Model):
         return f"β {self.ticker}/{self.benchmark}@{self.as_of_date} = {self.beta}"
 
 
+class VolEstimate(models.Model):
+    """Rolling-window daily-return volatility cache (P2j)."""
+    ticker = models.CharField(max_length=16, db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    window_days = models.SmallIntegerField(default=60)
+    daily_vol = models.DecimalField(max_digits=8, decimal_places=6)
+    annualised_vol = models.DecimalField(max_digits=8, decimal_places=6)
+    n_observations = models.SmallIntegerField()
+    synthetic = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("ticker", "as_of_date", "window_days")]
+
+    def __str__(self) -> str:
+        return f"vol {self.ticker}@{self.as_of_date} σ={self.daily_vol}"
+
+
+class Pair(models.Model):
+    """A candidate / open / closed pairs-trading pair (P2k)."""
+    STATUS_CHOICES = [
+        ("candidate", "Candidate"),
+        ("open", "Open"),
+        ("closed", "Closed"),
+    ]
+    strategy = models.ForeignKey(
+        PortfolioStrategy, related_name="pairs", on_delete=models.CASCADE
+    )
+    leg_a_ticker = models.CharField(max_length=16)
+    leg_b_ticker = models.CharField(max_length=16)
+    sector = models.CharField(max_length=64, blank=True, default="")
+    cointegration_p_value = models.FloatField(default=1.0)
+    correlation = models.FloatField(default=0.0)
+    hedge_ratio = models.FloatField(default=1.0)
+    spread_mean = models.FloatField(default=0.0)
+    spread_std = models.FloatField(default=0.0)
+    spread_window_days = models.SmallIntegerField(default=252)
+    entry_date = models.DateField(null=True, blank=True)
+    entry_z = models.FloatField(null=True, blank=True)
+    exit_date = models.DateField(null=True, blank=True)
+    exit_z = models.FloatField(null=True, blank=True)
+    exit_reason = models.CharField(max_length=24, blank=True, default="")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="candidate")
+    notional_per_leg_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True
+    )
+    council_action = models.CharField(max_length=12, blank=True, default="")
+    council_confidence = models.FloatField(null=True, blank=True)
+    council_thesis = models.TextField(blank=True, default="")
+    council_votes = models.JSONField(default=list, blank=True)
+    consecutive_coint_failures = models.SmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["strategy", "status"])]
+
+    def __str__(self) -> str:
+        return f"{self.leg_a_ticker}/{self.leg_b_ticker} ({self.status})"
+
+
 class RebalanceOrder(models.Model):
     SIDE_CHOICES = [
         ("buy", "Buy"),
@@ -363,6 +454,9 @@ class RebalanceOrder(models.Model):
         max_digits=14, decimal_places=2, default=Decimal("0")
     )
     sequence = models.IntegerField(default=2)
+    pair = models.ForeignKey(
+        "Pair", null=True, blank=True, related_name="orders", on_delete=models.SET_NULL
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

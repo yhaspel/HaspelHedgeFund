@@ -42,9 +42,13 @@ from .construction import (
     construct_concentrated_long,
     construct_global_macro,
     construct_market_neutral,
+    construct_risk_parity,
     construct_sector_rotation,
 )
+from .vol import compute_vols_for
+from .pairs import decide_open_pair_action, gather_log_prices, screen_pairs
 from .models import (
+    Pair,
     PortfolioStrategy,
     PortfolioTarget,
     Position,
@@ -499,6 +503,449 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 
 
+def _run_risk_parity_cycle(
+    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]]
+) -> dict:
+    """Deterministic inverse-vol cycle. No LLM, no screener."""
+    data_provider = get_data_provider()
+    tickers = [t for t, _ in members]
+    vols_map = compute_vols_for(
+        tickers, as_of,
+        window_days=int(strategy.vol_window_days),
+        data_provider=data_provider,
+    )
+    vols = {t: v.daily_vol for t, v in vols_map.items()}
+
+    portfolio = strategy.portfolio
+    portfolio_value_pre = float(portfolio.cash_balance) + sum(
+        float(p.avg_cost) * float(p.quantity)
+        for p in Position.objects.filter(portfolio=portfolio)
+    )
+
+    # Current weights for the band check.
+    current_weights: dict[str, float] = {}
+    if portfolio_value_pre > 0:
+        for p in Position.objects.filter(portfolio=portfolio):
+            current_weights[p.ticker] = (
+                float(p.avg_cost) * float(p.quantity) / portfolio_value_pre
+            )
+
+    result = construct_risk_parity(
+        members,
+        vols,
+        target_gross_pct=float(strategy.target_gross_pct or 1.0),
+        per_sleeve_max_pct=float(strategy.per_etf_max_pct or 0.50),
+        per_sleeve_min_pct=float(strategy.per_etf_min_pct or 0.02),
+        current_weights=current_weights or None,
+        rebalance_band_pct=float(strategy.rebalance_band_pct),
+    )
+
+    with transaction.atomic():
+        target, _ = PortfolioTarget.objects.update_or_create(
+            strategy=strategy, as_of_date=as_of,
+            defaults={
+                "status": "running",
+                "target_weights": {},
+                "rejected_candidates": [],
+                "decisions": [],
+                "error_message": "",
+                "finished_at": None,
+            },
+        )
+
+    last_close: dict[str, float] = {}
+    existing_tickers = list(
+        Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True)
+    )
+    for t in set(list(result.target_weights.keys()) + existing_tickers):
+        try:
+            bars = data_provider.get_daily_bars(
+                t, start=as_of, end=as_of, as_of=as_of
+            ) or data_provider.get_daily_bars(
+                t, start=as_of.replace(day=1), end=as_of, as_of=as_of
+            )
+            if bars:
+                last_close[t] = float(bars[-1].close)
+        except Exception:
+            last_close[t] = 0.0
+
+    current = [
+        CurrentPosition(
+            ticker=p.ticker, quantity=float(p.quantity),
+            avg_cost=float(p.avg_cost), sector=p.sector,
+        )
+        for p in Position.objects.filter(portfolio=portfolio)
+    ]
+    portfolio_value = float(portfolio.cash_balance) + sum(
+        last_close.get(p.ticker, float(p.avg_cost)) * float(p.quantity)
+        for p in Position.objects.filter(portfolio=portfolio)
+    )
+
+    cycle_outcome = "target_created"
+    if result.within_band:
+        # In-band: emit the target so the UI shows ideal vs current, but skip
+        # trading entirely (death-by-costs avoidance).
+        cycle_outcome = "within_rebalance_band"
+        orders = []
+    else:
+        orders = compute_orders(
+            current,
+            result.target_weights,
+            RebalanceConfig(
+                portfolio_value=max(1.0, portfolio_value),
+                last_close=last_close,
+                min_trade_notional_usd=float(strategy.min_trade_notional_usd),
+                max_turnover_pct=float(strategy.max_turnover_pct),
+            ),
+        )
+
+    RebalanceOrder.objects.filter(target=target).delete()
+    RebalanceOrder.objects.bulk_create([
+        RebalanceOrder(
+            target=target, ticker=o.ticker, side=o.side,
+            quantity=Decimal(str(round(o.quantity, 6))),
+            limit_price=Decimal(str(round(o.limit_price, 4))) if o.limit_price else None,
+            reason=o.reason,
+            estimated_notional_usd=Decimal(str(round(o.estimated_notional_usd, 2))),
+            sequence=o.sequence,
+        ) for o in orders
+    ])
+
+    target.target_weights = {t: round(w, 6) for t, w in result.target_weights.items()}
+    target.gross_pct = Decimal(str(round(result.gross_pct, 4)))
+    target.net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
+    target.rejected_candidates = result.rejected
+    target.beta_diagnostics = {
+        **result.diagnostics,
+        "within_band": result.within_band,
+        "max_drift": round(result.max_drift, 4),
+        "rebalance_band_pct": float(strategy.rebalance_band_pct),
+    }
+    target.cycle_outcome = cycle_outcome
+    target.decisions = []
+    target.status = "done"
+    target.finished_at = timezone.now()
+    target.save()
+    PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
+    return {"target_id": target.pk, "orders": len(orders), "status": "done"}
+
+
+def _run_pairs_cycle(
+    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]]
+) -> dict:
+    """Deterministic pairs-trading cycle (no LLM, no council).
+
+    Screen within-sector pairs by cointegration + correlation + |z| > entry.
+    Close mean-reverted / stopped open pairs first; then fill remaining slots
+    with top |z| new candidates. target_weights collapses paired legs into
+    signed per-ticker weights (long_a positive, short_b = - hedge_ratio·notional).
+    """
+    data_provider = get_data_provider()
+    lookback = int(strategy.pair_lookback_days)
+    portfolio = strategy.portfolio
+
+    open_pairs = list(Pair.objects.filter(strategy=strategy, status="open"))
+    tickers_needed = {t for t, _ in members}
+    for p in open_pairs:
+        tickers_needed.add(p.leg_a_ticker)
+        tickers_needed.add(p.leg_b_ticker)
+    # Pull log-prices once for all tickers.
+    bundle = gather_log_prices(
+        list(tickers_needed), as_of, lookback_days=lookback, data_provider=data_provider
+    )
+
+    # 1) Evaluate open pairs for exit / stop / regime-break.
+    exit_z = float(strategy.pair_exit_z)
+    stop_z = float(strategy.pair_stop_z)
+    p_max = float(strategy.pair_cointegration_p_max)
+    closes_log: list[dict] = []
+    held_pairs: list[Pair] = []
+    for p in open_pairs:
+        action, z, p_value = decide_open_pair_action(
+            leg_a=p.leg_a_ticker, leg_b=p.leg_b_ticker,
+            hedge_ratio=p.hedge_ratio,
+            spread_mean=p.spread_mean, spread_std=p.spread_std,
+            log_prices=bundle.log_prices,
+            exit_z=exit_z, stop_z=stop_z, p_max=p_max,
+            consecutive_failures=int(p.consecutive_coint_failures or 0),
+        )
+        if action == "no_price":
+            p.status = "closed"
+            p.exit_date = as_of
+            p.exit_reason = "no_price"
+            p.save()
+            closes_log.append({"pair_id": p.pk, "reason": "no_price", "z": None,
+                               "leg_a": p.leg_a_ticker, "leg_b": p.leg_b_ticker})
+            continue
+        if action in ("stopped", "reverted", "regime_break"):
+            p.status = "closed"
+            p.exit_z = z
+            p.exit_date = as_of
+            p.exit_reason = action
+            p.save()
+            closes_log.append({
+                "pair_id": p.pk, "reason": action, "z": round(z or 0.0, 3),
+                "leg_a": p.leg_a_ticker, "leg_b": p.leg_b_ticker,
+            })
+            continue
+        # action == "hold": persist the consecutive-failure counter for next cycle.
+        if p_value is not None and p_value > p_max:
+            p.consecutive_coint_failures = int(p.consecutive_coint_failures or 0) + 1
+        else:
+            p.consecutive_coint_failures = 0
+        p.save(update_fields=["consecutive_coint_failures"])
+        held_pairs.append(p)
+
+    # 2) Screen for new candidates.
+    candidates, screener_diag = screen_pairs(
+        members, as_of,
+        data_provider=data_provider,
+        lookback_days=lookback,
+        p_max=float(strategy.pair_cointegration_p_max),
+        corr_min=float(strategy.pair_correlation_min),
+        entry_z=float(strategy.pair_entry_z),
+    )
+    # Drop candidates that duplicate an open pair (same legs in any order).
+    open_keys = {tuple(sorted([p.leg_a_ticker, p.leg_b_ticker])) for p in held_pairs}
+    candidates = [
+        c for c in candidates
+        if tuple(sorted([c.leg_a, c.leg_b])) not in open_keys
+    ]
+
+    available_slots = max(0, int(strategy.pair_max_held) - len(held_pairs))
+    # Take a wider top-K when the council is on so we can survive skips.
+    council_on = bool(getattr(strategy, "enable_pair_council", False))
+    top_pool = candidates[: max(available_slots * 3, available_slots) if council_on else available_slots]
+
+    # 3) Optional council: vet each candidate; drop skips + low-confidence enters.
+    council_log: list[dict] = []
+    accepted: list = []
+    if council_on and top_pool:
+        from hedgefund_agents.pairs_council import debate_pair
+        from hedgefund_agents.registry import get_news_service
+        min_conf = float(strategy.pair_council_min_confidence)
+        overrides = _resolve_model_overrides(strategy)
+        personas = list(strategy.personas or [])
+        news_service = get_news_service()
+        # Cache per-ticker headline lists across pairs in this cycle so we
+        # only hit the news providers once per name even when a name appears
+        # in several candidate pairs.
+        news_cache: dict[str, list[str]] = {}
+
+        def _headlines_for(ticker: str) -> list[str]:
+            if ticker in news_cache:
+                return news_cache[ticker]
+            try:
+                items = news_service.fetch_and_persist(
+                    ticker, as_of=as_of, lookback_days=30
+                ) or []
+            except Exception as exc:
+                log.warning("news fetch failed for %s: %s", ticker, exc)
+                items = []
+            news_cache[ticker] = [it.headline for it in items[:6]]
+            return news_cache[ticker]
+
+        for c in top_pool:
+            if len(accepted) >= available_slots:
+                break
+            news_for_pair = {
+                c.leg_a: _headlines_for(c.leg_a),
+                c.leg_b: _headlines_for(c.leg_b),
+            }
+            decision = debate_pair(
+                leg_a=c.leg_a, leg_b=c.leg_b, sector=c.sector, as_of=as_of,
+                z_current=c.z_current, correlation=c.correlation, p_value=c.p_value,
+                personas=personas, model_overrides=overrides,
+                user_id=strategy.user_id,
+                news_by_ticker=news_for_pair,
+            )
+            council_log.append({
+                "leg_a": c.leg_a, "leg_b": c.leg_b,
+                "action": decision.action,
+                "confidence": decision.aggregate_confidence,
+                "enter_count": decision.enter_count,
+                "skip_count": decision.skip_count,
+                "thesis_excerpt": decision.thesis[:300],
+                "news_counts": {
+                    c.leg_a: len(news_for_pair[c.leg_a]),
+                    c.leg_b: len(news_for_pair[c.leg_b]),
+                },
+            })
+            if decision.action != "enter":
+                continue
+            if decision.aggregate_confidence < min_conf:
+                continue
+            accepted.append((c, decision))
+    else:
+        accepted = [(c, None) for c in top_pool[:available_slots]]
+
+    # 4) Persist new Pair rows.
+    new_pair_rows: list[Pair] = []
+    for c, decision in accepted:
+        z_entry = c.z_current
+        row = Pair.objects.create(
+            strategy=strategy,
+            leg_a_ticker=c.leg_a, leg_b_ticker=c.leg_b, sector=c.sector,
+            cointegration_p_value=c.p_value, correlation=c.correlation,
+            hedge_ratio=c.hedge_ratio, spread_mean=c.spread_mean, spread_std=c.spread_std,
+            spread_window_days=lookback,
+            entry_date=as_of, entry_z=z_entry,
+            status="open",
+            council_action=(decision.action if decision else ""),
+            council_confidence=(decision.aggregate_confidence if decision else None),
+            council_thesis=(decision.thesis if decision else ""),
+            council_votes=([v.model_dump() for v in decision.votes] if decision else []),
+        )
+        new_pair_rows.append(row)
+
+    # 4) Build target_weights per pair (long leg_a +X, short leg_b -X·β),
+    #    sum across pairs (a name may appear in multiple).
+    notional_pct = float(strategy.pair_notional_pct)
+    target_weights: dict[str, float] = {}
+    pair_legs: list[tuple[Pair, str, float]] = []  # (pair, ticker, signed_weight)
+
+    def _add_leg(book: dict[str, float], t: str, w: float) -> None:
+        book[t] = book.get(t, 0.0) + w
+
+    all_active = held_pairs + new_pair_rows
+    for p in all_active:
+        leg_a_w = notional_pct / 2.0
+        leg_b_w = -leg_a_w * max(0.05, min(20.0, float(p.hedge_ratio)))
+        _add_leg(target_weights, p.leg_a_ticker, leg_a_w)
+        _add_leg(target_weights, p.leg_b_ticker, leg_b_w)
+        pair_legs.append((p, p.leg_a_ticker, leg_a_w))
+        pair_legs.append((p, p.leg_b_ticker, leg_b_w))
+
+    # 5) Persist PortfolioTarget + orders.
+    with transaction.atomic():
+        target, _ = PortfolioTarget.objects.update_or_create(
+            strategy=strategy, as_of_date=as_of,
+            defaults={
+                "status": "running",
+                "target_weights": {},
+                "rejected_candidates": [],
+                "decisions": [],
+                "error_message": "",
+                "finished_at": None,
+            },
+        )
+
+    last_close: dict[str, float] = {}
+    existing_tickers = list(
+        Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True)
+    )
+    for t in set(list(target_weights.keys()) + existing_tickers):
+        try:
+            bars = data_provider.get_daily_bars(
+                t, start=as_of, end=as_of, as_of=as_of
+            ) or data_provider.get_daily_bars(
+                t, start=as_of.replace(day=1), end=as_of, as_of=as_of
+            )
+            if bars:
+                last_close[t] = float(bars[-1].close)
+        except Exception:
+            last_close[t] = 0.0
+
+    current = [
+        CurrentPosition(
+            ticker=p.ticker, quantity=float(p.quantity),
+            avg_cost=float(p.avg_cost), sector=p.sector,
+        )
+        for p in Position.objects.filter(portfolio=portfolio)
+    ]
+    portfolio_value = float(portfolio.cash_balance) + sum(
+        last_close.get(p.ticker, float(p.avg_cost)) * float(p.quantity)
+        for p in Position.objects.filter(portfolio=portfolio)
+    )
+
+    orders = compute_orders(
+        current,
+        target_weights,
+        RebalanceConfig(
+            portfolio_value=max(1.0, portfolio_value),
+            last_close=last_close,
+            min_trade_notional_usd=float(strategy.min_trade_notional_usd),
+            max_turnover_pct=float(strategy.max_turnover_pct),
+        ),
+    )
+
+    # Attach the most relevant Pair to each order. For (open) pairs we link
+    # by (ticker, long/short) inferred from their target weight; for pairs
+    # closed this cycle we link by leg role so the two close orders both
+    # carry the same pair_id (atomic-close contract).
+    pair_by_leg: dict[tuple[str, str], Pair] = {}
+    for p, t, w in pair_legs:
+        pair_by_leg.setdefault((t, "long" if w > 0 else "short"), p)
+    # Re-load the just-closed Pair rows to give close orders a back-link.
+    closed_this_cycle = list(
+        Pair.objects.filter(strategy=strategy, exit_date=as_of, status="closed")
+    )
+    closed_by_ticker: dict[str, Pair] = {}
+    for cp in closed_this_cycle:
+        closed_by_ticker.setdefault(cp.leg_a_ticker, cp)
+        closed_by_ticker.setdefault(cp.leg_b_ticker, cp)
+
+    RebalanceOrder.objects.filter(target=target).delete()
+    rows: list[RebalanceOrder] = []
+    for o in orders:
+        sign = "long" if o.side in ("buy", "sell") else "short"
+        pair = pair_by_leg.get((o.ticker, sign))
+        if pair is None and o.reason == "close":
+            pair = closed_by_ticker.get(o.ticker)
+        rows.append(RebalanceOrder(
+            target=target, ticker=o.ticker, side=o.side,
+            quantity=Decimal(str(round(o.quantity, 6))),
+            limit_price=Decimal(str(round(o.limit_price, 4))) if o.limit_price else None,
+            reason=o.reason,
+            estimated_notional_usd=Decimal(str(round(o.estimated_notional_usd, 2))),
+            sequence=o.sequence,
+            pair=pair,
+        ))
+    RebalanceOrder.objects.bulk_create(rows)
+
+    cycle_outcome = "target_created" if target_weights else "held_existing_book"
+    target.target_weights = {t: round(w, 6) for t, w in target_weights.items()}
+    target.gross_pct = Decimal(str(round(sum(abs(w) for w in target_weights.values()), 4)))
+    target.net_pct = Decimal(str(round(sum(target_weights.values()), 4)))
+    target.realised_net_pct = target.net_pct
+    target.sector_exposure = {}
+    target.rejected_candidates = []
+    target.decisions = []
+    target.beta_diagnostics = {
+        **screener_diag,
+        "n_open_before": len(open_pairs),
+        "n_closed_this_cycle": len(closes_log),
+        "n_new_pairs": len(new_pair_rows),
+        "n_open_after": len(all_active),
+        "closes": closes_log,
+        "council_enabled": council_on,
+        "council_log": council_log,
+        "open_pairs": [
+            {
+                "id": p.pk,
+                "leg_a": p.leg_a_ticker, "leg_b": p.leg_b_ticker,
+                "sector": p.sector,
+                "hedge_ratio": round(float(p.hedge_ratio), 4),
+                "entry_z": round(float(p.entry_z or 0.0), 3),
+                "p_value": round(float(p.cointegration_p_value), 4),
+                "correlation": round(float(p.correlation), 3),
+                "council_action": p.council_action,
+                "council_confidence": p.council_confidence,
+                "council_thesis": p.council_thesis,
+            }
+            for p in all_active
+        ],
+    }
+    target.cycle_outcome = cycle_outcome
+    target.status = "done"
+    target.finished_at = timezone.now()
+    target.save()
+    PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
+    return {"target_id": target.pk, "orders": len(orders), "status": "done"}
+
+
 @shared_task
 def daily_long_short_cycle(
     strategy_id: int,
@@ -521,6 +968,15 @@ def daily_long_short_cycle(
     members = _active_members(strategy, as_of)
     if not members:
         raise RuntimeError("Universe has no active members on as_of date.")
+
+    # Risk-parity fast path: pure deterministic inverse-vol — no screener, no
+    # council. Drops the entire LLM cost (matches plan default
+    # enable_council_veto=False). The veto-mode wiring is a follow-up.
+    if strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
+        return _run_risk_parity_cycle(strategy, as_of, members)
+
+    if strategy.kind == PortfolioStrategy.KIND_PAIRS:
+        return _run_pairs_cycle(strategy, as_of, members)
 
     try:
         is_long_only_flavor = strategy.kind in (
