@@ -27,13 +27,13 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.models_catalog.presets import expand_preset
-from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
 from apps.data.providers.factory import (
     get_edgar_provider,
     get_fmp_provider,
     get_news_service,
 )
+from apps.models_catalog.presets import expand_preset
+from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
 

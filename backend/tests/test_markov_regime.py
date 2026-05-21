@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import math
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -15,7 +14,6 @@ from hedgefund_agents.macro.markov_regime import (
     UndertrainedStateError,
     _stationary,
     fit_labelled_markov,
-    fit_regime,
 )
 
 
@@ -55,7 +53,7 @@ def _make_bars(
     for r in return_series:
         prices.append(prices[-1] * (1.0 + r))
     bars: list[_Bar] = []
-    for i, (d, p) in enumerate(zip(dates, prices)):
+    for i, (d, p) in enumerate(zip(dates, prices, strict=True)):
         raw_close = p
         if adjusted_split_at is not None and i >= adjusted_split_at:
             raw_close = p / split_ratio  # raw close drops at the "split"
@@ -520,7 +518,6 @@ def test_sector_features_include_markov_score(monkeypatch):
 @pytest.mark.django_db
 def test_regime_scaler_off_is_no_op():
     from apps.portfolios.construction import Constraints
-    from apps.portfolios.models import PortfolioStrategy
     from apps.portfolios.regime_scaling import apply_regime_scaler
 
     s = _ephemeral_strategy(regime_exposure_scaler="off")

@@ -17,10 +17,10 @@ has no Celery dependency and remains test-friendly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date as date_cls
 from decimal import Decimal
-from typing import Iterable
 
 from django.db import transaction
 from django.utils import timezone
@@ -372,6 +372,7 @@ def reconcile_run_cost(run: Run) -> Decimal:
     but a worker crash mid-call could leave the inline counter stale.
     """
     from django.db.models import Sum
+
     from hedgefund_agents.models import LLMCall
 
     total = (

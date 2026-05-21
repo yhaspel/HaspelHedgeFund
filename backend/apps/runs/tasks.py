@@ -9,6 +9,7 @@ from celery import shared_task
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
 from hedgefund_agents.analytical.valuation import run_valuation  # noqa: F401 — register spec
 from hedgefund_agents.graphs.council import (
     ANALYTICAL_NODES,
@@ -16,7 +17,6 @@ from hedgefund_agents.graphs.council import (
 )
 from hedgefund_agents.models import LLMCall
 from hedgefund_agents.personas import ALL_PERSONAS
-from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
 from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
 from .models import AgentMessage, Decision, Run

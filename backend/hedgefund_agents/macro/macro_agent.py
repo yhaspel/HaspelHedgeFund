@@ -10,6 +10,7 @@ import json
 from decimal import Decimal
 
 from apps.data.models import MacroSnapshot
+from apps.data.providers.factory import get_fred_provider
 from apps.data.providers.fred import FredProvider, MacroObservation
 
 from .._persist import record_llm_call
@@ -17,8 +18,6 @@ from ..base import AgentState
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import MacroOutput
-from apps.data.providers.factory import get_fred_provider
-
 from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AgentSpec, register
 

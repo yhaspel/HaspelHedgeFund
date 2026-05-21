@@ -210,12 +210,12 @@ def prime_agent_cache(
     """Walk every (ticker, rebalance day) once with a fresh agent graph
     invocation. Fills L2 cache (LLMResponseCache) and returns an in-memory
     map of agent outputs for the executor."""
+    from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
     from hedgefund_agents.graphs.council import (
         ANALYTICAL_NODES,
         build_council_graph,
     )
     from hedgefund_agents.personas import ALL_PERSONAS
-    from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
     from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
     ensure_versions_synced()

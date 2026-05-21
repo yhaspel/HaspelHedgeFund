@@ -275,7 +275,7 @@ def fit_labelled_markov(
 
     # Build the 3x3 transition count matrix C with Laplace smoothing.
     C = np.full((3, 3), float(cfg.laplace_alpha), dtype=float)
-    for prev, nxt in zip(labels[:-1], labels[1:]):
+    for prev, nxt in zip(labels[:-1], labels[1:], strict=True):
         C[STATE_INDEX[prev], STATE_INDEX[nxt]] += 1.0
     row_sums = C.sum(axis=1, keepdims=True)
     P = C / row_sums

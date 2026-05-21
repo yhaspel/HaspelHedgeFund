@@ -39,10 +39,10 @@ import logging  # noqa: E402
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 from apps.data.models import DailyBar  # noqa: E402
+from apps.data.providers.factory import get_edgar_provider, get_fmp_provider  # noqa: E402
 from hedgefund_agents.graphs.council import ANALYTICAL_NODES, build_council_graph  # noqa: E402
 from hedgefund_agents.models import LLMCall  # noqa: E402
 from hedgefund_agents.personas import ALL_PERSONAS  # noqa: E402
-from apps.data.providers.factory import get_edgar_provider, get_fmp_provider  # noqa: E402
 
 UNIVERSE = ["AAPL", "MSFT", "JPM"]
 N_DAYS = 5

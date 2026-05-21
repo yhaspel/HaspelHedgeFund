@@ -34,10 +34,8 @@ from django.db import transaction
 from apps.data.models import RegimeModel, RegimeSnapshot
 
 from .markov_regime import (
-    InsufficientHistoryError,
     MarkovConfig,
     RegimeFit,
-    UndertrainedStateError,
     fit_regime,
 )
 

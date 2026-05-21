@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+from apps.data.providers.factory import get_fmp_provider
 from apps.portfolios.borrow import HTB_TICKERS, StubBorrowProvider
 from apps.portfolios.construction import (
     Candidate,
@@ -16,7 +17,6 @@ from apps.portfolios.rebalance import (
     RebalanceConfig,
     compute_orders,
 )
-from apps.data.providers.factory import get_fmp_provider
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 
 

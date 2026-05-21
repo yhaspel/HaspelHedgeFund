@@ -15,7 +15,6 @@ from .models import (
     Portfolio,
     PortfolioStrategy,
     PortfolioTarget,
-    PortfolioTargetRun,
     Position,
     Universe,
     UniverseMembership,
@@ -254,7 +253,10 @@ class CycleApproveCouncilView(APIView):
         else:
             long_keys = long_subset
         if short_subset is None:
-            short_keys = [str(e.get("ticker", "")).upper() for e in (ranking.short_candidates or [])]
+            short_keys = [
+                str(e.get("ticker", "")).upper()
+                for e in (ranking.short_candidates or [])
+            ]
         else:
             short_keys = short_subset
 
@@ -277,8 +279,8 @@ class CycleRejectView(APIView):
     """
 
     def post(self, request: Request, pk: int, target_id: int) -> Response:
-        from hedgefund.celery import app as celery_app
         from apps.runs.models import Run
+        from hedgefund.celery import app as celery_app
 
         try:
             target = PortfolioTarget.objects.select_related("strategy").get(
