@@ -7,11 +7,12 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { EstimateResponse } from '../../core/models/backtest.model';
 import { ModelPanelComponent } from '../shared/model-panel.component';
+import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DecimalPipe, ModelPanelComponent, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DecimalPipe, ModelPanelComponent, AppShellComponent, GlossaryTermComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label:'New'}]">
       <div class="page-head">
@@ -29,7 +30,7 @@ import { ModelPanelComponent } from '../shared/model-panel.component';
               <input class="input sans" name="name" [(ngModel)]="name" required />
             </div>
             <div class="field">
-              <label class="lbl">Universe <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· comma-separated; blank uses default 20 quality names</span></label>
+              <label class="lbl"><hf-term key="universe">Universe</hf-term> <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· comma-separated; blank uses default 20 quality names</span></label>
               <textarea class="input sans" name="universe" [(ngModel)]="universeStr" rows="3"
                 placeholder="AAPL, MSFT, GOOGL, ..."
                 style="height:auto;padding:10px;line-height:18px;font-family:var(--font-mono);font-size:13px"></textarea>
@@ -62,7 +63,10 @@ import { ModelPanelComponent } from '../shared/model-panel.component';
                 <option value="sharpe">Sharpe</option>
                 <option value="sortino">Sortino</option>
                 <option value="calmar">Calmar</option>
-              </select></div>
+              </select>
+              <p style="font-size:11px;color:var(--text-3);margin:4px 0 0">
+                <hf-term key="sharpe">Sharpe</hf-term> / <hf-term key="sortino">Sortino</hf-term> · the score used to pick the best parameters in-sample.
+              </p></div>
             <div class="field"><label class="lbl">Rebalance</label>
               <select class="input sans" name="rb" [(ngModel)]="rebalance">
                 <option value="daily">Daily</option>

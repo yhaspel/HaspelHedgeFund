@@ -98,5 +98,17 @@ export const routes: Routes = [
         (m) => m.SettingsModelsPage,
       ),
   },
+  {
+    path: 'info',
+    loadComponent: () =>
+      import('./presentation/info/info-list.page').then((m) => m.InfoListPage),
+  },
+  {
+    path: 'info/:slug',
+    loadComponent: () =>
+      import('./presentation/info/info-detail.page').then(
+        (m) => m.InfoDetailPage,
+      ),
+  },
   { path: '**', redirectTo: '' },
 ];

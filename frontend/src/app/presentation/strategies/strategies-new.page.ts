@@ -9,13 +9,15 @@ import {
   STRATEGY_KIND_DESCRIPTIONS, STRATEGY_KIND_OPTIONS, StrategyKind,
 } from '../../core/models/strategy.model';
 import { InfoTooltipComponent } from '../shared/info-tooltip.component';
+import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { PersonaCardComponent } from '../shared/persona-card.component';
 import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
+import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
 
 @Component({
   selector: 'hf-strategies-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, InfoTooltipComponent, AppShellComponent, PersonaCardComponent],
+  imports: [CommonModule, FormsModule, RouterLink, InfoTooltipComponent, GlossaryTermComponent, AppShellComponent, PersonaCardComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label:'New'}]">
       <div class="page-head">
@@ -48,12 +50,17 @@ import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
                 }
               </select>
               <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">{{ kindDescription() }}</p>
+              <p style="font-size:11.5px;margin:6px 0 0">
+                <a [routerLink]="['/info', kindGuideSlug()]" style="color:var(--acc-info-fg)">
+                  Read the full guide →
+                </a>
+              </p>
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div class="field">
                 <label class="lbl">
-                  Universe
+                  <hf-term key="universe">Universe</hf-term>
                   <hf-info text="The investable pool of tickers the screener evaluates each cycle. Pick a named universe (e.g. sp500_top_200) — only its active members on the as-of date are scored." />
                 </label>
                 <select class="input sans" name="universe" [(ngModel)]="universe"
@@ -87,7 +94,7 @@ import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
           <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
             <div class="field">
               <label class="lbl">
-                Target gross
+                Target <hf-term key="gross-exposure">gross</hf-term>
                 <hf-info text="Total dollar exposure as a fraction of portfolio value (|longs| + |shorts|). 1.50 means 150% gross — e.g. 100% long + 50% short." />
               </label>
               <input class="input" name="g" type="number" step="0.05" min="0.5" max="3.0" [(ngModel)]="targetGross" />
@@ -95,7 +102,7 @@ import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
             @if (kind !== 'market_neutral' && kind !== 'concentrated_long' && kind !== 'pairs') {
               <div class="field">
                 <label class="lbl">
-                  Target net
+                  Target <hf-term key="net-exposure">net</hf-term>
                   <hf-info text="Long exposure minus short exposure as a fraction of portfolio value. 0.50 = +50% net (long-biased). 0 = market neutral. Negative = short-biased." />
                 </label>
                 <input class="input" name="n" type="number" step="0.05" min="-1.0" max="2.0" [(ngModel)]="targetNet" />
@@ -301,7 +308,7 @@ import { ALL_PERSONAS as PERSONA_META } from '../../core/models/run.model';
             </div>
             <div class="field">
               <label class="lbl">
-                Model preset
+                <hf-term key="preset">Model preset</hf-term>
                 <hf-info text="Which model preset the council uses. 'frugal' = OpenRouter Qwen/Llama (cheap), 'hybrid' = mix, 'quality' = Sonnet-only, 'dev' = cheapest, 'research' = Sonnet personas + Haiku analysts." />
               </label>
               <select class="input sans" name="pre" [(ngModel)]="modelPreset">
@@ -485,6 +492,7 @@ export class StrategiesNewPage implements OnInit {
   error = signal<string | null>(null);
 
   kindDescription(): string { return STRATEGY_KIND_DESCRIPTIONS[this.kind]; }
+  kindGuideSlug(): string { return STRATEGY_KIND_GUIDE[this.kind]; }
 
   /** Compact, stable timestamp suffix, e.g. "2026-05-21 14:32". */
   private buildStamp(): string {

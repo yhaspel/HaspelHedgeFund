@@ -26,6 +26,9 @@ import { AuthStore } from '../../abstraction/auth.store';
           <svg width="18" height="18"><use href="/icons.svg#i-layers" /></svg>
         </a>
         <div class="spacer"></div>
+        <a class="nav-btn" routerLink="/info" routerLinkActive="active" data-tip="Guides">
+          <svg width="18" height="18"><use href="/icons.svg#i-info" /></svg>
+        </a>
         <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" data-tip="Settings">
           <svg width="18" height="18"><use href="/icons.svg#i-settings" /></svg>
         </a>

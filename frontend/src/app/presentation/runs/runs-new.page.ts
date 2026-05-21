@@ -9,12 +9,13 @@ import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
 import { ModelPanelComponent } from '../shared/model-panel.component';
 import { PersonaCardComponent } from '../shared/persona-card.component';
 import { SparklineComponent } from '../shared/sparkline.component';
+import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 
 @Component({
   selector: 'hf-runs-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent, SparklineComponent],
+  imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent, SparklineComponent, GlossaryTermComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Runs', link:'/'}, {label:'New'}]">
       <div class="page-head">
@@ -28,7 +29,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         <section class="card">
           <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
             <div class="field">
-              <label class="lbl">Ticker</label>
+              <label class="lbl"><hf-term key="ticker">Ticker</hf-term></label>
               <div style="display:flex;align-items:center;gap:10px">
                 <input class="input" name="ticker" [(ngModel)]="ticker"
                   (ngModelChange)="onTickerChange($event)"
@@ -60,7 +61,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 
         <section class="card">
           <div class="card-hd">
-            <span class="title">Council personas</span>
+            <span class="title"><hf-term key="council">Council</hf-term> personas</span>
             <span class="pill"><span class="dot"></span>{{ selected().size }} of {{ allPersonas.length }}</span>
           </div>
           <div class="card-bd persona-grid">
