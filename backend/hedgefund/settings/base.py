@@ -4,7 +4,12 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-change-me")
+# Dev/test sentinels are intentionally insecure but 32+ bytes long so
+# SimpleJWT does not emit "key shorter than 32 bytes" warnings on every test
+# run. The guard at the bottom of this module still raises for non-dev envs.
+_DEV_INSECURE_SENTINEL = "dev-insecure-not-for-prod-not-for-prod-32b-sentinel"
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _DEV_INSECURE_SENTINEL)
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -96,9 +101,20 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
+# SimpleJWT emits a UserWarning when SIGNING_KEY is shorter than 32 bytes.
+# In dev/test we already guarantee a 32+ byte sentinel above; in non-dev envs
+# the guard at the bottom of this module raises if the key is short. The
+# warning still appears in CI for legacy configs — explicit assertion above
+# keeps test output clean.
 
+# Development default lists both localhost and 127.0.0.1 so that browser
+# probes from either hostname succeed without a CORS preflight failure.
+# Override with CORS_ALLOWED_ORIGINS in staging/prod.
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:4111").split(",") if o
+    o for o in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:4111,http://127.0.0.1:4111",
+    ).split(",") if o
 ]
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -159,7 +175,13 @@ LOGGING = {
 # with insecure default secrets. Dev defaults stay convenient but visibly
 # unsafe; prod-ish environments must override them.
 _DJANGO_ENV = os.environ.get("DJANGO_ENV", "dev").lower()
-_INSECURE_SECRET_SENTINELS = {"", "dev-insecure-change-me", "change-me", "insecure"}
+_INSECURE_SECRET_SENTINELS = {
+    "",
+    "dev-insecure-change-me",
+    "change-me",
+    "insecure",
+    _DEV_INSECURE_SENTINEL,
+}
 
 if _DJANGO_ENV not in {"dev", "test"}:
     if SECRET_KEY in _INSECURE_SECRET_SENTINELS:

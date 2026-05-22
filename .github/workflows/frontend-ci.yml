@@ -1,8 +1,9 @@
 name: frontend-ci
 
+# CI policy: every push (any branch) and PRs, path-filtered. See
+# backend-ci.yml for the decision trail.
 on:
   push:
-    branches: [main]
     paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
   pull_request:
     paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]

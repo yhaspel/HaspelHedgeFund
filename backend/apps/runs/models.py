@@ -57,6 +57,19 @@ class Run(models.Model):
         db_index=True,
     )
 
+    # P01 review: first-class evidence/provenance for run outputs.
+    # Structure: {"items": [{"agent": str, "provider": str, "source": str,
+    #             "url": str, "as_of": iso-date, "retrieved_at": iso-ts,
+    #             "label": str, "note": str}], "providers": {...}}
+    evidence = models.JSONField(default=dict, blank=True)
+
+    # P02a review: explicit risk-context label so the UI can show whether
+    # sizing is illustrative (stub), portfolio-aware (real), or research-only.
+    # Structure: {"mode": "stub"|"real"|"research_only",
+    #             "portfolio_id": int|null, "notes": str,
+    #             "stub_nav_usd": Decimal-as-string}
+    risk_context = models.JSONField(default=dict, blank=True)
+
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"
 

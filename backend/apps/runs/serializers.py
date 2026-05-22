@@ -71,6 +71,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
             "created_at", "finished_at", "total_cost_usd", "error_message",
             "source", "portfolio_target", "strategy_backlink",
             "messages", "decisions", "llm_calls",
+            # P01/P02a review: surface evidence and risk-context to the UI.
+            "evidence", "risk_context",
         )
 
     def get_strategy_backlink(self, run: Run) -> dict | None:
@@ -132,6 +134,18 @@ class RunCreateSerializer(serializers.ModelSerializer):
             return v or {}
         if not isinstance(v, dict):
             raise serializers.ValidationError("model_overrides must be an object")
+
+        # P01 review: reject typoed agent override keys against the canonical
+        # registry so a stray "fundamentls" key isn't silently ignored.
+        from apps.models_catalog.presets import ALL_AGENTS
+
+        unknown_agents = [k for k in v if str(k) not in ALL_AGENTS]
+        if unknown_agents:
+            raise serializers.ValidationError(
+                f"model_overrides has unknown agent key(s): {sorted(unknown_agents)}. "
+                f"Known agents: {sorted(ALL_AGENTS)}"
+            )
+
         try:
             from django.db.models import Q
 

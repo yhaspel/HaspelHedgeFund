@@ -109,6 +109,39 @@ def _backfill_scores(items: list[NewsItem], events: list[MaterialEvent]) -> None
         it.save(update_fields=["materiality_score", "materiality_tag"])
 
 
+def _news_freshness(items: list[NewsItem], as_of) -> dict:
+    """P02b review: provider/freshness/stale flags for the news digest."""
+    import datetime as _dt
+
+    providers: set[str] = set()
+    sources: set[str] = set()
+    newest: _dt.datetime | None = None
+    for it in items:
+        if it.provider:
+            providers.add(it.provider)
+        if it.source:
+            sources.add(it.source)
+        if newest is None or it.published_at > newest:
+            newest = it.published_at
+    newest_age_days: int | None = None
+    if newest is not None:
+        # `as_of` is a date; compare against the date-portion of newest.
+        newest_age_days = int((as_of - newest.date()).days)
+    return {
+        "providers": sorted(providers),
+        "sources_sampled": sorted(sources)[:8],
+        "item_count": len(items),
+        "newest_published_at": newest.isoformat() if newest else None,
+        "newest_age_days": newest_age_days,
+        # Stale when the freshest item is more than 7 days before as_of and
+        # we have at least one item; "no items" is a different signal (empty
+        # provider response, missing key, or genuine quiet period).
+        "stale": bool(items) and (newest_age_days is not None) and newest_age_days > 7,
+        "partial": len(items) == 0,
+        "fallback": False,
+    }
+
+
 def run_news(state: AgentState) -> AgentState:
     ticker = state["ticker"]
     as_of = state["as_of_date"]
@@ -176,7 +209,9 @@ def run_news(state: AgentState) -> AgentState:
             agent_name="news_digest", resp=resp,
         )
         _backfill_scores(items, parsed.material_events)
-        return {"news_digest": parsed.model_dump()}  # type: ignore[return-value]
+        payload = parsed.model_dump()
+        payload["_freshness"] = _news_freshness(items, as_of)
+        return {"news_digest": payload}  # type: ignore[return-value]
     except Exception as e:
         log.warning("news synthesis failed: %s; returning skeletal digest", e)
         skel = NewsOutput(
@@ -187,4 +222,11 @@ def run_news(state: AgentState) -> AgentState:
             sentiment_score=0.0,
             sentiment_drivers=[],
         )
-        return {"news_digest": skel.model_dump()}  # type: ignore[return-value]
+        payload = skel.model_dump()
+        # When synthesis fails we still pass through whatever items we
+        # gathered so the UI can flag a fallback rather than confusing the
+        # state with a clean digest.
+        fresh = _news_freshness(items, as_of)
+        fresh["fallback"] = True
+        payload["_freshness"] = fresh
+        return {"news_digest": payload}  # type: ignore[return-value]

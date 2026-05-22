@@ -19,6 +19,7 @@ from hedgefund_agents.models import LLMCall
 from hedgefund_agents.personas import ALL_PERSONAS
 from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
+from .evidence import build_evidence, build_risk_context
 from .models import AgentMessage, Decision, Run
 
 log = logging.getLogger(__name__)
@@ -98,6 +99,12 @@ def execute_run(run_id: int) -> None:
     run.save(update_fields=["agent_versions"])
 
     try:
+        # P02a review: label the run's risk context (stub vs real portfolio).
+        # Strategy-sourced runs already see a real portfolio downstream; ad-hoc
+        # single-ticker runs use the $100K stub in the risk manager.
+        run.risk_context = build_risk_context(portfolio=None)
+        run.save(update_fields=["risk_context"])
+
         for ticker in run.tickers:
             initial_state = {
                 "ticker": ticker,
@@ -110,9 +117,16 @@ def execute_run(run_id: int) -> None:
             final_state = graph.invoke(initial_state)
             _persist_outputs(run, final_state, selected_personas)
 
+        # P01 review: capture evidence/provenance after data has settled.
+        try:
+            primary_ticker = (run.tickers or [""])[0]
+            if primary_ticker:
+                run.evidence = build_evidence(primary_ticker, run.as_of_date)
+        except Exception:  # never let evidence collection fail the run
+            log.exception("evidence collection failed for run=%s", run_id)
         run.status = Run.DONE
         run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at"])
+        run.save(update_fields=["status", "finished_at", "evidence"])
     except Exception as exc:  # pragma: no cover
         log.exception("Run %s failed", run_id)
         # If the user already cancelled this run via the API, don't clobber

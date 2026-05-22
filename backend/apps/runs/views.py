@@ -1,3 +1,6 @@
+import datetime as dt
+
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.request import Request
@@ -83,3 +86,115 @@ class ModelCatalogView(APIView):
 
     def get(self, request: Request) -> Response:
         return Response({"models": MODEL_CATALOG})
+
+
+def _provider_state(key_setting: str) -> str:
+    """Map a settings key value to a UI-visible state label."""
+    return "configured" if getattr(settings, key_setting, "") else "missing"
+
+
+def _latest_freshness(model_cls, *, date_field: str, scope: dict | None = None) -> dict:
+    """Return as_of/age for the most recent row of a data model."""
+    try:
+        qs = model_cls.objects.all()
+        if scope:
+            qs = qs.filter(**scope)
+        latest = qs.order_by(f"-{date_field}").first()
+        if latest is None:
+            return {"last_at": None, "age_days": None, "count": 0}
+        val = getattr(latest, date_field)
+        if isinstance(val, dt.datetime):
+            age = (timezone.now() - val).days
+            iso = val.isoformat()
+        else:
+            age = (dt.date.today() - val).days
+            iso = val.isoformat()
+        return {
+            "last_at": iso,
+            "age_days": int(age),
+            "count": qs.count(),
+        }
+    except Exception as e:  # pragma: no cover — defensive
+        return {"last_at": None, "age_days": None, "error": str(e)[:100]}
+
+
+class ProviderDiagnosticsView(APIView):
+    """P01/P02b review: operator-facing provider state.
+
+    Reports configured/missing key state for every provider, the most
+    recent persisted row per provider, and the current run cap settings.
+    Read-only; never hits the wire.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        from apps.data.models import (
+            DailyBar,
+            Fundamental,
+            MacroSnapshot,
+            NewsItem,
+        )
+
+        # Per-user BYOK status: do they have a key row at all?
+        user_byok: dict[str, bool] = {}
+        try:
+            from apps.models_catalog.models import ProviderKey
+
+            pk = ProviderKey.objects.filter(user_id=request.user.id).first()
+            for prov in ("fmp", "tiingo", "fred", "anthropic", "openrouter"):
+                user_byok[prov] = bool(pk and pk.has_key(prov))
+        except Exception:
+            user_byok = {}
+
+        return Response(
+            {
+                "as_of": timezone.now().isoformat(),
+                "providers": {
+                    "fmp": {
+                        "key": _provider_state("FMP_API_KEY"),
+                        "user_byok": user_byok.get("fmp", False),
+                        "freshness": _latest_freshness(
+                            DailyBar, date_field="fetched_at",
+                            scope={"source": "fmp"},
+                        ),
+                    },
+                    "tiingo": {
+                        "key": _provider_state("TIINGO_API_KEY"),
+                        "user_byok": user_byok.get("tiingo", False),
+                        "freshness": _latest_freshness(
+                            NewsItem, date_field="fetched_at",
+                            scope={"provider": "tiingo"},
+                        ),
+                    },
+                    "fred": {
+                        "key": _provider_state("FRED_API_KEY"),
+                        "user_byok": user_byok.get("fred", False),
+                        "freshness": _latest_freshness(
+                            MacroSnapshot, date_field="created_at",
+                        ),
+                    },
+                    "edgar": {
+                        "key": "configured",  # public, no key
+                        "user_byok": False,
+                        "freshness": _latest_freshness(
+                            Fundamental, date_field="fetched_at",
+                            scope={"source": "edgar"},
+                        ),
+                    },
+                    "anthropic": {
+                        "key": _provider_state("ANTHROPIC_API_KEY"),
+                        "user_byok": user_byok.get("anthropic", False),
+                    },
+                    "openrouter": {
+                        "key": _provider_state("OPENROUTER_API_KEY"),
+                        "user_byok": user_byok.get("openrouter", False),
+                    },
+                },
+                "policy": {
+                    "allow_platform_data_keys": bool(
+                        getattr(settings, "ALLOW_PLATFORM_DATA_KEYS", False)
+                    ),
+                },
+            }
+        )

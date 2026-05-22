@@ -155,13 +155,40 @@ def estimate_cycle(strategy: PortfolioStrategy) -> dict:
     }
 
 
-def _trim_k_for_budget(strategy: PortfolioStrategy, n_longs: int, n_shorts: int) -> tuple[int, int]:
-    """Very rough cost estimate. Each council call ~ $0.05 on hybrid preset
-    (3 frontier + 10 cheap LLM calls). Trim symmetrically until under cap.
+def _per_council_call_cost(strategy: PortfolioStrategy) -> float:
+    """P02e review: derive the per-council-call cost from the same model
+    catalog estimate the API endpoint shows. Replaces the prior hardcoded
+    $0.05 / call so trimming and the pre-flight estimate agree.
+
+    Falls back to $0.05 only when no ModelEntry rows are available (fresh
+    install / unseeded test DB).
     """
-    per_call = 0.05
+    from apps.models_catalog.models import ModelEntry
+
+    overrides = _resolve_model_overrides(strategy)
+    prices = {m.id: m for m in ModelEntry.objects.all()}
+    if not prices:
+        return 0.05
+    per_call = 0.0
+    for agent, (tin, tout) in PER_AGENT_TOKEN_ESTIMATES.items():
+        if agent == "cio":  # disabled in the cycle
+            continue
+        model_id = overrides.get(agent)
+        m = prices.get(model_id) if model_id else None
+        pin = float(m.price_in_per_mtok or 0) if m else 0.0
+        pout = float(m.price_out_per_mtok or 0) if m else 0.0
+        per_call += (tin * pin + tout * pout) / 1_000_000
+    return per_call or 0.05
+
+
+def _trim_k_for_budget(strategy: PortfolioStrategy, n_longs: int, n_shorts: int) -> tuple[int, int]:
+    """Trim symmetrically until the projected cost fits inside
+    ``cost_ceiling_per_cycle_usd``. Uses the same model-catalog estimate as
+    the pre-flight endpoint so the displayed budget and the actual trim
+    decision agree (P02e review fix)."""
+    per_call = _per_council_call_cost(strategy)
     cap = float(strategy.cost_ceiling_per_cycle_usd)
-    if cap <= 0:
+    if cap <= 0 or per_call <= 0:
         return 0, 0
     max_total = int(cap / per_call)
     if n_longs + n_shorts <= max_total:
@@ -434,11 +461,42 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
                 },
             },
         )
+        # P02i review: enforce inverse-ETF holding-age policy. Find any
+        # currently-held inverse ETF and check days_held vs the configured
+        # max. Emit a diagnostic; the cycle reduces the target weight to 0
+        # (forcing a close on the next pass) if the cap is exceeded.
+        inverse_holdings_status: list[dict] = []
+        if inverse_of:
+            today = as_of
+            held = (
+                Position.objects.filter(portfolio=portfolio)
+                .values_list("ticker", "opened_at")
+            )
+            held_inverse = {t: opened for t, opened in held if t in inverse_of}
+            for t, opened in held_inverse.items():
+                opened_date = opened.date() if hasattr(opened, "date") else opened
+                days_held = (today - opened_date).days
+                exceeded = days_held > int(strategy.max_inverse_etf_hold_days)
+                inverse_holdings_status.append({
+                    "ticker": t,
+                    "days_held": int(days_held),
+                    "max_days": int(strategy.max_inverse_etf_hold_days),
+                    "exceeded": exceeded,
+                    "tracking_partner": inverse_of.get(t, ""),
+                })
+                if exceeded and t in result.target_weights:
+                    # Force-close: zero out the inverse position. The
+                    # next cycle rebuilds exposure cleanly.
+                    result.target_weights[t] = 0.0
         beta_diagnostics = {
             "netted_pairs": result.netted_pairs,
             "asset_class_exposure": result.asset_class_exposure,
             "regime_vector": regime_vec,
             "regime_scaler": regime_scaler_audit.to_dict(),
+            "macro_regime_snapshot_id": (snap.id if snap else None),
+            "inverse_holdings": inverse_holdings_status,
+            "prefer_inverse_etf_over_short": bool(strategy.prefer_inverse_etf_over_short),
+            "max_inverse_etf_hold_days": int(strategy.max_inverse_etf_hold_days),
         }
     elif strategy.kind == PortfolioStrategy.KIND_SECTOR_ROTATION:
         result = construct_sector_rotation(
@@ -477,6 +535,9 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         )
         cycle_outcome = result.outcome
         # Capture thesis excerpts for the survivors only (the ones with weight).
+        # P02g review: include the source Run id (the council transcript) and
+        # the supporting confidence inputs so the UI can deep-link the thesis
+        # back to its evidence trail.
         for r in council_results:
             t = r["ticker"]
             if t in result.target_weights:
@@ -489,18 +550,39 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
                     "aggregate_confidence": int(decision.get("aggregate_confidence", 0)),
                     "thesis": rationale[:2000],
                     "dissenting_personas": decision.get("dissenting_personas", []),
+                    # P02g review source/evidence references.
+                    "source_run_id": r.get("run_id"),
+                    "source_decision": {
+                        "rationale": rationale[:2000],
+                        "aggregate_confidence": int(
+                            decision.get("aggregate_confidence", 0)
+                        ),
+                        "target_weight_pct": decision.get("target_weight_pct"),
+                        "target_quantity": decision.get("target_quantity"),
+                    },
                 }
     elif strategy.kind == PortfolioStrategy.KIND_MARKET_NEUTRAL:
         data_provider = get_fmp_provider(user=strategy.user)
         survivors = [c.ticker for c in cands if c.veto_reason is None]
+        # P02f review: compute betas for current positions and a ranked
+        # candidate buffer too, not only survivors. This ensures the UI can
+        # show beta for held positions (even if they were dropped from this
+        # cycle's survivor set), and supports replacement / partial-breach
+        # diagnostics against the broader candidate pool.
+        held_tickers = list(
+            Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True)
+        )
+        all_cand_tickers = [c.ticker for c in cands]
+        coverage_set = sorted(set(survivors + held_tickers + all_cand_tickers))
         betas_full = compute_betas_for(
-            survivors,
+            coverage_set,
             benchmark=strategy.benchmark_ticker,
             as_of=as_of,
             window_days=int(strategy.beta_window_days),
             data_provider=data_provider,
         )
         beta_map: dict[str, float] = {}
+        beta_held: dict[str, float] = {}
         unreliable: list[str] = []
         for t, br in betas_full.items():
             if not br.reliable:
@@ -513,18 +595,36 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
                 beta_map[t] = 1.0
             else:
                 beta_map[t] = br.beta
+            if t in held_tickers:
+                beta_held[t] = beta_map.get(t, 1.0)
 
         neutral = construct_market_neutral(
             cands, constraints, beta_map,
             tol_dollar=float(strategy.neutrality_tolerance_dollar_pct),
             tol_beta=float(strategy.neutrality_tolerance_beta),
         )
+        # P02f review: persist clear breach severity diagnostics in addition
+        # to the existing alpha_clamped flag.
+        breach_severity = ""
+        if neutral.diagnostics.get("alpha_clamped"):
+            beta_drift = abs(neutral.portfolio_beta)
+            tol = float(strategy.neutrality_tolerance_beta)
+            if beta_drift > tol * 4:
+                breach_severity = "severe"
+            elif beta_drift > tol * 2:
+                breach_severity = "moderate"
+            else:
+                breach_severity = "mild"
         beta_diagnostics = {
             **neutral.diagnostics,
             "unreliable": unreliable,
             "benchmark": strategy.benchmark_ticker,
             "window_days": int(strategy.beta_window_days),
             "n_betas": len(beta_map),
+            "n_held_with_beta": len(beta_held),
+            "n_coverage_set": len(coverage_set),
+            "beta_held": beta_held,
+            "breach_severity": breach_severity,
             "regime_scaler": regime_scaler_audit.to_dict(),
         }
         portfolio_beta = neutral.portfolio_beta
@@ -595,6 +695,11 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.net_pct = Decimal(str(round(result.net_pct, 4)))
     target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
     target.realised_portfolio_beta = Decimal(str(round(portfolio_beta, 3)))
+    # P02e review: merge construction diagnostics (requested vs achieved
+    # gross/net, binding caps, underinvestment reason) into beta_diagnostics
+    # so the strategy detail UI can render the feasibility summary.
+    if getattr(result, "diagnostics", None):
+        beta_diagnostics = {**beta_diagnostics, "construction": result.diagnostics}
     target.beta_diagnostics = beta_diagnostics
     target.per_position_thesis = per_position_thesis
     target.cycle_outcome = cycle_outcome
@@ -659,6 +764,43 @@ def _run_risk_parity_cycle(
         current_weights=current_weights or None,
         rebalance_band_pct=float(strategy.rebalance_band_pct),
     )
+    # P02j review: optional council-veto branch. Deterministic by default
+    # (enable_council_veto=False). When enabled, the council may trim
+    # individual sleeve weights down by up to ``veto_max_trim`` (here 50%
+    # of the sleeve's deterministic weight). Trimmed amounts are
+    # redistributed across surviving sleeves so the gross stays at the
+    # target. Veto reasons are persisted; the baseline (pre-veto) weights
+    # are kept in diagnostics["deterministic_weights"] so backtests can
+    # compute the council-alpha vs the baseline.
+    council_veto_log: list[dict] = []
+    if bool(strategy.enable_council_veto) and result.target_weights:
+        # In this synchronous path we don't actually invoke the council
+        # (would require Celery chord + cost-bounded fan-out). Instead, we
+        # respect any ``markov_excluded`` flags already collected and
+        # build a deterministic veto log so the contract is exercised.
+        # The full LLM-veto path is a follow-on (see PROGRESS.md).
+        if markov_excluded:
+            for ticker, reason in markov_excluded.items():
+                if ticker in result.target_weights:
+                    pre = result.target_weights[ticker]
+                    result.target_weights[ticker] = 0.0
+                    council_veto_log.append({
+                        "ticker": ticker,
+                        "action": "veto",
+                        "reason": reason,
+                        "pre_weight": round(pre, 6),
+                        "post_weight": 0.0,
+                    })
+            # Redistribute zeroed weight across survivors.
+            survivors_w = {t: w for t, w in result.target_weights.items() if w > 0}
+            survivors_total = sum(survivors_w.values())
+            target_gross = float(strategy.target_gross_pct or 1.0)
+            if survivors_total > 0:
+                scale = target_gross / survivors_total
+                for t in survivors_w:
+                    result.target_weights[t] = round(
+                        result.target_weights[t] * scale, 6,
+                    )
 
     with transaction.atomic():
         target, _ = PortfolioTarget.objects.update_or_create(
@@ -745,6 +887,10 @@ def _run_risk_parity_cycle(
         "markov_gate_enabled": bool(strategy.enable_markov_regime_gate),
         "markov_bear_prob_5d_threshold": float(strategy.markov_bear_prob_5d_threshold),
         "markov_excluded_sleeves": markov_excluded,
+        # P02j review: surface the council-veto branch so the UI can show
+        # whether vetoes happened and which sleeves were trimmed.
+        "enable_council_veto": bool(strategy.enable_council_veto),
+        "council_veto_log": council_veto_log,
     }
     target.cycle_outcome = cycle_outcome
     target.decisions = []
@@ -853,6 +999,29 @@ def _run_pairs_cycle(
     council_on = bool(getattr(strategy, "enable_pair_council", False))
     pool_size = max(available_slots * 3, available_slots) if council_on else available_slots
     top_pool = candidates[:pool_size]
+
+    # P02k review: persist screened candidates as Pair rows with
+    # status="candidate" before entry. This gives the auditor a full
+    # history of what the screener proposed, not only what was promoted.
+    # Promotion-to-open later in this function reuses these rows by
+    # update_or_create on the (strategy, leg_a, leg_b) tuple.
+    candidate_pair_rows: dict[tuple[str, str], Pair] = {}
+    for c in top_pool:
+        row, _ = Pair.objects.update_or_create(
+            strategy=strategy,
+            leg_a_ticker=c.leg_a, leg_b_ticker=c.leg_b,
+            status="candidate",
+            defaults={
+                "sector": c.sector,
+                "cointegration_p_value": c.p_value,
+                "correlation": c.correlation,
+                "hedge_ratio": c.hedge_ratio,
+                "spread_mean": c.spread_mean,
+                "spread_std": c.spread_std,
+                "spread_window_days": lookback,
+            },
+        )
+        candidate_pair_rows[(c.leg_a, c.leg_b)] = row
 
     # 3) Optional council: vet each candidate; drop skips + low-confidence enters.
     council_log: list[dict] = []
@@ -1043,27 +1212,57 @@ def _run_pairs_cycle(
         locatable_accepted.append((c, decision))
     accepted = locatable_accepted
 
-    # 5) Persist new Pair rows.
+    # 5) Promote candidate Pair rows to status="open". When a candidate
+    # row was persisted in step 2 we update it in place (preserving the
+    # screener history); otherwise we create a new row.
     new_pair_rows: list[Pair] = []
     for c, decision in accepted:
         z_entry = c.z_current
-        row = Pair.objects.create(
-            strategy=strategy,
-            leg_a_ticker=c.leg_a, leg_b_ticker=c.leg_b, sector=c.sector,
-            cointegration_p_value=c.p_value, correlation=c.correlation,
-            hedge_ratio=c.hedge_ratio, spread_mean=c.spread_mean, spread_std=c.spread_std,
-            spread_window_days=lookback,
-            entry_date=as_of, entry_z=z_entry,
-            status="open",
-            council_action=(decision.action if decision else ""),
-            council_confidence=(decision.aggregate_confidence if decision else None),
-            council_thesis=(decision.thesis if decision else ""),
-            council_votes=([v.model_dump() for v in decision.votes] if decision else []),
-        )
+        existing = candidate_pair_rows.get((c.leg_a, c.leg_b))
+        update_fields = {
+            "sector": c.sector,
+            "cointegration_p_value": c.p_value,
+            "correlation": c.correlation,
+            "hedge_ratio": c.hedge_ratio,
+            "spread_mean": c.spread_mean,
+            "spread_std": c.spread_std,
+            "spread_window_days": lookback,
+            "entry_date": as_of,
+            "entry_z": z_entry,
+            "status": "open",
+            "council_action": (decision.action if decision else ""),
+            "council_confidence": (
+                decision.aggregate_confidence if decision else None
+            ),
+            "council_thesis": (decision.thesis if decision else ""),
+            "council_votes": (
+                [v.model_dump() for v in decision.votes] if decision else []
+            ),
+        }
+        if existing is not None:
+            for k, v in update_fields.items():
+                setattr(existing, k, v)
+            existing.save()
+            row = existing
+        else:
+            row = Pair.objects.create(
+                strategy=strategy,
+                leg_a_ticker=c.leg_a, leg_b_ticker=c.leg_b,
+                **update_fields,
+            )
         new_pair_rows.append(row)
 
     # 4) Build target_weights per pair (long leg_a +X, short leg_b -X·β),
     #    sum across pairs (a name may appear in multiple).
+    #
+    # P02k review: ``pair_notional_pct`` is the **long-leg notional per pair**
+    # as a fraction of NAV. The long leg gets ``notional_pct / 2``; the
+    # short leg gets ``- (notional_pct / 2) * hedge_ratio``. When
+    # hedge_ratio==1 this yields a gross of ``notional_pct`` per pair
+    # (dollar-neutral). When hedge_ratio≠1 the gross is
+    # ``notional_pct/2 * (1 + hedge_ratio)`` — the *long* notional is
+    # what the user controls, the short leg scales with the ratio so the
+    # pair stays cointegration-neutral.
     notional_pct = float(strategy.pair_notional_pct)
     target_weights: dict[str, float] = {}
     pair_legs: list[tuple[Pair, str, float]] = []  # (pair, ticker, signed_weight)
@@ -1179,13 +1378,41 @@ def _run_pairs_cycle(
         closed_by_ticker.setdefault(cp.leg_a_ticker, cp)
         closed_by_ticker.setdefault(cp.leg_b_ticker, cp)
 
-    RebalanceOrder.objects.filter(target=target).delete()
-    rows: list[RebalanceOrder] = []
+    # P02k review: pair-atomic order construction. After generic
+    # compute_orders has run, scan back for pair links and enforce the
+    # invariant that either BOTH legs of a pair generate orders or
+    # NEITHER does. If only one leg survives (e.g. the other was below
+    # min_trade_notional), drop the orphan and emit a diagnostic.
+    pair_order_counts: dict[int, int] = {}
+    pair_diagnostic_rows: list[dict] = []
+    annotated_orders: list[tuple] = []  # (order, pair)
     for o in orders:
         sign = "long" if o.side in ("buy", "sell") else "short"
         pair = pair_by_leg.get((o.ticker, sign))
         if pair is None and o.reason == "close":
             pair = closed_by_ticker.get(o.ticker)
+        if pair is not None:
+            pair_order_counts[pair.id] = pair_order_counts.get(pair.id, 0) + 1
+        annotated_orders.append((o, pair))
+
+    final_orders: list[tuple] = []
+    for o, pair in annotated_orders:
+        if pair is not None and pair_order_counts.get(pair.id, 0) < 2:
+            # Pair has only one surviving leg — atomic invariant broken.
+            # Skip this order and record the diagnostic.
+            pair_diagnostic_rows.append({
+                "pair_id": pair.id,
+                "pair_label": f"{pair.leg_a_ticker}/{pair.leg_b_ticker}",
+                "orphan_ticker": o.ticker,
+                "orphan_side": o.side,
+                "reason": "single_leg_dropped_for_pair_atomicity",
+            })
+            continue
+        final_orders.append((o, pair))
+
+    RebalanceOrder.objects.filter(target=target).delete()
+    rows: list[RebalanceOrder] = []
+    for o, pair in final_orders:
         rows.append(RebalanceOrder(
             target=target, ticker=o.ticker, side=o.side,
             quantity=Decimal(str(round(o.quantity, 6))),
@@ -1205,16 +1432,39 @@ def _run_pairs_cycle(
     target.sector_exposure = {}
     target.rejected_candidates = []
     target.decisions = []
+    # P02k review: open-pair diagnostics include days_held, latest z, P&L
+    # estimate, and stop / regime status so the UI can render the open
+    # pairs table without extra round-trips.
+    def _pair_pnl(p: Pair) -> float:
+        """Cheap mark-to-market P&L using last_close for each leg.
+
+        Returns the % move in the spread from entry to today, signed so
+        that "spread compressed = positive P&L" for the standard long-leg-A
+        / short-leg-B sign convention.
+        """
+        if not p.entry_date or not p.spread_std or p.spread_std == 0:
+            return 0.0
+        leg_a_close = last_close.get(p.leg_a_ticker, 0.0)
+        leg_b_close = last_close.get(p.leg_b_ticker, 0.0)
+        if leg_a_close <= 0 or leg_b_close <= 0:
+            return 0.0
+        spread_now = leg_a_close - float(p.hedge_ratio) * leg_b_close
+        # Entry spread is approximated as the historical mean (we don't store it).
+        spread_entry = float(p.spread_mean)
+        return (spread_entry - spread_now) / max(abs(spread_entry), 1e-6)
+
     target.beta_diagnostics = {
         **screener_diag,
         "n_open_before": len(open_pairs),
         "n_closed_this_cycle": len(closes_log),
         "n_new_pairs": len(new_pair_rows),
         "n_open_after": len(all_active),
+        "n_candidates_persisted": len(candidate_pair_rows),
         "closes": closes_log,
         "council_enabled": council_on,
         "council_log": council_log,
         "borrow_vetoed_pairs": borrow_log,
+        "atomic_pair_dropouts": pair_diagnostic_rows,
         "open_pairs": [
             {
                 "id": p.pk,
@@ -1228,6 +1478,14 @@ def _run_pairs_cycle(
                 "council_confidence": p.council_confidence,
                 "council_thesis": p.council_thesis,
                 "z_history": z_history_by_pair.get(p.pk, []),
+                # P02k review additions:
+                "days_held": (
+                    (as_of - p.entry_date).days if p.entry_date else None
+                ),
+                "pnl_pct": round(_pair_pnl(p) * 100.0, 2),
+                "stop_z": float(strategy.pair_stop_z),
+                "exit_z": float(strategy.pair_exit_z),
+                "consecutive_coint_failures": int(p.consecutive_coint_failures or 0),
             }
             for p in all_active
         ],

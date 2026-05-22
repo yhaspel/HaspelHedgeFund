@@ -121,6 +121,67 @@ def test_create_run_rejects_unknown_model_override() -> None:
     mock_task.assert_not_called()
 
 
+@pytest.mark.django_db
+def test_provider_key_status_serializer_never_exposes_plaintext() -> None:
+    """P02d review: the read-side ``ProviderKeyStatusSerializer`` must NEVER
+    return decrypted key material. It exposes ``set`` / ``unset`` per
+    provider — that's it. This is a regression test for the most common
+    failure mode of "I added a new key and accidentally returned it"."""
+    from apps.models_catalog.models import ProviderKey
+    from apps.models_catalog.serializers import ProviderKeyStatusSerializer
+
+    u = User.objects.create_user(email="pk@x.com", password="x" * 12)
+    pk = ProviderKey.objects.create(user=u)
+    pk.set_key("anthropic", "sk-ant-PLAINTEXT-CANARY-1234567890")
+    pk.set_key("openrouter", "sk-or-PLAINTEXT-CANARY-1234567890")
+    pk.set_key("fmp", "fmp-PLAINTEXT-CANARY-1234567890")
+    pk.set_key("tiingo", "tg-PLAINTEXT-CANARY-1234567890")
+    pk.save()
+
+    data = ProviderKeyStatusSerializer(pk).data
+    body = repr(data)
+    assert "PLAINTEXT-CANARY" not in body, (
+        f"plaintext key material leaked into the API response: {body!r}"
+    )
+    assert data["anthropic"] == "set"
+    assert data["openrouter"] == "set"
+    assert data["fmp"] == "set"
+    assert data["tiingo"] == "set"
+    assert data["openai"] == "unset"
+    assert data["fred"] == "unset"
+
+
+@pytest.mark.django_db
+def test_my_provider_keys_endpoint_never_returns_plaintext() -> None:
+    """P02d review: PUT-then-GET round-trip on /api/me/provider-keys/ must
+    not surface the freshly-saved plaintext key. Belt-and-suspenders on
+    top of the serializer-level test above."""
+    from apps.models_catalog.models import ProviderKey
+
+    User.objects.create_user(email="pkx@x.com", password="x" * 12)
+    c = APIClient()
+    tok = c.post(
+        reverse("login"),
+        {"email": "pkx@x.com", "password": "x" * 12},
+        format="json",
+    ).data["access"]
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {tok}")
+    plain = "sk-ant-PLAINTEXT-CANARY-9876543210ABCDEF"
+    put_resp = c.put(
+        reverse("my-provider-keys"),
+        {"anthropic_api_key": plain},
+        format="json",
+    )
+    assert put_resp.status_code == 200, put_resp.data
+    assert "PLAINTEXT-CANARY" not in repr(put_resp.data)
+    get_resp = c.get(reverse("my-provider-keys"))
+    assert get_resp.status_code == 200
+    assert "PLAINTEXT-CANARY" not in repr(get_resp.data)
+    # Sanity: the key is actually stored encrypted and retrievable.
+    pk = ProviderKey.objects.get(user__email="pkx@x.com")
+    assert pk.get_key("anthropic") == plain
+
+
 # --- 5. Quality preset uses Opus ----------------------------------------
 
 

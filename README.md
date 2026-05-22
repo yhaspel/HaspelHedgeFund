@@ -26,7 +26,7 @@ Then open:
 
 - Angular UI → http://localhost:4111/
 - Django admin → http://localhost:8811/admin/
-- API health probe → http://localhost:8811/api/me/ (returns 401 without a token — that's correct)
+- API health probe → http://localhost:8811/api/health/ (200, no auth required — what compose / load balancers / smoke checks should use)
 
 To trigger the demo Celery task, log into `/admin/` → Periodic Tasks → run `apps.accounts.tasks.ping` and watch the `worker-1` container logs.
 

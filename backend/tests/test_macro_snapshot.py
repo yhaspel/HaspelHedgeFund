@@ -60,3 +60,44 @@ def test_snapshot_is_cached_per_date(monkeypatch):
     assert s1.yield_curve_state == "inverted"
     assert s1.narrative == "test narrative"
     assert s1.sector_implications == {"technology": "overweight"}
+
+
+def test_macro_agent_emits_freshness_metadata(monkeypatch):
+    """P02b review: ``run_macro`` must attach a ``_freshness`` block with
+    provider, stale-flag, snapshot-age, and series-used keys so the UI
+    can show degraded provider state instead of mistaking it for a
+    neutral macro stance."""
+    from hedgefund_agents.macro.macro_agent import _macro_freshness, run_macro
+
+    fake = _FakeFred()
+    monkeypatch.setattr(
+        "hedgefund_agents.macro.macro_agent._llm_narrative",
+        lambda **_kwargs: ("test narrative", {"technology": "overweight"}),
+    )
+    monkeypatch.setattr(
+        "hedgefund_agents.macro.macro_agent.get_fred_provider",
+        lambda **_kwargs: fake,
+    )
+    d = dt.date(2024, 12, 31)
+    state = {"as_of_date": d, "ticker": "AAPL", "run_id": None}
+    out = run_macro(state)
+    fresh = out["macro"]["_freshness"]
+    assert fresh["provider"] == "fred"
+    assert fresh["stale"] is False
+    assert fresh["partial"] is False
+    assert fresh["snapshot_age_days"] == 0
+    assert set(fresh["series_used"]) >= {"GDPC1", "CPIAUCSL", "UNRATE"}
+
+    # Simulate the stale-snapshot path: build a snapshot dated 30 days ago.
+    snap = MacroSnapshot.objects.first()
+    snap.as_of_date = d - dt.timedelta(days=30)
+    snap.series_used = {"GDPC1": 22000.0}
+    snap.save(update_fields=["as_of_date", "series_used"])
+    fresh = _macro_freshness(snap, d)
+    assert fresh["stale"] is True
+    assert fresh["snapshot_age_days"] == 30
+    # Empty series_used path is the "fallback" signal.
+    snap.series_used = {"GDPC1": None}
+    fresh = _macro_freshness(snap, d)
+    assert fresh["fallback"] is True
+    assert fresh["partial"] is True

@@ -63,3 +63,39 @@ def test_per_sleeve_floor_enforced():
     )
     for w in out.target_weights.values():
         assert w >= 0.05 - 1e-9
+
+
+def test_diagnostics_include_baseline_version_and_sleeve_rows_p02j():
+    """P02j review: diagnostics must include ``baseline_version``,
+    ``deterministic_weights``, and a per-sleeve list with vol + weight +
+    risk_contribution so the UI can render the sleeve table."""
+    sleeves = [("A", "Equity"), ("B", "Rates")]
+    vols = {"A": 0.01, "B": 0.005}
+    out = construct_risk_parity(
+        sleeves, vols, target_gross_pct=1.0,
+        per_sleeve_max_pct=1.0, per_sleeve_min_pct=0.0,
+    )
+    d = out.diagnostics
+    assert d["baseline_version"] == "v1"
+    assert set(d["deterministic_weights"]) == {"A", "B"}
+    rows = {row["ticker"]: row for row in d["sleeves"]}
+    assert {"A", "B"}.issubset(rows)
+    assert rows["A"]["daily_vol"] == 0.01
+    assert rows["A"]["target_weight"] > 0
+    # Risk contributions of pure inverse-vol weights are equal across sleeves.
+    rc_a = rows["A"]["risk_contribution"]
+    rc_b = rows["B"]["risk_contribution"]
+    assert abs(rc_a - rc_b) < 1e-9
+
+
+def test_diagnostics_include_rebalance_skip_reason_when_within_band_p02j():
+    sleeves = [("A", "X"), ("B", "X")]
+    vols = {"A": 0.01, "B": 0.01}
+    out = construct_risk_parity(
+        sleeves, vols, target_gross_pct=1.0,
+        per_sleeve_max_pct=1.0, per_sleeve_min_pct=0.0,
+        current_weights={"A": 0.50, "B": 0.50},
+        rebalance_band_pct=0.05,
+    )
+    assert out.within_band is True
+    assert "within ±5% band" in out.diagnostics["rebalance_skip_reason"]

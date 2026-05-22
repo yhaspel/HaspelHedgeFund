@@ -116,9 +116,13 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
               <input class="input" type="number" step="0.5" min="0" [(ngModel)]="ceiling" name="ceil" />
             </div>
 
-            <button type="button" class="btn primary" (click)="savePrefs()" [disabled]="savingPrefs()"
+            <!-- P02d review: disable Save when no dirty change so the
+                 button reflects whether there is anything to commit. -->
+            <button type="button" class="btn primary"
+              (click)="savePrefs()"
+              [disabled]="savingPrefs() || !isPrefsDirty()"
               data-test="save-prefs" style="height:32px;justify-content:center">
-              {{ savingPrefs() ? 'Saving…' : 'Save preferences' }}
+              {{ savingPrefs() ? 'Saving…' : (isPrefsDirty() ? 'Save preferences' : 'No changes') }}
             </button>
             @if (prefsMsg()) {
               <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0">{{ prefsMsg() }}</p>
@@ -132,6 +136,9 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
           <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
             <p style="font-size:11.5px;color:var(--text-3);margin:0">
               "Current default" = what the active preset (<b>{{ preset }}</b>) resolves to. Pick an explicit model to override it for this agent.
+            </p>
+            <p style="font-size:11.5px;color:var(--text-3);margin:0;font-style:italic" data-test="per-agent-autosave-note">
+              Per-agent selections save automatically. Preset and cost ceiling save via the button above.
             </p>
             @for (g of groupedAgents(); track g.group) {
               <div>
@@ -235,6 +242,14 @@ export class SettingsModelsPage implements OnInit {
   keysMsg = signal<string | null>(null);
   prefsMsg = signal<string | null>(null);
   presetOverrides = signal<Record<string, string>>({});
+  // P02d review: track which preset/ceiling values are persisted so the
+  // Save button can be disabled when nothing is dirty (consistent save UX).
+  private savedPreset = 'research';
+  private savedCeiling: number | null = 5;
+
+  isPrefsDirty(): boolean {
+    return this.preset !== this.savedPreset || this.ceiling !== this.savedCeiling;
+  }
 
   ngOnInit(): void {
     this.store.loadAll().subscribe(() => {
@@ -245,6 +260,9 @@ export class SettingsModelsPage implements OnInit {
         this.preset = prefs.preset ?? 'research';
         this.ceiling = prefs.cost_ceiling_per_run_usd
           ? Number(prefs.cost_ceiling_per_run_usd) : null;
+        // Snapshot persisted values so isPrefsDirty() works.
+        this.savedPreset = this.preset;
+        this.savedCeiling = this.ceiling;
         const vals = Object.values(prefs.per_agent_defaults ?? {});
         const allSame = vals.length > 0 && vals.every((v) => v === vals[0]);
         this.globalDefault = allSame ? (vals[0] as string) : '';
@@ -340,7 +358,12 @@ export class SettingsModelsPage implements OnInit {
       preset: this.preset,
       cost_ceiling_per_run_usd: this.ceiling,
     }).subscribe({
-      next: () => { this.savingPrefs.set(false); this.prefsMsg.set('Saved.'); },
+      next: () => {
+        this.savingPrefs.set(false);
+        this.prefsMsg.set('Saved.');
+        this.savedPreset = this.preset;
+        this.savedCeiling = this.ceiling;
+      },
       error: () => { this.savingPrefs.set(false); this.prefsMsg.set('Failed to save'); },
     });
   }

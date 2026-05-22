@@ -131,10 +131,14 @@ class PortfolioStrategy(models.Model):
     drop_on_unreliable_beta = models.BooleanField(default=False)
 
     # Concentrated long-only (kind=concentrated_long) parameters.
+    # P02g review: defaults aligned with the plan and UI (min_positions=5,
+    # min_aggregate_confidence=0.65). The earlier weaker defaults
+    # (min_positions=3, 0.55) let API-only callers create concentrated
+    # strategies that didn't actually concentrate.
     max_positions = models.SmallIntegerField(default=15)
-    min_positions = models.SmallIntegerField(default=3)
+    min_positions = models.SmallIntegerField(default=5)
     min_aggregate_confidence = models.DecimalField(
-        max_digits=4, decimal_places=3, default=Decimal("0.550")
+        max_digits=4, decimal_places=3, default=Decimal("0.650")
     )
 
     # Sector rotation (kind=sector_rotation) parameters.
@@ -250,6 +254,34 @@ class SectorETF(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ticker} ({self.sector})"
+
+
+class ETFHoldingSnapshot(models.Model):
+    """P02h review: per-ETF constituent holdings snapshot.
+
+    One row per (etf_ticker, constituent_ticker, as_of_date, source).
+    Backed by FMP/Tiingo holdings endpoints or a manual import; the
+    cycle reads the most recent snapshot for each ETF and computes
+    pairwise overlap from holdings rather than hardcoded pairs.
+
+    weight: constituent's weight in the ETF, in [0, 1].
+    """
+
+    etf_ticker = models.CharField(max_length=16, db_index=True)
+    constituent_ticker = models.CharField(max_length=16, db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    weight = models.DecimalField(max_digits=7, decimal_places=6)
+    source = models.CharField(max_length=32, default="manual")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [
+            ("etf_ticker", "constituent_ticker", "as_of_date", "source"),
+        ]
+        indexes = [models.Index(fields=["etf_ticker", "as_of_date"])]
+
+    def __str__(self) -> str:
+        return f"{self.etf_ticker}@{self.as_of_date}:{self.constituent_ticker}"
 
 
 class MacroETF(models.Model):
@@ -376,7 +408,20 @@ class PortfolioTarget(models.Model):
     )
     beta_diagnostics = models.JSONField(default=dict, blank=True)
     per_position_thesis = models.JSONField(default=dict, blank=True)
-    cycle_outcome = models.CharField(max_length=24, blank=True, default="")
+    # P02g review: cycle_outcome enum (string, kept as CharField for flexibility
+    # but values are constrained to this list). Documented here so analytics /
+    # UI copy can rely on a stable contract:
+    #   - "target_created"       — new target weights emitted; orders may follow.
+    #   - "held_existing_book"   — no new target (concentrated_long below
+    #                              min_positions, or no actionable candidates).
+    #                              An empty target row is still written for
+    #                              audit history; orders are NOT generated.
+    #   - "within_rebalance_band"— risk-parity skipped this cycle because no
+    #                              sleeve drifted outside its band.
+    #   - "blocked_insufficient_confidence" — every candidate cleared but the
+    #                              aggregate confidence bar wasn't met.
+    #   - "risk_off"             — risk manager vetoed the whole book.
+    cycle_outcome = models.CharField(max_length=32, blank=True, default="")
     rejected_candidates = models.JSONField(default=list)
     decisions = models.JSONField(default=list)
     # Sector-rotation v2: per-ETF veto reasoning. Each item:

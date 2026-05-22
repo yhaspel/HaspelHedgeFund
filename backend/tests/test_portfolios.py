@@ -74,6 +74,37 @@ def test_constructor_per_name_cap_enforced():
         assert abs(w) <= cap + 1e-9
 
 
+def test_constructor_emits_feasibility_diagnostics_p02e():
+    """P02e review: every construct() result must report requested vs
+    achieved gross/net, the list of binding caps, and an underinvestment
+    reason when those values diverge."""
+    cands = [_c(f"T{i}", "long", "buy", conf=80) for i in range(3)]
+    cap = 0.10  # 3 names × 10% = 30% max gross
+    out = construct(cands, Constraints(target_gross_pct=1.0, target_net_pct=1.0,
+                                          max_position_pct=cap, max_sector_pct=1.0,
+                                          min_position_pct=0.0001))
+    d = out.diagnostics
+    assert d["requested_gross_pct"] == 1.0
+    # 3 names × cap=0.10 = 0.30 achievable — well short of the 1.0 ask.
+    assert d["achieved_gross_pct"] <= 0.30 + 1e-6
+    assert d["underinvested"] is True
+    assert d["underinvestment_reason"] == "binding_caps_after_redistribution"
+    assert any("max_position:" in c for c in d["binding_caps"])
+    assert d["n_actionable_candidates"] == 3
+
+
+def test_constructor_no_actionable_marks_no_candidates_reason_p02e():
+    """P02e review: when zero candidates are actionable, the diagnostic
+    must say so — the UI shouldn't have to guess why gross is 0."""
+    cands = [_c("ZZZ", "long", "hold")]  # action=hold → not actionable.
+    out = construct(cands, Constraints(target_gross_pct=1.0, target_net_pct=0.0,
+                                          max_position_pct=1.0, max_sector_pct=1.0,
+                                          min_position_pct=0.001))
+    assert out.diagnostics["n_actionable_candidates"] == 0
+    assert out.diagnostics["underinvested"] is True
+    assert out.diagnostics["underinvestment_reason"] == "no_actionable_candidates"
+
+
 def test_rebalancer_empty_portfolio_opens_all():
     target = {"AAPL": 0.10, "MSFT": -0.05}
     orders = compute_orders(

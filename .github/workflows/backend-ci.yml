@@ -1,8 +1,11 @@
 name: backend-ci
 
+# CI policy: run on every push (any branch) and on pull requests, filtered by
+# paths so docs-only edits skip CI. See phase-00-foundations review for the
+# decision trail (plan called for every-push, original workflow filtered to
+# main; this resolves to every-push + PR).
 on:
   push:
-    branches: [main]
     paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
     paths: ["backend/**", ".github/workflows/backend-ci.yml"]

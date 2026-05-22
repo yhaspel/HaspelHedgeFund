@@ -96,10 +96,22 @@ class StrategySerializer(serializers.ModelSerializer):
 
 
 class RebalanceOrderSerializer(serializers.ModelSerializer):
+    # P02k review: surface the pair linkage so the UI / API consumer can
+    # verify that paired legs share the same Pair row. Read-only.
+    pair_label = serializers.SerializerMethodField()
+
     class Meta:
         model = RebalanceOrder
         fields = ("id", "ticker", "side", "quantity", "limit_price",
-                  "reason", "estimated_notional_usd", "sequence")
+                  "reason", "estimated_notional_usd", "sequence",
+                  "pair", "pair_label")
+        read_only_fields = ("pair",)
+
+    def get_pair_label(self, obj: RebalanceOrder) -> str:
+        p = obj.pair
+        if not p:
+            return ""
+        return f"{p.leg_a_ticker}/{p.leg_b_ticker}"
 
 
 class ScreenerRankingSerializer(serializers.ModelSerializer):

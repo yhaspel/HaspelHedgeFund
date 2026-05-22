@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ModelsStore } from '../../abstraction/models.store';
@@ -12,7 +12,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DecimalPipe, ModelPanelComponent, AppShellComponent, GlossaryTermComponent],
+  imports: [CommonModule, FormsModule, DecimalPipe, ModelPanelComponent, AppShellComponent, GlossaryTermComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label:'New'}]">
       <div class="page-head">
@@ -238,12 +238,17 @@ export class BacktestsNewPage implements OnInit {
   estimateCost(): void {
     this.estimating.set(true);
     this.error.set(null);
+    // P02c review: estimate must use the same model_overrides and personas
+    // that the eventual create request will use. Otherwise the displayed
+    // cost can diverge from the actual run cost after the user changes
+    // model selections.
     this.store.estimate({
       universe: this.parsedUniverse(),
       start_date: this.startDate,
       end_date: this.endDate,
       rebalance_frequency: this.rebalance,
       max_budget_usd: this.maxBudgetUsd,
+      model_overrides: this.overrides(),
     }).subscribe({
       next: (est) => { this.estimating.set(false); this.estimate.set(est); },
       error: (e) => {

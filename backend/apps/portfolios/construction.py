@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -43,6 +43,9 @@ class ConstructorResult:
     net_pct: float
     sector_exposure: dict[str, float]
     rejected: list[dict]
+    # P02e review: feasibility diagnostics so the UI can render
+    # requested vs achieved exposure and explain underinvestment.
+    diagnostics: dict = field(default_factory=dict)
 
 
 def _filter_actionable(cands: Iterable[Candidate]) -> tuple[list[Candidate], list[dict]]:
@@ -167,12 +170,50 @@ def construct(
     gross_pct = sum(abs(w) for w in weights.values())
     net_pct = sum(weights.values())
 
+    # P02e review: feasibility diagnostics. Identify binding caps and the
+    # gap between requested and achieved exposure so the UI can explain
+    # cash drag / underinvestment.
+    binding_caps: list[str] = []
+    name_cap_eps = 1e-6
+    for t, w in weights.items():
+        if abs(abs(w) - constraints.max_position_pct) < name_cap_eps:
+            binding_caps.append(f"max_position:{t}")
+    if sector_notes:
+        binding_caps.extend([f"max_sector:{n['sector']}" for n in sector_notes])
+    gross_shortfall = max(0.0, gross - gross_pct)
+    net_shortfall = abs(net - net_pct)
+    underinvested = gross_shortfall > 0.01 * gross  # > 1% of requested gross
+    underinvestment_reason = ""
+    if underinvested:
+        if not actionable:
+            underinvestment_reason = "no_actionable_candidates"
+        elif binding_caps:
+            underinvestment_reason = "binding_caps_after_redistribution"
+        else:
+            underinvestment_reason = "below_min_position_filter"
+    diagnostics = {
+        "requested_gross_pct": round(gross, 6),
+        "achieved_gross_pct": round(gross_pct, 6),
+        "gross_shortfall_pct": round(gross_shortfall, 6),
+        "requested_net_pct": round(net, 6),
+        "achieved_net_pct": round(net_pct, 6),
+        "net_shortfall_pct": round(net_shortfall, 6),
+        "binding_caps": binding_caps,
+        "underinvested": underinvested,
+        "underinvestment_reason": underinvestment_reason,
+        "n_actionable_candidates": len(actionable),
+        "n_longs_in_book": len(long_w),
+        "n_shorts_in_book": len(short_w_pos),
+        "n_final_positions": len(weights),
+    }
+
     return ConstructorResult(
         target_weights=weights,
         gross_pct=gross_pct,
         net_pct=net_pct,
         sector_exposure=sector_exposure,
         rejected=rejected,
+        diagnostics=diagnostics,
     )
 
 
@@ -317,8 +358,9 @@ class SectorRotationResult:
 
 
 # ETF holdings overlap matrix. ~50% holdings overlap = implicit double bet.
-# Hard-coded for the initial registry — replace with a real holdings snapshot
-# in P3+. Pairs map (ETF_A, ETF_B) → estimated holdings overlap fraction.
+# P02h review: prefer the data-backed ETFHoldingSnapshot table when populated;
+# fall back to this hardcoded pair map only when no snapshots exist for either
+# ETF in the pair. Pairs map (ETF_A, ETF_B) → estimated holdings overlap.
 _OVERLAP_PAIRS: dict[tuple[str, str], float] = {
     ("XLK", "SOXX"): 0.50,
     ("XLK", "XLC"): 0.20,
@@ -329,7 +371,52 @@ _OVERLAP_PAIRS: dict[tuple[str, str], float] = {
 }
 
 
+def _overlap_from_snapshot(a: str, b: str) -> float | None:
+    """P02h review: compute overlap as the L1 intersection of holdings
+    weights from the most recent ``ETFHoldingSnapshot`` rows.
+
+    Returns None when either ETF has no snapshot rows OR the DB is
+    unavailable — caller falls back to the hardcoded pair map.
+    """
+    try:
+        from .models import ETFHoldingSnapshot
+    except Exception:
+        return None
+
+    def _latest_holdings(etf: str) -> dict[str, float]:
+        try:
+            latest = (
+                ETFHoldingSnapshot.objects.filter(etf_ticker=etf)
+                .order_by("-as_of_date")
+                .values_list("as_of_date", flat=True)
+                .first()
+            )
+        except Exception:
+            return {}
+        if latest is None:
+            return {}
+        try:
+            rows = ETFHoldingSnapshot.objects.filter(
+                etf_ticker=etf, as_of_date=latest
+            ).values_list("constituent_ticker", "weight")
+            return {t: float(w) for t, w in rows}
+        except Exception:
+            return {}
+
+    a_h = _latest_holdings(a)
+    b_h = _latest_holdings(b)
+    if not a_h or not b_h:
+        return None
+    # Overlap = sum over constituents of min(weight_a, weight_b).
+    common = set(a_h) & set(b_h)
+    overlap = sum(min(a_h[t], b_h[t]) for t in common)
+    return overlap
+
+
 def _overlap_fraction(a: str, b: str) -> float:
+    snap = _overlap_from_snapshot(a, b)
+    if snap is not None:
+        return snap
     return _OVERLAP_PAIRS.get((a, b)) or _OVERLAP_PAIRS.get((b, a)) or 0.0
 
 
@@ -678,12 +765,44 @@ def construct_risk_parity(
     cold_start = not cur
     within_band = (not cold_start) and (max_drift <= rebalance_band_pct)
 
+    # P02j review: sleeve-level diagnostics — vol, weight, estimated risk
+    # contribution. For pure inverse-vol, each sleeve's risk contribution
+    # equals the target gross divided by the number of survivors (the
+    # whole point of risk parity), but we compute it explicitly so the UI
+    # can show "yes, AAPL contributes ~equal risk to TLT".
+    sleeves_diag: list[dict] = []
+    for t, _g in survivors:
+        w = float(weights.get(t, 0.0))
+        sigma = float(vols.get(t, 0.0))
+        risk_contrib = w * sigma  # marginal risk contribution; ∑ = portfolio σ
+        sleeves_diag.append({
+            "ticker": t,
+            "group": _g,
+            "daily_vol": round(sigma, 6),
+            "annualised_vol": round(sigma * (252 ** 0.5), 4),
+            "target_weight": round(w, 6),
+            "current_weight": round(float(cur.get(t, 0.0)), 6),
+            "risk_contribution": round(risk_contrib, 6),
+        })
+
     diagnostics = {
+        # Persisted "baseline" identity. Bump when the deterministic
+        # inverse-vol formula changes so backtest replays can detect drift.
+        "baseline_version": "v1",
         "vols": {t: round(vols[t], 6) for t, _g in survivors},
         "annualised_vols": {t: round(vols[t] * (252 ** 0.5), 4) for t, _g in survivors},
         "n_survivors": len(survivors),
         "n_excluded": len(excluded),
         "cold_start": cold_start,
+        # P02j review: persist deterministic weights so a council-veto run
+        # can be compared against the no-veto baseline downstream.
+        "deterministic_weights": {t: round(w, 6) for t, w in weights.items()},
+        "sleeves": sleeves_diag,
+        "rebalance_band_pct": rebalance_band_pct,
+        "rebalance_skip_reason": (
+            f"all sleeves within ±{rebalance_band_pct:.0%} band"
+            if within_band else ""
+        ),
     }
 
     return RiskParityResult(

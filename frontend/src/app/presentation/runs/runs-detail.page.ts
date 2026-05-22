@@ -342,6 +342,71 @@ interface PersonaCard {
           </section>
         }
 
+        <!-- Risk context (P02a review) -->
+        @if (riskContext(); as rc) {
+          <section class="card" style="margin-bottom:14px" data-test="risk-context">
+            <div class="card-hd">
+              <span class="title">Risk context</span>
+              <span class="pill"
+                [class.warn]="rc.mode === 'stub'"
+                [class.ok]="rc.mode === 'real'">
+                <span class="dot"></span>{{ rc.mode || 'unknown' }}
+              </span>
+            </div>
+            <div class="card-bd">
+              <p style="font-size:13px;color:var(--text-2);margin:0">{{ rc.notes }}</p>
+              @if (rc.mode === 'stub' && rc.stub_nav_usd) {
+                <p style="font-size:11.5px;color:var(--text-3);margin:6px 0 0">
+                  Stub NAV: <span class="mono">$ {{ rc.stub_nav_usd }}</span>
+                </p>
+              }
+              @if (rc.mode === 'real' && rc.cash_balance_usd) {
+                <p style="font-size:11.5px;color:var(--text-3);margin:6px 0 0">
+                  Portfolio cash: <span class="mono">$ {{ rc.cash_balance_usd }}</span>
+                </p>
+              }
+            </div>
+          </section>
+        }
+
+        <!-- Evidence trail (P01 review) -->
+        @if (evidenceItems().length || providerStateEntries().length) {
+          <section class="card" style="margin-bottom:14px" data-test="evidence-trail">
+            <div class="card-hd"><span class="title">Evidence &amp; sources</span></div>
+            <div class="card-bd">
+              @if (providerStateEntries().length) {
+                <div class="eyebrow" style="margin-bottom:6px">Provider status</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+                  @for (p of providerStateEntries(); track p.name) {
+                    <span class="pill"
+                      [class.ok]="p.state === 'configured'"
+                      [class.err]="p.state === 'missing'">
+                      <span class="dot"></span>{{ p.name }} · {{ p.state }}
+                    </span>
+                  }
+                </div>
+              }
+              @if (evidenceItems().length) {
+                <div class="eyebrow" style="margin-bottom:6px">Citations</div>
+                <ul style="margin:0;padding:0;list-style:none;font-size:13px">
+                  @for (it of evidenceItems(); track it.label + it.source + it.url) {
+                    <li style="border-top:1px solid var(--border);padding:6px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                      <span class="pill"><span class="dot"></span>{{ it.agent }}</span>
+                      <span style="color:var(--text-2)">{{ it.label }}</span>
+                      <span class="mono" style="font-size:11px;color:var(--text-3)">
+                        {{ it.provider }}{{ it.as_of ? ' · ' + it.as_of : '' }}
+                      </span>
+                      @if (it.url) {
+                        <a [href]="it.url" target="_blank" rel="noopener" style="color:var(--acc-info-fg);font-size:11.5px">open ↗</a>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          </section>
+        }
+
         <!-- LLM calls -->
         @if (run()!.llm_calls.length) {
           <section class="card">
@@ -460,6 +525,25 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly pmDecisionMsg = computed<Record<string, unknown> | null>(() => {
     const msg = this.messageByAgent().get('pm_decision');
     return msg ? (msg.parsed_output as Record<string, unknown>) : null;
+  });
+
+  // P02a review: surface the stub/real label so users don't treat
+  // illustrative target sizing as portfolio-grade advice.
+  readonly riskContext = computed(() => {
+    const rc = this.run()?.risk_context;
+    if (!rc || !rc.mode) return null;
+    return rc;
+  });
+
+  // P01 review: provider + citation list rendered as the evidence trail.
+  readonly evidenceItems = computed(() => {
+    const items = this.run()?.evidence?.items ?? [];
+    return Array.isArray(items) ? items : [];
+  });
+
+  readonly providerStateEntries = computed(() => {
+    const providers = this.run()?.evidence?.providers ?? {};
+    return Object.entries(providers).map(([name, state]) => ({ name, state }));
   });
 
   asAnyArray(v: unknown): Record<string, unknown>[] {

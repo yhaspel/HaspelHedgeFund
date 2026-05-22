@@ -363,3 +363,11 @@ def test_atomic_close_emits_paired_sequence_zero_orders(monkeypatch, pairs_strat
         # tied to the closing pair; both legs should map back to our Pair.
         assert o.pair_id == pair.pk, f"order on {o.ticker} not linked to pair"
         assert o.reason == "close"
+
+    # P02k review: serializer must expose pair_id + pair_label so the
+    # API/UI can verify atomic-pair siblings without joining models.
+    from apps.portfolios.serializers import RebalanceOrderSerializer
+
+    payload = RebalanceOrderSerializer(closes, many=True).data
+    assert all(row["pair"] == pair.pk for row in payload), payload
+    assert all(row["pair_label"] == "A/B" for row in payload), payload

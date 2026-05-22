@@ -103,3 +103,41 @@ def test_idempotent_same_inputs_same_outputs():
     r1 = construct_sector_rotation(cands, max_etfs_held=5)
     r2 = construct_sector_rotation(cands, max_etfs_held=5)
     assert r1.target_weights == r2.target_weights
+
+
+@pytest.mark.django_db
+def test_overlap_uses_etf_holding_snapshot_when_present_p02h():
+    """P02h review: when an ``ETFHoldingSnapshot`` exists for two ETFs,
+    overlap is computed from holdings (L1 min-weight intersection) instead
+    of falling back to the hardcoded pair map."""
+    import datetime as dt
+    from decimal import Decimal
+
+    from apps.portfolios.construction import _overlap_fraction
+    from apps.portfolios.models import ETFHoldingSnapshot
+
+    # Two ETFs share AAPL+MSFT (very high overlap) and each has a
+    # unique tail. L1 overlap = min(0.4,0.5) + min(0.4,0.4) = 0.80.
+    today = dt.date.today()
+    for tk, w in (("AAPL", "0.40"), ("MSFT", "0.40"), ("NVDA", "0.20")):
+        ETFHoldingSnapshot.objects.create(
+            etf_ticker="ETF_A", constituent_ticker=tk,
+            as_of_date=today, weight=Decimal(w), source="manual",
+        )
+    for tk, w in (("AAPL", "0.50"), ("MSFT", "0.40"), ("AMZN", "0.10")):
+        ETFHoldingSnapshot.objects.create(
+            etf_ticker="ETF_B", constituent_ticker=tk,
+            as_of_date=today, weight=Decimal(w), source="manual",
+        )
+    overlap = _overlap_fraction("ETF_A", "ETF_B")
+    assert 0.79 < overlap < 0.81, f"expected ~0.80, got {overlap}"
+
+
+@pytest.mark.django_db
+def test_overlap_falls_back_to_hardcoded_when_no_snapshots_p02h():
+    """P02h review: when no snapshots exist, the hardcoded pair map is
+    still consulted so existing behavior is preserved on fresh DBs."""
+    from apps.portfolios.construction import _overlap_fraction
+
+    # XLE/XOP is in the hardcoded map at 0.55.
+    assert _overlap_fraction("XLE", "XOP") == 0.55

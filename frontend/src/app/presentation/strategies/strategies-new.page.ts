@@ -161,6 +161,47 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
               </div>
               }
             }
+            @if (kind === 'global_macro') {
+              <!-- P02i review: asset-class cap editor + inverse policy controls. -->
+              <div class="field" data-test="gm-prefer-inverse">
+                <label class="lbl">
+                  Prefer inverse ETF over short
+                  <hf-info text="When on (default), bearish macro views prefer holding an inverse ETF (e.g. SH for short SPY exposure) instead of opening a hard short. Inverse ETFs avoid borrow risk but carry tracking decay over time." />
+                </label>
+                <input class="check" name="pis" type="checkbox" [(ngModel)]="preferInverseEtfOverShort" />
+              </div>
+              <div class="field" data-test="gm-max-inverse-days">
+                <label class="lbl">
+                  Max inverse ETF hold (days)
+                  <hf-info text="Inverse ETFs decay over long holds. The cycle warns when an inverse position has been held longer than this; the next cycle reduces or replaces it. Default 14." />
+                </label>
+                <input class="input" name="mih" type="number" min="1" max="90" [(ngModel)]="maxInverseEtfHoldDays" />
+              </div>
+              <div class="field" data-test="gm-asset-class-cap-equity">
+                <label class="lbl">
+                  Equity cap
+                  <hf-info text="Max fraction of gross exposure allocated to the equity asset class (SPY/QQQ/etc.). 0.50 = 50% cap. Combined with the other class caps, this enforces diversification across asset classes." />
+                </label>
+                <input class="input" name="acce" type="number" step="0.05" min="0.05" max="1.0"
+                  [(ngModel)]="assetClassCapEquity" />
+              </div>
+              <div class="field" data-test="gm-asset-class-cap-rates">
+                <label class="lbl">
+                  Rates cap
+                  <hf-info text="Max fraction of gross exposure to the rates / duration asset class (TLT/IEF/SHY). Default 0.40." />
+                </label>
+                <input class="input" name="accr" type="number" step="0.05" min="0.05" max="1.0"
+                  [(ngModel)]="assetClassCapRates" />
+              </div>
+              <div class="field" data-test="gm-asset-class-cap-commodity">
+                <label class="lbl">
+                  Commodity / FX cap
+                  <hf-info text="Max fraction of gross exposure to gold, broad commodities, and FX proxies. Default 0.30." />
+                </label>
+                <input class="input" name="accc" type="number" step="0.05" min="0.05" max="1.0"
+                  [(ngModel)]="assetClassCapCommodity" />
+              </div>
+            }
             @if (kind === 'risk_parity') {
               <div class="field">
                 <label class="lbl">
@@ -257,6 +298,44 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                   <input class="input" name="pcc" type="number" step="0.05" min="0.30" max="0.95" [(ngModel)]="pairCouncilMinConfidence" />
                 </div>
               }
+            }
+            <!-- P02f review: surface market-neutral controls -->
+            @if (kind === 'market_neutral') {
+              <div class="field" data-test="mn-benchmark">
+                <label class="lbl">
+                  Benchmark ticker
+                  <hf-info text="Benchmark for beta estimation. Default SPY. Used to compute each candidate's market beta and to estimate the book's portfolio beta." />
+                </label>
+                <input class="input sans" name="bt" type="text" maxlength="8" [(ngModel)]="benchmarkTicker" />
+              </div>
+              <div class="field" data-test="mn-beta-window">
+                <label class="lbl">
+                  Beta lookback (days)
+                  <hf-info text="Rolling-window size used to estimate beta. Default 252 (≈ 1 year of trading days). Shorter windows react faster to regime change but are noisier." />
+                </label>
+                <input class="input" name="bwd" type="number" min="60" max="504" [(ngModel)]="betaWindowDays" />
+              </div>
+              <div class="field" data-test="mn-tol-dollar">
+                <label class="lbl">
+                  Dollar neutrality tolerance
+                  <hf-info text="Maximum |net dollar exposure| as a fraction of gross. 0.02 = ±2%. Targets outside the band trigger a neutrality breach diagnostic." />
+                </label>
+                <input class="input" name="ntd" type="number" step="0.005" min="0.005" max="0.10" [(ngModel)]="neutralityToleranceDollar" />
+              </div>
+              <div class="field" data-test="mn-tol-beta">
+                <label class="lbl">
+                  Beta neutrality tolerance
+                  <hf-info text="Maximum |portfolio beta|. 0.05 = ±0.05β. Targets outside the band trigger a breach diagnostic and the constructor scales the book to fit." />
+                </label>
+                <input class="input" name="ntb" type="number" step="0.01" min="0.01" max="0.30" [(ngModel)]="neutralityToleranceBeta" />
+              </div>
+              <div class="field" data-test="mn-drop-unreliable">
+                <label class="lbl">
+                  Drop on unreliable beta
+                  <hf-info text="When on: drop candidates whose beta R² is below the reliability threshold (more conservative, smaller book). When off (default): retain them with β=1 fallback and flag in diagnostics." />
+                </label>
+                <input class="check" name="dub" type="checkbox" [(ngModel)]="dropOnUnreliableBeta" />
+              </div>
             }
             @if (kind === 'concentrated_long') {
               <div class="field">
@@ -458,6 +537,18 @@ export class StrategiesNewPage implements OnInit {
   pairCorrelationMin = 0.70;
   enablePairCouncil = false;
   pairCouncilMinConfidence = 0.50;
+  // P02f review: market-neutral controls exposed in the UI.
+  benchmarkTicker = 'SPY';
+  betaWindowDays = 252;
+  neutralityToleranceDollar = 0.02;
+  neutralityToleranceBeta = 0.05;
+  dropOnUnreliableBeta = false;
+  // P02i review: global-macro asset-class caps + inverse policy.
+  preferInverseEtfOverShort = true;
+  maxInverseEtfHoldDays = 14;
+  assetClassCapEquity = 0.50;
+  assetClassCapRates = 0.40;
+  assetClassCapCommodity = 0.30;
   /** P2l: false → cycle pauses at awaiting_review, true → council fans out
    *  immediately after screening (default — preserves pre-P2l behavior). */
   autoRunCouncil = true;
@@ -574,6 +665,25 @@ export class StrategiesNewPage implements OnInit {
       this.targetNet = 0.0;
       this.maxPosition = 0.05;
       this.maxSector = 1.0;
+      // P02k review: switch to an equity universe when the user picks
+      // pairs unless the currently-selected universe is already equity-
+      // like. ETF-only universes (risk_parity_sleeves, sector_etfs,
+      // macro_etfs) don't have enough cointegrated pairs to be useful.
+      const ETF_ONLY_UNIVERSES = new Set([
+        'risk_parity_sleeves', 'sector_etfs', 'macro_etfs',
+      ]);
+      const currentUni = this.universe === null ? null
+        : this.store.universes().find((u) => u.id === this.universe);
+      if (!currentUni || ETF_ONLY_UNIVERSES.has(currentUni.name)) {
+        const equityUni = this.store.universes().find(
+          (u) => u.name === 'sp500_top_200',
+        ) || this.store.universes().find(
+          (u) => u.name === 'sp500',
+        ) || this.store.universes().find(
+          (u) => !ETF_ONLY_UNIVERSES.has(u.name),
+        );
+        if (equityUni) this.universe = equityUni.id;
+      }
     } else if (k === 'risk_parity') {
       this.topLongs = 0;
       this.topShorts = 0;
@@ -640,6 +750,14 @@ export class StrategiesNewPage implements OnInit {
         ? []
         : [...this.selectedPersonas],
     };
+    if (this.kind === 'market_neutral') {
+      // P02f review: surface market-neutral parameters in the payload.
+      payload['benchmark_ticker'] = this.benchmarkTicker.toUpperCase();
+      payload['beta_window_days'] = this.betaWindowDays;
+      payload['neutrality_tolerance_dollar_pct'] = String(this.neutralityToleranceDollar);
+      payload['neutrality_tolerance_beta'] = String(this.neutralityToleranceBeta);
+      payload['drop_on_unreliable_beta'] = this.dropOnUnreliableBeta;
+    }
     if (this.kind === 'concentrated_long') {
       payload['min_positions'] = this.minPositions;
       payload['max_positions'] = this.maxPositions;
@@ -657,6 +775,14 @@ export class StrategiesNewPage implements OnInit {
       payload['per_etf_max_pct'] = String(this.perEtfMax);
       payload['per_etf_min_pct'] = String(this.perEtfMin);
       payload['bearish_veto_threshold'] = String(this.bearishVetoThreshold);
+      // P02i review: surface inverse-policy + asset-class caps to backend.
+      payload['prefer_inverse_etf_over_short'] = this.preferInverseEtfOverShort;
+      payload['max_inverse_etf_hold_days'] = this.maxInverseEtfHoldDays;
+      payload['asset_class_caps'] = {
+        equity: this.assetClassCapEquity,
+        rates: this.assetClassCapRates,
+        commodity: this.assetClassCapCommodity,
+      };
     }
     if (this.kind === 'risk_parity') {
       payload['per_etf_max_pct'] = String(this.perEtfMax);

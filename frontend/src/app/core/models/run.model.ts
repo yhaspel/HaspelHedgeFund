@@ -99,6 +99,33 @@ export interface RunSummary {
   strategy_backlink?: StrategyBacklink | null;
 }
 
+/** P01 review: per-source provenance entry for run outputs. */
+export interface EvidenceItem {
+  agent: string;
+  label: string;
+  provider: string;
+  source: string;
+  url: string;
+  as_of: string | null;
+  retrieved_at: string | null;
+}
+
+export interface RunEvidence {
+  as_of?: string | null;
+  providers?: Record<string, string>;
+  items?: EvidenceItem[];
+  generated_at?: string | null;
+}
+
+/** P02a review: explicit label for whether sizing is illustrative. */
+export interface RunRiskContext {
+  mode?: 'stub' | 'real' | 'research_only';
+  portfolio_id?: number | null;
+  stub_nav_usd?: string | null;
+  cash_balance_usd?: string;
+  notes?: string;
+}
+
 export interface RunDetail extends RunSummary {
   model_overrides: Record<string, string>;
   personas: string[];
@@ -107,6 +134,10 @@ export interface RunDetail extends RunSummary {
   messages: AgentMessage[];
   decisions: DecisionRow[];
   llm_calls: LLMCallRow[];
+  /** P01 review: source/provider/timestamp trail behind the council's claims. */
+  evidence?: RunEvidence;
+  /** P02a review: whether sizing was stub/real/research-only. */
+  risk_context?: RunRiskContext;
 }
 
 export interface CreateRunRequest {

@@ -67,3 +67,23 @@ def test_health_endpoint_is_unauthenticated(client: APIClient) -> None:
     resp = client.get(reverse("health"))
     assert resp.status_code == 200
     assert resp.data == {"status": "ok"}
+
+
+def test_cors_default_includes_localhost_and_127_origins() -> None:
+    """Phase 00 review fix: dev CORS must allow both hostnames so browser
+    probes from 127.0.0.1:4111 don't fail their preflight."""
+    from django.conf import settings
+
+    assert "http://localhost:4111" in settings.CORS_ALLOWED_ORIGINS
+    assert "http://127.0.0.1:4111" in settings.CORS_ALLOWED_ORIGINS
+
+
+def test_jwt_signing_key_is_at_least_32_bytes() -> None:
+    """Phase 00 review fix: the dev/test sentinel must be 32+ bytes so
+    SimpleJWT does not emit length warnings on every test run."""
+    from django.conf import settings
+
+    key = settings.SIMPLE_JWT["SIGNING_KEY"]
+    assert len(key.encode("utf-8")) >= 32, (
+        f"JWT_SIGNING_KEY must be >= 32 bytes; got {len(key.encode('utf-8'))}"
+    )

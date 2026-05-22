@@ -225,6 +225,37 @@ def _llm_narrative(
     return parsed.narrative, parsed.sector_implications
 
 
+def _macro_freshness(snapshot, as_of) -> dict:
+    """P02b review: explicit freshness/provider/source state on macro output.
+
+    ``stale`` is True when the consumed snapshot is more than 14 days
+    older than ``as_of`` — long enough that the regime classifier may
+    have moved on. ``fallback`` is True when ``series_used`` contains
+    only None values, signalling the provider call failed and we are
+    rendering an unpopulated snapshot.
+    """
+    import datetime as _dt
+
+    age_days = (as_of - snapshot.as_of_date).days
+    series_used = getattr(snapshot, "series_used", None) or {}
+    has_any_value = any(v is not None for v in series_used.values())
+    created_at = getattr(snapshot, "created_at", None)
+    return {
+        "snapshot_date": snapshot.as_of_date.isoformat(),
+        "snapshot_age_days": int(age_days),
+        "retrieved_at": (
+            created_at.isoformat()
+            if isinstance(created_at, _dt.datetime)
+            else None
+        ),
+        "provider": "fred",
+        "stale": age_days > 14,
+        "partial": not has_any_value,
+        "fallback": not has_any_value,
+        "series_used": list(series_used.keys()),
+    }
+
+
 def run_macro(state: AgentState) -> AgentState:
     as_of = state["as_of_date"]
     snapshot = compute_snapshot(
@@ -242,7 +273,12 @@ def run_macro(state: AgentState) -> AgentState:
         narrative=snapshot.narrative,
         sector_implications=snapshot.sector_implications or {},
     )
-    return {"macro": out.model_dump()}  # type: ignore[return-value]
+    payload = out.model_dump()
+    # P02b review: append provenance/freshness metadata that the run-detail
+    # UI consumes. Kept as a sibling key rather than added to MacroOutput so
+    # the LLM contract stays narrow.
+    payload["_freshness"] = _macro_freshness(snapshot, as_of)
+    return {"macro": payload}  # type: ignore[return-value]
 
 
 # Silence unused warning on Decimal import — kept for tests/typing.
