@@ -90,15 +90,46 @@ def stub_fmp_provider():
 
 
 @pytest.fixture(autouse=True)
-def clear_mark_cache():
-    """Mark cache is keyed on (ticker, date) so tests need a clean Redis."""
-    try:
-        from apps.data.cache import _redis
-        client = _redis()
-        for key in client.scan_iter("mark:fmp:*"):
-            client.delete(key)
-    except Exception:
-        pass
+def in_memory_mark_cache():
+    """Replace the Redis-backed cache with an in-memory dict so the tests
+    don't depend on Redis being available (CI runs without it). Patches
+    both `valuation.cache_get/set` and `_redis()` so test seeds + the
+    `invalidate_mark_cache` helper also share the dict."""
+    import json
+    store: dict[str, str] = {}
+
+    def _get(key: str):
+        raw = store.get(key)
+        return json.loads(raw) if raw else None
+
+    def _set(key: str, value, ttl_seconds: int = 86_400):
+        store[key] = json.dumps(value, default=str)
+
+    class _FakeRedis:
+        def get(self, key):
+            return store.get(key)
+
+        def set(self, key, value, *args, **kwargs):
+            store[key] = value if isinstance(value, str) else json.dumps(value)
+
+        def setex(self, key, ttl, value):
+            store[key] = value if isinstance(value, str) else json.dumps(value)
+
+        def delete(self, *keys):
+            for k in keys:
+                store.pop(k, None)
+
+        def scan_iter(self, match="*"):
+            import fnmatch
+            return [k for k in list(store.keys()) if fnmatch.fnmatch(k, match)]
+
+    fake = _FakeRedis()
+    with (
+        patch("apps.portfolios.valuation.cache_get", side_effect=_get),
+        patch("apps.portfolios.valuation.cache_set", side_effect=_set),
+        patch("apps.data.cache._redis", return_value=fake),
+    ):
+        yield store
 
 
 @pytest.fixture(autouse=True)
