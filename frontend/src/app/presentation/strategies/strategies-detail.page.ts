@@ -530,8 +530,8 @@ import { ModalComponent } from '../shared/modal.component';
                       <tbody>
                         @for (p of openPairs(); track $index) {
                           <tr>
-                            <td class="mono" style="color:var(--acc-long-fg)">{{ p.leg_a }}</td>
-                            <td class="mono" style="color:var(--acc-short-fg)">{{ p.leg_b }}</td>
+                            <td><hf-ticker [ticker]="p.leg_a"></hf-ticker></td>
+                            <td><hf-ticker [ticker]="p.leg_b"></hf-ticker></td>
                             <td style="font-size:11.5px;color:var(--text-2)">{{ p.sector || '—' }}</td>
                             <td class="num">{{ p.hedge_ratio | number: '1.2-3' }}</td>
                             <td class="num">{{ p.entry_z | number: '1.2-2' }}</td>
@@ -569,7 +569,11 @@ import { ModalComponent } from '../shared/modal.component';
                           @if (p.council_thesis) {
                             <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface-2)">
                               <div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--text-3)">
-                                <span class="mono" style="color:var(--text);font-weight:600">{{ p.leg_a }} / {{ p.leg_b }}</span>
+                                <span style="font-weight:600;color:var(--text);display:inline-flex;align-items:baseline;gap:4px">
+                                  <hf-ticker [ticker]="p.leg_a"></hf-ticker>
+                                  <span style="color:var(--text-3)">/</span>
+                                  <hf-ticker [ticker]="p.leg_b"></hf-ticker>
+                                </span>
                                 <span>· council {{ p.council_action }} @ {{ p.council_confidence }}</span>
                               </div>
                               <p style="font-size:12.5px;color:var(--text-2);margin:4px 0 0;white-space:pre-wrap;word-break:break-word">{{ p.council_thesis }}</p>
@@ -593,8 +597,16 @@ import { ModalComponent } from '../shared/modal.component';
                       <tbody>
                         @for (cp of closedPairs(); track $index) {
                           <tr>
-                            <td class="mono">{{ cp.leg_a || '—' }}</td>
-                            <td class="mono">{{ cp.leg_b || '—' }}</td>
+                            <td>
+                              @if (cp.leg_a) {
+                                <hf-ticker [ticker]="cp.leg_a"></hf-ticker>
+                              } @else { <span class="mono">—</span> }
+                            </td>
+                            <td>
+                              @if (cp.leg_b) {
+                                <hf-ticker [ticker]="cp.leg_b"></hf-ticker>
+                              } @else { <span class="mono">—</span> }
+                            </td>
                             <td style="font-size:11.5px"
                               [style.color]="cp.reason === 'reverted' ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
                               {{ cp.reason === 'reverted' ? 'mean-reverted (profit-take)'
@@ -617,9 +629,13 @@ import { ModalComponent } from '../shared/modal.component';
                     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
                       @for (sk of councilSkipped(); track $index) {
                         <div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-2)">
-                          <div style="font-size:11.5px;color:var(--text-3)">
-                            <span class="mono" style="color:var(--text)">{{ sk.leg_a }} / {{ sk.leg_b }}</span>
-                            · {{ sk.enter_count }} enter / {{ sk.skip_count }} skip · confidence {{ sk.confidence }}
+                          <div style="font-size:11.5px;color:var(--text-3);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px">
+                            <span style="color:var(--text);display:inline-flex;align-items:baseline;gap:4px">
+                              <hf-ticker [ticker]="sk.leg_a"></hf-ticker>
+                              <span style="color:var(--text-3)">/</span>
+                              <hf-ticker [ticker]="sk.leg_b"></hf-ticker>
+                            </span>
+                            <span>· {{ sk.enter_count }} enter / {{ sk.skip_count }} skip · confidence {{ sk.confidence }}</span>
                           </div>
                           <p style="font-size:12px;color:var(--text-2);margin:4px 0 0">{{ sk.thesis_excerpt }}</p>
                         </div>
@@ -653,7 +669,10 @@ import { ModalComponent } from '../shared/modal.component';
                       <div class="card" data-test="position-thesis"
                         style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--surface-2)">
                         <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
-                          <span class="mono" style="color:var(--text);font-weight:600">{{ t.ticker }}</span>
+                          <span style="font-weight:600;color:var(--text)">
+                            <hf-ticker [ticker]="t.ticker"></hf-ticker>
+                          </span>
+                          <span style="font-size:11.5px;color:var(--text-2)">{{ nameFor(t.ticker) }}</span>
                           <span style="font-size:11.5px;color:var(--text-3)">{{ t.sector || '—' }}</span>
                           <span class="mono" style="font-size:11.5px;color:var(--acc-long-fg)">
                             {{ t.weight | number: '1.2-2' }}%
@@ -790,12 +809,22 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     if (Array.isArray((d as { theses?: { ticker?: string }[] }).theses)) {
       addArr((d as { theses?: { ticker?: string }[] }).theses);
     }
-    if (Array.isArray((d as { open_pairs?: { leg_a?: string; leg_b?: string }[] }).open_pairs)) {
-      (d as { open_pairs?: { leg_a?: string; leg_b?: string }[] }).open_pairs!.forEach((p) => {
+    const addPairs = (
+      pairs: { leg_a?: string | null; leg_b?: string | null }[] | undefined,
+    ) => {
+      (pairs ?? []).forEach((p) => {
         if (p.leg_a) tk.add(p.leg_a);
         if (p.leg_b) tk.add(p.leg_b);
       });
-    }
+    };
+    const dd = d as {
+      open_pairs?: { leg_a?: string; leg_b?: string }[];
+      closed_pairs?: { leg_a?: string; leg_b?: string }[];
+      council_skipped_pairs?: { leg_a?: string; leg_b?: string }[];
+    };
+    addPairs(dd.open_pairs);
+    addPairs(dd.closed_pairs);
+    addPairs(dd.council_skipped_pairs);
     return [...tk];
   }
 

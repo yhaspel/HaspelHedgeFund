@@ -1,4 +1,4 @@
-import { Component, Input, computed, inject, signal } from '@angular/core';
+import { Component, Input, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
@@ -50,7 +50,7 @@ function fmtDec(value: string | null, digits = 2): string {
             [points]="historySpark()"
             [width]="180"
             [height]="36"
-            [loading]="!historySpark() && !historyLoadedOnce()"
+            [loading]="!historySpark()"
           />
         </div>
         <dl class="hf-tpop-stats">
@@ -157,7 +157,6 @@ export class TickerPopoverComponent {
   readonly profileStore = inject(TickerProfileStore);
   private readonly history = inject(TickerHistoryStore);
 
-  readonly historyLoadedOnce = signal(false);
   readonly historySpark = computed<number[] | null>(() => {
     // re-evaluate when either store bumps.
     this.history._bump();
@@ -187,12 +186,4 @@ export class TickerPopoverComponent {
     this.profileStore._bump();
     return this.profileStore.profile(this.ticker)?.as_of ?? null;
   });
-
-  load(): void {
-    if (!this.ticker) return;
-    this.profileStore.fetchProfile(this.ticker).subscribe();
-    this.history.fetch(this.ticker, 60).subscribe(() => {
-      this.historyLoadedOnce.set(true);
-    });
-  }
 }

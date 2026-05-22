@@ -1,14 +1,16 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { AuthStore } from '../../abstraction/auth.store';
 import { MacroStore } from '../../abstraction/macro.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { StrategiesStore } from '../../abstraction/strategies.store';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { GrossNetMeterComponent } from '../shared/gross-net-meter.component';
+import { TickerComponent } from '../shared/ticker.component';
 
 type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
 
@@ -22,6 +24,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
     AppShellComponent,
     KpiTileComponent,
     GrossNetMeterComponent,
+    TickerComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Dashboard'}]">
@@ -185,16 +188,24 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               <ul class="runlist">
                 @for (r of activeRuns(); track r.id) {
                   <li>
-                    <a [routerLink]="['/runs', r.id]" class="runrow">
+                    <div class="runrow" role="link" tabindex="0"
+                         [attr.aria-label]="'Open run ' + r.id"
+                         (click)="openRun(r.id)"
+                         (keydown.enter)="openRun(r.id)"
+                         (keydown.space)="openRun(r.id); $event.preventDefault()">
                       <span class="run-id mono">#{{ r.id }}</span>
-                      <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      <span class="run-tickers">
+                        @for (t of r.tickers; track t; let last = $last) {
+                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+                        }
+                      </span>
                       @if (r.source === 'strategy' && r.strategy_backlink) {
                         <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
                           via {{ r.strategy_backlink.strategy_name }}
                         </span>
                       }
                       <span class="pill warn"><span class="dot"></span>{{ r.status }}</span>
-                    </a>
+                    </div>
                   </li>
                 }
               </ul>
@@ -204,9 +215,17 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               <ul class="runlist">
                 @for (r of recentDone(); track r.id) {
                   <li>
-                    <a [routerLink]="['/runs', r.id]" class="runrow">
+                    <div class="runrow" role="link" tabindex="0"
+                         [attr.aria-label]="'Open run ' + r.id"
+                         (click)="openRun(r.id)"
+                         (keydown.enter)="openRun(r.id)"
+                         (keydown.space)="openRun(r.id); $event.preventDefault()">
                       <span class="run-id mono">#{{ r.id }}</span>
-                      <span class="run-tickers mono">{{ r.tickers.join(', ') }}</span>
+                      <span class="run-tickers">
+                        @for (t of r.tickers; track t; let last = $last) {
+                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+                        }
+                      </span>
                       @if (r.source === 'strategy' && r.strategy_backlink) {
                         <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
                           via {{ r.strategy_backlink.strategy_name }}
@@ -218,7 +237,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                         <span class="dot"></span>{{ r.status }}
                       </span>
                       <span class="cost mono">$ {{ (+r.total_cost_usd).toFixed(4) }}</span>
-                    </a>
+                    </div>
                   </li>
                 }
               </ul>
@@ -392,17 +411,21 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         border-radius: var(--r-6, 6px);
         text-decoration: none;
         color: var(--text);
+        cursor: pointer;
         transition: background var(--dur-fast, 120ms) var(--ease-out-ui);
       }
       .runrow:hover { background: var(--surface-2); }
-      .run-id { color: var(--text-3); font-size: 12px; }
+      .runrow:focus-visible { outline: none; box-shadow: var(--focus-ring); }
       .run-tickers {
-        color: var(--text);
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        font-family: var(--font-mono);
         font-size: 13px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        color: var(--text);
       }
+      .run-id { color: var(--text-3); font-size: 12px; }
       .cost { color: var(--text-2); font-size: 12px; }
       .recent-eyebrow {
         margin-top: 14px;
@@ -435,6 +458,10 @@ export class DashboardPage implements OnInit {
   readonly macro = inject(MacroStore);
   readonly strategies = inject(StrategiesStore);
   readonly portfolio = inject(PortfolioStore);
+  private readonly profiles = inject(TickerProfileStore);
+  private readonly router = inject(Router);
+
+  openRun(id: number): void { this.router.navigate(['/runs', id]); }
 
   book = signal<{
     strategy_name: string;
@@ -468,7 +495,12 @@ export class DashboardPage implements OnInit {
 
   setRunSource(s: 'all' | 'adhoc' | 'strategy'): void {
     this.runSource.set(s);
-    this.runs.listRuns({ source: s }).subscribe();
+    this.runs.listRuns({ source: s }).subscribe((rows) => this._prefetchTickerNames(rows));
+  }
+
+  private _prefetchTickerNames(rows: { tickers: string[] }[]): void {
+    const tickers = [...new Set(rows.flatMap((r) => r.tickers || []))];
+    if (tickers.length) this.profiles.fetchNames(tickers).subscribe();
   }
 
   manualLongCount(): number {
@@ -480,7 +512,7 @@ export class DashboardPage implements OnInit {
   }
 
   ngOnInit(): void {
-    this.runs.listRuns().subscribe();
+    this.runs.listRuns().subscribe((rows) => this._prefetchTickerNames(rows));
     this.macro.loadSnapshot().subscribe({ error: () => {} });
     // P3: load the Manual Book so the Positions KPI reflects the real book,
     // not the latest strategy cycle's target-weight count.

@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
@@ -7,6 +7,8 @@ import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.m
 import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
 import { PositionSide } from '../../core/models/portfolio.model';
+import { TickerComponent } from '../shared/ticker.component';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 
 interface PersonaCard {
   id: string;
@@ -23,14 +25,18 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, TickerComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
         <div>
           <div class="eyebrow">Run · {{ run()?.status || '…' }}</div>
           <h1 style="margin-top:6px">
-            Run #{{ run()?.id }} <span style="color:var(--text-3);font-weight:500">— {{ run()?.tickers?.join(', ') }}</span>
+            Run #{{ run()?.id }}
+            <span style="color:var(--text-3);font-weight:500">—</span>
+            @for (t of (run()?.tickers || []); track t; let last = $last) {
+              <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+            }
           </h1>
         </div>
         <div class="head-actions">
@@ -110,8 +116,9 @@ interface PersonaCard {
             <div class="card-bd">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
                 <div>
-                  <h2 style="font-size:18px;font-weight:600;margin:0">
-                    Final order ticket: {{ d.action.toUpperCase() }} {{ d.ticker }}
+                  <h2 style="font-size:18px;font-weight:600;margin:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span>Final order ticket: {{ d.action.toUpperCase() }}</span>
+                    <hf-ticker [ticker]="d.ticker"></hf-ticker>
                   </h2>
                   <div style="font-size:12px;color:var(--text-3);margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                     @if (d.risk_overrides.veto) {
@@ -477,9 +484,28 @@ interface PersonaCard {
 export class RunsDetailPage implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   readonly store = inject(RunsStore);
+  private readonly profiles = inject(TickerProfileStore);
   readonly run = this.store.currentRun;
   readonly expanded = signal<Set<string>>(new Set());
   readonly cancelling = signal(false);
+  private prefetchedTickers = new Set<string>();
+
+  constructor() {
+    // WS-2: prefetch identity for every ticker the run + its decisions reference,
+    // so popovers on the heading and decision cards open with the name already
+    // cached. Idempotent — skips tickers already in flight or resolved.
+    effect(() => {
+      const r = this.run();
+      if (!r) return;
+      const tickers = new Set<string>();
+      (r.tickers || []).forEach((t) => tickers.add(t));
+      (r.decisions || []).forEach((d) => d.ticker && tickers.add(d.ticker));
+      const fresh = [...tickers].filter((t) => !this.prefetchedTickers.has(t));
+      if (!fresh.length) return;
+      fresh.forEach((t) => this.prefetchedTickers.add(t));
+      this.profiles.fetchNames(fresh).subscribe();
+    });
+  }
 
   crumbs = computed(() => [
     { label: 'Runs', link: '/runs' },
