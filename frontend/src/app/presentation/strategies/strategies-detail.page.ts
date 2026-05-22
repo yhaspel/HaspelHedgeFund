@@ -124,7 +124,13 @@ import { ModalComponent } from '../shared/modal.component';
         <section class="card">
           <div class="card-hd"><span class="title">Cycles</span></div>
           <div class="card-bd">
-            @if (store.cycles().length === 0) {
+            @if (store.cycles().length === 0 && !cyclesLoaded()) {
+              <div class="flex flex-col gap-2" aria-busy="true" aria-label="Loading cycles">
+                @for (_ of [1,2,3]; track $index) {
+                  <div class="skel h-[18px] w-full"></div>
+                }
+              </div>
+            } @else if (store.cycles().length === 0) {
               <hf-empty-state
                 [compact]="true"
                 message="No cycles yet."
@@ -858,6 +864,12 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   private readonly profiles = inject(TickerProfileStore);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
+  /** Flips true after the first `listCycles` call settles so the left-rail
+   *  can show a skeleton during the initial fetch (rather than the
+   *  "No cycles yet." empty state, which only applies to true zero-cycle
+   *  strategies). */
+  readonly cyclesLoaded = signal(false);
+
   nameFor(ticker: string | null | undefined): string {
     if (!ticker) return '—';
     void this.profiles._bump();
@@ -1117,17 +1129,21 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   ngOnDestroy(): void { if (this.pollHandle) clearInterval(this.pollHandle); }
 
   refreshCycles(): void {
-    this.store.listCycles(this.strategyId).subscribe((cs) => {
-      if (cs.length === 0) return;
-      const open = this.cycle();
-      // If the user manually opened an older cycle, keep refreshing it;
-      // otherwise always prefer the most recently created row so a freshly
-      // dispatched cycle appears on the page after run-now.
-      if (!open || open.id === cs[0].id) {
-        this.openCycle(cs[0].id);
-      } else {
-        this.openCycle(open.id);
-      }
+    this.store.listCycles(this.strategyId).subscribe({
+      next: (cs) => {
+        this.cyclesLoaded.set(true);
+        if (cs.length === 0) return;
+        const open = this.cycle();
+        // If the user manually opened an older cycle, keep refreshing it;
+        // otherwise always prefer the most recently created row so a freshly
+        // dispatched cycle appears on the page after run-now.
+        if (!open || open.id === cs[0].id) {
+          this.openCycle(cs[0].id);
+        } else {
+          this.openCycle(open.id);
+        }
+      },
+      error: () => this.cyclesLoaded.set(true),
     });
   }
 

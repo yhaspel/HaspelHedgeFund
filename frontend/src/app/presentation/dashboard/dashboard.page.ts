@@ -146,6 +146,17 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             eyebrow="Target book (latest cycle)"
             [value]="b.positionCount.toString()"
             [sub]="b.longCount + ' L · ' + b.shortCount + ' S · ' + b.as_of_date" />
+        } @else if (!bookLoaded()) {
+          <section class="card placeholder" aria-busy="true" aria-label="Loading strategy book">
+            <div class="skel h-2.5 w-[55%]"></div>
+            <div class="skel h-[26px] w-[70%] mt-2"></div>
+            <div class="skel h-[11px] w-[80%] mt-2"></div>
+          </section>
+          <section class="card placeholder" aria-hidden="true">
+            <div class="skel h-2.5 w-[55%]"></div>
+            <div class="skel h-[26px] w-[70%] mt-2"></div>
+            <div class="skel h-[11px] w-[80%] mt-2"></div>
+          </section>
         } @else {
           <section class="card placeholder">
             <p class="muted">No strategy cycles yet.
@@ -222,7 +233,13 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             </div>
           </div>
           <div class="card-bd">
-            @if (activeRuns().length === 0) {
+            @if (activeRuns().length === 0 && !runsLoaded()) {
+              <div aria-busy="true" aria-label="Loading runs" class="flex flex-col gap-2">
+                @for (_ of [1,2,3]; track $index) {
+                  <div class="skel h-[28px] w-full"></div>
+                }
+              </div>
+            } @else if (activeRuns().length === 0) {
               <p class="muted">No runs in flight.</p>
             } @else {
               <ul class="runlist">
@@ -290,7 +307,13 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             <span class="title">Strategies</span>
             <a routerLink="/strategies" class="link mono">View all →</a>
           </div>
-          @if (strategies.strategies().length === 0) {
+          @if (strategies.strategies().length === 0 && !strategiesLoaded()) {
+            <div class="card-bd flex flex-col gap-2" aria-busy="true" aria-label="Loading strategies">
+              @for (_ of [1,2,3]; track $index) {
+                <div class="skel h-[28px] w-full"></div>
+              }
+            </div>
+          } @else if (strategies.strategies().length === 0) {
             <hf-empty-state message="No strategies yet.">
               <a class="btn primary" routerLink="/strategies/new">Create a strategy</a>
             </hf-empty-state>
@@ -482,6 +505,14 @@ export class DashboardPage implements OnInit {
     shorts: { ticker: string; weight: number }[];
   } | null>(null);
 
+  // Load tracking — distinguish "still fetching" (show skeleton) from
+  // "loaded but empty" (show hf-empty-state). Each flag flips true once
+  // the relevant store call settles (success or empty path).
+  readonly runsLoaded = signal(false);
+  readonly strategiesLoaded = signal(false);
+  readonly bookLoaded = signal(false);
+  readonly portfolioLoaded = signal(false);
+
   // P2l: source filter for the runs list. 'all' shows both.
   runSource = signal<'all' | 'adhoc' | 'strategy'>('all');
 
@@ -531,44 +562,59 @@ export class DashboardPage implements OnInit {
   }
 
   ngOnInit(): void {
-    this.runs.listRuns().subscribe((rows) => this._prefetchTickerNames(rows));
+    this.runs.listRuns().subscribe({
+      next: (rows) => { this._prefetchTickerNames(rows); this.runsLoaded.set(true); },
+      error: () => this.runsLoaded.set(true),
+    });
     this.macro.loadSnapshot().subscribe({ error: () => {} });
-    // P3: load the Manual Book so the Positions KPI reflects the real book,
-    // not the latest strategy cycle's target-weight count.
-    this.portfolio.loadOverview().subscribe({ error: () => {} });
-    this.strategies.list().subscribe((ss) => {
-      const recent = ss.find((s) => !!s.last_run_at) ?? ss[0];
-      if (!recent) return;
-      this.strategies.listCycles(recent.id).subscribe((cs) => {
-        const done = cs.find((c) => c.status === 'done') ?? cs[0];
-        if (!done) return;
-        this.strategies.cycleDetail(recent.id, done.id).subscribe((d) => {
-          const allLongs = Object.entries(d.target_weights)
-            .filter(([, w]) => Number(w) > 0)
-            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
-          const allShorts = Object.entries(d.target_weights)
-            .filter(([, w]) => Number(w) < 0)
-            .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
-          const longPct = allLongs.reduce((a, b) => a + b.weight, 0);
-          const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
-          this.book.set({
-            strategy_name: recent.name,
-            as_of_date: d.as_of_date,
-            gross_pct: d.gross_pct,
-            net_pct: d.net_pct,
-            target_gross_pct: recent.target_gross_pct,
-            target_net_pct: recent.target_net_pct,
-            longPct,
-            shortPct,
-            netSigned: longPct - shortPct,
-            longCount: allLongs.length,
-            shortCount: allShorts.length,
-            positionCount: allLongs.length + allShorts.length,
-            longs: allLongs.sort((a, b) => b.weight - a.weight).slice(0, 5),
-            shorts: allShorts.sort((a, b) => a.weight - b.weight).slice(0, 5),
-          });
+    this.portfolio.loadOverview().subscribe({
+      next: () => this.portfolioLoaded.set(true),
+      error: () => this.portfolioLoaded.set(true),
+    });
+    this.strategies.list().subscribe({
+      next: (ss) => {
+        this.strategiesLoaded.set(true);
+        const recent = ss.find((s) => !!s.last_run_at) ?? ss[0];
+        if (!recent) { this.bookLoaded.set(true); return; }
+        this.strategies.listCycles(recent.id).subscribe({
+          next: (cs) => {
+            const done = cs.find((c) => c.status === 'done') ?? cs[0];
+            if (!done) { this.bookLoaded.set(true); return; }
+            this.strategies.cycleDetail(recent.id, done.id).subscribe({
+              next: (d) => {
+                const allLongs = Object.entries(d.target_weights)
+                  .filter(([, w]) => Number(w) > 0)
+                  .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+                const allShorts = Object.entries(d.target_weights)
+                  .filter(([, w]) => Number(w) < 0)
+                  .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+                const longPct = allLongs.reduce((a, b) => a + b.weight, 0);
+                const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
+                this.book.set({
+                  strategy_name: recent.name,
+                  as_of_date: d.as_of_date,
+                  gross_pct: d.gross_pct,
+                  net_pct: d.net_pct,
+                  target_gross_pct: recent.target_gross_pct,
+                  target_net_pct: recent.target_net_pct,
+                  longPct,
+                  shortPct,
+                  netSigned: longPct - shortPct,
+                  longCount: allLongs.length,
+                  shortCount: allShorts.length,
+                  positionCount: allLongs.length + allShorts.length,
+                  longs: allLongs.sort((a, b) => b.weight - a.weight).slice(0, 5),
+                  shorts: allShorts.sort((a, b) => a.weight - b.weight).slice(0, 5),
+                });
+                this.bookLoaded.set(true);
+              },
+              error: () => this.bookLoaded.set(true),
+            });
+          },
+          error: () => this.bookLoaded.set(true),
         });
-      });
+      },
+      error: () => { this.strategiesLoaded.set(true); this.bookLoaded.set(true); },
     });
   }
 
