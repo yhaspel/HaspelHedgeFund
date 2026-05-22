@@ -51,15 +51,18 @@
   --acc-danger-fg: #f08c87;
   --acc-danger-soft: rgba(200, 51, 44, 0.12);
 
-  /* Persona chart palette */
-  --c1: #6b8fd9;
-  --c2: #2e9d6e;
+  /* Persona chart palette — recalibrated 2026-05-22 for WCAG 2 AA contrast
+     on persona-card mono-tiles (color text on 12%-tinted bg). Each value
+     gives ≥4.5:1 contrast against its rendered tile bg in dark theme; the
+     [data-theme='light'] block below mirrors the same constraint. */
+  --c1: #92aae0;
+  --c2: #3fc28a;
   --c3: #c99746;
-  --c4: #d04b50;
-  --c5: #8a6bc9;
+  --c4: #e57579;
+  --c5: #a896d8;
   --c6: #3fa5b7;
-  --c7: #c2748b;
-  --c8: #7b9b4e;
+  --c7: #d8a4b3;
+  --c8: #a3c46c;
   --chart-grid: #1a1f28;
   --chart-axis: #5c6470;
   --chart-tip-bg: #161a21;
@@ -190,14 +193,15 @@
   --acc-danger-fg: #7c140f;
   --acc-danger-soft: rgba(178, 43, 37, 0.1);
 
-  --c1: #3c66b8;
-  --c2: #1f7e55;
-  --c3: #a47322;
-  --c4: #b0353a;
-  --c5: #6a4fb0;
-  --c6: #2a8595;
-  --c7: #a45470;
-  --c8: #5e7b33;
+  /* Persona chart palette — recalibrated 2026-05-22 (see :root note). */
+  --c1: #2e528f;
+  --c2: #176544;
+  --c3: #7a5418;
+  --c4: #9c2a2f;
+  --c5: #5a3f99;
+  --c6: #1f6371;
+  --c7: #8a3f57;
+  --c8: #4c6428;
   --chart-grid: #ece9df;
   --chart-axis: #8a93a0;
   --chart-tip-bg: #ffffff;
