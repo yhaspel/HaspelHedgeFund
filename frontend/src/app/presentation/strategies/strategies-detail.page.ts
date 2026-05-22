@@ -735,6 +735,20 @@ import { ModalComponent } from '../shared/modal.component';
               }
             </div>
           </section>
+        } @else if (store.cycles().length > 0) {
+          <section class="card" aria-busy="true" aria-label="Loading cycle">
+            <div class="card-hd"><span class="title">Cycle</span></div>
+            <div class="card-bd" style="display:flex;flex-direction:column;gap:10px">
+              <div class="skel" style="height:14px;width:40%"></div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+                @for (_ of [1,2,3,4]; track $index) {
+                  <div class="skel" style="height:60px"></div>
+                }
+              </div>
+              <div class="skel" style="height:14px;width:100%"></div>
+              <div class="skel" style="height:14px;width:80%"></div>
+            </div>
+          </section>
         }
         </div>
       </div>

@@ -63,12 +63,30 @@ Chart.register(
             <div class="kpi">
               <div class="k">Stitched OOS return</div>
               <div class="v">{{ m.total_return_pct | number: '1.2-2' }}%</div>
-              <div class="d">Baseline: {{ m.baseline_return_pct | number: '1.2-2' }}%</div>
+              <div class="d">
+                <span class="delta"
+                  [class.up]="m.total_return_pct > m.baseline_return_pct"
+                  [class.down]="m.total_return_pct < m.baseline_return_pct"
+                  [class.flat]="m.total_return_pct === m.baseline_return_pct">
+                  {{ m.total_return_pct > m.baseline_return_pct ? '▲' : m.total_return_pct < m.baseline_return_pct ? '▼' : '—' }}
+                  {{ m.total_return_pct - m.baseline_return_pct | number: '1.2-2' }}
+                </span>
+                vs baseline {{ m.baseline_return_pct | number: '1.2-2' }}%
+              </div>
             </div>
             <div class="kpi">
               <div class="k">OOS Sharpe (mean)</div>
               <div class="v">{{ m.mean_oos_sharpe | number: '1.2-2' }}</div>
-              <div class="d">IS mean: {{ m.mean_is_sharpe | number: '1.2-2' }} · σ {{ m.oos_sharpe_std | number: '1.2-2' }}</div>
+              <div class="d">
+                <span class="delta"
+                  [class.up]="m.mean_oos_sharpe > m.mean_is_sharpe"
+                  [class.down]="m.mean_oos_sharpe < m.mean_is_sharpe"
+                  [class.flat]="m.mean_oos_sharpe === m.mean_is_sharpe">
+                  {{ m.mean_oos_sharpe > m.mean_is_sharpe ? '▲' : m.mean_oos_sharpe < m.mean_is_sharpe ? '▼' : '—' }}
+                  {{ m.mean_oos_sharpe - m.mean_is_sharpe | number: '1.2-2' }}
+                </span>
+                vs IS {{ m.mean_is_sharpe | number: '1.2-2' }} · σ {{ m.oos_sharpe_std | number: '1.2-2' }}
+              </div>
             </div>
             <div class="kpi">
               <div class="k">Deflation (OOS / IS)</div>

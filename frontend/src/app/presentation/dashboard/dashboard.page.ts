@@ -105,7 +105,15 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                 }
               }
             } @else {
-              <p class="muted">Loading macro snapshot…</p>
+              <div aria-busy="true" aria-label="Loading macro snapshot">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                  @for (_ of [1,2,3,4]; track $index) {
+                    <div class="skel" style="height:18px;width:88px;border-radius:999px"></div>
+                  }
+                </div>
+                <div class="skel" style="height:14px;width:100%;margin-bottom:6px"></div>
+                <div class="skel" style="height:14px;width:85%"></div>
+              </div>
             }
           </div>
         </section>
@@ -138,8 +146,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             [sub]="manualLongCount() + ' L · ' + manualShortCount() + ' S · $' + (+p.total_value | number: '1.0-0')" />
         } @else {
           <a class="card placeholder kpi-link"
-             routerLink="/portfolio" style="text-decoration:none;color:inherit">
-            <p class="muted">Loading Manual Book…</p>
+             routerLink="/portfolio" style="text-decoration:none;color:inherit"
+             aria-busy="true" aria-label="Loading Manual Book">
+            <div class="skel" style="height:10px;width:60%"></div>
+            <div class="skel" style="height:26px;width:50%;margin-top:8px"></div>
+            <div class="skel" style="height:11px;width:75%;margin-top:8px"></div>
           </a>
         }
       </div>

@@ -9,7 +9,7 @@ import { SparkbarComponent } from './sparkbar.component';
   template: `
     <div class="kpi-tile">
       <div class="k">{{ eyebrow }}</div>
-      <div class="v mono">{{ value }}</div>
+      <div class="v mono" [class.up]="!delta && tone==='up'" [class.down]="!delta && tone==='down'">{{ value }}</div>
       @if (delta) {
         <div class="d" [class.up]="tone==='up'" [class.down]="tone==='down'">{{ delta }}</div>
       }
@@ -46,6 +46,8 @@ import { SparkbarComponent } from './sparkbar.component';
         line-height: 1.1;
         margin-top: 2px;
       }
+      .v.up { color: var(--acc-long-fg); }
+      .v.down { color: var(--acc-short-fg); }
       .d {
         font-family: var(--font-mono);
         font-size: 12px;

@@ -54,7 +54,13 @@ type StatusFilter = 'all' | RunStatus;
         </div>
 
         @if (loading()) {
-          <div class="card-bd"><p class="muted">Loading runs…</p></div>
+          <div class="card-bd" aria-busy="true" aria-label="Loading runs">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              @for (_ of [1,2,3,4,5]; track $index) {
+                <div class="skel" style="height:24px;width:100%"></div>
+              }
+            </div>
+          </div>
         } @else if (filtered().length === 0) {
           <div class="empty-state">
             @if (allRuns().length === 0) {

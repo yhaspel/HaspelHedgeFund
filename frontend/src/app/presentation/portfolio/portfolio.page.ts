@@ -13,6 +13,7 @@ import { PositionsTableComponent } from './positions-table.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
 import { ModalComponent } from '../shared/modal.component';
+import { KpiTileComponent } from '../shared/kpi-tile.component';
 
 @Component({
   selector: 'hf-portfolio-page',
@@ -25,6 +26,7 @@ import { ModalComponent } from '../shared/modal.component';
     CashAdjustModalComponent,
     TickerComponent,
     ModalComponent,
+    KpiTileComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Portfolio'}]">
@@ -71,33 +73,24 @@ import { ModalComponent } from '../shared/modal.component';
 
       @if (store.overview(); as o) {
         <section class="kpi-row" style="margin-bottom:16px">
-          <div class="kpi">
-            <div class="eyebrow">Total value</div>
-            <div class="v mono">$\{{ +o.total_value | number: '1.2-2' }}</div>
-            <div class="sub mono">cash $\{{ +o.cash_balance | number: '1.2-2' }} ·
-              free $\{{ +o.free_cash | number: '1.2-2' }}</div>
-          </div>
-          <div class="kpi">
-            <div class="eyebrow">Unrealized P&amp;L</div>
-            <div class="v mono"
-                 [style.color]="+o.unrealized_pnl > 0 ? 'var(--acc-long-fg)' : (+o.unrealized_pnl < 0 ? 'var(--acc-short-fg)' : null)">
-              $\{{ +o.unrealized_pnl | number: '1.2-2' }}
-            </div>
-            <div class="sub">across {{ o.positions.length }} position{{ o.positions.length === 1 ? '' : 's' }}</div>
-          </div>
-          <div class="kpi">
-            <div class="eyebrow">Net exposure</div>
-            <div class="v mono">{{ +o.net_exposure_pct | number: '1.2-2' }}%</div>
-            <div class="sub">gross {{ +o.gross_exposure_pct | number: '1.2-2' }}%</div>
-          </div>
-          <div class="kpi">
-            <div class="eyebrow">Realized P&amp;L</div>
-            <div class="v mono"
-                 [style.color]="+o.realized_pnl > 0 ? 'var(--acc-long-fg)' : (+o.realized_pnl < 0 ? 'var(--acc-short-fg)' : null)">
-              $\{{ +o.realized_pnl | number: '1.2-2' }}
-            </div>
-            <div class="sub">closed lots</div>
-          </div>
+          <hf-kpi-tile
+            eyebrow="Total value"
+            [value]="'$' + (+o.total_value | number: '1.2-2')"
+            [sub]="'cash $' + (+o.cash_balance | number: '1.2-2') + ' · free $' + (+o.free_cash | number: '1.2-2')" />
+          <hf-kpi-tile
+            eyebrow="Unrealized P&amp;L"
+            [value]="'$' + (+o.unrealized_pnl | number: '1.2-2')"
+            [tone]="+o.unrealized_pnl > 0 ? 'up' : (+o.unrealized_pnl < 0 ? 'down' : 'neutral')"
+            [sub]="'across ' + o.positions.length + ' position' + (o.positions.length === 1 ? '' : 's')" />
+          <hf-kpi-tile
+            eyebrow="Net exposure"
+            [value]="(+o.net_exposure_pct | number: '1.2-2') + '%'"
+            [sub]="'gross ' + (+o.gross_exposure_pct | number: '1.2-2') + '%'" />
+          <hf-kpi-tile
+            eyebrow="Realized P&amp;L"
+            [value]="'$' + (+o.realized_pnl | number: '1.2-2')"
+            [tone]="+o.realized_pnl > 0 ? 'up' : (+o.realized_pnl < 0 ? 'down' : 'neutral')"
+            sub="closed lots" />
         </section>
 
         @if (o.warnings.length > 0) {
@@ -127,7 +120,23 @@ import { ModalComponent } from '../shared/modal.component';
             (editClick)="onEdit($event)" />
         </section>
       } @else {
-        <p style="color:var(--text-2)">Loading manual book…</p>
+        <section class="kpi-row" aria-busy="true" aria-label="Loading manual book" style="margin-bottom:16px">
+          @for (_ of [1,2,3,4]; track $index) {
+            <div class="kpi">
+              <div class="skel" style="height:10px;width:55%"></div>
+              <div class="skel" style="height:26px;width:70%;margin-top:8px"></div>
+              <div class="skel" style="height:11px;width:80%;margin-top:8px"></div>
+            </div>
+          }
+        </section>
+        <section class="card" style="margin-bottom:18px">
+          <div class="card-hd"><span class="title">Positions</span></div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:8px" aria-hidden="true">
+            @for (_ of [1,2,3]; track $index) {
+              <div class="skel" style="height:18px;width:100%"></div>
+            }
+          </div>
+        </section>
       }
 
       <section class="card">
@@ -274,6 +283,14 @@ import { ModalComponent } from '../shared/modal.component';
   `,
   styles: [
     `
+      .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+      @media (max-width: 1100px) {
+        .kpi-row { grid-template-columns: 1fr 1fr; }
+      }
       .modal-overlay {
         position: fixed; inset: 0; background: rgba(0,0,0,0.6);
         z-index: var(--z-modal); display: flex; align-items: center;

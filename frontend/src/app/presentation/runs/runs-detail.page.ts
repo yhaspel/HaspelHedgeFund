@@ -253,7 +253,7 @@ interface PersonaCard {
         @if (activeTab() === 'council') {
           <div role="tabpanel" id="tab-council" aria-labelledby="tabbtn-council" tabindex="0">
             <section style="margin-bottom:14px">
-              <div class="eyebrow" style="margin-bottom:10px">Council</div>
+              <h2 class="eyebrow" style="margin:0 0 10px">Council members</h2>
               <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
                 @for (p of personas(); track p.id) {
                   <article class="card" style="border-top:3px solid"
@@ -317,6 +317,7 @@ interface PersonaCard {
 
         @if (activeTab() === 'risk') {
           <div role="tabpanel" id="tab-risk" aria-labelledby="tabbtn-risk" tabindex="0">
+            <h2 class="eyebrow" style="margin:0 0 10px">Risk analysis</h2>
             <!-- Risk Manager -->
             @if (riskOutput(); as risk) {
               <section class="card" style="margin-bottom:14px">
@@ -447,6 +448,7 @@ interface PersonaCard {
 
         @if (activeTab() === 'raw') {
           <div role="tabpanel" id="tab-raw" aria-labelledby="tabbtn-raw" tabindex="0">
+            <h2 class="eyebrow" style="margin:0 0 10px">Raw artifacts</h2>
             <!-- Evidence trail (P01 review) -->
             @if (evidenceItems().length || providerStateEntries().length) {
               <section class="card" style="margin-bottom:14px" data-test="evidence-trail">
