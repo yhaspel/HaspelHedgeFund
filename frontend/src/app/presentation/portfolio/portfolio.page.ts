@@ -8,12 +8,14 @@ import {
 } from '../../core/models/portfolio.model';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { CashAdjustModalComponent } from './cash-adjust.modal';
+import { EmptyStateComponent } from '../shared/empty-state.component';
 import { EnterPositionModalComponent } from './enter-position.modal';
 import { PositionsTableComponent } from './positions-table.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
 import { ModalComponent } from '../shared/modal.component';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
+import { PopoverComponent } from '../shared/popover.component';
 
 @Component({
   selector: 'hf-portfolio-page',
@@ -21,20 +23,22 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
   imports: [
     CommonModule, DatePipe, DecimalPipe,
     AppShellComponent,
+    EmptyStateComponent,
     PositionsTableComponent,
     EnterPositionModalComponent,
     CashAdjustModalComponent,
     TickerComponent,
     ModalComponent,
     KpiTileComponent,
+    PopoverComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Portfolio'}]">
       <div class="page-head">
         <div>
           <div class="eyebrow">Manual Book · Paper</div>
-          <h1 style="margin-top:6px">Portfolio</h1>
-          <p style="font-size:13px;color:var(--text-2);margin-top:4px">
+          <h1 class="mt-1.5">Portfolio</h1>
+          <p class="text-xs text-text-2 mt-1">
             A local paper book seeded with $100,000. No broker, no real money.
             <span data-test="cadence-summary">{{ cadenceSummary() }}</span>
           </p>
@@ -47,17 +51,20 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
             (click)="onRefreshMarks()"
             [disabled]="refreshDisabled()"
             data-test="refresh-marks-btn"
-            [title]="refreshTitle()">
-            <svg width="13" height="13" style="margin-right:4px">
+            [attr.aria-describedby]="popRefresh.open() ? popRefresh.popoverId : null"
+            (mouseenter)="popRefresh.show()" (mouseleave)="popRefresh.maybeHide()"
+            (focus)="popRefresh.show()" (blur)="popRefresh.maybeHide()">
+            <svg width="13" height="13" class="mr-1">
               <use href="/icons.svg#i-rerun" />
             </svg>
             {{ store.refreshing() ? 'Refreshing…' : 'Refresh marks' }}
+            <hf-popover #popRefresh placement="bottom" align="start">{{ refreshTitle() }}</hf-popover>
           </button>
           <button class="btn" (click)="cashOpen.set(true)" data-test="cash-btn">
             Cash deposit / withdraw
           </button>
           <button class="btn primary" (click)="openEntry()" data-test="add-position-btn">
-            <svg width="14" height="14" style="margin-right:6px">
+            <svg width="14" height="14" class="mr-1.5">
               <use href="/icons.svg#i-plus" />
             </svg>
             Add position
@@ -66,13 +73,13 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
       </div>
 
       @if (loadError(); as msg) {
-        <div role="alert" class="pill err" style="height:auto;padding:8px 12px;margin-bottom:14px">
+        <div role="alert" class="pill err h-auto py-2 px-3 mb-3.5">
           <span class="dot"></span>{{ msg }}
         </div>
       }
 
       @if (store.overview(); as o) {
-        <section class="kpi-row" style="margin-bottom:16px">
+        <section class="kpi-row mb-4">
           <hf-kpi-tile
             eyebrow="Total value"
             [value]="'$' + (+o.total_value | number: '1.2-2')"
@@ -94,21 +101,21 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
         </section>
 
         @if (o.warnings.length > 0) {
-          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+          <div class="flex flex-col gap-1.5 mb-3.5">
             @for (w of o.warnings; track w) {
-              <div class="pill warn" style="height:auto;padding:6px 12px">
+              <div class="pill warn h-auto py-1.5 px-3">
                 <span class="dot"></span>{{ w }}
               </div>
             }
           </div>
         }
 
-        <section class="card" style="margin-bottom:18px">
+        <section class="card mb-[18px]">
           <div class="card-hd">
             <span class="title">Positions</span>
             <div class="actions">
               @if (+o.reserved_short_proceeds > 0) {
-                <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                <span class="mono text-[11.5px] text-text-3">
                   reserved short proceeds $\{{ +o.reserved_short_proceeds | number: '1.2-2' }}
                 </span>
               }
@@ -120,20 +127,20 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
             (editClick)="onEdit($event)" />
         </section>
       } @else {
-        <section class="kpi-row" aria-busy="true" aria-label="Loading manual book" style="margin-bottom:16px">
+        <section class="kpi-row mb-4" aria-busy="true" aria-label="Loading manual book">
           @for (_ of [1,2,3,4]; track $index) {
             <div class="kpi">
-              <div class="skel" style="height:10px;width:55%"></div>
-              <div class="skel" style="height:26px;width:70%;margin-top:8px"></div>
-              <div class="skel" style="height:11px;width:80%;margin-top:8px"></div>
+              <div class="skel h-2.5 w-[55%]"></div>
+              <div class="skel h-[26px] w-[70%] mt-2"></div>
+              <div class="skel h-[11px] w-[80%] mt-2"></div>
             </div>
           }
         </section>
-        <section class="card" style="margin-bottom:18px">
+        <section class="card mb-[18px]">
           <div class="card-hd"><span class="title">Positions</span></div>
-          <div style="padding:16px;display:flex;flex-direction:column;gap:8px" aria-hidden="true">
+          <div class="p-4 flex flex-col gap-2" aria-hidden="true">
             @for (_ of [1,2,3]; track $index) {
-              <div class="skel" style="height:18px;width:100%"></div>
+              <div class="skel h-[18px] w-full"></div>
             }
           </div>
         </section>
@@ -143,16 +150,16 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
         <div class="card-hd">
           <span class="title">Transaction ledger</span>
           <div class="actions">
-            <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+            <span class="mono text-[11.5px] text-text-3">
               showing latest 50
             </span>
           </div>
         </div>
         @if (store.ledger().length === 0) {
-          <p style="font-size:12px;color:var(--text-3);margin:0;padding:16px">
-            No transactions yet. The ledger captures every cash movement and
-            position event.
-          </p>
+          <hf-empty-state
+            message="No transactions yet."
+            detail="The ledger captures every cash movement and position event.">
+          </hf-empty-state>
         } @else {
           <table class="tbl">
             <thead>
@@ -172,7 +179,7 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
             <tbody>
               @for (e of ledgerHead(); track e.id) {
                 <tr>
-                  <td class="mono" style="font-size:11.5px">{{ e.created_at | date: 'short' }}</td>
+                  <td class="mono text-[11.5px]">{{ e.created_at | date: 'short' }}</td>
                   <td><span class="pill" [class.ok]="isLong(e.kind)" [class.err]="isShortLike(e.kind)" [class.info]="e.kind === 'edit_adjustment'"><span class="dot"></span>{{ humanKind(e.kind) }}</span></td>
                   <td>
                     @if (e.ticker) {
@@ -181,7 +188,7 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
                       <span class="mono">—</span>
                     }
                   </td>
-                  <td style="color:var(--text-2);font-size:12.5px">{{ e.ticker ? nameFor(e.ticker) : '—' }}</td>
+                  <td class="text-text-2 text-[12.5px]">{{ e.ticker ? nameFor(e.ticker) : '—' }}</td>
                   <td class="num mono">{{ formatQty(e.quantity_delta) }}</td>
                   <td class="num mono">{{ e.price !== null ? (+e.price | number: '1.2-4') : '—' }}</td>
                   <td class="num mono"
@@ -190,7 +197,7 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
                   </td>
                   <td class="num mono">{{ +e.realized_pnl === 0 ? '—' : (+e.realized_pnl | number: '1.2-2') }}</td>
                   <td class="num mono">{{ +e.cash_balance_after | number: '1.2-2' }}</td>
-                  <td style="font-size:11.5px;color:var(--text-3)">{{ truncateNote(e.note) }}</td>
+                  <td class="text-[11.5px] text-text-3">{{ truncateNote(e.note) }}</td>
                 </tr>
               }
             </tbody>
@@ -217,32 +224,32 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
                 </button>
               </div>
             </div>
-            <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
-              <p style="font-size:11.5px;color:var(--text-3);margin:0">
+            <div class="p-4 flex flex-col gap-3">
+              <p class="text-[11.5px] text-text-3 m-0">
                 Correction-only — adjusting cash should use deposit/withdraw,
                 trades should use close/reduce. The edit writes an audit
                 <span class="mono">edit_adjustment</span> ledger entry.
               </p>
-              <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" for="edit-pos-qty" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Quantity</label>
-                <input id="edit-pos-qty" class="input mono" type="number" step="any"
-                       [value]="editQty" (input)="editQty = $any($event.target).value" style="width:160px" />
+              <div class="flex items-center gap-2.5">
+                <label class="lbl edit-modal__lbl" for="edit-pos-qty">Quantity</label>
+                <input id="edit-pos-qty" class="input mono w-[160px]" type="number" step="any"
+                       [value]="editQty" (input)="editQty = $any($event.target).value" />
               </div>
-              <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" for="edit-pos-avg" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Avg cost</label>
-                <input id="edit-pos-avg" class="input mono" type="number" step="0.0001"
-                       [value]="editAvgCost" (input)="editAvgCost = $any($event.target).value" style="width:160px" />
+              <div class="flex items-center gap-2.5">
+                <label class="lbl edit-modal__lbl" for="edit-pos-avg">Avg cost</label>
+                <input id="edit-pos-avg" class="input mono w-[160px]" type="number" step="0.0001"
+                       [value]="editAvgCost" (input)="editAvgCost = $any($event.target).value" />
               </div>
-              <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" for="edit-pos-note" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Note</label>
+              <div class="flex items-center gap-2.5">
+                <label class="lbl edit-modal__lbl" for="edit-pos-note">Note</label>
                 <input id="edit-pos-note" class="input" type="text"
                        [value]="editNote" (input)="editNote = $any($event.target).value" />
               </div>
               @if (editError(); as msg) {
-                <div role="alert" class="pill err" style="height:auto;padding:6px 10px"><span class="dot"></span>{{ msg }}</div>
+                <div role="alert" class="pill err h-auto py-1.5 px-2.5"><span class="dot"></span>{{ msg }}</div>
               }
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+            <div class="flex justify-end gap-2 py-3 px-4 border-t border-solid border-border">
               <button class="btn" (click)="cancelEdit()">Cancel</button>
               <button class="btn primary" (click)="confirmEdit()" [disabled]="store.busy()">Save</button>
             </div>
@@ -252,25 +259,25 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
 
       @if (confirmClose(); as pc) {
         <hf-modal titleId="confirm-close-title" (closed)="onCancelClose()">
-          <div class="card" style="max-width:440px;width:100%">
+          <div class="card max-w-[440px] w-full">
             <div class="card-hd">
               <span class="title" id="confirm-close-title">Close {{ pc.ticker }}?</span>
             </div>
-            <div style="padding:16px;display:flex;flex-direction:column;gap:8px">
-              <p style="margin:0;font-size:13px;color:var(--text)">
+            <div class="p-4 flex flex-col gap-2">
+              <p class="m-0 text-xs text-text">
                 Close {{ pc.ticker }} at the latest mark — this realises P&amp;L
                 and writes a position-close entry to the ledger.
               </p>
-              <p style="margin:0;font-size:11.5px;color:var(--text-3)">
+              <p class="m-0 text-[11.5px] text-text-3">
                 Action is irreversible from this UI; correct via Edit position if needed.
               </p>
               @if (closeError(); as msg) {
-                <div role="alert" class="pill err" style="height:auto;padding:6px 10px;margin-top:4px">
+                <div role="alert" class="pill err h-auto py-1.5 px-2.5 mt-1">
                   <span class="dot"></span>{{ msg }}
                 </div>
               }
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+            <div class="flex justify-end gap-2 py-3 px-4 border-t border-solid border-border">
               <button class="btn" (click)="onCancelClose()">Cancel</button>
               <button class="btn danger" (click)="onConfirmClose()" [disabled]="store.busy()">
                 {{ store.busy() ? 'Closing…' : 'Close position' }}
@@ -297,6 +304,7 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
         justify-content: center; padding: 16px;
       }
       .edit-modal { max-width: 480px; width: 100%; }
+      .edit-modal__lbl { flex: 0 0 110px; font-size: 12px; color: var(--text-2); }
     `,
   ],
 })

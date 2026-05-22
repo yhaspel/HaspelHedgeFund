@@ -48,7 +48,7 @@ interface PrefillInput {
 
           <div class="entry-modal__body scroll-area">
             @if (store.suggestionLoading()) {
-              <p style="margin:0;color:var(--text-3)">Loading suggestion…</p>
+              <p class="m-0 text-text-3">Loading suggestion…</p>
             }
 
             <div class="field-row">
@@ -80,12 +80,12 @@ interface PrefillInput {
 
             <div class="field-row">
               <label class="lbl">Size</label>
-              <div style="display:flex;gap:8px;align-items:center;flex:1">
-                <input class="input mono" type="number" [min]="0" step="{{ quantityMode === 'whole' ? '1' : '0.000001' }}"
-                       [(ngModel)]="quantity" style="width:120px" />
-                <span style="font-size:11.5px;color:var(--text-3)">shares</span>
+              <div class="flex gap-2 items-center flex-1">
+                <input class="input mono w-[120px]" type="number" [min]="0" step="{{ quantityMode === 'whole' ? '1' : '0.000001' }}"
+                       [(ngModel)]="quantity" />
+                <span class="text-[11.5px] text-text-3">shares</span>
                 @if (currentPrice() > 0) {
-                  <span style="font-size:11.5px;color:var(--text-3)">
+                  <span class="text-[11.5px] text-text-3">
                     ≈ $\{{ notionalEstimate() | number: '1.2-2' }} ·
                     {{ weightEstimate() | number: '1.2-2' }}% of book
                   </span>
@@ -95,10 +95,10 @@ interface PrefillInput {
 
             <div class="field-row">
               <label class="lbl">Entry price</label>
-              <input class="input mono" type="number" min="0" step="0.01"
-                     [(ngModel)]="entryPrice" style="width:160px" />
+              <input class="input mono w-[160px]" type="number" min="0" step="0.01"
+                     [(ngModel)]="entryPrice" />
               @if (priceAsOf()) {
-                <span style="font-size:11.5px;color:var(--text-3);margin-left:8px">
+                <span class="text-[11.5px] text-text-3 ml-2">
                   latest close {{ priceAsOf() | date: 'mediumDate' }}
                 </span>
               }
@@ -114,7 +114,7 @@ interface PrefillInput {
               <details class="why-card" [open]="true">
                 <summary>
                   <span class="eyebrow">Why this size?</span>
-                  <span style="margin-left:8px;color:var(--text-2);font-size:11.5px">
+                  <span class="ml-2 text-text-2 text-[11.5px]">
                     {{ s.action_label }} · suggested {{ +s.suggested_weight_pct | number: '1.2-2' }}%
                     ({{ formatQty(s.suggested_quantity) }} sh @ \${{ +s.current_price | number: '1.2-4' }})
                   </span>
@@ -129,7 +129,7 @@ interface PrefillInput {
                   }
                 </ul>
                 @if (+s.rounding_residual_usd > 0.5) {
-                  <p style="font-size:11.5px;color:var(--text-3);margin:6px 0 0">
+                  <p class="text-[11.5px] text-text-3 m-0 mt-1.5">
                     Whole-share rounding residual:
                     <span class="mono">\${{ +s.rounding_residual_usd | number: '1.2-2' }}</span>
                     — switch to fractional shares to capture the full notional.
@@ -138,16 +138,16 @@ interface PrefillInput {
               </details>
             }
 
-            <div role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:4px">
+            <div role="status" aria-live="polite" class="flex flex-col gap-1">
               @for (w of warnings(); track w) {
-                <div class="pill warn" style="height:auto;padding:6px 10px;width:fit-content">
+                <div class="pill warn h-auto py-1.5 px-2.5 w-fit">
                   <span class="dot"></span>{{ w }}
                 </div>
               }
             </div>
 
             @if (error()) {
-              <div role="alert" class="pill err" style="height:auto;padding:6px 10px">
+              <div role="alert" class="pill err h-auto py-1.5 px-2.5">
                 <span class="dot"></span>{{ error() }}
               </div>
             }

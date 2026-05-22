@@ -3,6 +3,7 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { AuthStore } from '../../abstraction/auth.store';
+import { EmptyStateComponent } from '../shared/empty-state.component';
 import { MacroStore } from '../../abstraction/macro.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
@@ -10,6 +11,7 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { GrossNetMeterComponent } from '../shared/gross-net-meter.component';
+import { PopoverComponent } from '../shared/popover.component';
 import { TickerComponent } from '../shared/ticker.component';
 
 type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
@@ -22,8 +24,10 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
     DecimalPipe,
     RouterLink,
     AppShellComponent,
+    EmptyStateComponent,
     KpiTileComponent,
     GrossNetMeterComponent,
+    PopoverComponent,
     TickerComponent,
   ],
   template: `
@@ -56,30 +60,42 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                 <span class="pill help" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
                   [class.warn]="chipKind('growth', s.growth_quadrant)==='warn'"
                   [class.err]="chipKind('growth', s.growth_quadrant)==='err'"
-                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                  tabindex="0"
+                  [attr.aria-describedby]="popGrowth.open() ? popGrowth.popoverId : null"
+                  (mouseenter)="popGrowth.show()" (mouseleave)="popGrowth.maybeHide()"
+                  (focus)="popGrowth.show()" (blur)="popGrowth.maybeHide()">
                   <span class="dot"></span>growth · {{ s.growth_quadrant }}
-                  <span class="tip">{{ chipTooltip('growth', s.growth_quadrant) }}</span>
+                  <hf-popover #popGrowth placement="top" align="start">{{ chipTooltip('growth', s.growth_quadrant) }}</hf-popover>
                 </span>
                 <span class="pill help" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
                   [class.warn]="chipKind('inflation', s.inflation_regime)==='warn'"
                   [class.err]="chipKind('inflation', s.inflation_regime)==='err'"
-                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                  tabindex="0"
+                  [attr.aria-describedby]="popInfl.open() ? popInfl.popoverId : null"
+                  (mouseenter)="popInfl.show()" (mouseleave)="popInfl.maybeHide()"
+                  (focus)="popInfl.show()" (blur)="popInfl.maybeHide()">
                   <span class="dot"></span>inflation · {{ s.inflation_regime }}
-                  <span class="tip">{{ chipTooltip('inflation', s.inflation_regime) }}</span>
+                  <hf-popover #popInfl placement="top" align="start">{{ chipTooltip('inflation', s.inflation_regime) }}</hf-popover>
                 </span>
                 <span class="pill help" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
                   [class.warn]="chipKind('curve', s.yield_curve_state)==='warn'"
                   [class.err]="chipKind('curve', s.yield_curve_state)==='err'"
-                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                  tabindex="0"
+                  [attr.aria-describedby]="popCurve.open() ? popCurve.popoverId : null"
+                  (mouseenter)="popCurve.show()" (mouseleave)="popCurve.maybeHide()"
+                  (focus)="popCurve.show()" (blur)="popCurve.maybeHide()">
                   <span class="dot"></span>curve · {{ s.yield_curve_state }}
-                  <span class="tip">{{ chipTooltip('curve', s.yield_curve_state) }}</span>
+                  <hf-popover #popCurve placement="top" align="start">{{ chipTooltip('curve', s.yield_curve_state) }}</hf-popover>
                 </span>
                 <span class="pill help" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
                   [class.warn]="chipKind('policy', s.policy_stance)==='warn'"
                   [class.info]="chipKind('policy', s.policy_stance)==='info'"
-                  (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                  tabindex="0"
+                  [attr.aria-describedby]="popPolicy.open() ? popPolicy.popoverId : null"
+                  (mouseenter)="popPolicy.show()" (mouseleave)="popPolicy.maybeHide()"
+                  (focus)="popPolicy.show()" (blur)="popPolicy.maybeHide()">
                   <span class="dot"></span>policy · {{ s.policy_stance }}
-                  <span class="tip">{{ chipTooltip('policy', s.policy_stance) }}</span>
+                  <hf-popover #popPolicy placement="top" align="start">{{ chipTooltip('policy', s.policy_stance) }}</hf-popover>
                 </span>
                 @if (s.markov_consensus; as mc) {
                   @if (mc.consensus_state !== 'unavailable') {
@@ -87,9 +103,12 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                           [class.ok]="mc.consensus_state==='bull'"
                           [class.warn]="mc.consensus_state==='sideways'"
                           [class.err]="mc.consensus_state==='bear'"
-                          (mouseenter)="positionTip($event)" (focus)="positionTip($event)" tabindex="0">
+                          tabindex="0"
+                          [attr.aria-describedby]="popMarkov.open() ? popMarkov.popoverId : null"
+                          (mouseenter)="popMarkov.show()" (mouseleave)="popMarkov.maybeHide()"
+                          (focus)="popMarkov.show()" (blur)="popMarkov.maybeHide()">
                       <span class="dot"></span>markov · {{ mc.consensus_state }} ({{ (mc.consensus_strength*100).toFixed(0) }}%)
-                      <span class="tip">{{ markovTooltip(mc) }}</span>
+                      <hf-popover #popMarkov placement="top" align="start">{{ markovTooltip(mc) }}</hf-popover>
                     </span>
                   }
                 }
@@ -97,7 +116,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               <p class="narrative">{{ s.narrative }}</p>
               @if (s.markov_consensus; as mc) {
                 @if (mc.available_count > 0) {
-                  <p class="muted" style="font-size:11.5px;margin-top:4px">
+                  <p class="muted text-[11.5px] mt-1">
                     Markov consensus: {{ mc.vote.bull || 0 }} bull · {{ mc.vote.sideways || 0 }} sideways · {{ mc.vote.bear || 0 }} bear
                     across {{ mc.available_count }} always-modelled ETFs
                     @if (mc.stale_count > 0) { · {{ mc.stale_count }} stale }
@@ -106,13 +125,13 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               }
             } @else {
               <div aria-busy="true" aria-label="Loading macro snapshot">
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                <div class="flex gap-1.5 flex-wrap mb-2.5">
                   @for (_ of [1,2,3,4]; track $index) {
-                    <div class="skel" style="height:18px;width:88px;border-radius:999px"></div>
+                    <div class="skel h-[18px] w-[88px] rounded-full"></div>
                   }
                 </div>
-                <div class="skel" style="height:14px;width:100%;margin-bottom:6px"></div>
-                <div class="skel" style="height:14px;width:85%"></div>
+                <div class="skel h-3.5 w-full mb-1.5"></div>
+                <div class="skel h-3.5 w-[85%]"></div>
               </div>
             }
           </div>
@@ -145,19 +164,19 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             [value]="p.positions.length.toString()"
             [sub]="manualLongCount() + ' L · ' + manualShortCount() + ' S · $' + (+p.total_value | number: '1.0-0')" />
         } @else {
-          <a class="card placeholder kpi-link"
-             routerLink="/portfolio" style="text-decoration:none;color:inherit"
+          <a class="card placeholder kpi-link no-underline text-inherit"
+             routerLink="/portfolio"
              aria-busy="true" aria-label="Loading Manual Book">
-            <div class="skel" style="height:10px;width:60%"></div>
-            <div class="skel" style="height:26px;width:50%;margin-top:8px"></div>
-            <div class="skel" style="height:11px;width:75%;margin-top:8px"></div>
+            <div class="skel h-2.5 w-[60%]"></div>
+            <div class="skel h-[26px] w-1/2 mt-2"></div>
+            <div class="skel h-[11px] w-3/4 mt-2"></div>
           </a>
         }
       </div>
 
       <!-- Gross·Net meter (only when we have data) -->
       @if (book(); as b) {
-        <section class="card" style="margin-bottom:18px">
+        <section class="card mb-[18px]">
           <div class="card-hd">
             <span class="title">Exposure</span>
             <span class="pill"><span class="dot"></span>target gross {{ b.target_gross_pct }}% · net {{ b.target_net_pct }}%</span>
@@ -183,8 +202,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               <span class="dot"></span>{{ activeRuns().length }} in flight
             </span>
             <!-- P2l source filter -->
-            <div class="actions" role="radiogroup" aria-label="Filter runs by source"
-                 style="gap:4px;align-items:center"
+            <div class="actions gap-1 items-center" role="radiogroup" aria-label="Filter runs by source"
                  (keydown)="onRunSourceKeydown($event)">
               <button class="chip" type="button" role="radio"
                       [class.chip-on]="runSource() === 'all'"
@@ -218,11 +236,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                       <span class="run-id mono">#{{ r.id }}</span>
                       <span class="run-tickers">
                         @for (t of r.tickers; track t; let last = $last) {
-                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span class="text-text-3">, </span>}
                         }
                       </span>
                       @if (r.source === 'strategy' && r.strategy_backlink) {
-                        <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
+                        <span class="pill pill-source">
                           via {{ r.strategy_backlink.strategy_name }}
                         </span>
                       }
@@ -245,11 +263,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                       <span class="run-id mono">#{{ r.id }}</span>
                       <span class="run-tickers">
                         @for (t of r.tickers; track t; let last = $last) {
-                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+                          <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span class="text-text-3">, </span>}
                         }
                       </span>
                       @if (r.source === 'strategy' && r.strategy_backlink) {
-                        <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 6px;font-size:11px">
+                        <span class="pill pill-source">
                           via {{ r.strategy_backlink.strategy_name }}
                         </span>
                       }
@@ -273,11 +291,9 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             <a routerLink="/strategies" class="link mono">View all →</a>
           </div>
           @if (strategies.strategies().length === 0) {
-            <div class="card-bd">
-              <p class="muted">No strategies yet.
-                <a routerLink="/strategies/new" class="link">Create one →</a>
-              </p>
-            </div>
+            <hf-empty-state message="No strategies yet.">
+              <a class="btn primary" routerLink="/strategies/new">Create a strategy</a>
+            </hf-empty-state>
           } @else {
             <table class="tbl">
               <thead><tr>
@@ -289,7 +305,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                   <tr>
                     <td><a [routerLink]="['/strategies', s.id]" class="link">{{ s.name }}</a></td>
                     <td><span class="pill mono">{{ s.kind }}</span></td>
-                    <td class="mono" style="color:var(--text-2)">{{ s.universe_name }}</td>
+                    <td class="mono text-text-2">{{ s.universe_name }}</td>
                     <td>
                       <span class="pill"
                         [class.ok]="s.is_active"
@@ -297,7 +313,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                         <span class="dot"></span>{{ s.is_active ? 'active' : 'paused' }}
                       </span>
                     </td>
-                    <td class="mono" style="color:var(--text-3)">{{ s.last_run_at ? (s.last_run_at | date:'yyyy-MM-dd') : '—' }}</td>
+                    <td class="mono text-text-3">{{ s.last_run_at ? (s.last_run_at | date:'yyyy-MM-dd') : '—' }}</td>
                   </tr>
                 }
               </tbody>
@@ -340,53 +356,6 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         text-decoration-color: var(--text-3, rgba(255, 255, 255, 0.25));
         text-underline-offset: 3px;
         position: relative;
-      }
-      .chips .pill.help .tip {
-        position: absolute;
-        bottom: calc(100% + 8px);
-        left: 0;
-        z-index: 50;
-        width: 320px;
-        max-width: 90vw;
-        padding: 10px 12px;
-        background: var(--surface-2, #161a21);
-        color: var(--text, #f6f8fb);
-        border: 1px solid var(--border-2, #2c313d);
-        border-radius: 6px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-        font-size: 12px;
-        font-weight: 400;
-        line-height: 1.55;
-        text-align: left;
-        text-decoration: none;
-        white-space: pre-line;
-        letter-spacing: normal;
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(2px);
-        transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
-        pointer-events: none;
-      }
-      .chips .pill.help:hover .tip,
-      .chips .pill.help:focus-visible .tip {
-        opacity: 1;
-        visibility: visible;
-        transform: translateY(0);
-      }
-      /* Viewport-aware: flip the tooltip below the chip when there's no
-         room above. positionTip() toggles these classes on mouseenter. */
-      .chips .pill.help.tip-below .tip {
-        bottom: auto;
-        top: calc(100% + 8px);
-        transform: translateY(-2px);
-      }
-      .chips .pill.help.tip-below:hover .tip,
-      .chips .pill.help.tip-below:focus-visible .tip {
-        transform: translateY(0);
-      }
-      .chips .pill.help.tip-right-aligned .tip {
-        left: auto;
-        right: 0;
       }
       .card.macro { overflow: visible; }
       .narrative {
@@ -474,6 +443,13 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         background: var(--surface-2);
         color: var(--text);
         border-color: var(--text-3);
+      }
+      .pill-source {
+        background: var(--surface-2);
+        color: var(--text-3);
+        height: auto;
+        padding: 2px 6px;
+        font-size: 11px;
       }
     `,
   ],
@@ -646,36 +622,6 @@ export class DashboardPage implements OnInit {
     const header = HEADERS[kind] ?? '';
     const explanation = VALUES[kind]?.[value] ?? `Current value: ${value}.`;
     return header ? `${header}\n\n${explanation}` : explanation;
-  }
-
-  /**
-   * Viewport-aware tooltip positioning. Called on hover/focus of a chip.
-   * Measures the chip's bounding rect against the tooltip's natural size
-   * and toggles `.tip-below` / `.tip-right-aligned` classes so the tip
-   * never gets clipped by the top or right edge of the viewport.
-   */
-  positionTip(event: Event): void {
-    const chip = event.currentTarget as HTMLElement | null;
-    if (!chip) return;
-    const tip = chip.querySelector('.tip') as HTMLElement | null;
-    if (!tip) return;
-    // Temporarily reveal off-screen to measure (display:block makes
-    // getBoundingClientRect honest while opacity/visibility still hide it).
-    const prevVis = tip.style.visibility;
-    const prevDisp = tip.style.display;
-    tip.style.visibility = 'hidden';
-    tip.style.display = 'block';
-    const tipRect = tip.getBoundingClientRect();
-    tip.style.display = prevDisp;
-    tip.style.visibility = prevVis;
-
-    const chipRect = chip.getBoundingClientRect();
-    const margin = 12;
-    const flipBelow = chipRect.top - tipRect.height - margin < 0;
-    chip.classList.toggle('tip-below', flipBelow);
-
-    const overflowRight = chipRect.left + tipRect.width + margin > window.innerWidth;
-    chip.classList.toggle('tip-right-aligned', overflowRight);
   }
 
   /** Hover tooltip for the Markov consensus chip. */

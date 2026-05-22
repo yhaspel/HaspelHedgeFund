@@ -26,7 +26,7 @@ Chart.register(
       <div class="page-head">
         <div>
           <div class="eyebrow">Walk-forward backtest</div>
-          <h1 style="margin-top:6px">{{ store.current()?.name || 'Backtest' }}</h1>
+          <h1 class="mt-1.5">{{ store.current()?.name || 'Backtest' }}</h1>
         </div>
         <div class="head-actions">
           @if (store.current(); as bt) {
@@ -39,27 +39,27 @@ Chart.register(
 
       @if (store.current(); as bt) {
         @if (bt.status !== 'done') {
-          <section class="card" style="margin-bottom:18px;border-color:var(--acc-hold-soft);background:var(--acc-hold-soft)">
+          <section class="card mb-[18px] border-[var(--acc-hold-soft)] bg-[var(--acc-hold-soft)]">
             <div class="card-bd">
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <div style="font-size:13px">
-                  <span style="font-weight:600">Status:</span> {{ bt.status }}
+              <div class="flex justify-between items-center">
+                <div class="text-xs">
+                  <span class="font-semibold">Status:</span> {{ bt.status }}
                   @if (bt.progress_message) {
-                    <span style="color:var(--text-2)"> — {{ bt.progress_message }}</span>
+                    <span class="text-text-2"> — {{ bt.progress_message }}</span>
                   }
                 </div>
-                <div class="mono" style="font-size:12px;color:var(--text-2)">{{ bt.progress_pct }}%</div>
+                <div class="mono text-2xs text-text-2">{{ bt.progress_pct }}%</div>
               </div>
-              <div class="cost-gauge" style="margin-top:8px;height:8px"><div class="fill" [style.width.%]="bt.progress_pct" style="background:var(--acc-hold)"></div></div>
+              <div class="cost-gauge mt-2 h-2"><div class="fill bg-hold" [style.width.%]="bt.progress_pct"></div></div>
               @if (bt.error_message) {
-                <p style="color:var(--acc-short-fg);font-size:12px;margin:8px 0 0">{{ bt.error_message }}</p>
+                <p class="text-[var(--acc-short-fg)] text-2xs m-0 mt-2">{{ bt.error_message }}</p>
               }
             </div>
           </section>
         }
 
         @if (bt.metrics; as m) {
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px">
+          <div class="grid grid-cols-4 gap-3.5 mb-[18px]">
             <div class="kpi">
               <div class="k">Stitched OOS return</div>
               <div class="v">{{ m.total_return_pct | number: '1.2-2' }}%</div>
@@ -95,7 +95,7 @@ Chart.register(
                 {{ m.sharpe_deflation | number: '1.2-2' }}
               </div>
               @if (m.sharpe_deflation < 0.3) {
-                <div class="d" style="color:var(--acc-short-fg)">⚠ Strong overfitting suspected</div>
+                <div class="d text-[var(--acc-short-fg)]">⚠ Strong overfitting suspected</div>
               }
             </div>
             <div class="kpi">
@@ -105,20 +105,20 @@ Chart.register(
             </div>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px">
+          <div class="grid grid-cols-2 gap-[18px] mb-[18px]">
             <section class="card">
               <div class="card-hd"><span class="title">Stitched OOS equity vs baseline ({{ bt.baseline }})</span></div>
-              <div class="card-bd"><div style="position:relative;height:260px"><canvas #equityChart></canvas></div></div>
+              <div class="card-bd"><div class="relative h-[260px]"><canvas #equityChart></canvas></div></div>
             </section>
             <section class="card">
               <div class="card-hd"><span class="title">IS vs OOS Sharpe per fold</span></div>
-              <div class="card-bd"><div style="position:relative;height:260px"><canvas #deflationChart></canvas></div></div>
+              <div class="card-bd"><div class="relative h-[260px]"><canvas #deflationChart></canvas></div></div>
             </section>
           </div>
 
-          <section class="card" style="margin-bottom:18px">
+          <section class="card mb-[18px]">
             <div class="card-hd"><span class="title">Per-agent attribution (stitched OOS PnL delta)</span></div>
-            <div class="card-bd"><div style="position:relative;height:240px"><canvas #attributionChart></canvas></div></div>
+            <div class="card-bd"><div class="relative h-[240px]"><canvas #attributionChart></canvas></div></div>
           </section>
         }
 
@@ -134,8 +134,8 @@ Chart.register(
               @for (f of bt.folds; track f.id) {
                 <tr>
                   <td class="mono">{{ f.fold_index }}</td>
-                  <td class="mono" style="color:var(--text-2)">{{ f.is_start }} → {{ f.is_end }}</td>
-                  <td class="mono" style="color:var(--text-2)">{{ f.oos_start }} → {{ f.oos_end }}</td>
+                  <td class="mono text-text-2">{{ f.is_start }} → {{ f.is_end }}</td>
+                  <td class="mono text-text-2">{{ f.oos_start }} → {{ f.oos_end }}</td>
                   <td class="num">{{ f.is_sharpe | number: '1.2-2' }}</td>
                   <td class="num">{{ f.oos_sharpe | number: '1.2-2' }}</td>
                   <td class="num">{{ f.oos_return_pct | number: '1.2-2' }}%</td>

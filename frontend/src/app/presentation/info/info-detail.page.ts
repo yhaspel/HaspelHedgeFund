@@ -34,15 +34,15 @@ import { MarkdownComponent, MarkdownHeading } from '../shared/markdown.component
           <div class="page-head">
             <div>
               <div class="eyebrow">Guide</div>
-              <h1 #pageHeading tabindex="-1" style="margin-top:6px">
+              <h1 #pageHeading tabindex="-1" class="mt-1.5">
                 {{ g.title }}
                 @if (g.status === 'coming-soon') {
-                  <span class="pill warn" style="margin-left:8px;vertical-align:middle">
+                  <span class="pill warn ml-2 align-middle">
                     <span class="dot"></span>Coming soon
                   </span>
                 }
               </h1>
-              <p style="font-size:13.5px;color:var(--text-2);margin:8px 0 0;max-width:720px">
+              <p class="text-[13.5px] text-text-2 m-0 mt-2 max-w-[720px]">
                 {{ g.summary }}
               </p>
             </div>
@@ -69,17 +69,17 @@ import { MarkdownComponent, MarkdownHeading } from '../shared/markdown.component
 
             <main id="info-main" #mainEl>
               @if (loading()) {
-                <div class="stack" style="margin-bottom:16px">
-                  <div class="skel" style="height:18px;width:60%"></div>
-                  <div class="skel" style="height:12px;width:90%"></div>
-                  <div class="skel" style="height:12px;width:85%"></div>
-                  <div class="skel" style="height:12px;width:70%"></div>
+                <div class="stack mb-4">
+                  <div class="skel h-[18px] w-[60%]"></div>
+                  <div class="skel h-3 w-[90%]"></div>
+                  <div class="skel h-3 w-[85%]"></div>
+                  <div class="skel h-3 w-[70%]"></div>
                 </div>
               } @else if (error()) {
-                <div class="card" style="margin-bottom:16px">
-                  <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+                <div class="card mb-4">
+                  <div class="card-bd flex flex-col gap-3">
                     <strong>Could not load this guide.</strong>
-                    <p style="font-size:13px;color:var(--text-2);margin:0">
+                    <p class="text-xs text-text-2 m-0">
                       {{ error() }}
                     </p>
                     <button class="btn sm" (click)="reload()">Try again</button>
@@ -94,10 +94,10 @@ import { MarkdownComponent, MarkdownHeading } from '../shared/markdown.component
 
               @if (showToc1Col()) {
                 <details class="info-toc-disclosure">
-                  <summary style="font-size:12px;color:var(--text-2);cursor:pointer">
+                  <summary class="text-2xs text-text-2 cursor-pointer">
                     On this page
                   </summary>
-                  <nav class="info-toc" style="position:static;margin-top:8px">
+                  <nav class="info-toc info-toc-inline">
                     <ul>
                       @for (h of headings(); track h.id) {
                         <li>
@@ -124,8 +124,8 @@ import { MarkdownComponent, MarkdownHeading } from '../shared/markdown.component
                   </a>
                 }
               </div>
-              <p style="margin-top:24px">
-                <a [routerLink]="['/info']" style="color:var(--acc-info-fg);font-size:13px">← Back to all guides</a>
+              <p class="mt-6">
+                <a [routerLink]="['/info']" class="text-[var(--acc-info-fg)] text-xs">← Back to all guides</a>
               </p>
             </main>
           </div>
@@ -133,6 +133,14 @@ import { MarkdownComponent, MarkdownHeading } from '../shared/markdown.component
       </ng-template>
     </hf-guide-shell>
   `,
+  styles: [
+    `
+      .info-toc-inline {
+        position: static;
+        margin-top: 8px;
+      }
+    `,
+  ],
 })
 export class InfoDetailPage implements OnInit, AfterViewInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);

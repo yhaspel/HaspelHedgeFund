@@ -29,7 +29,7 @@ function fmtDec(value: string | null, digits = 2): string {
   standalone: true,
   imports: [CommonModule, SparklineComponent],
   template: `
-    <div class="hf-tpop" role="tooltip" [id]="id">
+    <div class="hf-tpop">
       <div class="hf-tpop-hd">
         <span class="hf-tpop-sym mono">{{ ticker }}</span>
         @if (profileStore.profile(ticker); as p) {
@@ -152,7 +152,6 @@ function fmtDec(value: string | null, digits = 2): string {
 })
 export class TickerPopoverComponent {
   @Input({ required: true }) ticker = '';
-  @Input({ required: true }) id = '';
 
   readonly profileStore = inject(TickerProfileStore);
   private readonly history = inject(TickerHistoryStore);

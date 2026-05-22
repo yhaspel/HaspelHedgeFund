@@ -23,13 +23,13 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
       <div class="page-head">
         <div>
           <div class="eyebrow">Strategy setup</div>
-          <h1 style="margin-top:6px">New strategy</h1>
+          <h1 class="mt-1.5">New strategy</h1>
         </div>
       </div>
 
-      <form (ngSubmit)="submit()" style="max-width:840px;display:flex;flex-direction:column;gap:18px">
+      <form (ngSubmit)="submit()" class="max-w-[840px] flex flex-col gap-[18px]">
         <section class="card">
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+          <div class="card-bd flex flex-col gap-3.5">
             <div class="field">
               <label class="lbl" for="strat-name">
                 Name
@@ -49,15 +49,15 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                   <option [value]="k.value">{{ k.label }}</option>
                 }
               </select>
-              <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">{{ kindDescription() }}</p>
-              <p style="font-size:11.5px;margin:6px 0 0">
-                <a [routerLink]="['/info', kindGuideSlug()]" style="color:var(--acc-info-fg)">
+              <p class="text-[11.5px] text-text-3 m-0 mt-1">{{ kindDescription() }}</p>
+              <p class="text-[11.5px] m-0 mt-1.5">
+                <a [routerLink]="['/info', kindGuideSlug()]" class="text-[var(--acc-info-fg)]">
                   Read the full guide →
                 </a>
               </p>
             </div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="grid grid-cols-2 gap-3.5">
               <div class="field">
                 <label class="lbl" for="strat-universe">
                   <hf-term key="universe">Universe</hf-term>
@@ -80,8 +80,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                     <option [value]="p.id">{{ p.name }} ($ {{ p.cash_balance }})</option>
                   }
                 </select>
-                <button type="button" (click)="createPortfolio()"
-                  style="font-size:11.5px;color:var(--acc-info-fg);background:transparent;border:0;cursor:pointer;padding:0;margin-top:4px;text-align:left">
+                <button type="button" (click)="createPortfolio()" class="strat-link-button">
                   + Create starter portfolio
                 </button>
               </div>
@@ -91,7 +90,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
 
         <section class="card">
           <div class="card-hd"><span class="title">Construction targets</span></div>
-          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="card-bd grid grid-cols-2 gap-3.5">
             <div class="field">
               <label class="lbl" for="strat-g">
                 Target <hf-term key="gross-exposure">gross</hf-term>
@@ -398,15 +397,15 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                 <option value="quality">quality</option>
               </select>
             </div>
-            <div class="field" style="grid-column:1 / -1">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);cursor:pointer">
+            <div class="field col-span-full">
+              <label class="flex items-center gap-2 text-2xs text-text-2 cursor-pointer">
                 <input type="checkbox" name="autoRunCouncil" [(ngModel)]="autoRunCouncil" />
                 <span>
                   Automatically run the council after screening
                   <hf-info text="When ON, the cycle screens and immediately dispatches the council on every shortlisted name (default behavior). When OFF, the cycle stops after screening — you'll see a 'Review' panel on the strategy page where you can approve a subset before any LLM cost is incurred." />
                 </span>
               </label>
-              <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0 22px">
+              <p class="text-[11.5px] text-text-3 m-0 mt-1 ml-[22px]">
                 @if (autoRunCouncil) {
                   The cycle will spend up to your cost ceiling running the council on every screened candidate.
                 } @else {
@@ -423,7 +422,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
             <span class="pill"><span class="dot"></span>{{ selectedPersonas.length }} of {{ ALL_PERSONAS.length }}</span>
           </div>
           <div class="card-bd">
-            <p style="font-size:11.5px;color:var(--text-3);margin:0 0 10px">
+            <p class="text-[11.5px] text-text-3 m-0 mb-2.5">
               Which personas debate each candidate. Leaving all selected = full council.
               @if (kind === 'sector_rotation') {
                 <span>Sector rotation defaults to the macro trio (Druckenmiller, Damodaran, Burry) — name-centric value investors aren't a great fit for ETF baskets.</span>
@@ -443,21 +442,20 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
         <section class="card">
           <div class="card-hd"><span class="title">Screener weights</span></div>
           <div class="card-bd">
-            <p style="font-size:11.5px;color:var(--text-3);margin:0 0 10px">
+            <p class="text-[11.5px] text-text-3 m-0 mb-2.5">
               How much each feature contributes to the ranking. Higher = more weight. Hover the (!) icon on each row for what it does.
             </p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+            <div class="grid grid-cols-2 gap-y-2 gap-x-6">
               @for (key of weightKeys; track key) {
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2)">
-                  <span style="flex:1;display:inline-flex;align-items:center;gap:4px">
+                <label class="flex items-center gap-2 text-2xs text-text-2">
+                  <span class="flex-1 inline-flex items-center gap-1">
                     {{ label(key) }}
                     <hf-info [text]="tooltip(key)" />
                   </span>
-                  <input class="input mono" type="number" step="0.05" min="0" max="5"
+                  <input class="input mono w-20 h-[26px] py-0 px-2 text-2xs" type="number" step="0.05" min="0" max="5"
                     [ngModel]="weights[key]"
                     (ngModelChange)="weights[key] = $event"
-                    [name]="'w_' + key"
-                    style="width:80px;height:26px;padding:0 8px;font-size:12px" />
+                    [name]="'w_' + key" />
                 </label>
               }
             </div>
@@ -465,13 +463,12 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
         </section>
 
         @if (error()) {
-          <p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+          <p class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
         }
 
-        <div style="display:flex;gap:8px">
+        <div class="flex gap-2">
           <a class="btn ghost" routerLink="/strategies">Cancel</a>
-          <button type="submit" class="btn primary" [disabled]="submitting()"
-            style="flex:1;height:36px;justify-content:center">
+          <button type="submit" class="btn primary flex-1 h-9 justify-center" [disabled]="submitting()">
             {{ submitting() ? 'Creating…' : 'Create strategy' }}
           </button>
         </div>
@@ -487,6 +484,16 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
       }
       @media (max-width: 540px) {
         .persona-grid { grid-template-columns: 1fr; }
+      }
+      .strat-link-button {
+        font-size: 11.5px;
+        color: var(--acc-info-fg);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        padding: 0;
+        margin-top: 4px;
+        text-align: left;
       }
     `,
   ],

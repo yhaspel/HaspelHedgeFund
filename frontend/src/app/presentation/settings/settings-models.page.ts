@@ -17,25 +17,25 @@ import { MarkCadence } from '../../core/models/portfolio.model';
       <div class="page-head">
         <div>
           <div class="eyebrow">Settings</div>
-          <h1 style="margin-top:6px">Models</h1>
+          <h1 class="mt-1.5">Models</h1>
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1100px">
+      <div class="grid grid-cols-2 gap-[18px] max-w-[1100px]">
         <!-- A: Provider keys (BYO) -->
         <section class="card">
           <div class="card-hd"><span class="title">Provider keys (BYO)</span></div>
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
-            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+          <div class="card-bd flex flex-col gap-3">
+            <p class="text-[11.5px] text-text-3 m-0">
               Keys are stored Fernet-encrypted on your user row. P4a will replace this with a multi-tenant vault.
             </p>
 
-            <div class="eyebrow" style="border-bottom:1px solid var(--border);padding-bottom:6px">
+            <div class="eyebrow border-b border-solid border-border pb-1.5">
               LLM providers
             </div>
             @for (p of providers; track p.field) {
               <div class="field">
-                <label class="lbl" [attr.for]="'llm-key-' + p.field" style="display:flex;justify-content:space-between">
+                <label class="lbl flex justify-between" [attr.for]="'llm-key-' + p.field">
                   <span>{{ p.label }}</span>
                   <span class="pill" [class.ok]="statusOf(p.field) === 'set'">
                     <span class="dot"></span>{{ statusOf(p.field) }}
@@ -53,15 +53,15 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                 placeholder="http://localhost:11434" data-test="ollama-host" />
             </div>
 
-            <div class="eyebrow" style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-top:6px">
+            <div class="eyebrow border-b border-solid border-border pb-1.5 mt-1.5">
               Data providers
             </div>
-            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+            <p class="text-[11.5px] text-text-3 m-0">
               P2n BYOK: FMP and Tiingo require user-supplied keys (no platform fallback in prod). FRED is optional — free public data falls back to a shared platform key.
             </p>
             @for (p of dataProviders; track p.field) {
               <div class="field">
-                <label class="lbl" [attr.for]="'data-key-' + p.field" style="display:flex;justify-content:space-between">
+                <label class="lbl flex justify-between" [attr.for]="'data-key-' + p.field">
                   <span>{{ p.label }}</span>
                   <span class="pill" [class.ok]="statusOf(p.field) === 'set'">
                     <span class="dot"></span>{{ statusOf(p.field) }}
@@ -72,17 +72,16 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                   [attr.aria-describedby]="'data-key-note-' + p.field"
                   [attr.data-test]="'data-key-' + p.field"
                   placeholder="•••• paste to replace, blank to keep" />
-                <p [id]="'data-key-note-' + p.field" style="font-size:11px;color:var(--text-3);margin:2px 0 0">{{ p.note }}</p>
+                <p [id]="'data-key-note-' + p.field" class="text-[11px] text-text-3 m-0 mt-0.5">{{ p.note }}</p>
               </div>
             }
 
-            <button type="button" class="btn primary" (click)="saveKeys()" [disabled]="savingKeys()"
-              data-test="save-keys"
-              style="height:32px;justify-content:center">
+            <button type="button" class="btn primary save-btn" (click)="saveKeys()" [disabled]="savingKeys()"
+              data-test="save-keys">
               {{ savingKeys() ? 'Saving…' : 'Save provider keys' }}
             </button>
             @if (keysMsg()) {
-              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="keys-msg">{{ keysMsg() }}</p>
+              <p role="status" aria-live="polite" class="text-[11.5px] text-[var(--acc-long-fg)] m-0" data-test="keys-msg">{{ keysMsg() }}</p>
             }
           </div>
         </section>
@@ -90,7 +89,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
         <!-- B: Default model + preset + ceiling -->
         <section class="card">
           <div class="card-hd"><span class="title">Defaults &amp; cost ceiling</span></div>
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
+          <div class="card-bd flex flex-col gap-3">
             <div class="field">
               <label class="lbl" for="global-default">Default model (applies to every agent)</label>
               <select id="global-default" class="input sans" [(ngModel)]="globalDefault" name="globalDefault"
@@ -103,7 +102,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                   </option>
                 }
               </select>
-              <p id="global-default-note" style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
+              <p id="global-default-note" class="text-[11.5px] text-text-3 m-0 mt-1">
                 Sets the same model for every agent. Clear to fall back to the preset rules below.
               </p>
             </div>
@@ -125,46 +124,45 @@ import { MarkCadence } from '../../core/models/portfolio.model';
 
             <!-- P02d review: disable Save when no dirty change so the
                  button reflects whether there is anything to commit. -->
-            <button type="button" class="btn primary"
+            <button type="button" class="btn primary save-btn"
               (click)="savePrefs()"
               [disabled]="savingPrefs() || !isPrefsDirty()"
-              data-test="save-prefs" style="height:32px;justify-content:center">
+              data-test="save-prefs">
               {{ savingPrefs() ? 'Saving…' : (isPrefsDirty() ? 'Save preferences' : 'No changes') }}
             </button>
             @if (prefsMsg()) {
-              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0">{{ prefsMsg() }}</p>
+              <p role="status" aria-live="polite" class="text-[11.5px] text-[var(--acc-long-fg)] m-0">{{ prefsMsg() }}</p>
             }
           </div>
         </section>
 
         <!-- C: per-agent defaults -->
-        <section class="card" style="grid-column:span 2">
+        <section class="card col-span-2">
           <div class="card-hd"><span class="title">Per-agent defaults</span></div>
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
-            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
               "Current default" = what the active preset (<b>{{ preset }}</b>) resolves to. Pick an explicit model to override it for this agent.
             </p>
-            <p style="font-size:11.5px;color:var(--text-3);margin:0;font-style:italic" data-test="per-agent-autosave-note">
+            <p class="text-[11.5px] text-text-3 m-0 italic" data-test="per-agent-autosave-note">
               Per-agent selections save automatically. Preset and cost ceiling save via the button above.
             </p>
             @for (g of groupedAgents(); track g.group) {
               <div>
-                <div class="eyebrow" style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px">
+                <div class="eyebrow border-b border-solid border-border pb-1.5 mb-2">
                   {{ groupLabel(g.group) }} ({{ g.agents.length }})
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+                <div class="agent-grid">
                   @for (a of g.agents; track a) {
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:center;font-size:13px">
+                    <div class="agent-row">
                       <div>{{ display(a) }}</div>
-                      <div class="mono" style="font-size:11.5px"
+                      <div class="mono text-[11.5px]"
                         [style.color]="agentDefault(a) ? 'var(--text-3)' : 'var(--text-2)'">
                         {{ resolvedDefault(a) }}
                       </div>
-                      <select class="input sans"
+                      <select class="input sans agent-select"
                         [ngModel]="agentDefault(a)"
                         (ngModelChange)="setAgentDefault(a, $event)"
-                        [attr.aria-label]="'Model for ' + a"
-                        style="height:26px;font-size:11.5px;padding:0 6px">
+                        [attr.aria-label]="'Model for ' + a">
                         <option value="">— use preset default —</option>
                         @for (m of store.models(); track m.id) {
                           <option [value]="m.id" [disabled]="!m.available">
@@ -181,61 +179,60 @@ import { MarkCadence } from '../../core/models/portfolio.model';
         </section>
 
         <!-- D2 (P3.1): Portfolio settings -->
-        <section class="card" style="grid-column:span 2" data-test="portfolio-settings-card">
+        <section class="card col-span-2" data-test="portfolio-settings-card">
           <div class="card-hd"><span class="title">Portfolio</span></div>
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
-            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
               Controls how the Manual Book's positions are marked to market on
-              <a routerLink="/portfolio" style="color:var(--acc-info-fg);text-decoration:underline">/portfolio</a>.
+              <a routerLink="/portfolio" class="text-[var(--acc-info-fg)] underline">/portfolio</a>.
               Intraday cadences require a premium FMP plan.
             </p>
 
             <div role="radiogroup" aria-label="Mark cadence"
-                 style="display:flex;flex-direction:column;gap:10px">
+                 class="flex flex-col gap-2.5">
               @for (opt of cadenceOptions; track opt.value) {
                 <label class="cadence-row" [class.selected]="markCadence === opt.value">
                   <input type="radio" name="mark_cadence"
                          [value]="opt.value" [(ngModel)]="markCadence"
                          [attr.data-test]="'cadence-' + opt.value" />
                   <div>
-                    <div style="font-weight:500;font-size:13px">{{ opt.label }}</div>
-                    <div style="font-size:11.5px;color:var(--text-3)">{{ opt.help }}</div>
+                    <div class="font-medium text-xs">{{ opt.label }}</div>
+                    <div class="text-[11.5px] text-text-3">{{ opt.help }}</div>
                   </div>
                 </label>
               }
             </div>
 
             @if (markCadence === 'delayed') {
-              <div class="field" style="max-width:280px">
+              <div class="field max-w-[280px]">
                 <label class="lbl" for="cadence-interval-input">Auto-refresh interval (minutes)</label>
                 <input id="cadence-interval-input" class="input mono" type="number"
                        min="5" max="1440" step="1"
                        [(ngModel)]="intervalMinutes" name="interval_minutes"
                        aria-describedby="cadence-interval-note"
                        data-test="cadence-interval" />
-                <p id="cadence-interval-note" style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
+                <p id="cadence-interval-note" class="text-[11.5px] text-text-3 m-0 mt-1">
                   Minimum 5 minutes, maximum 1440 (24 hours). Polling stops while the tab is hidden.
                 </p>
               </div>
             }
 
-            <button type="button" class="btn primary"
+            <button type="button" class="btn primary save-btn save-btn--portfolio"
                     (click)="savePortfolioPrefs()"
                     [disabled]="savingPortfolio() || !isPortfolioDirty()"
-                    data-test="save-portfolio-prefs"
-                    style="height:32px;justify-content:center;align-self:flex-start;min-width:200px">
+                    data-test="save-portfolio-prefs">
               {{ savingPortfolio()
                   ? 'Saving…'
                   : (isPortfolioDirty() ? 'Save portfolio settings' : 'No changes') }}
             </button>
             @if (portfolioMsg()) {
-              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="portfolio-msg">{{ portfolioMsg() }}</p>
+              <p role="status" aria-live="polite" class="text-[11.5px] text-[var(--acc-long-fg)] m-0" data-test="portfolio-msg">{{ portfolioMsg() }}</p>
             }
           </div>
         </section>
 
         <!-- D: Available models -->
-        <section class="card" style="grid-column:span 2">
+        <section class="card col-span-2">
           <div class="card-hd"><span class="title">Available models ({{ store.models().length }})</span></div>
           <table class="tbl">
             <thead><tr>
@@ -245,7 +242,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             <tbody>
               @for (m of store.models(); track m.id) {
                 <tr>
-                  <td class="mono" style="color:var(--text)">{{ m.display_name }}</td>
+                  <td class="mono text-text">{{ m.display_name }}</td>
                   <td>{{ m.provider }}</td>
                   <td>{{ m.tier }}</td>
                   <td class="num">{{ m.price_in_per_mtok ?? '0' }}</td>
@@ -279,6 +276,25 @@ import { MarkCadence } from '../../core/models/portfolio.model';
       .cadence-row:hover { border-color: var(--text-3); }
       .cadence-row.selected { border-color: var(--acc-info); background: var(--acc-info-soft, var(--surface)); }
       .cadence-row input[type="radio"] { margin-top: 2px; }
+      .save-btn { height: 32px; justify-content: center; }
+      .save-btn--portfolio { align-self: flex-start; min-width: 200px; }
+      .agent-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 24px;
+      }
+      .agent-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .agent-select {
+        height: 26px;
+        font-size: 11.5px;
+        padding: 0 6px;
+      }
     `,
   ],
 })

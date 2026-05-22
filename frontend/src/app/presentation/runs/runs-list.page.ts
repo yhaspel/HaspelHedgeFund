@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 
 import { AppShellComponent } from '../shared/app-shell.component';
+import { EmptyStateComponent } from '../shared/empty-state.component';
 import { RunsStore } from '../../abstraction/runs.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
@@ -14,28 +15,28 @@ type StatusFilter = 'all' | RunStatus;
 @Component({
   selector: 'hf-runs-list',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{label:'Runs'}]">
-      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px">
+      <div class="page-head flex items-end justify-between gap-4 mb-3.5">
         <div>
           <div class="eyebrow">Run archive</div>
-          <h1 style="margin:6px 0 0">Runs</h1>
-          <p class="muted" style="margin:4px 0 0;font-size:13px;color:var(--text-3)">
+          <h1 class="m-0 mt-1.5">Runs</h1>
+          <p class="muted m-0 mt-1 text-xs text-text-3">
             Every analysis you have run — ad-hoc and strategy-cycle-sourced.
           </p>
         </div>
-        <a class="btn primary" routerLink="/runs/new" style="height:32px;padding:0 14px;display:inline-flex;align-items:center;gap:6px">
+        <a class="btn primary h-8 px-3.5 inline-flex items-center gap-1.5" routerLink="/runs/new">
           <svg width="14" height="14" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
           New run
         </a>
       </div>
 
       <section class="card">
-        <div class="card-hd" style="gap:12px;flex-wrap:wrap">
+        <div class="card-hd gap-3 flex-wrap">
           <span class="title">All runs ({{ filtered().length }})</span>
-          <div role="group" aria-label="Filter by source" class="seg" style="margin-left:auto">
+          <div role="group" aria-label="Filter by source" class="seg ml-auto">
             @for (opt of sourceOptions; track opt.id) {
               <button type="button" class="seg-btn"
                 [class.active]="sourceFilter() === opt.id"
@@ -55,33 +56,33 @@ type StatusFilter = 'all' | RunStatus;
 
         @if (loading()) {
           <div class="card-bd" aria-busy="true" aria-label="Loading runs">
-            <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="flex flex-col gap-2.5">
               @for (_ of [1,2,3,4,5]; track $index) {
-                <div class="skel" style="height:24px;width:100%"></div>
+                <div class="skel h-6 w-full"></div>
               }
             </div>
           </div>
         } @else if (filtered().length === 0) {
-          <div class="empty-state">
-            @if (allRuns().length === 0) {
-              <p>You haven't started any runs yet.</p>
+          @if (allRuns().length === 0) {
+            <hf-empty-state message="You haven't started any runs yet.">
               <a class="btn primary" routerLink="/runs/new">Start your first run</a>
-            } @else {
-              <p>No runs match the current filters.</p>
+            </hf-empty-state>
+          } @else {
+            <hf-empty-state message="No runs match the current filters.">
               <button type="button" class="btn ghost" (click)="resetFilters()">Reset filters</button>
-            }
-          </div>
+            </hf-empty-state>
+          }
         } @else {
           <table class="tbl runs-tbl">
             <thead>
               <tr>
-                <th scope="col" style="width:78px">Run</th>
+                <th scope="col" class="w-[78px]">Run</th>
                 <th scope="col">Tickers</th>
-                <th scope="col" style="width:120px">Source</th>
-                <th scope="col" style="width:108px">Status</th>
-                <th scope="col" class="right" style="width:96px">Personas</th>
-                <th scope="col" class="right" style="width:108px">Cost</th>
-                <th scope="col" style="width:128px">Date</th>
+                <th scope="col" class="w-[120px]">Source</th>
+                <th scope="col" class="w-[108px]">Status</th>
+                <th scope="col" class="right w-24">Personas</th>
+                <th scope="col" class="right w-[108px]">Cost</th>
+                <th scope="col" class="w-32">Date</th>
               </tr>
             </thead>
             <tbody>
@@ -89,7 +90,7 @@ type StatusFilter = 'all' | RunStatus;
                 <tr class="row-clickable" (click)="open(r)">
                   <td class="mono">#{{ r.id }}</td>
                   <td>
-                    <span style="display:inline-flex;gap:8px;flex-wrap:wrap">
+                    <span class="inline-flex gap-2 flex-wrap">
                       @for (t of r.tickers; track t) {
                         <hf-ticker [ticker]="t"></hf-ticker>
                       }
@@ -97,11 +98,11 @@ type StatusFilter = 'all' | RunStatus;
                   </td>
                   <td>
                     @if (r.source === 'strategy' && r.strategy_backlink) {
-                      <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 8px;font-size:11px">
+                      <span class="pill pill-source">
                         via {{ r.strategy_backlink.strategy_name }}
                       </span>
                     } @else {
-                      <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 8px;font-size:11px">manual</span>
+                      <span class="pill pill-source">manual</span>
                     }
                   </td>
                   <td>
@@ -114,7 +115,7 @@ type StatusFilter = 'all' | RunStatus;
                   </td>
                   <td class="num">{{ personaCount(r) }}</td>
                   <td class="num">$ {{ (+r.total_cost_usd).toFixed(4) }}</td>
-                  <td class="mono" style="color:var(--text-3);font-size:11.5px">
+                  <td class="mono text-text-3 text-[11.5px]">
                     {{ r.as_of_date }}
                   </td>
                 </tr>
@@ -129,17 +130,13 @@ type StatusFilter = 'all' | RunStatus;
     `
       .runs-tbl tr.row-clickable { cursor: pointer; }
       .runs-tbl tr.row-clickable:hover { background: var(--hover); }
-      .empty-state {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        padding: 32px 12px;
-        text-align: center;
+      .pill-source {
+        background: var(--surface-2);
         color: var(--text-3);
+        height: auto;
+        padding: 2px 8px;
+        font-size: 11px;
       }
-      .empty-state p { margin: 0; font-size: 13px; }
       .seg {
         display: inline-flex;
         background: var(--surface-2);

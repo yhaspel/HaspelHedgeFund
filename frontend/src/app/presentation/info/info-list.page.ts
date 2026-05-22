@@ -33,8 +33,8 @@ interface GroupSection {
         <div class="page-head">
           <div>
             <div class="eyebrow">Guides</div>
-            <h1 style="margin-top:6px">Guides</h1>
-            <p style="font-size:13.5px;color:var(--text-2);margin:8px 0 0;max-width:640px">
+            <h1 class="mt-1.5">Guides</h1>
+            <p class="text-[13.5px] text-text-2 m-0 mt-2 max-w-[640px]">
               Everything you need to operate the AI Hedge Fund — what it does, how to use it,
               what each strategy means, and a plain-language glossary of every term in the app.
             </p>
@@ -67,14 +67,14 @@ interface GroupSection {
             @if (results().length === 0) {
               <div class="info-empty">
                 <strong>No guides match "{{ effectiveQuery() }}"</strong>
-                <p style="font-size:13px;color:var(--text-2);margin:0">
+                <p class="text-xs text-text-2 m-0">
                   Try a shorter query, or skim the cards below for the topic you need.
                 </p>
                 <button type="button" class="btn sm" (click)="clear()">Clear search</button>
               </div>
             } @else {
               @if (!info.indexReady() && hasHeadingPotential()) {
-                <p style="font-size:11.5px;color:var(--text-3);margin:8px 0 0">
+                <p class="text-[11.5px] text-text-3 m-0 mt-2">
                   Indexing additional sections…
                 </p>
               }
@@ -89,7 +89,7 @@ interface GroupSection {
                     <span class="info-result-title">
                       <strong>{{ r.guide.title }}</strong>
                       @if (r.heading) {
-                        <span style="color:var(--text-3)"> · {{ r.heading.text }}</span>
+                        <span class="text-text-3"> · {{ r.heading.text }}</span>
                       }
                     </span>
                     <span class="info-result-sub">{{ r.guide.summary }}</span>

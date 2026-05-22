@@ -37,9 +37,9 @@ import { ModalComponent } from '../shared/modal.component';
             </div>
             <div class="field-row">
               <label class="lbl" for="cash-amount">Amount</label>
-              <input id="cash-amount" class="input mono" type="number" min="0" step="0.01"
-                     [(ngModel)]="amount" style="width:160px" placeholder="0.00" name="amount" />
-              <span style="font-size:11.5px;color:var(--text-3)">USD</span>
+              <input id="cash-amount" class="input mono w-[160px]" type="number" min="0" step="0.01"
+                     [(ngModel)]="amount" placeholder="0.00" name="amount" />
+              <span class="text-[11.5px] text-text-3">USD</span>
             </div>
             <div class="field-row">
               <label class="lbl" for="cash-note">Note</label>
@@ -47,7 +47,7 @@ import { ModalComponent } from '../shared/modal.component';
                      placeholder="optional context for the ledger" />
             </div>
             @if (error()) {
-              <div role="alert" class="pill err" style="height:auto;padding:6px 10px">
+              <div role="alert" class="pill err h-auto py-1.5 px-2.5">
                 <span class="dot"></span>{{ error() }}
               </div>
             }

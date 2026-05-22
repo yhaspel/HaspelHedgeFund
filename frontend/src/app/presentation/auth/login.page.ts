@@ -8,18 +8,17 @@ import { AuthStore } from '../../abstraction/auth.store';
   standalone: true,
   imports: [FormsModule, RouterLink],
   template: `
-    <div style="min-height:100vh;display:grid;place-items:center;background:var(--bg)">
-      <section style="width:100%;max-width:420px;padding:40px">
+    <div class="min-h-screen grid place-items-center bg-bg">
+      <section class="w-full max-w-[420px] p-10">
         <div class="auth-form-wrap">
-          <div style="display:flex;align-items:center;gap:14px;color:var(--text-2)">
-            <img src="/icon-large.svg" alt="" width="52" height="52"
-                 style="display:block;border:1px solid var(--border-2);border-radius:12px" />
-            <span style="font-size:24px;font-weight:600;color:var(--text)">Haspel Hedge Fund</span>
+          <div class="flex items-center gap-3.5 text-text-2">
+            <img src="/icon-large.svg" alt="" width="52" height="52" class="auth-logo" />
+            <span class="auth-brand">Haspel Hedge Fund</span>
           </div>
 
           <h1>Log in</h1>
 
-          <form (ngSubmit)="submit()" style="display:flex;flex-direction:column;gap:14px">
+          <form (ngSubmit)="submit()" class="flex flex-col gap-3.5">
             <div class="field">
               <label class="lbl" for="login-email">Email</label>
               <input id="login-email" class="input sans" type="email" name="email" autocomplete="email"
@@ -35,21 +34,35 @@ import { AuthStore } from '../../abstraction/auth.store';
                 [attr.aria-describedby]="error() ? 'login-error' : null" />
             </div>
             @if (error()) {
-              <p id="login-error" role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+              <p id="login-error" role="alert" class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
             }
-            <button class="btn primary" type="submit" style="width:100%;height:36px;justify-content:center">
+            <button class="btn primary w-full h-9 justify-center" type="submit">
               Log in
             </button>
           </form>
 
-          <p style="font-size:13px;color:var(--text-2)">
+          <p class="text-xs text-text-2">
             No account?
-            <a routerLink="/signup" style="color:var(--acc-info-fg)">Sign up</a>
+            <a routerLink="/signup" class="text-[var(--acc-info-fg)]">Sign up</a>
           </p>
         </div>
       </section>
     </div>
   `,
+  styles: [
+    `
+      .auth-logo {
+        display: block;
+        border: 1px solid var(--border-2);
+        border-radius: 12px;
+      }
+      .auth-brand {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--text);
+      }
+    `,
+  ],
 })
 export class LoginPage {
   private readonly auth = inject(AuthStore);

@@ -21,24 +21,23 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
       <div class="page-head">
         <div>
           <div class="eyebrow">Run setup</div>
-          <h1 style="margin-top:6px">New analysis</h1>
+          <h1 class="mt-1.5">New analysis</h1>
         </div>
       </div>
 
-      <form (ngSubmit)="submit()" style="max-width:640px;display:flex;flex-direction:column;gap:18px">
+      <form (ngSubmit)="submit()" class="max-w-[640px] flex flex-col gap-[18px]">
         <section class="card">
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+          <div class="card-bd flex flex-col gap-3.5">
             <div class="field">
               <label class="lbl" for="run-ticker"><hf-term key="ticker">Ticker</hf-term></label>
-              <div style="display:flex;align-items:center;gap:10px">
-                <input id="run-ticker" class="input" name="ticker" [(ngModel)]="ticker"
+              <div class="flex items-center gap-2.5">
+                <input id="run-ticker" class="input uppercase flex-1" name="ticker" [(ngModel)]="ticker"
                   (ngModelChange)="onTickerChange($event)"
-                  placeholder="AAPL" required autocomplete="off"
-                  style="text-transform:uppercase;flex:1" />
+                  placeholder="AAPL" required autocomplete="off" />
                 <hf-sparkline [points]="tickerSpark()" [width]="80" [height]="22" [loading]="sparkLoading()" />
               </div>
               @if (tickerSpark() && tickerSpark()!.length >= 2) {
-                <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+                <div class="mono text-[11px] text-text-3 mt-1">
                   {{ ticker.toUpperCase() }} · last {{ tickerSpark()!.length }}d ·
                   <span [style.color]="trendUp() ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
                     {{ trendUp() ? '▲' : '▼' }} {{ trendPct() }}%
@@ -75,14 +74,13 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         </section>
 
         @if (error()) {
-          <p role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+          <p role="alert" class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
         }
 
-        <div style="display:flex;gap:8px">
+        <div class="flex gap-2">
           <a class="btn ghost" routerLink="/runs">Cancel</a>
-          <button type="submit" class="btn primary"
-            [disabled]="submitting() || selected().size === 0"
-            style="flex:1;height:36px;justify-content:center">
+          <button type="submit" class="btn primary flex-1 h-9 justify-center"
+            [disabled]="submitting() || selected().size === 0">
             {{ submitting() ? 'Submitting…' : 'Run council' }}
           </button>
         </div>

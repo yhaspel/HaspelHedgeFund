@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
 import { CommandPaletteComponent } from './command-palette.component';
+import { PopoverComponent } from './popover.component';
 
 type Theme = 'light' | 'dark';
 const THEME_KEY = 'hf.theme';
@@ -10,56 +11,80 @@ const THEME_KEY = 'hf.theme';
 @Component({
   selector: 'hf-app-shell',
   standalone: true,
-  imports: [CommonModule, RouterLink, RouterLinkActive, CommandPaletteComponent],
+  imports: [CommonModule, RouterLink, RouterLinkActive, CommandPaletteComponent, PopoverComponent],
   template: `
     <div class="app">
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <nav class="sidebar" aria-label="Primary">
-        <div class="logo" title="Haspel Hedge Fund">
+        <div class="logo">
           <img src="/icon.svg" alt="Haspel Hedge Fund" width="30" height="30" />
         </div>
         <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navHome="routerLinkActive"
            [attr.aria-current]="navHome.isActive ? 'page' : null"
-           aria-label="Dashboard" data-tip="Dashboard">
+           aria-label="Dashboard"
+           (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
+           (focus)="popHome.show()" (blur)="popHome.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
+          <hf-popover #popHome placement="right" align="center" size="compact" role="tooltip">Dashboard</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/portfolio" routerLinkActive="active" #navPort="routerLinkActive"
            [attr.aria-current]="navPort.isActive ? 'page' : null"
-           aria-label="Portfolio" data-tip="Portfolio">
+           aria-label="Portfolio"
+           (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
+           (focus)="popPort.show()" (blur)="popPort.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
+          <hf-popover #popPort placement="right" align="center" size="compact" role="tooltip">Portfolio</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navRuns="routerLinkActive"
            [attr.aria-current]="navRuns.isActive ? 'page' : null"
-           aria-label="Runs" data-tip="Runs">
+           aria-label="Runs"
+           (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
+           (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
+          <hf-popover #popRuns placement="right" align="center" size="compact" role="tooltip">Runs</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" #navNewRun="routerLinkActive"
            [attr.aria-current]="navNewRun.isActive ? 'page' : null"
-           aria-label="New run" data-tip="New run">
+           aria-label="New run"
+           (mouseenter)="popNewRun.show()" (mouseleave)="popNewRun.maybeHide()"
+           (focus)="popNewRun.show()" (blur)="popNewRun.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
+          <hf-popover #popNewRun placement="right" align="center" size="compact" role="tooltip">New run</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
            [attr.aria-current]="navBt.isActive ? 'page' : null"
-           aria-label="Backtests" data-tip="Backtests">
+           aria-label="Backtests"
+           (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
+           (focus)="popBt.show()" (blur)="popBt.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
+          <hf-popover #popBt placement="right" align="center" size="compact" role="tooltip">Backtests</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
            [attr.aria-current]="navSt.isActive ? 'page' : null"
-           aria-label="Strategies" data-tip="Strategies">
+           aria-label="Strategies"
+           (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
+           (focus)="popSt.show()" (blur)="popSt.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
+          <hf-popover #popSt placement="right" align="center" size="compact" role="tooltip">Strategies</hf-popover>
         </a>
         <div class="spacer"></div>
         <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
            [attr.aria-current]="navInfo.isActive ? 'page' : null"
-           aria-label="Guides" data-tip="Guides">
+           aria-label="Guides"
+           (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
+           (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
+          <hf-popover #popInfo placement="right" align="center" size="compact" role="tooltip">Guides</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
            [attr.aria-current]="navSet.isActive ? 'page' : null"
-           aria-label="Settings" data-tip="Settings">
+           aria-label="Settings"
+           (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
+           (focus)="popSet.show()" (blur)="popSet.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
+          <hf-popover #popSet placement="right" align="center" size="compact" role="tooltip">Settings</hf-popover>
         </a>
       </nav>
       <main>
@@ -79,16 +104,16 @@ const THEME_KEY = 'hf.theme';
             <svg width="14" height="14" aria-hidden="true">
               <use href="/icons.svg#i-search" />
             </svg>
-            <span style="flex:1;text-align:left">Search runs, strategies, backtests…</span>
+            <span class="flex-1 text-left">Search runs, strategies, backtests…</span>
             <span class="kbd">{{ paletteShortcutHint() }}</span>
           </button>
-          <div style="display:flex;align-items:center;gap:12px">
+          <div class="flex items-center gap-3">
             <button class="icon-btn" (click)="toggleTheme()" [attr.aria-label]="themeToggleLabel()">
               <svg width="16" height="16" aria-hidden="true">
                 <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
               </svg>
             </button>
-            <span *ngIf="auth.user() as u" class="mono" style="font-size:12px;color:var(--text-2)">{{ u.email }}</span>
+            <span *ngIf="auth.user() as u" class="mono text-2xs text-text-2">{{ u.email }}</span>
             <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
           </div>
         </div>

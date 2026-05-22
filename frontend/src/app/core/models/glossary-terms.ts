@@ -292,4 +292,62 @@ export const GLOSSARY_TERMS: Record<string, GlossaryTerm> = {
     short: 'The prevailing market mood — bull (rising, calm), sideways (range-bound), or bear (falling, volatile).',
     anchor: 'regime-market',
   },
+  // Valuation (WS-6 UR-09)
+  dcf: {
+    id: 'dcf',
+    term: 'DCF',
+    short: 'Discounted Cash Flow — values a company by forecasting future cash flows and discounting them back to today.',
+    anchor: 'dcf-discounted-cash-flow',
+  },
+  'fair-value': {
+    id: 'fair-value',
+    term: 'Fair value',
+    short: 'A reasoned estimate of what a security is worth — usually given as a range (low / high) from a valuation model.',
+    anchor: 'fair-value-fair-value-band',
+  },
+  'margin-of-safety': {
+    id: 'margin-of-safety',
+    term: 'Margin of safety',
+    short: 'The gap between intrinsic value and price (MoS). A wider gap means more cushion if estimates are wrong.',
+    anchor: 'margin-of-safety',
+  },
+  moat: {
+    id: 'moat',
+    term: 'Moat',
+    short: 'A durable competitive advantage that protects a company\'s profits from competitors.',
+    anchor: 'moat',
+  },
+  // Risk concepts (WS-6 UR-09)
+  veto: {
+    id: 'veto',
+    term: 'Veto',
+    short: 'The Risk Manager blocking a trade because it breaches a hard limit (position size, drawdown budget, etc.).',
+    anchor: 'veto',
+  },
+  'stop-loss': {
+    id: 'stop-loss',
+    term: 'Stop loss',
+    short: 'The price (or % drop) at which a losing position is automatically closed, capping the loss on that trade.',
+    anchor: 'stop-stop-level',
+  },
+  // Strategy mechanics (WS-6 UR-09)
+  screener: {
+    id: 'screener',
+    term: 'Screener',
+    short: 'A filter that ranks the universe by quantitative criteria to produce a shortlist of candidates.',
+    anchor: 'screener',
+  },
+  'walk-forward': {
+    id: 'walk-forward',
+    term: 'Walk-forward',
+    short: 'A backtest that fits on an in-sample window, then tests on the next out-of-sample window — repeatedly walking forward in time.',
+    anchor: 'walk-forward',
+  },
+  // Macro (WS-6 UR-09)
+  'yield-curve': {
+    id: 'yield-curve',
+    term: 'Yield curve',
+    short: 'Government-bond yields plotted by maturity. Its shape signals the market\'s view of growth and policy direction.',
+    anchor: 'yield-curve',
+  },
 };

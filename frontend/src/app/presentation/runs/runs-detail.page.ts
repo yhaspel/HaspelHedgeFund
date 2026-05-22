@@ -6,7 +6,10 @@ import { RunsStore } from '../../abstraction/runs.store';
 import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
 import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
+import { GlossaryTermComponent } from '../shared/glossary-term.component';
+import { InfoTooltipComponent } from '../shared/info-tooltip.component';
 import { PositionSide } from '../../core/models/portfolio.model';
+import { RangeRailComponent } from '../shared/range-rail.component';
 import { TickerComponent } from '../shared/ticker.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 
@@ -28,17 +31,17 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, GlossaryTermComponent, InfoTooltipComponent, RangeRailComponent, TickerComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
         <div>
           <div class="eyebrow">Run · {{ run()?.status || '…' }}</div>
-          <h1 style="margin-top:6px">
+          <h1 class="mt-1.5">
             Run #{{ run()?.id }}
-            <span style="color:var(--text-3);font-weight:500">—</span>
+            <span class="text-text-3 font-medium">—</span>
             @for (t of (run()?.tickers || []); track t; let last = $last) {
-              <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span style="color:var(--text-3)">, </span>}
+              <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span class="text-text-3">, </span>}
             }
           </h1>
         </div>
@@ -53,24 +56,24 @@ interface PersonaCard {
       </div>
 
       @if (!run()) {
-        <p style="color:var(--text-3)">Loading…</p>
+        <p class="text-text-3">Loading…</p>
       } @else {
         @if (run()!.source === 'strategy' && run()!.strategy_backlink; as link) {
-          <div class="card" style="margin-bottom:14px;background:var(--surface-2)" data-test="strategy-backlink">
-            <div class="card-bd" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
-              <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 8px">
+          <div class="card mb-3.5 bg-surface-2" data-test="strategy-backlink">
+            <div class="card-bd flex items-center gap-2.5 flex-wrap text-2xs">
+              <span class="pill bg-surface-2 text-text-3 h-auto py-0.5 px-2">
                 <span class="dot"></span>Strategy cycle
               </span>
-              <span style="color:var(--text-2)">
+              <span class="text-text-2">
                 Triggered by
-                <a [routerLink]="['/strategies', link.strategy_id]" style="color:var(--acc-info-fg);text-decoration:none;font-weight:600">
+                <a [routerLink]="['/strategies', link.strategy_id]" class="text-[var(--acc-info-fg)] no-underline font-semibold">
                   {{ link.strategy_name }}
                 </a>
                 · cycle <span class="mono">{{ link.as_of_date }}</span>
                 ·
                 <a [routerLink]="['/strategies', link.strategy_id]"
                    [queryParams]="{ cycle: link.portfolio_target_id }"
-                   style="color:var(--acc-info-fg);text-decoration:none">
+                   class="text-[var(--acc-info-fg)] no-underline">
                   open cycle →
                 </a>
               </span>
@@ -79,15 +82,15 @@ interface PersonaCard {
         }
 
         @if (run()!.error_message) {
-          <section class="card" style="margin-bottom:14px;border-color:var(--acc-short-soft)">
+          <section class="card mb-3.5 border-[var(--acc-short-soft)]">
             <div class="card-bd">
-              <p class="mono" style="color:var(--acc-short-fg);font-size:12px;margin:0;white-space:pre-wrap">{{ run()!.error_message }}</p>
+              <p class="mono text-[var(--acc-short-fg)] text-2xs m-0 whitespace-pre-wrap">{{ run()!.error_message }}</p>
             </div>
           </section>
         }
 
         <!-- Tab strip (ADR 0002) -->
-        <nav class="tabs" role="tablist" aria-label="Run sections" style="margin-bottom:14px">
+        <nav class="tabs mb-3.5" role="tablist" aria-label="Run sections">
           @for (t of tabs; track t.id) {
             <button type="button"
               role="tab"
@@ -109,184 +112,247 @@ interface PersonaCard {
         </nav>
 
         @if (activeTab() === 'decision') {
-          <div role="tabpanel" id="tab-decision" aria-labelledby="tabbtn-decision" tabindex="0">
-            <!-- Status strip -->
-            <section class="card" style="margin-bottom:14px">
-              <div class="card-bd" style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px">
-                <div>
-                  <div class="eyebrow">Status</div>
-                  <span class="pill"
-                    [class.ok]="run()!.status==='done'"
-                    [class.err]="run()!.status==='failed'"
-                    [class.warn]="run()!.status==='running' || run()!.status==='queued'">
-                    <span class="dot"></span>{{ run()!.status }}
-                  </span>
+          <div role="tabpanel" id="tab-decision" aria-labelledby="tabbtn-decision" tabindex="0" class="decision-grid">
+            <div class="decision-main">
+              <!-- Status strip -->
+              <section class="card mb-3.5">
+                <div class="card-bd grid grid-cols-4 gap-6">
+                  <div>
+                    <div class="eyebrow">Status</div>
+                    <span class="pill"
+                      [class.ok]="run()!.status==='done'"
+                      [class.err]="run()!.status==='failed'"
+                      [class.warn]="run()!.status==='running' || run()!.status==='queued'">
+                      <span class="dot"></span>{{ run()!.status }}
+                    </span>
+                  </div>
+                  <div>
+                    <div class="eyebrow">As-of</div>
+                    <div class="mono text-sm mt-1">{{ run()!.as_of_date }}</div>
+                  </div>
+                  <div>
+                    <div class="eyebrow">Personas</div>
+                    <div class="mono text-sm mt-1">{{ personas().length }}</div>
+                  </div>
+                  <div>
+                    <div class="eyebrow">Total cost</div>
+                    <div class="mono text-sm mt-1">$ {{ formatCost(run()!.total_cost_usd) }}</div>
+                  </div>
                 </div>
-                <div>
-                  <div class="eyebrow">As-of</div>
-                  <div class="mono" style="font-size:14px;margin-top:4px">{{ run()!.as_of_date }}</div>
-                </div>
-                <div>
-                  <div class="eyebrow">Personas</div>
-                  <div class="mono" style="font-size:14px;margin-top:4px">{{ personas().length }}</div>
-                </div>
-                <div>
-                  <div class="eyebrow">Total cost</div>
-                  <div class="mono" style="font-size:14px;margin-top:4px">$ {{ formatCost(run()!.total_cost_usd) }}</div>
-                </div>
-              </div>
-            </section>
+              </section>
 
-            <!-- Final order ticket(s) -->
-            @for (d of run()!.decisions; track d.id) {
-              <section class="card" style="margin-bottom:14px;border-left:3px solid;"
-                [style.borderLeftColor]="d.action === 'buy' ? 'var(--acc-long)' : d.action === 'sell' ? 'var(--acc-short)' : 'var(--acc-hold)'">
-                <div class="card-bd">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
-                    <div>
-                      <h2 style="font-size:18px;font-weight:600;margin:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                        <span>Final order ticket: {{ d.action.toUpperCase() }}</span>
-                        <hf-ticker [ticker]="d.ticker"></hf-ticker>
-                      </h2>
-                      <div style="font-size:12px;color:var(--text-3);margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                        @if (d.risk_overrides.veto) {
-                          <span class="pill err"><span class="dot"></span>RISK VETO</span>
-                        }
-                        @if (cioOutput()?.['overrode_pm']) {
-                          <span class="pill warn"><span class="dot"></span>CIO OVERRIDE</span>
-                        }
-                      </div>
-                      <div style="margin-top:10px;max-width:280px">
-                        <hf-confidence-meter
-                          [value]="d.confidence"
-                          [tone]="d.action === 'buy' ? 'buy' : d.action === 'sell' ? 'sell' : 'hold'"
-                          [counts]="stanceCounts()" />
-                      </div>
-                    </div>
-                    <div style="text-align:right;font-size:13px">
-                      <p style="margin:0">
-                        Target qty: <span class="mono" style="color:var(--text)">{{ d.target_quantity }}</span>
-                        <span style="margin-left:4px;color:var(--text-3);cursor:help"
-                          title="Illustrative — computed against a $100K stub portfolio. Replaced by your real broker account balance in P3a (paper trading).">ⓘ</span>
-                      </p>
-                      <p style="margin:2px 0 0">
-                        Target weight: <span class="mono" style="color:var(--text)">{{ d.target_weight_pct }}%</span>
-                      </p>
-                      @if (canAddToPortfolio(d)) {
-                        <button class="btn primary sm" style="margin-top:10px"
-                                (click)="addToPortfolio(d)"
-                                [attr.data-test]="'add-to-portfolio-' + d.ticker">
-                          <svg width="12" height="12" style="margin-right:4px">
-                            <use href="/icons.svg#i-plus" />
-                          </svg>
-                          Add to portfolio
-                        </button>
-                      } @else if (d.side === 'pair') {
-                        <p style="margin:8px 0 0;font-size:11px;color:var(--text-3)">
-                          Pair decisions can't be entered manually (v1).
-                        </p>
-                      } @else if (run()!.status !== 'done') {
-                        <p style="margin:8px 0 0;font-size:11px;color:var(--text-3)">
-                          Wait for the run to complete to enter a position.
-                        </p>
+              <!-- Trade levels (WS-5.4.2 range-rails) -->
+              @if (statGridVisible()) {
+                <section class="card mb-3.5" data-test="trade-levels">
+                  <div class="card-hd"><span class="title">Trade levels</span></div>
+                  <div class="card-bd">
+                    <div class="stat-grid">
+                      @if (targetZoneCell(); as tz) {
+                        <div class="stat-cell">
+                          <div class="eyebrow">Target zone</div>
+                          <div class="stat-value mono">{{ fmtMoney(tz.value) }}</div>
+                          <hf-range-rail
+                            [min]="tz.min" [max]="tz.max" [value]="tz.value"
+                            [bandLo]="tz.bandLo" [bandHi]="tz.bandHi"
+                            tone="neutral"
+                            [format]="fmtMoney"
+                            [ariaLabel]="'Current price ' + fmtMoney(tz.value) + ' inside fair-value band ' + fmtMoney(tz.bandLo) + ' to ' + fmtMoney(tz.bandHi)" />
+                        </div>
+                      }
+                      @if (stopLossCell(); as st) {
+                        <div class="stat-cell" [class.dim]="isVetoed()">
+                          <div class="eyebrow flex items-center gap-1.5">
+                            <span><hf-term key="stop-loss">Stop loss</hf-term></span>
+                            @if (isVetoed()) { <span class="pill err"><span class="dot"></span>VETO</span> }
+                          </div>
+                          <div class="stat-value mono">{{ fmtPctDecimal(st.value) }}</div>
+                          <hf-range-rail
+                            [min]="st.min" [max]="st.max" [value]="st.value"
+                            tone="short"
+                            [format]="fmtPctDecimal"
+                            [ariaLabel]="'Stop loss ' + fmtPctDecimal(st.value)" />
+                        </div>
+                      }
+                      @if (expectedReturnCell(); as er) {
+                        <div class="stat-cell">
+                          <div class="eyebrow">Expected return</div>
+                          <div class="stat-value mono">{{ fmtSignedPctScaled(er.value) }}</div>
+                          <hf-range-rail
+                            [min]="er.min" [max]="er.max" [value]="er.value"
+                            [tone]="er.tone"
+                            [format]="fmtSignedPctScaled"
+                            [ariaLabel]="'Expected return ' + fmtSignedPctScaled(er.value)" />
+                        </div>
+                      }
+                      @if (drawdownCell(); as dd) {
+                        <div class="stat-cell" [class.dim]="isVetoed()">
+                          <div class="eyebrow flex items-center gap-1.5">
+                            <span><hf-term key="drawdown">Drawdown</hf-term> at stop</span>
+                            @if (isVetoed()) { <span class="pill err"><span class="dot"></span>VETO</span> }
+                          </div>
+                          <div class="stat-value mono">{{ fmtSignedPctDecimal(dd.value) }}</div>
+                          <hf-range-rail
+                            [min]="dd.min" [max]="dd.max" [value]="dd.value"
+                            tone="short"
+                            [format]="fmtSignedPctDecimal"
+                            [ariaLabel]="'Drawdown at stop ' + fmtSignedPctDecimal(dd.value)" />
+                        </div>
                       }
                     </div>
                   </div>
-                  <p style="font-size:13px;line-height:20px;color:var(--text-2);margin:12px 0 0;white-space:pre-wrap">{{ d.rationale }}</p>
-                </div>
-              </section>
-            }
+                </section>
+              }
 
-            <!-- Macro -->
-            @if (macroOutput(); as m) {
-              <section class="card" style="margin-bottom:14px">
-                <div class="card-hd"><span class="title">Macro context</span></div>
-                <div class="card-bd">
-                  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-                    <span class="pill"><span class="dot"></span>growth · {{ m['growth_quadrant'] }}</span>
-                    <span class="pill"><span class="dot"></span>inflation · {{ m['inflation_regime'] }}</span>
-                    <span class="pill"><span class="dot"></span>curve · {{ m['yield_curve_state'] }}</span>
-                    <span class="pill"><span class="dot"></span>policy · {{ m['policy_stance'] }}</span>
+              <!-- Macro -->
+              @if (macroOutput(); as m) {
+                <section class="card mb-3.5">
+                  <div class="card-hd"><span class="title">Macro context</span></div>
+                  <div class="card-bd">
+                    <div class="flex flex-wrap gap-1.5 mb-2.5">
+                      <span class="pill"><span class="dot"></span>growth · {{ m['growth_quadrant'] }}</span>
+                      <span class="pill"><span class="dot"></span>inflation · {{ m['inflation_regime'] }}</span>
+                      <span class="pill"><span class="dot"></span><hf-term key="yield-curve">curve</hf-term> · {{ m['yield_curve_state'] }}</span>
+                      <span class="pill"><span class="dot"></span>policy · {{ m['policy_stance'] }}</span>
+                    </div>
+                    <p class="text-xs text-text-2 m-0">{{ m['narrative'] }}</p>
                   </div>
-                  <p style="font-size:13px;color:var(--text-2);margin:0">{{ m['narrative'] }}</p>
-                </div>
-              </section>
-            }
+                </section>
+              }
 
-            <!-- News & filings -->
-            @if (newsOutput(); as n) {
-              <section class="card" style="margin-bottom:14px">
-                <div class="card-hd"><span class="title">News &amp; filings</span></div>
-                <div class="card-bd">
-                  <p style="font-size:13px;color:var(--text-2);margin:0 0 12px">{{ n['digest'] }}</p>
-                  @if (asArray(n['risk_factor_highlights']).length) {
-                    <div class="eyebrow" style="margin-bottom:6px">Risk factor highlights</div>
-                    <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--text-2)">
-                      @for (r of asArray(n['risk_factor_highlights']); track r) { <li>{{ r }}</li> }
-                    </ul>
-                  }
-                  @if (asAnyArray(n['material_events']).length) {
-                    <div class="eyebrow" style="margin:12px 0 6px">Material events</div>
-                    <ul style="margin:0;padding:0;list-style:none;font-size:13px">
-                      @for (e of asAnyArray(n['material_events']); track e['url']) {
-                        <li style="border-top:1px solid var(--border);padding:6px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                          <span class="mono" style="font-size:11.5px;color:var(--text-3)">{{ e['date'] }}</span>
-                          <span class="pill"><span class="dot"></span>{{ e['tag'] }}</span>
-                          <span class="mono" style="font-size:11px;color:var(--text-3)">m={{ e['materiality'] }}</span>
-                          <a [href]="e['url']" target="_blank" style="color:var(--acc-info-fg)">{{ e['headline'] }}</a>
-                        </li>
-                      }
-                    </ul>
-                  }
-                  <p style="font-size:11.5px;color:var(--text-3);margin:10px 0 0">
-                    Sentiment: <span class="mono">{{ num(n['sentiment_score']) }}</span>
-                    @if (asArray(n['sentiment_drivers']).length) {
-                      · drivers: {{ asArray(n['sentiment_drivers']).join('; ') }}
+              <!-- News & filings -->
+              @if (newsOutput(); as n) {
+                <section class="card mb-3.5">
+                  <div class="card-hd"><span class="title">News &amp; filings</span></div>
+                  <div class="card-bd">
+                    <p class="text-xs text-text-2 m-0 mb-3">{{ n['digest'] }}</p>
+                    @if (asArray(n['risk_factor_highlights']).length) {
+                      <div class="eyebrow mb-1.5">Risk factor highlights</div>
+                      <ul class="m-0 pl-[18px] text-xs text-text-2">
+                        @for (r of asArray(n['risk_factor_highlights']); track r) { <li>{{ r }}</li> }
+                      </ul>
                     }
-                  </p>
-                </div>
-              </section>
-            }
+                    @if (asAnyArray(n['material_events']).length) {
+                      <div class="eyebrow m-0 mt-3 mb-1.5">Material events</div>
+                      <ul class="m-0 p-0 list-none text-xs">
+                        @for (e of asAnyArray(n['material_events']); track e['url']) {
+                          <li class="border-t border-solid border-border py-1.5 px-0 flex items-center gap-1.5 flex-wrap">
+                            <span class="mono text-[11.5px] text-text-3">{{ e['date'] }}</span>
+                            <span class="pill"><span class="dot"></span>{{ e['tag'] }}</span>
+                            <span class="mono text-[11px] text-text-3">m={{ e['materiality'] }}</span>
+                            <a [href]="e['url']" target="_blank" class="text-[var(--acc-info-fg)]">{{ e['headline'] }}</a>
+                          </li>
+                        }
+                      </ul>
+                    }
+                    <p class="text-[11.5px] text-text-3 m-0 mt-2.5">
+                      Sentiment: <span class="mono">{{ num(n['sentiment_score']) }}</span>
+                      @if (asArray(n['sentiment_drivers']).length) {
+                        · drivers: {{ asArray(n['sentiment_drivers']).join('; ') }}
+                      }
+                    </p>
+                  </div>
+                </section>
+              }
+            </div>
+
+            <!-- Sticky right rail: final order ticket(s) (WS-5.4.5) -->
+            <aside class="order-ticket-rail" aria-label="Order ticket">
+              @for (d of run()!.decisions; track d.id) {
+                <section class="card border-l-[3px] border-solid"
+                  [style.borderLeftColor]="d.action === 'buy' ? 'var(--acc-long)' : d.action === 'sell' ? 'var(--acc-short)' : 'var(--acc-hold)'">
+                  <div class="card-bd">
+                    <div class="flex flex-col gap-3">
+                      <div>
+                        <h2 class="text-base font-semibold m-0 flex items-center gap-1.5 flex-wrap">
+                          <span>{{ d.action.toUpperCase() }}</span>
+                          <hf-ticker [ticker]="d.ticker"></hf-ticker>
+                        </h2>
+                        <div class="text-2xs text-text-3 mt-2 flex gap-1.5 items-center flex-wrap">
+                          @if (d.risk_overrides.veto) {
+                            <span class="pill err"><span class="dot"></span>RISK VETO</span>
+                          }
+                          @if (cioOutput()?.['overrode_pm']) {
+                            <span class="pill warn"><span class="dot"></span>CIO OVERRIDE</span>
+                          }
+                        </div>
+                      </div>
+                      <hf-confidence-meter
+                        [value]="d.confidence"
+                        [tone]="d.action === 'buy' ? 'buy' : d.action === 'sell' ? 'sell' : 'hold'"
+                        [counts]="stanceCounts()" />
+                      <div class="text-xs">
+                        <p class="m-0">
+                          Target qty: <span class="mono text-text">{{ d.target_quantity }}</span>
+                          <hf-info text="Illustrative — computed against a $100K stub portfolio. Replaced by your real broker account balance in P3a (paper trading)."></hf-info>
+                        </p>
+                        <p class="m-0 mt-0.5">
+                          Target weight: <span class="mono text-text">{{ d.target_weight_pct }}%</span>
+                        </p>
+                        @if (canAddToPortfolio(d)) {
+                          <button class="btn primary sm mt-2.5"
+                                  (click)="addToPortfolio(d)"
+                                  [attr.data-test]="'add-to-portfolio-' + d.ticker">
+                            <svg width="12" height="12" class="mr-1">
+                              <use href="/icons.svg#i-plus" />
+                            </svg>
+                            Add to portfolio
+                          </button>
+                        } @else if (d.side === 'pair') {
+                          <p class="m-0 mt-2 text-[11px] text-text-3">
+                            Pair decisions can't be entered manually (v1).
+                          </p>
+                        } @else if (run()!.status !== 'done') {
+                          <p class="m-0 mt-2 text-[11px] text-text-3">
+                            Wait for the run to complete to enter a position.
+                          </p>
+                        }
+                      </div>
+                      <p class="text-xs leading-5 text-text-2 m-0 whitespace-pre-wrap">{{ d.rationale }}</p>
+                    </div>
+                  </div>
+                </section>
+              }
+            </aside>
           </div>
         }
 
         @if (activeTab() === 'council') {
           <div role="tabpanel" id="tab-council" aria-labelledby="tabbtn-council" tabindex="0">
-            <section style="margin-bottom:14px">
-              <h2 class="eyebrow" style="margin:0 0 10px">Council members</h2>
-              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
+            <section class="mb-3.5">
+              <h2 class="eyebrow m-0 mb-2.5">Council members</h2>
+              <div class="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-3">
                 @for (p of personas(); track p.id) {
-                  <article class="card" style="border-top:3px solid"
+                  <article class="card border-t-[3px] border-solid"
                     [style.borderTopColor]="p.signal === 'bullish' ? 'var(--acc-long)' : p.signal === 'bearish' ? 'var(--acc-short)' : p.signal === 'neutral' ? 'var(--acc-hold)' : 'var(--border-2)'">
                     <div class="card-bd">
-                      <div style="display:flex;justify-content:space-between;align-items:baseline">
-                        <h3 style="font-size:14px;font-weight:600;margin:0">{{ p.displayName }}</h3>
-                        <span class="mono" style="font-size:11px;color:var(--text-3)">{{ p.id }}&#64;{{ p.version }}</span>
+                      <div class="flex justify-between items-baseline">
+                        <h3 class="text-sm font-semibold m-0">{{ p.displayName }}</h3>
+                        <span class="mono text-[11px] text-text-3">{{ p.id }}&#64;{{ p.version }}</span>
                       </div>
-                      <p style="font-size:13px;margin:6px 0 0">
-                        <span style="font-weight:500;text-transform:uppercase">{{ p.signal }}</span>
-                        <span style="color:var(--text-3)"> · {{ p.confidence }}% confidence</span>
+                      <p class="text-xs m-0 mt-1.5">
+                        <span class="font-medium uppercase">{{ p.signal }}</span>
+                        <span class="text-text-3"> · {{ p.confidence }}% confidence</span>
                       </p>
-                      <p [id]="'thesis-' + p.id" style="font-size:13px;color:var(--text-2);margin:8px 0 0;line-height:18px">
+                      <p [id]="'thesis-' + p.id" class="text-xs text-text-2 m-0 mt-2 leading-[18px]">
                         {{ expanded().has(p.id) ? p.thesis : truncate(p.thesis, 200) }}
                       </p>
                       @if (p.thesis.length > 200) {
                         <button type="button"
+                          class="thesis-expand"
                           [attr.aria-expanded]="expanded().has(p.id)"
                           [attr.aria-controls]="'thesis-' + p.id"
-                          style="font-size:11.5px;color:var(--acc-info-fg);margin-top:4px;background:transparent;border:0;cursor:pointer;padding:0"
                           (click)="toggleExpand(p.id)">
                           {{ expanded().has(p.id) ? 'Collapse' : 'See full reasoning' }}
                         </button>
                       }
                       @if (p.keyRisks.length) {
-                        <p style="font-size:11.5px;color:var(--text-3);margin:8px 0 0">
+                        <p class="text-[11.5px] text-text-3 m-0 mt-2">
                           Risks: {{ p.keyRisks.join('; ') }}
                         </p>
                       }
                       @if (p.intrinsicValue !== null) {
-                        <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
-                          IV $ {{ p.intrinsicValue }}, MoS {{ p.marginOfSafety }}%
+                        <p class="text-[11.5px] text-text-3 m-0 mt-1">
+                          IV $ {{ p.intrinsicValue }}, <hf-term key="margin-of-safety">MoS</hf-term> {{ p.marginOfSafety }}%
                         </p>
                       }
                     </div>
@@ -297,15 +363,15 @@ interface PersonaCard {
 
             <!-- Dissent -->
             @if (dissent().length) {
-              <section class="card" style="margin-bottom:14px;background:var(--acc-hold-soft);border-color:var(--acc-hold-soft)">
+              <section class="card mb-3.5 bg-[var(--acc-hold-soft)] border-[var(--acc-hold-soft)]">
                 <div class="card-bd">
-                  <h2 style="font-size:14px;font-weight:600;margin:0 0 8px;color:var(--acc-hold-fg)">Dissenting views</h2>
-                  <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:13px">
+                  <h2 class="text-sm font-semibold m-0 mb-2 text-[var(--acc-hold-fg)]">Dissenting views</h2>
+                  <ul class="m-0 p-0 list-none flex flex-col gap-1.5 text-xs">
                     @for (d of dissent(); track d.name) {
                       <li>
-                        <span style="font-weight:500">{{ displayName(d.name) }}</span>
+                        <span class="font-medium">{{ displayName(d.name) }}</span>
                         ({{ d.signal }}, {{ d.confidence }}%):
-                        <span style="color:var(--text-2)">{{ d.thesis_summary }}</span>
+                        <span class="text-text-2">{{ d.thesis_summary }}</span>
                       </li>
                     }
                   </ul>
@@ -317,41 +383,41 @@ interface PersonaCard {
 
         @if (activeTab() === 'risk') {
           <div role="tabpanel" id="tab-risk" aria-labelledby="tabbtn-risk" tabindex="0">
-            <h2 class="eyebrow" style="margin:0 0 10px">Risk analysis</h2>
+            <h2 class="eyebrow m-0 mb-2.5">Risk analysis</h2>
             <!-- Risk Manager -->
             @if (riskOutput(); as risk) {
-              <section class="card" style="margin-bottom:14px">
+              <section class="card mb-3.5">
                 <div class="card-hd">
-                  <span class="title">Risk Manager</span>
+                  <span class="title"><hf-term key="rm">Risk Manager</hf-term></span>
                   @if (risk['veto']) {
-                    <span class="pill err"><span class="dot"></span>VETO</span>
+                    <span class="pill err"><span class="dot"></span><hf-term key="veto">VETO</hf-term></span>
                   }
                 </div>
                 <div class="card-bd">
-                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:13px">
+                  <div class="grid grid-cols-3 gap-4 text-xs">
                     <div>
                       <div class="eyebrow">Max position</div>
-                      <div class="mono" style="margin-top:4px">{{ pct(risk['max_position_pct_for_this_trade']) }}</div>
+                      <div class="mono mt-1">{{ pct(risk['max_position_pct_for_this_trade']) }}</div>
                     </div>
                     <div>
-                      <div class="eyebrow">Stop loss</div>
-                      <div class="mono" style="margin-top:4px">{{ pct(risk['stop_loss_pct']) }}</div>
+                      <div class="eyebrow"><hf-term key="stop-loss">Stop loss</hf-term></div>
+                      <div class="mono mt-1">{{ pct(risk['stop_loss_pct']) }}</div>
                     </div>
                     <div>
                       <div class="eyebrow">Hard caps applied</div>
-                      <div class="mono" style="margin-top:4px;font-size:11.5px">
+                      <div class="mono mt-1 text-[11.5px]">
                         {{ (asArray(risk['hard_caps_applied'])).join(', ') || 'none' }}
                       </div>
                     </div>
                   </div>
-                  <p style="font-size:13px;color:var(--text-2);margin:14px 0 0;white-space:pre-wrap">{{ risk['rationale'] }}</p>
+                  <p class="text-xs text-text-2 m-0 mt-3.5 whitespace-pre-wrap">{{ risk['rationale'] }}</p>
                 </div>
               </section>
             }
 
             <!-- Risk context (P02a review) -->
             @if (riskContext(); as rc) {
-              <section class="card" style="margin-bottom:14px" data-test="risk-context">
+              <section class="card mb-3.5" data-test="risk-context">
                 <div class="card-hd">
                   <span class="title">Risk context</span>
                   <span class="pill"
@@ -361,14 +427,14 @@ interface PersonaCard {
                   </span>
                 </div>
                 <div class="card-bd">
-                  <p style="font-size:13px;color:var(--text-2);margin:0">{{ rc.notes }}</p>
+                  <p class="text-xs text-text-2 m-0">{{ rc.notes }}</p>
                   @if (rc.mode === 'stub' && rc.stub_nav_usd) {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:6px 0 0">
+                    <p class="text-[11.5px] text-text-3 m-0 mt-1.5">
                       Stub NAV: <span class="mono">$ {{ rc.stub_nav_usd }}</span>
                     </p>
                   }
                   @if (rc.mode === 'real' && rc.cash_balance_usd) {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:6px 0 0">
+                    <p class="text-[11.5px] text-text-3 m-0 mt-1.5">
                       Portfolio cash: <span class="mono">$ {{ rc.cash_balance_usd }}</span>
                     </p>
                   }
@@ -378,19 +444,19 @@ interface PersonaCard {
 
             <!-- Valuation -->
             @if (valuationOutput(); as v) {
-              <section class="card" style="margin-bottom:14px">
+              <section class="card mb-3.5">
                 <div class="card-hd"><span class="title">Valuation</span></div>
                 <div class="card-bd">
-                  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;font-size:13px">
-                    <div><div class="eyebrow">DCF</div><div class="mono" style="margin-top:4px">{{ num(v['dcf_fair_value']) }}</div></div>
-                    <div><div class="eyebrow">Multiples</div><div class="mono" style="margin-top:4px">{{ num(v['multiples_fair_value']) }}</div></div>
-                    <div><div class="eyebrow">Residual income</div><div class="mono" style="margin-top:4px">{{ num(v['residual_income_fair_value']) }}</div></div>
-                    <div><div class="eyebrow">Current price</div><div class="mono" style="margin-top:4px">{{ num(v['current_price']) }}</div></div>
-                    <div><div class="eyebrow">FV low</div><div class="mono" style="margin-top:4px">{{ num(v['fair_value_low']) }}</div></div>
-                    <div><div class="eyebrow">FV high</div><div class="mono" style="margin-top:4px">{{ num(v['fair_value_high']) }}</div></div>
-                    <div style="grid-column:span 2"><div class="eyebrow">Upside</div><div class="mono" style="margin-top:4px">{{ num(v['upside_pct']) }}%</div></div>
+                  <div class="grid grid-cols-4 gap-3.5 text-xs">
+                    <div><div class="eyebrow"><hf-term key="dcf">DCF</hf-term></div><div class="mono mt-1">{{ num(v['dcf_fair_value']) }}</div></div>
+                    <div><div class="eyebrow">Multiples</div><div class="mono mt-1">{{ num(v['multiples_fair_value']) }}</div></div>
+                    <div><div class="eyebrow">Residual income</div><div class="mono mt-1">{{ num(v['residual_income_fair_value']) }}</div></div>
+                    <div><div class="eyebrow">Current price</div><div class="mono mt-1">{{ num(v['current_price']) }}</div></div>
+                    <div><div class="eyebrow"><hf-term key="fair-value">FV</hf-term> low</div><div class="mono mt-1">{{ num(v['fair_value_low']) }}</div></div>
+                    <div><div class="eyebrow"><hf-term key="fair-value">FV</hf-term> high</div><div class="mono mt-1">{{ num(v['fair_value_high']) }}</div></div>
+                    <div class="col-span-2"><div class="eyebrow">Upside</div><div class="mono mt-1">{{ num(v['upside_pct']) }}%</div></div>
                   </div>
-                  <p style="font-size:11.5px;color:var(--text-3);margin:10px 0 0">
+                  <p class="text-[11.5px] text-text-3 m-0 mt-2.5">
                     Most sensitive: {{ v['most_sensitive_assumption'] }}
                   </p>
                 </div>
@@ -398,7 +464,7 @@ interface PersonaCard {
             }
 
             @if (!riskOutput() && !riskContext() && !valuationOutput()) {
-              <p style="color:var(--text-3)">No risk output recorded for this run.</p>
+              <p class="text-text-3">No risk output recorded for this run.</p>
             }
           </div>
         }
@@ -406,11 +472,11 @@ interface PersonaCard {
         @if (activeTab() === 'cio') {
           <div role="tabpanel" id="tab-cio" aria-labelledby="tabbtn-cio" tabindex="0">
             @if (cioOutput(); as c) {
-              <section class="card" style="margin-bottom:14px;border-left:3px solid;"
+              <section class="card mb-3.5 border-l-[3px] border-solid"
                 [style.borderLeftColor]="c['overrode_pm'] ? 'var(--acc-hold)' : 'var(--acc-info)'">
                 <div class="card-bd">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                    <h2 style="font-size:16px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px">
+                  <div class="flex justify-between items-start">
+                    <h2 class="text-base font-semibold m-0 flex items-center gap-2">
                       Chief Investment Officer
                       @if (c['overrode_pm']) {
                         <span class="pill warn"><span class="dot"></span>OVERRIDE</span>
@@ -418,45 +484,45 @@ interface PersonaCard {
                         <span class="pill info"><span class="dot"></span>RATIFIED PM</span>
                       }
                     </h2>
-                    <span class="mono" style="font-size:11px;color:var(--text-3)">confidence {{ c['confidence'] }}</span>
+                    <span class="mono text-[11px] text-text-3">confidence {{ c['confidence'] }}</span>
                   </div>
-                  <p style="font-size:13px;color:var(--text-2);margin:10px 0 0">{{ c['outlook'] }}</p>
+                  <p class="text-xs text-text-2 m-0 mt-2.5">{{ c['outlook'] }}</p>
                   @if (c['overrode_pm'] && c['override_reason']) {
-                    <p style="font-size:13px;margin:8px 0 0">
-                      <span style="font-weight:600">Override reason:</span> {{ c['override_reason'] }}
+                    <p class="text-xs m-0 mt-2">
+                      <span class="font-semibold">Override reason:</span> {{ c['override_reason'] }}
                     </p>
                   }
                   @if (c['stop_loss_pct']) {
-                    <p style="font-size:11px;color:var(--text-3);margin:8px 0 0">
+                    <p class="text-[11px] text-text-3 m-0 mt-2">
                       Stop loss: <span class="mono">{{ pct(c['stop_loss_pct']) }}</span>
                     </p>
                   }
                   @if (pmDecisionMsg(); as pm) {
-                    <details style="margin-top:12px;font-size:11px;color:var(--text-3)">
-                      <summary style="cursor:pointer">Original PM ticket (pre-CIO)</summary>
-                      <pre style="margin:6px 0 0;background:var(--surface-2);padding:8px;border-radius:4px;overflow:auto;font-family:var(--font-mono);font-size:11.5px;color:var(--text-2)">action: {{ pm['action'] }}, weight: {{ pm['target_weight_pct'] }}%, qty: {{ pm['target_quantity'] }}
+                    <details class="mt-3 text-[11px] text-text-3">
+                      <summary class="cursor-pointer">Original PM ticket (pre-CIO)</summary>
+                      <pre class="m-0 mt-1.5 bg-surface-2 p-2 rounded-sm overflow-auto font-mono text-[11.5px] text-text-2">action: {{ pm['action'] }}, weight: {{ pm['target_weight_pct'] }}%, qty: {{ pm['target_quantity'] }}
 {{ pm['rationale'] }}</pre>
                     </details>
                   }
                 </div>
               </section>
             } @else {
-              <p style="color:var(--text-3)">No CIO output recorded for this run.</p>
+              <p class="text-text-3">No CIO output recorded for this run.</p>
             }
           </div>
         }
 
         @if (activeTab() === 'raw') {
           <div role="tabpanel" id="tab-raw" aria-labelledby="tabbtn-raw" tabindex="0">
-            <h2 class="eyebrow" style="margin:0 0 10px">Raw artifacts</h2>
+            <h2 class="eyebrow m-0 mb-2.5">Raw artifacts</h2>
             <!-- Evidence trail (P01 review) -->
             @if (evidenceItems().length || providerStateEntries().length) {
-              <section class="card" style="margin-bottom:14px" data-test="evidence-trail">
+              <section class="card mb-3.5" data-test="evidence-trail">
                 <div class="card-hd"><span class="title">Evidence &amp; sources</span></div>
                 <div class="card-bd">
                   @if (providerStateEntries().length) {
-                    <div class="eyebrow" style="margin-bottom:6px">Provider status</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+                    <div class="eyebrow mb-1.5">Provider status</div>
+                    <div class="flex flex-wrap gap-1.5 mb-3">
                       @for (p of providerStateEntries(); track p.name) {
                         <span class="pill"
                           [class.ok]="p.state === 'configured'"
@@ -467,17 +533,17 @@ interface PersonaCard {
                     </div>
                   }
                   @if (evidenceItems().length) {
-                    <div class="eyebrow" style="margin-bottom:6px">Citations</div>
-                    <ul style="margin:0;padding:0;list-style:none;font-size:13px">
+                    <div class="eyebrow mb-1.5">Citations</div>
+                    <ul class="m-0 p-0 list-none text-xs">
                       @for (it of evidenceItems(); track it.label + it.source + it.url) {
-                        <li style="border-top:1px solid var(--border);padding:6px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                        <li class="border-t border-solid border-border py-1.5 px-0 flex flex-wrap gap-2 items-center">
                           <span class="pill"><span class="dot"></span>{{ it.agent }}</span>
-                          <span style="color:var(--text-2)">{{ it.label }}</span>
-                          <span class="mono" style="font-size:11px;color:var(--text-3)">
+                          <span class="text-text-2">{{ it.label }}</span>
+                          <span class="mono text-[11px] text-text-3">
                             {{ it.provider }}{{ it.as_of ? ' · ' + it.as_of : '' }}
                           </span>
                           @if (it.url) {
-                            <a [href]="it.url" target="_blank" rel="noopener" style="color:var(--acc-info-fg);font-size:11.5px">open ↗</a>
+                            <a [href]="it.url" target="_blank" rel="noopener" class="text-[var(--acc-info-fg)] text-[11.5px]">open ↗</a>
                           }
                         </li>
                       }
@@ -501,8 +567,8 @@ interface PersonaCard {
                     @for (c of run()!.llm_calls; track c.id) {
                       <tr>
                         <td>{{ c.agent_name }}</td>
-                        <td style="color:var(--text-2)">{{ c.provider }}</td>
-                        <td class="mono" style="font-size:11.5px">{{ c.model }}</td>
+                        <td class="text-text-2">{{ c.provider }}</td>
+                        <td class="mono text-[11.5px]">{{ c.model }}</td>
                         <td class="num">{{ c.prompt_tokens }}</td>
                         <td class="num">{{ c.completion_tokens }}</td>
                         <td class="num">$ {{ formatCost(c.cost_usd) }}</td>
@@ -515,7 +581,7 @@ interface PersonaCard {
             }
 
             @if (!evidenceItems().length && !providerStateEntries().length && !run()!.llm_calls.length) {
-              <p style="color:var(--text-3)">No raw artifacts recorded for this run.</p>
+              <p class="text-text-3">No raw artifacts recorded for this run.</p>
             }
           </div>
         }
@@ -530,16 +596,27 @@ interface PersonaCard {
           @if (toastMsg(); as t) { {{ t }} }
         </div>
         @if (toastMsg(); as t) {
-          <div class="pill ok" style="position:fixed;bottom:18px;right:18px;height:auto;padding:8px 12px;z-index:var(--z-modal)"
+          <div class="pill ok fixed bottom-[18px] right-[18px] h-auto py-2 px-3 z-[var(--z-modal)]"
                data-test="position-saved-toast">
             <span class="dot"></span>{{ t }}
             <a routerLink="/portfolio"
-               style="margin-left:6px;color:var(--acc-info-fg);text-decoration:underline">View portfolio →</a>
+               class="ml-1.5 text-[var(--acc-info-fg)] underline">View portfolio →</a>
           </div>
         }
       }
     </hf-app-shell>
   `,
+  styles: [`
+    .thesis-expand {
+      font-size: 11.5px;
+      color: var(--acc-info-fg);
+      margin-top: 4px;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      padding: 0;
+    }
+  `],
 })
 export class RunsDetailPage implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
@@ -675,6 +752,67 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     const msg = this.messageByAgent().get('pm_decision');
     return msg ? (msg.parsed_output as Record<string, unknown>) : null;
   });
+
+  // WS-5.4.2: range-rail cells on the Decision tab. Each cell returns null
+  // when its source data is absent — the template hides the cell individually
+  // rather than fabricating placeholder values.
+  readonly targetZoneCell = computed<{
+    min: number; max: number; value: number; bandLo: number; bandHi: number;
+  } | null>(() => {
+    const v = this.valuationOutput();
+    if (!v) return null;
+    const fvLo = Number(v['fair_value_low']);
+    const fvHi = Number(v['fair_value_high']);
+    const cp = Number(v['current_price']);
+    if (!Number.isFinite(fvLo) || !Number.isFinite(fvHi) || !Number.isFinite(cp)) return null;
+    const min = Math.floor(Math.min(fvLo, cp) * 0.9);
+    const max = Math.ceil(Math.max(fvHi, cp) * 1.1);
+    return { min, max, value: cp, bandLo: fvLo, bandHi: fvHi };
+  });
+
+  readonly stopLossCell = computed<{ min: number; max: number; value: number } | null>(() => {
+    const r = this.riskOutput();
+    if (!r) return null;
+    const v = Number(r['stop_loss_pct']);
+    if (!Number.isFinite(v)) return null;
+    return { min: 0, max: 0.20, value: v };
+  });
+
+  readonly expectedReturnCell = computed<{
+    min: number; max: number; value: number; tone: 'long' | 'short' | 'neutral';
+  } | null>(() => {
+    const v = this.valuationOutput();
+    if (!v) return null;
+    const up = Number(v['upside_pct']);
+    if (!Number.isFinite(up)) return null;
+    const span = Math.max(5, Math.abs(up));
+    const tone: 'long' | 'short' | 'neutral' = up > 0 ? 'long' : up < 0 ? 'short' : 'neutral';
+    return { min: -span, max: span, value: up, tone };
+  });
+
+  readonly drawdownCell = computed<{ min: number; max: number; value: number } | null>(() => {
+    const r = this.riskOutput();
+    if (!r) return null;
+    const d = this.run()?.decisions?.[0];
+    if (!d) return null;
+    const stop = Number(r['stop_loss_pct']);
+    const tw = Number(d.target_weight_pct);
+    if (!Number.isFinite(stop) || !Number.isFinite(tw)) return null;
+    return { min: -0.05, max: 0, value: -(tw / 100) * stop };
+  });
+
+  readonly statGridVisible = computed(() =>
+    !!(this.targetZoneCell() || this.stopLossCell() || this.expectedReturnCell() || this.drawdownCell()),
+  );
+
+  readonly isVetoed = computed(() => !!(this.riskOutput()?.['veto']));
+
+  // Format callbacks bound as instance arrow functions so they can be passed
+  // straight to hf-range-rail without losing `this` context.
+  readonly fmtMoney = (v: number) => `$ ${v.toFixed(2)}`;
+  readonly fmtPctDecimal = (v: number) => `${(v * 100).toFixed(1)}%`;
+  readonly fmtSignedPctScaled = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+  readonly fmtSignedPctDecimal = (v: number) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
 
   // P02a review: surface the stub/real label so users don't treat
   // illustrative target sizing as portfolio-grade advice.

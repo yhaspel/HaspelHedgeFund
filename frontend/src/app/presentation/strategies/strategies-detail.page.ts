@@ -2,6 +2,8 @@ import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { EmptyStateComponent } from '../shared/empty-state.component';
+import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
@@ -12,17 +14,17 @@ import { ModalComponent } from '../shared/modal.component';
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
+  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, EmptyStateComponent, GlossaryTermComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
       <div class="page-head">
         <div>
           <div class="eyebrow">Strategy</div>
-          <h1 style="margin-top:6px">{{ store.currentStrategy()?.name ?? 'Strategy' }}</h1>
-          <p style="font-size:13px;color:var(--text-2);margin-top:4px">
-            Universe {{ store.currentStrategy()?.universe_name }} ·
-            Gross {{ store.currentStrategy()?.target_gross_pct }} ·
-            Net {{ store.currentStrategy()?.target_net_pct }} ·
+          <h1 class="mt-1.5">{{ store.currentStrategy()?.name ?? 'Strategy' }}</h1>
+          <p class="text-xs text-text-2 mt-1">
+            <hf-term key="universe">Universe</hf-term> {{ store.currentStrategy()?.universe_name }} ·
+            <hf-term key="gross-exposure">Gross</hf-term> {{ store.currentStrategy()?.target_gross_pct }} ·
+            <hf-term key="net-exposure">Net</hf-term> {{ store.currentStrategy()?.target_net_pct }} ·
             K {{ store.currentStrategy()?.top_k_longs }}L / {{ store.currentStrategy()?.top_k_shorts }}S
           </p>
         </div>
@@ -41,18 +43,18 @@ import { ModalComponent } from '../shared/modal.component';
             <div class="est-modal__head">
               <div class="card-hd"><span class="title" id="estimate-modal-title">Confirm cycle dispatch</span></div>
               <div class="est-modal__head-bd">
-                <p style="font-size:11.5px;color:var(--text-3);margin:0">
-                  Preset <span class="mono" style="color:var(--text)">{{ est.preset }}</span> ·
+                <p class="text-[11.5px] text-text-3 m-0">
+                  Preset <span class="mono text-text">{{ est.preset }}</span> ·
                   {{ est.n_candidates }} candidates · full council per candidate
                 </p>
 
                 <div
-                  style="border:1px solid;border-radius:6px;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:13px"
+                  class="border border-solid rounded-md p-3 grid grid-cols-2 gap-y-1.5 gap-x-6 text-xs"
                   [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'"
                   [style.background]="est.exceeds_ceiling ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'">
                   <div>Est. per-call: <span class="mono">$ {{ est.per_call_usd.toFixed(4) }}</span></div>
                   <div>Est. total:
-                    <span class="mono" style="font-weight:600"
+                    <span class="mono font-semibold"
                       [style.color]="est.exceeds_ceiling ? 'var(--acc-short-fg)' : 'var(--text)'">
                       $ {{ est.est_total_usd.toFixed(2) }}
                     </span>
@@ -62,7 +64,7 @@ import { ModalComponent } from '../shared/modal.component';
                 </div>
 
                 @if (est.exceeds_ceiling) {
-                  <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
+                  <p class="text-[11.5px] text-[var(--acc-short-fg)] m-0">
                     ⚠ Estimate exceeds your cost ceiling. The cycle will trim K_longs/K_shorts before dispatching — raise the ceiling for a full fan-out.
                   </p>
                 }
@@ -92,9 +94,9 @@ import { ModalComponent } from '../shared/modal.component';
 
             <div class="est-modal__foot">
               @if (anyAnthropic(est)) {
-                <p style="font-size:11.5px;color:var(--acc-short-fg);margin:0">
+                <p class="text-[11.5px] text-[var(--acc-short-fg)] m-0">
                   ⚠ This cycle will hit Anthropic for at least one agent. If you didn't intend this, change the model in
-                  <a routerLink="/settings/models" style="text-decoration:underline">Settings → Models</a>
+                  <a routerLink="/settings/models" class="underline">Settings → Models</a>
                   or pick a different strategy preset.
                 </p>
               }
@@ -113,23 +115,27 @@ import { ModalComponent } from '../shared/modal.component';
       }
 
       @if (notice()) {
-        <div role="status" aria-live="polite" class="pill info" style="margin-bottom:14px;height:auto;padding:8px 12px">
+        <div role="status" aria-live="polite" class="pill info mb-3.5 h-auto py-2 px-3">
           <span class="dot"></span>{{ notice() }}
         </div>
       }
 
-      <div style="display:grid;grid-template-columns:280px 1fr;gap:18px">
+      <div class="grid grid-cols-[280px_1fr] gap-[18px]">
         <section class="card">
           <div class="card-hd"><span class="title">Cycles</span></div>
           <div class="card-bd">
             @if (store.cycles().length === 0) {
-              <p style="font-size:11.5px;color:var(--text-3);margin:0">No cycles yet — click "Run cycle now".</p>
+              <hf-empty-state
+                [compact]="true"
+                message="No cycles yet."
+                detail='Click "Run cycle now" above to kick off the first one.'>
+              </hf-empty-state>
             } @else {
-              <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;font-size:13px">
+              <ul class="list-none p-0 m-0 flex flex-col gap-1.5 text-xs">
                 @for (c of store.cycles(); track c.id) {
                   <li>
                     <button (click)="openCycle(c.id)"
-                      style="background:transparent;border:0;padding:0;color:var(--acc-info-fg);cursor:pointer;text-align:left">
+                      class="bg-transparent border-0 p-0 text-[var(--acc-info-fg)] cursor-pointer text-left">
                       <span class="mono">{{ c.as_of_date }}</span> · {{ c.status }} · g {{ c.gross_pct }}
                     </button>
                   </li>
@@ -155,35 +161,35 @@ import { ModalComponent } from '../shared/modal.component';
                 <span class="dot"></span>{{ c.status }}
               </span>
               <div class="actions">
-                <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                <span class="mono text-[11.5px] text-text-3">
                   {{ c.finished_at ? (c.finished_at | date: 'short') : '—' }}
                 </span>
-                <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                <span class="mono text-[11.5px] text-text-3">
                   · gross {{ c.gross_pct | number: '1.4-4' }} · net {{ c.net_pct | number: '1.4-4' }}
                 </span>
               </div>
             </div>
 
             @if (c.status === 'awaiting_review') {
-              <div class="card-bd" style="display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--border)">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div class="card-bd flex flex-col gap-3 border-b border-solid border-border">
+                <div class="flex items-center gap-2.5 flex-wrap">
                   <span class="eyebrow" data-test="review-panel-title">Review screener picks</span>
-                  <span style="font-size:11.5px;color:var(--text-3)">
+                  <span class="text-[11.5px] text-text-3">
                     The cycle stopped after the cheap screener pass. Pick which names should get the full council debate, then approve.
                   </span>
                 </div>
 
                 @if (reviewLongs(c).length > 0) {
                   <div>
-                    <div class="eyebrow" style="color:var(--acc-long-fg);margin-bottom:6px">
+                    <div class="eyebrow text-[var(--acc-long-fg)] mb-1.5">
                       Long candidates ({{ reviewLongsSelected().size }} / {{ reviewLongs(c).length }} selected)
                     </div>
                     <table class="tbl">
                       <thead><tr>
-                        <th scope="col" style="width:36px"><span class="visually-hidden">Include in council</span></th>
+                        <th scope="col" class="w-9"><span class="visually-hidden">Include in council</span></th>
                         <th scope="col">Ticker</th><th scope="col">Name</th><th scope="col">Sector</th>
                         <th scope="col" class="right">Score</th>
-                        <th scope="col" style="font-size:11.5px;color:var(--text-3)">Why</th>
+                        <th scope="col" class="text-[11.5px] text-text-3">Why</th>
                       </tr></thead>
                       <tbody>
                         @for (cand of reviewLongs(c); track cand.ticker) {
@@ -195,10 +201,10 @@ import { ModalComponent } from '../shared/modal.component';
                                      [attr.data-test]="'review-long-' + cand.ticker" />
                             </td>
                             <td><hf-ticker [ticker]="cand.ticker"></hf-ticker></td>
-                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(cand.ticker) }}</td>
-                            <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
+                            <td class="text-text-2 text-[12.5px]">{{ nameFor(cand.ticker) }}</td>
+                            <td class="text-[11.5px] text-text-2">{{ cand.sector }}</td>
                             <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
-                            <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
+                            <td class="text-[11.5px] text-text-3">{{ cand.rationale }}</td>
                           </tr>
                         }
                       </tbody>
@@ -208,15 +214,15 @@ import { ModalComponent } from '../shared/modal.component';
 
                 @if (reviewShorts(c).length > 0) {
                   <div>
-                    <div class="eyebrow" style="color:var(--acc-short-fg);margin-bottom:6px">
+                    <div class="eyebrow text-[var(--acc-short-fg)] mb-1.5">
                       Short candidates ({{ reviewShortsSelected().size }} / {{ reviewShorts(c).length }} selected)
                     </div>
                     <table class="tbl">
                       <thead><tr>
-                        <th scope="col" style="width:36px"><span class="visually-hidden">Include in council</span></th>
+                        <th scope="col" class="w-9"><span class="visually-hidden">Include in council</span></th>
                         <th scope="col">Ticker</th><th scope="col">Name</th><th scope="col">Sector</th>
                         <th scope="col" class="right">Score</th>
-                        <th scope="col" style="font-size:11.5px;color:var(--text-3)">Why</th>
+                        <th scope="col" class="text-[11.5px] text-text-3">Why</th>
                       </tr></thead>
                       <tbody>
                         @for (cand of reviewShorts(c); track cand.ticker) {
@@ -228,10 +234,10 @@ import { ModalComponent } from '../shared/modal.component';
                                      [attr.data-test]="'review-short-' + cand.ticker" />
                             </td>
                             <td><hf-ticker [ticker]="cand.ticker"></hf-ticker></td>
-                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(cand.ticker) }}</td>
-                            <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
+                            <td class="text-text-2 text-[12.5px]">{{ nameFor(cand.ticker) }}</td>
+                            <td class="text-[11.5px] text-text-2">{{ cand.sector }}</td>
                             <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
-                            <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
+                            <td class="text-[11.5px] text-text-3">{{ cand.rationale }}</td>
                           </tr>
                         }
                       </tbody>
@@ -240,10 +246,10 @@ import { ModalComponent } from '../shared/modal.component';
                 }
 
                 @if (reviewError()) {
-                  <p role="alert" style="color:var(--acc-short-fg);font-size:12px;margin:0" data-test="review-error">{{ reviewError() }}</p>
+                  <p role="alert" class="text-[var(--acc-short-fg)] text-2xs m-0" data-test="review-error">{{ reviewError() }}</p>
                 }
 
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <div class="flex gap-2 items-center flex-wrap">
                   <button class="btn primary" (click)="approveCouncil(c)" [disabled]="approving()"
                           data-test="approve-council">
                     {{ approving() ? 'Approving…' : 'Approve & run council (' + reviewSelectedCount() + ')' }}
@@ -252,7 +258,7 @@ import { ModalComponent } from '../shared/modal.component';
                           data-test="reject-cycle">
                     {{ rejecting() ? 'Cancelling…' : 'Reject' }}
                   </button>
-                  <span style="font-size:11.5px;color:var(--text-3)">
+                  <span class="text-[11.5px] text-text-3">
                     · cost ceiling
                     <span class="mono">$ {{ store.currentStrategy()?.cost_ceiling_per_cycle_usd }}</span>
                   </span>
@@ -261,8 +267,8 @@ import { ModalComponent } from '../shared/modal.component';
             }
 
             @if (c.candidate_runs && c.candidate_runs.length > 0) {
-              <div class="card-bd" style="border-bottom:1px solid var(--border)">
-                <div class="eyebrow" style="margin-bottom:6px">
+              <div class="card-bd border-b border-solid border-border">
+                <div class="eyebrow mb-1.5">
                   Candidate runs ({{ c.candidate_runs.length }})
                 </div>
                 <table class="tbl">
@@ -275,24 +281,23 @@ import { ModalComponent } from '../shared/modal.component';
                     @for (cr of c.candidate_runs; track cr.run_id) {
                       <tr>
                         <td class="mono">{{ cr.screener_rank }}</td>
-                        <td class="mono" style="color:var(--text)">{{ cr.candidate_key }}</td>
+                        <td class="mono text-text">{{ cr.candidate_key }}</td>
                         <td class="mono"
                             [style.color]="cr.side === 'short' ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'">
                           {{ cr.side }}
                         </td>
                         <td>
-                          <span class="pill"
+                          <span class="pill h-auto py-0.5 px-1.5 text-[11px]"
                             [class.ok]="cr.run_status === 'done'"
                             [class.warn]="cr.run_status === 'queued' || cr.run_status === 'running'"
-                            [class.err]="cr.run_status === 'failed' || cr.run_status === 'cancelled'"
-                            style="height:auto;padding:2px 6px;font-size:11px">
+                            [class.err]="cr.run_status === 'failed' || cr.run_status === 'cancelled'">
                             {{ cr.run_status }}
                           </span>
                         </td>
                         <td class="num mono">$ {{ cr.run_cost_usd }}</td>
                         <td>
                           <a [routerLink]="['/runs', cr.run_id]"
-                             style="color:var(--acc-info-fg)" data-test="candidate-run-link">
+                             class="text-[var(--acc-info-fg)]" data-test="candidate-run-link">
                             Open run #{{ cr.run_id }} →
                           </a>
                         </td>
@@ -303,58 +308,60 @@ import { ModalComponent } from '../shared/modal.component';
               </div>
             }
             @if (store.currentStrategy()?.kind === 'market_neutral') {
-              <div class="card-bd" style="display:flex;gap:14px;align-items:center;border-top:1px solid var(--border);padding-top:10px">
+              <div class="card-bd flex gap-3.5 items-center border-t border-solid border-border pt-2.5">
                 <span class="eyebrow">Neutrality</span>
                 <span class="mono" [style.color]="netNeutral(c) ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
-                  net $ {{ c.realised_net_pct || c.net_pct | number: '1.4-4' }}
+                  <hf-term key="net-exposure">net</hf-term> $ {{ c.realised_net_pct || c.net_pct | number: '1.4-4' }}
                 </span>
                 <span class="mono" [style.color]="betaNeutral(c) ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
-                  β {{ c.realised_portfolio_beta | number: '1.3-3' }}
+                  <hf-term key="beta">β</hf-term> {{ c.realised_portfolio_beta | number: '1.3-3' }}
                 </span>
                 @if (c.beta_diagnostics?.['alpha_clamped']) {
-                  <span class="mono" style="color:var(--acc-short-fg);font-size:11.5px">⚠ α clamped — partial breach</span>
+                  <span class="mono text-[var(--acc-short-fg)] text-[11.5px]">⚠ α clamped — partial breach</span>
                 }
                 @if (unreliable(c).length) {
-                  <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                  <span class="mono text-[11.5px] text-text-3">
                     unreliable β: {{ unreliable(c).join(', ') }}
                   </span>
                 }
               </div>
             }
-            <div class="card-bd" style="display:flex;flex-direction:column;gap:18px">
+            <div class="card-bd flex flex-col gap-[18px]">
               @if (c.error_message) {
-                <p style="color:var(--acc-short-fg);font-size:12px;margin:0">{{ c.error_message }}</p>
+                <p class="text-[var(--acc-short-fg)] text-2xs m-0">{{ c.error_message }}</p>
               }
 
-              @if (c.status === 'done' && c.marked_snapshot; as snap) {
-                <div data-test="marked-snapshot" style="border:1px solid var(--border);border-radius:var(--r-8);padding:12px;display:flex;flex-direction:column;gap:10px">
-                  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div class="strat-group">
+                <div class="strat-group-hd">Book structure</div>
+                @if (c.status === 'done' && c.marked_snapshot; as snap) {
+                <div data-test="marked-snapshot" class="marked-snapshot-card">
+                  <div class="flex items-baseline justify-between gap-3 flex-wrap">
                     <div>
                       <div class="eyebrow">Marked book (vs cycle as_of)</div>
-                      <div style="display:flex;align-items:baseline;gap:14px;margin-top:4px;flex-wrap:wrap">
-                        <div style="font-size:20px;font-weight:600"
+                      <div class="flex items-baseline gap-3.5 mt-1 flex-wrap">
+                        <div class="text-[20px] font-semibold"
                              [style.color]="snap.since_as_of_pct && +snap.since_as_of_pct > 0 ? 'var(--acc-long-fg)' : (snap.since_as_of_pct && +snap.since_as_of_pct < 0 ? 'var(--acc-short-fg)' : null)">
                           @if (snap.since_as_of_pct !== null) {
                             {{ +snap.since_as_of_pct > 0 ? '+' : '' }}{{ +snap.since_as_of_pct | number: '1.2-2' }}%
                           } @else { — }
                         </div>
-                        <div class="mono" style="font-size:11.5px;color:var(--text-3)">
+                        <div class="mono text-[11.5px] text-text-3">
                           marked gross {{ snap.marked_gross_pct !== null ? (+snap.marked_gross_pct | number: '1.2-2') : '—' }}% ·
                           marked net {{ snap.marked_net_pct !== null ? (+snap.marked_net_pct | number: '1.2-2') : '—' }}%
                         </div>
                       </div>
-                      <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+                      <div class="mono text-[11px] text-text-3 mt-1">
                         as_of {{ c.as_of_date }} → mark {{ snap.mark_as_of }} · stamped {{ snap.snapshot_at | date: 'short' }}
                       </div>
                     </div>
                     <button class="btn ghost sm" (click)="refreshCycleMark(c)" [disabled]="refreshingMark()" data-test="refresh-cycle-mark">
-                      <svg width="12" height="12" style="margin-right:4px"><use href="/icons.svg#i-rerun" /></svg>
+                      <svg width="12" height="12" class="mr-1"><use href="/icons.svg#i-rerun" /></svg>
                       {{ refreshingMark() ? 'Refreshing…' : 'Refresh mark' }}
                     </button>
                   </div>
 
                   @for (w of snap.warnings; track w) {
-                    <div class="pill warn" style="height:auto;padding:4px 8px;width:fit-content"><span class="dot"></span>{{ w }}</div>
+                    <div class="pill warn h-auto py-1 px-2 w-fit"><span class="dot"></span>{{ w }}</div>
                   }
 
                   @if (markedRows(snap).length > 0) {
@@ -374,7 +381,7 @@ import { ModalComponent } from '../shared/modal.component';
                         @for (row of markedRows(snap); track row.ticker) {
                           <tr>
                             <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
-                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
+                            <td class="text-text-2 text-[12.5px]">{{ nameFor(row.ticker) }}</td>
                             <td class="num mono"
                                 [style.color]="row.weight_pct >= 0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
                               {{ row.weight_pct >= 0 ? '+' : '' }}{{ row.weight_pct | number: '1.2-2' }}%
@@ -396,16 +403,16 @@ import { ModalComponent } from '../shared/modal.component';
                       </tbody>
                     </table>
                   } @else {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No marked positions — empty target book.</p>
+                    <hf-empty-state [compact]="true" message="No marked positions — empty target book."></hf-empty-state>
                   }
                 </div>
               }
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+              <div class="grid grid-cols-2 gap-[18px]">
                 <div>
-                  <div class="eyebrow" style="color:var(--acc-long-fg);margin-bottom:6px">Long book</div>
+                  <div class="eyebrow text-[var(--acc-long-fg)] mb-1.5">Long book</div>
                   @if (longs().length === 0) {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No longs.</p>
+                    <p class="text-[11.5px] text-text-3 m-0">No longs.</p>
                   } @else {
                     <table class="tbl">
                       <thead>
@@ -419,7 +426,7 @@ import { ModalComponent } from '../shared/modal.component';
                         @for (row of longs(); track row.ticker) {
                           <tr>
                             <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
-                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
+                            <td class="text-text-2 text-[12.5px]">{{ nameFor(row.ticker) }}</td>
                             <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
                           </tr>
                         }
@@ -428,9 +435,9 @@ import { ModalComponent } from '../shared/modal.component';
                   }
                 </div>
                 <div>
-                  <div class="eyebrow" style="color:var(--acc-short-fg);margin-bottom:6px">Short book</div>
+                  <div class="eyebrow text-[var(--acc-short-fg)] mb-1.5">Short book</div>
                   @if (shorts().length === 0) {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No shorts.</p>
+                    <p class="text-[11.5px] text-text-3 m-0">No shorts.</p>
                   } @else {
                     <table class="tbl">
                       <thead>
@@ -444,7 +451,7 @@ import { ModalComponent } from '../shared/modal.component';
                         @for (row of shorts(); track row.ticker) {
                           <tr>
                             <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
-                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
+                            <td class="text-text-2 text-[12.5px]">{{ nameFor(row.ticker) }}</td>
                             <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
                           </tr>
                         }
@@ -455,7 +462,7 @@ import { ModalComponent } from '../shared/modal.component';
               </div>
 
               <div>
-                <div class="eyebrow" style="margin-bottom:6px">Sector exposure (signed)</div>
+                <div class="eyebrow mb-1.5">Sector exposure (signed)</div>
                 <table class="tbl">
                   <thead>
                     <tr>
@@ -476,11 +483,14 @@ import { ModalComponent } from '../shared/modal.component';
                   </tbody>
                 </table>
               </div>
+              </div><!-- /.strat-group Book structure -->
 
-              <div>
-                <div class="eyebrow" style="margin-bottom:6px">Rebalance orders ({{ c.orders.length }})</div>
+              <div class="strat-group">
+                <div class="strat-group-hd">Orders</div>
+                <div>
+                <div class="eyebrow mb-1.5">Rebalance orders ({{ c.orders.length }})</div>
                 @if (c.orders.length === 0) {
-                  <p style="font-size:11.5px;color:var(--text-3);margin:0">No orders this cycle.</p>
+                  <p class="text-[11.5px] text-text-3 m-0">No orders this cycle.</p>
                 } @else {
                   <table class="tbl">
                     <thead><tr>
@@ -498,10 +508,10 @@ import { ModalComponent } from '../shared/modal.component';
                             {{ o.side }}
                           </td>
                           <td><hf-ticker [ticker]="o.ticker"></hf-ticker></td>
-                          <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(o.ticker) }}</td>
+                          <td class="text-text-2 text-[12.5px]">{{ nameFor(o.ticker) }}</td>
                           <td class="num">{{ o.quantity }}</td>
                           <td class="num">{{ o.limit_price ?? 'mkt' }}</td>
-                          <td style="font-size:11.5px;color:var(--text-2)">{{ o.reason }}</td>
+                          <td class="text-[11.5px] text-text-2">{{ o.reason }}</td>
                           <td class="num">$ {{ o.estimated_notional_usd }}</td>
                         </tr>
                       }
@@ -509,24 +519,27 @@ import { ModalComponent } from '../shared/modal.component';
                   </table>
                 }
               </div>
+              </div><!-- /.strat-group Orders -->
 
               @if (store.currentStrategy()?.kind === 'pairs') {
+              <div class="strat-group">
+                <div class="strat-group-hd">Pairs</div>
                 <div>
-                  <div class="eyebrow" style="margin-bottom:6px">
+                  <div class="eyebrow mb-1.5">
                     Open pairs ({{ openPairs().length }})
                     @if (councilEnabled()) {
-                      <span style="font-size:11.5px;color:var(--text-3);margin-left:8px">· AI council ON</span>
+                      <span class="text-[11.5px] text-text-3 ml-2">· AI council ON</span>
                     }
                   </div>
                   @if (openPairs().length === 0) {
-                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No open pairs.</p>
+                    <p class="text-[11.5px] text-text-3 m-0">No open pairs.</p>
                   } @else {
                     <table class="tbl">
                       <thead><tr>
                         <th scope="col">Long</th><th scope="col">Short</th><th scope="col">Sector</th>
-                        <th scope="col" class="right">Hedge β</th>
-                        <th scope="col" class="right">Entry gap (z)</th>
-                        <th scope="col" class="right">Co-move</th>
+                        <th scope="col" class="right">Hedge <hf-term key="beta">β</hf-term></th>
+                        <th scope="col" class="right">Entry gap (<hf-term key="zscore">z</hf-term>)</th>
+                        <th scope="col" class="right"><hf-term key="cointegration">Co-move</hf-term></th>
                         <th scope="col" class="right">Fit (p)</th>
                         <th scope="col">z trend (30d)</th>
                         @if (councilEnabled()) {
@@ -538,7 +551,7 @@ import { ModalComponent } from '../shared/modal.component';
                           <tr>
                             <td><hf-ticker [ticker]="p.leg_a"></hf-ticker></td>
                             <td><hf-ticker [ticker]="p.leg_b"></hf-ticker></td>
-                            <td style="font-size:11.5px;color:var(--text-2)">{{ p.sector || '—' }}</td>
+                            <td class="text-[11.5px] text-text-2">{{ p.sector || '—' }}</td>
                             <td class="num">{{ p.hedge_ratio | number: '1.2-3' }}</td>
                             <td class="num">{{ p.entry_z | number: '1.2-2' }}</td>
                             <td class="num">{{ p.correlation | number: '1.2-2' }}</td>
@@ -547,7 +560,7 @@ import { ModalComponent } from '../shared/modal.component';
                               @if (p.z_history.length >= 2) {
                                 <svg [attr.width]="sparkW" [attr.height]="sparkH"
                                   [attr.viewBox]="'0 0 ' + sparkW + ' ' + sparkH"
-                                  style="display:block;overflow:visible">
+                                  class="block overflow-visible">
                                   <path [attr.d]="sparkPath(p.z_history)"
                                         fill="none" stroke="var(--acc-info-fg)" stroke-width="1.2" />
                                   <line x1="0" [attr.x2]="sparkW"
@@ -555,7 +568,7 @@ import { ModalComponent } from '../shared/modal.component';
                                         stroke="var(--text-3)" stroke-width="0.5" stroke-dasharray="2,2" />
                                 </svg>
                               } @else {
-                                <span style="font-size:11px;color:var(--text-3)">—</span>
+                                <span class="text-[11px] text-text-3">—</span>
                               }
                             </td>
                             @if (councilEnabled()) {
@@ -570,19 +583,19 @@ import { ModalComponent } from '../shared/modal.component';
                       </tbody>
                     </table>
                     @if (councilEnabled()) {
-                      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+                      <div class="flex flex-col gap-2 mt-2">
                         @for (p of openPairs(); track $index) {
                           @if (p.council_thesis) {
-                            <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface-2)">
-                              <div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--text-3)">
-                                <span style="font-weight:600;color:var(--text);display:inline-flex;align-items:baseline;gap:4px">
+                            <div class="border border-solid border-border rounded-md py-2 px-2.5 bg-surface-2">
+                              <div class="flex gap-2 items-baseline text-[11.5px] text-text-3">
+                                <span class="font-semibold text-text inline-flex items-baseline gap-1">
                                   <hf-ticker [ticker]="p.leg_a"></hf-ticker>
-                                  <span style="color:var(--text-3)">/</span>
+                                  <span class="text-text-3">/</span>
                                   <hf-ticker [ticker]="p.leg_b"></hf-ticker>
                                 </span>
                                 <span>· council {{ p.council_action }} @ {{ p.council_confidence }}</span>
                               </div>
-                              <p style="font-size:12.5px;color:var(--text-2);margin:4px 0 0;white-space:pre-wrap;word-break:break-word">{{ p.council_thesis }}</p>
+                              <p class="text-[12.5px] text-text-2 m-0 mt-1 whitespace-pre-wrap break-words">{{ p.council_thesis }}</p>
                             </div>
                           }
                         }
@@ -593,7 +606,7 @@ import { ModalComponent } from '../shared/modal.component';
 
                 @if (closedPairs().length > 0) {
                   <div>
-                    <div class="eyebrow" style="margin-bottom:6px">Pairs closed this cycle ({{ closedPairs().length }})</div>
+                    <div class="eyebrow mb-1.5">Pairs closed this cycle ({{ closedPairs().length }})</div>
                     <table class="tbl">
                       <thead><tr>
                         <th scope="col">Long leg</th><th scope="col">Short leg</th>
@@ -613,7 +626,7 @@ import { ModalComponent } from '../shared/modal.component';
                                 <hf-ticker [ticker]="cp.leg_b"></hf-ticker>
                               } @else { <span class="mono">—</span> }
                             </td>
-                            <td style="font-size:11.5px"
+                            <td class="text-[11.5px]"
                               [style.color]="cp.reason === 'reverted' ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
                               {{ cp.reason === 'reverted' ? 'mean-reverted (profit-take)'
                                  : cp.reason === 'stopped' ? 'bail-out (gap kept widening)'
@@ -629,21 +642,21 @@ import { ModalComponent } from '../shared/modal.component';
 
                 @if (councilSkipped().length > 0) {
                   <details>
-                    <summary class="eyebrow" style="cursor:pointer">
+                    <summary class="eyebrow cursor-pointer">
                       Council skipped ({{ councilSkipped().length }})
                     </summary>
-                    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                    <div class="flex flex-col gap-1.5 mt-2">
                       @for (sk of councilSkipped(); track $index) {
-                        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-2)">
-                          <div style="font-size:11.5px;color:var(--text-3);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px">
-                            <span style="color:var(--text);display:inline-flex;align-items:baseline;gap:4px">
+                        <div class="border border-solid border-border rounded-md py-1.5 px-2.5 bg-surface-2">
+                          <div class="text-[11.5px] text-text-3 flex flex-wrap items-baseline gap-1">
+                            <span class="text-text inline-flex items-baseline gap-1">
                               <hf-ticker [ticker]="sk.leg_a"></hf-ticker>
-                              <span style="color:var(--text-3)">/</span>
+                              <span class="text-text-3">/</span>
                               <hf-ticker [ticker]="sk.leg_b"></hf-ticker>
                             </span>
                             <span>· {{ sk.enter_count }} enter / {{ sk.skip_count }} skip · confidence {{ sk.confidence }}</span>
                           </div>
-                          <p style="font-size:12px;color:var(--text-2);margin:4px 0 0">{{ sk.thesis_excerpt }}</p>
+                          <p class="text-2xs text-text-2 m-0 mt-1">{{ sk.thesis_excerpt }}</p>
                         </div>
                       }
                     </div>
@@ -651,43 +664,43 @@ import { ModalComponent } from '../shared/modal.component';
                 }
 
                 @if (pairsDiag(); as d) {
-                  <p style="font-size:11.5px;color:var(--text-3);margin:0">
-                    Screener: evaluated {{ d.n_pairs_evaluated }} same-sector pairs ·
+                  <p class="text-[11.5px] text-text-3 m-0">
+                    <hf-term key="screener">Screener</hf-term>: evaluated {{ d.n_pairs_evaluated }} same-sector pairs ·
                     {{ d.n_pairs_cointegrated }} statistically fit ·
                     {{ d.n_pairs_above_entry_z }} above the open-trade trigger ·
                     {{ d.n_new_pairs }} opened this cycle.
                   </p>
                 }
+              </div><!-- /.strat-group Pairs -->
               }
 
               @if (store.currentStrategy()?.kind === 'concentrated_long' && c.cycle_outcome === 'held_existing_book') {
-                <div class="pill warn" style="height:auto;padding:8px 12px">
+                <div class="pill warn h-auto py-2 px-3">
                   <span class="dot"></span>
                   No-action cycle: fewer than min_positions cleared the confidence bar. Existing book held; no new target produced.
                 </div>
               }
 
               @if (theses().length > 0) {
-                <div>
-                  <div class="eyebrow" style="margin-bottom:6px">Per-position thesis ({{ theses().length }})</div>
-                  <div style="display:flex;flex-direction:column;gap:10px">
+                <div class="strat-group">
+                  <div class="strat-group-hd">Per-position theses ({{ theses().length }})</div>
+                  <div class="flex flex-col gap-2.5">
                     @for (t of theses(); track t.ticker) {
-                      <div class="card" data-test="position-thesis"
-                        style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--surface-2)">
-                        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
-                          <span style="font-weight:600;color:var(--text)">
+                      <div class="card thesis-card" data-test="position-thesis">
+                        <div class="flex gap-2.5 items-baseline flex-wrap">
+                          <span class="font-semibold text-text">
                             <hf-ticker [ticker]="t.ticker"></hf-ticker>
                           </span>
-                          <span style="font-size:11.5px;color:var(--text-2)">{{ nameFor(t.ticker) }}</span>
-                          <span style="font-size:11.5px;color:var(--text-3)">{{ t.sector || '—' }}</span>
-                          <span class="mono" style="font-size:11.5px;color:var(--acc-long-fg)">
+                          <span class="text-[11.5px] text-text-2">{{ nameFor(t.ticker) }}</span>
+                          <span class="text-[11.5px] text-text-3">{{ t.sector || '—' }}</span>
+                          <span class="mono text-[11.5px] text-[var(--acc-long-fg)]">
                             {{ t.weight | number: '1.2-2' }}%
                           </span>
-                          <span class="mono" style="font-size:11.5px;color:var(--text-3)">
+                          <span class="mono text-[11.5px] text-text-3">
                             confidence {{ t.aggregate_confidence }}
                           </span>
                         </div>
-                        <p style="font-size:12.5px;color:var(--text-2);margin:6px 0 0;white-space:pre-wrap;word-break:break-word">
+                        <p class="text-[12.5px] text-text-2 m-0 mt-1.5 whitespace-pre-wrap break-words">
                           {{ t.thesis }}
                         </p>
                       </div>
@@ -698,22 +711,22 @@ import { ModalComponent } from '../shared/modal.component';
 
               @if (c.sector_veto_log && c.sector_veto_log.length > 0) {
                 <details open>
-                  <summary class="eyebrow" style="cursor:pointer">
-                    Council review ({{ c.sector_veto_log.length }} ETFs · {{ sectorVetoCount(c) }} vetoed)
+                  <summary class="eyebrow cursor-pointer">
+                    Council review ({{ c.sector_veto_log.length }} ETFs · {{ sectorVetoCount(c) }} <hf-term key="veto">vetoed</hf-term>)
                   </summary>
-                  <ul class="mono" style="margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--text-2)">
+                  <ul class="mono m-0 mt-2 p-0 list-none flex flex-col gap-1.5 text-[11.5px] text-text-2">
                     @for (v of c.sector_veto_log; track v.ticker) {
                       <li>
-                        <span style="color:var(--text)">{{ v.ticker }}</span>
+                        <span class="text-text">{{ v.ticker }}</span>
                         @if (v.decision === 'veto') {
-                          <span style="color:var(--acc-short-fg)">— vetoed</span>
-                          @if (v.rm_veto) { <span> · risk-manager veto</span> }
+                          <span class="text-[var(--acc-short-fg)]">— <hf-term key="veto">vetoed</hf-term></span>
+                          @if (v.rm_veto) { <span> · <hf-term key="rm">risk-manager</hf-term> <hf-term key="veto">veto</hf-term></span> }
                           @for (r of v.reasons; track r.persona) {
                             <span> · {{ r.persona }} {{ r.signal }}@{{ r.confidence }}</span>
                           }
                         } @else {
-                          <span style="color:var(--acc-long-fg)">— approved</span>
-                          <span style="color:var(--text-3)"> (threshold {{ v.threshold_pct }}%)</span>
+                          <span class="text-[var(--acc-long-fg)]">— approved</span>
+                          <span class="text-text-3"> (threshold {{ v.threshold_pct }}%)</span>
                         }
                       </li>
                     }
@@ -723,12 +736,12 @@ import { ModalComponent } from '../shared/modal.component';
 
               @if (c.rejected_candidates.length > 0) {
                 <details>
-                  <summary class="eyebrow" style="cursor:pointer">
+                  <summary class="eyebrow cursor-pointer">
                     Rejected candidates ({{ c.rejected_candidates.length }})
                   </summary>
-                  <ul class="mono" style="margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--text-2)">
+                  <ul class="mono m-0 mt-2 p-0 list-none flex flex-col gap-1 text-[11.5px] text-text-2">
                     @for (r of c.rejected_candidates; track $index) {
-                      <li><span style="color:var(--text)">{{ r.ticker ?? '(sector)' }}</span> — {{ r.reason }}</li>
+                      <li><span class="text-text">{{ r.ticker ?? '(sector)' }}</span> — {{ r.reason }}</li>
                     }
                   </ul>
                 </details>
@@ -738,15 +751,15 @@ import { ModalComponent } from '../shared/modal.component';
         } @else if (store.cycles().length > 0) {
           <section class="card" aria-busy="true" aria-label="Loading cycle">
             <div class="card-hd"><span class="title">Cycle</span></div>
-            <div class="card-bd" style="display:flex;flex-direction:column;gap:10px">
-              <div class="skel" style="height:14px;width:40%"></div>
-              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+            <div class="card-bd flex flex-col gap-2.5">
+              <div class="skel h-3.5 w-2/5"></div>
+              <div class="grid grid-cols-4 gap-3.5">
                 @for (_ of [1,2,3,4]; track $index) {
-                  <div class="skel" style="height:60px"></div>
+                  <div class="skel h-[60px]"></div>
                 }
               </div>
-              <div class="skel" style="height:14px;width:100%"></div>
-              <div class="skel" style="height:14px;width:80%"></div>
+              <div class="skel h-3.5 w-full"></div>
+              <div class="skel h-3.5 w-4/5"></div>
             </div>
           </section>
         }
@@ -796,6 +809,45 @@ import { ModalComponent } from '../shared/modal.component';
         display: flex;
         justify-content: flex-end;
         gap: 8px;
+      }
+      /* Marked-book snapshot card — uses --r-8 radius token. */
+      .marked-snapshot-card {
+        border: 1px solid var(--border);
+        border-radius: var(--r-8);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      /* Per-position thesis card — soft surface chip. */
+      .thesis-card {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        background: var(--surface-2);
+      }
+      /* WS-6 DC-09 — visual grouping for the cycle main column. */
+      .strat-group {
+        background: var(--surface-2);
+        border-radius: var(--r-6);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .strat-group-hd {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-2);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      /* Snapshot card nested inside .strat-group should match the surface
+         the group sits on, otherwise the nested surface-2 looks doubled. */
+      .strat-group .marked-snapshot-card {
+        background: var(--surface);
       }
     `,
   ],

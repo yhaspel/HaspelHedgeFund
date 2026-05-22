@@ -1,49 +1,49 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, Input, ViewChild, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  Input,
+  ViewChild,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { PopoverComponent } from './popover.component';
 import { TickerPopoverComponent } from './ticker-popover.component';
-
-let _popoverIdSeq = 0;
 
 /**
  * hf-ticker — renders a ticker symbol with an accessible hover/focus
  * popover that lazy-loads the company name, trend sparkline, and the
- * latest market cap / P/E / EPS. WS-2 / R4.
+ * latest market cap / P/E / EPS. WS-2 / R4 / WS-4.3.
  *
- * The popover opens on hover OR keyboard focus, can be dismissed with
- * Escape or by moving focus elsewhere, and is `aria-describedby` the
- * inline span so screen readers announce its content. The popover lives
- * inline in the document (no portal) — viewport-clamped via right/left
- * fallback when the trigger is near the right edge.
- *
- * `disablePopover` short-circuits the behaviour for cases where the
- * popover would be noise (e.g. the parent of a Name column cell — the
- * column already shows the name).
+ * Positioning, viewport flip, Escape, and ARIA wiring come from hf-popover.
+ * This component owns the trigger styling, the lazy-fetch trigger on first
+ * open, and the `disablePopover` short-circuit (used in Name-column cells
+ * where the popover would be noise because the name already shows beside).
  */
 @Component({
   selector: 'hf-ticker',
   standalone: true,
-  imports: [CommonModule, TickerPopoverComponent],
+  imports: [CommonModule, PopoverComponent, TickerPopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <span class="hf-tk-wrap" #wrap>
+    <span class="hf-tk-wrap">
       <span
         class="hf-tk-sym mono"
         tabindex="0"
         [attr.role]="disablePopover ? null : 'button'"
-        [attr.aria-describedby]="open() ? popoverId : null"
+        [attr.aria-describedby]="pop.open() && !disablePopover ? pop.popoverId : null"
         (mouseenter)="onEnter()"
         (mouseleave)="onLeave()"
         (focus)="onFocus()"
         (blur)="onBlur()"
       >{{ ticker }}</span>
-      @if (open() && !disablePopover) {
-        <span class="hf-tk-pop" [class.right]="alignRight()" aria-hidden="false">
-          <hf-ticker-popover [ticker]="ticker" [id]="popoverId"></hf-ticker-popover>
-        </span>
-      }
+      <hf-popover #pop placement="bottom" align="start" role="tooltip" surface="bare">
+        @if (pop.open() && !disablePopover && fetchedOnce) {
+          <hf-ticker-popover [ticker]="ticker"></hf-ticker-popover>
+        }
+      </hf-popover>
     </span>
   `,
   styles: [
@@ -59,9 +59,7 @@ let _popoverIdSeq = 0;
         cursor: default;
         outline: none;
         border-radius: 3px;
-        /* WS-3.6: WCAG 2.2 §2.5.8 — give the focusable ticker chip a 24×24
-           target footprint (vertical padding + min-height) without changing
-           the visible glyph baseline. */
+        /* WS-3.6: WCAG 2.2 §2.5.8 — 24×24 hit target without changing baseline. */
         display: inline-block;
         min-height: 24px;
         line-height: 24px;
@@ -70,23 +68,6 @@ let _popoverIdSeq = 0;
       .hf-tk-sym:focus-visible {
         box-shadow: var(--focus-ring);
       }
-      .hf-tk-pop {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        margin-top: 6px;
-        z-index: var(--z-tooltip);
-        pointer-events: auto;
-        animation: hf-tk-pop-in 120ms var(--ease-out-ui);
-      }
-      .hf-tk-pop.right {
-        left: auto;
-        right: 0;
-      }
-      @keyframes hf-tk-pop-in {
-        from { opacity: 0; transform: translateY(-4px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
     `,
   ],
 })
@@ -94,62 +75,46 @@ export class TickerComponent {
   @Input() set ticker(v: string) {
     this._ticker = (v || '').toUpperCase();
   }
-  get ticker(): string { return this._ticker; }
+  get ticker(): string {
+    return this._ticker;
+  }
   private _ticker = '';
 
   @Input() disablePopover = false;
 
-  @ViewChild('wrap', { static: true }) wrapRef?: ElementRef<HTMLElement>;
+  @ViewChild(PopoverComponent, { static: true }) pop!: PopoverComponent;
 
   private readonly profileStore = inject(TickerProfileStore);
   private readonly historyStore = inject(TickerHistoryStore);
 
-  readonly popoverId = `hf-tk-pop-${++_popoverIdSeq}`;
-  readonly open = signal(false);
-  readonly alignRight = signal(false);
-  private hovering = false;
-  private focused = false;
-  private hideTimer: number | null = null;
-  private fetchedOnce = false;
+  protected fetchedOnce = false;
 
-  private show(): void {
+  onEnter(): void {
     if (this.disablePopover || !this.ticker) return;
-    if (this.hideTimer) { window.clearTimeout(this.hideTimer); this.hideTimer = null; }
-    if (!this.open()) {
-      // Decide alignment before opening to avoid a flicker.
-      const el = this.wrapRef?.nativeElement;
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        const popWidth = 280;
-        const overflowRight = rect.left + popWidth > window.innerWidth - 8;
-        this.alignRight.set(overflowRight);
-      }
-      this.open.set(true);
-      if (!this.fetchedOnce) {
-        this.fetchedOnce = true;
-        this.profileStore.fetchProfile(this.ticker).subscribe();
-        this.historyStore.fetch(this.ticker, 60).subscribe();
-      }
-    }
+    this.lazyFetch();
+    this.pop.show();
   }
 
-  private maybeHide(): void {
-    if (this.hovering || this.focused) return;
-    if (this.hideTimer) window.clearTimeout(this.hideTimer);
-    this.hideTimer = window.setTimeout(() => this.open.set(false), 80);
+  onLeave(): void {
+    if (this.disablePopover) return;
+    this.pop.maybeHide();
   }
 
-  onEnter(): void { this.hovering = true; this.show(); }
-  onLeave(): void { this.hovering = false; this.maybeHide(); }
-  onFocus(): void { this.focused = true; this.show(); }
-  onBlur(): void { this.focused = false; this.maybeHide(); }
+  onFocus(): void {
+    if (this.disablePopover || !this.ticker) return;
+    this.lazyFetch();
+    this.pop.show();
+  }
 
-  @HostListener('keydown.escape')
-  onEscape(): void {
-    if (this.open()) {
-      this.open.set(false);
-      this.hovering = false;
-      this.focused = false;
-    }
+  onBlur(): void {
+    if (this.disablePopover) return;
+    this.pop.maybeHide();
+  }
+
+  private lazyFetch(): void {
+    if (this.fetchedOnce) return;
+    this.fetchedOnce = true;
+    this.profileStore.fetchProfile(this.ticker).subscribe();
+    this.historyStore.fetch(this.ticker, 60).subscribe();
   }
 }

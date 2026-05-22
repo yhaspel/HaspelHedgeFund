@@ -18,29 +18,28 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
       <div class="page-head">
         <div>
           <div class="eyebrow">Backtest setup</div>
-          <h1 style="margin-top:6px">New walk-forward backtest</h1>
+          <h1 class="mt-1.5">New walk-forward backtest</h1>
         </div>
       </div>
 
-      <form (ngSubmit)="submit()" style="max-width:760px;display:flex;flex-direction:column;gap:18px"
+      <form (ngSubmit)="submit()" class="max-w-[760px] flex flex-col gap-[18px]"
             [attr.aria-describedby]="error() ? 'bt-form-error' : null">
         <section class="card">
-          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+          <div class="card-bd flex flex-col gap-3.5">
             <div class="field">
               <label class="lbl" for="bt-name">Name</label>
               <input id="bt-name" class="input sans" name="name" [(ngModel)]="name" required />
             </div>
             <div class="field">
-              <label class="lbl" for="bt-universe"><hf-term key="universe">Universe</hf-term> <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· comma-separated; blank uses default 20 quality names</span></label>
-              <textarea id="bt-universe" class="input sans" name="universe" [(ngModel)]="universeStr" rows="3"
+              <label class="lbl" for="bt-universe"><hf-term key="universe">Universe</hf-term> <span class="text-text-3 normal-case tracking-normal font-normal">· comma-separated; blank uses default 20 quality names</span></label>
+              <textarea id="bt-universe" class="input sans h-auto p-2.5 leading-[18px] font-mono text-xs" name="universe" [(ngModel)]="universeStr" rows="3"
                 aria-describedby="bt-universe-default"
-                placeholder="AAPL, MSFT, GOOGL, ..."
-                style="height:auto;padding:10px;line-height:18px;font-family:var(--font-mono);font-size:13px"></textarea>
-              <div id="bt-universe-default" class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+                placeholder="AAPL, MSFT, GOOGL, ..."></textarea>
+              <div id="bt-universe-default" class="mono text-[11px] text-text-3 mt-1">
                 Default universe: {{ store.defaultUniverse().join(', ') || '(loading)' }}
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="grid grid-cols-2 gap-3.5">
               <div class="field"><label class="lbl" for="bt-start">Master start</label>
                 <input id="bt-start" class="input" type="date" name="start" [(ngModel)]="startDate" required /></div>
               <div class="field"><label class="lbl" for="bt-end">Master end</label>
@@ -51,7 +50,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
         <section class="card">
           <div class="card-hd"><span class="title">Walk-forward</span></div>
-          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+          <div class="card-bd grid grid-cols-3 gap-3.5">
             <div class="field"><label class="lbl" for="bt-is-window">IS window (days)</label>
               <input id="bt-is-window" class="input" type="number" name="is_w" [(ngModel)]="isWindow" min="126" /></div>
             <div class="field"><label class="lbl" for="bt-oos-window">OOS window (days)</label>
@@ -67,7 +66,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
                 <option value="sortino">Sortino</option>
                 <option value="calmar">Calmar</option>
               </select>
-              <p id="bt-objective-note" style="font-size:11px;color:var(--text-3);margin:4px 0 0">
+              <p id="bt-objective-note" class="text-[11px] text-text-3 m-0 mt-1">
                 <hf-term key="sharpe">Sharpe</hf-term> / <hf-term key="sortino">Sortino</hf-term> · the score used to pick the best parameters in-sample.
               </p></div>
             <div class="field"><label class="lbl" for="bt-rebalance">Rebalance</label>
@@ -80,7 +79,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
-          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="card-bd grid grid-cols-2 gap-3.5">
             <div class="field"><label class="lbl" for="bt-cash">Starting cash (USD)</label>
               <input id="bt-cash" class="input" type="number" name="cash" [(ngModel)]="startingCash" min="1000" /></div>
             <div class="field"><label class="lbl" for="bt-baseline">Baseline</label>
@@ -92,7 +91,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
-          <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+          <div class="card-bd grid grid-cols-3 gap-3.5">
             <div class="field"><label class="lbl" for="bt-comm">Commission (bps)</label>
               <input id="bt-comm" class="input" type="number" name="comm" [(ngModel)]="commissionBps" min="0" /></div>
             <div class="field"><label class="lbl" for="bt-spread">Spread (bps)</label>
@@ -100,7 +99,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
             <div class="field"><label class="lbl" for="bt-budget">Max budget (USD)</label>
               <input id="bt-budget" class="input" type="number" name="bud" [(ngModel)]="maxBudgetUsd" min="0.5" step="0.5"
                 aria-describedby="bt-budget-note" />
-              <div id="bt-budget-note" class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">Run aborts if spend reaches this cap.</div></div>
+              <div id="bt-budget-note" class="mono text-[11px] text-text-3 mt-1">Run aborts if spend reaches this cap.</div></div>
           </div>
         </section>
 
@@ -111,11 +110,11 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         @if (error()) {
-          <p id="bt-form-error" role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+          <p id="bt-form-error" role="alert" class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
         }
 
         @if (!estimate()) {
-          <button type="button" class="btn primary" style="height:36px;justify-content:center"
+          <button type="button" class="btn primary h-9 justify-center"
             (click)="estimateCost()" [disabled]="estimating()">
             {{ estimating() ? 'Estimating…' : 'Estimate cost' }}
           </button>
@@ -123,35 +122,34 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
           <section class="card"
             [style.borderColor]="estimate()!.exceeds_budget ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'"
             [style.background]="estimate()!.exceeds_budget ? 'var(--acc-short-soft)' : 'var(--acc-long-soft)'">
-            <div class="card-bd" style="display:flex;flex-direction:column;gap:10px">
-              <div style="display:flex;justify-content:space-between;align-items:baseline">
-                <h3 style="font-size:14px;font-weight:600;margin:0">Pre-flight estimate</h3>
-                <button type="button" (click)="resetEstimate()"
-                  style="font-size:11.5px;color:var(--acc-info-fg);background:transparent;border:0;cursor:pointer;padding:0">
+            <div class="card-bd flex flex-col gap-2.5">
+              <div class="flex justify-between items-baseline">
+                <h3 class="text-sm font-semibold m-0">Pre-flight estimate</h3>
+                <button type="button" (click)="resetEstimate()" class="bt-link-button">
                   Edit &amp; re-estimate
                 </button>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:13px">
+              <div class="grid grid-cols-2 gap-y-2 gap-x-6 text-xs">
                 <div>Estimated cost:
-                  <span class="mono" style="font-weight:600"
+                  <span class="mono font-semibold"
                     [style.color]="estimate()!.exceeds_budget ? 'var(--acc-short-fg)' : 'var(--text)'">
                     $ {{ estimate()!.est_total_usd | number: '1.2-2' }}
                   </span>
-                  <span style="color:var(--text-3)"> / cap $ {{ estimate()!.budget_cap_usd | number: '1.2-2' }}</span>
+                  <span class="text-text-3"> / cap $ {{ estimate()!.budget_cap_usd | number: '1.2-2' }}</span>
                 </div>
                 <div>LLM calls: <span class="mono">{{ estimate()!.n_llm_calls | number }}</span></div>
                 <div>Rebalance days: <span class="mono">{{ estimate()!.n_rebalance_days }}</span></div>
                 <div>Est. wall-time: <span class="mono">{{ estimate()!.est_minutes_optimistic | number: '1.0-1' }}–{{ estimate()!.est_minutes_upper | number: '1.0-1' }} min</span></div>
               </div>
               @if (estimate()!.exceeds_budget) {
-                <p style="font-size:13px;color:var(--acc-short-fg);font-weight:500;margin:0">
+                <p class="text-xs text-[var(--acc-short-fg)] font-medium m-0">
                   ⚠ Estimated cost exceeds your max budget. The run will abort partway.
                   Either raise the cap, shrink the universe/date range, or switch to a cheaper rebalance frequency.
                 </p>
               }
-              <details style="font-size:11.5px;color:var(--text-2)">
-                <summary style="cursor:pointer">Per-agent breakdown</summary>
-                <table class="tbl" style="margin-top:6px">
+              <details class="text-[11.5px] text-text-2">
+                <summary class="cursor-pointer">Per-agent breakdown</summary>
+                <table class="tbl mt-1.5">
                   <thead><tr>
                     <th>Agent</th><th>Model</th>
                     <th class="right">$/call</th><th class="right">Total</th>
@@ -160,7 +158,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
                     @for (row of estimate()!.by_agent; track row.agent) {
                       <tr>
                         <td class="mono">{{ row.agent }}</td>
-                        <td class="mono" style="color:var(--text-3)">{{ row.model }}</td>
+                        <td class="mono text-text-3">{{ row.model }}</td>
                         <td class="num">{{ row.per_call_usd | number: '1.4-5' }}</td>
                         <td class="num">{{ row.total_usd | number: '1.2-4' }}</td>
                       </tr>
@@ -168,10 +166,9 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
                   </tbody>
                 </table>
               </details>
-              <button type="submit" class="btn"
+              <button type="submit" class="btn h-9 justify-center"
                 [class.primary]="!estimate()!.exceeds_budget"
-                [disabled]="submitting() || estimate()!.exceeds_budget"
-                style="height:36px;justify-content:center">
+                [disabled]="submitting() || estimate()!.exceeds_budget">
                 {{ submitting() ? 'Submitting…' : (estimate()!.exceeds_budget ? 'Over budget — raise cap to submit' : 'Confirm & start walk-forward') }}
               </button>
             </div>
@@ -180,6 +177,18 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
       </form>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      .bt-link-button {
+        font-size: 11.5px;
+        color: var(--acc-info-fg);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        padding: 0;
+      }
+    `,
+  ],
 })
 export class BacktestsNewPage implements OnInit {
   readonly store = inject(BacktestsStore);

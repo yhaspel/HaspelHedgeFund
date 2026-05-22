@@ -10,6 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { RegimeStore } from '../../abstraction/regime.store';
 import { RegimeHistoryItem } from '../../core/models/regime.model';
+import { PopoverComponent } from '../shared/popover.component';
 
 /**
  * Compact regime context panel rendered on every strategy-detail page.
@@ -21,13 +22,19 @@ import { RegimeHistoryItem } from '../../core/models/regime.model';
 @Component({
   selector: 'hf-regime-context-widget',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, PopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card regime-widget">
       <div class="card-hd">
         <span class="title">Regime context</span>
-        <span class="hint" title="Markov regime classifier — a deterministic, price-based regime detector run nightly. Not the council's view.">ⓘ Markov regime</span>
+        <span class="hint" tabindex="0"
+              [attr.aria-describedby]="popMarkov.open() ? popMarkov.popoverId : null"
+              (mouseenter)="popMarkov.show()" (mouseleave)="popMarkov.maybeHide()"
+              (focus)="popMarkov.show()" (blur)="popMarkov.maybeHide()">
+          ⓘ Markov regime
+          <hf-popover #popMarkov placement="bottom" align="end">Markov regime classifier — a deterministic, price-based regime detector run nightly. Not the council's view.</hf-popover>
+        </span>
       </div>
       <div class="card-bd">
         <div class="row">
@@ -38,7 +45,12 @@ import { RegimeHistoryItem } from '../../core/models/regime.model';
                                  [class.sideways]="s.current_state === 'sideways'"
                                  [class.bear]="s.current_state === 'bear'">
                 <span class="dot"></span>{{ s.current_state }}
-                @if (s.stale) { <span class="stale" title="Snapshot older than 10 days">stale</span> }
+                @if (s.stale) {
+                  <span class="stale" tabindex="0"
+                        [attr.aria-describedby]="popStale.open() ? popStale.popoverId : null"
+                        (mouseenter)="popStale.show()" (mouseleave)="popStale.maybeHide()"
+                        (focus)="popStale.show()" (blur)="popStale.maybeHide()">stale<hf-popover #popStale placement="top" align="center" size="compact">Snapshot older than 10 days</hf-popover></span>
+                }
               </span>
               <div class="meta">
                 bull–bear · {{ (s.bull_minus_bear_1d * 100).toFixed(1) }}%
@@ -68,13 +80,11 @@ import { RegimeHistoryItem } from '../../core/models/regime.model';
         </div>
 
         @if (spy(); as s) {
-          <div class="bar">
-            <div class="seg bull" [style.width.%]="s.bull_prob_1d * 100"
-                 [title]="'bull ' + (s.bull_prob_1d*100).toFixed(0) + '%'"></div>
-            <div class="seg sideways" [style.width.%]="s.sideways_prob_1d * 100"
-                 [title]="'sideways ' + (s.sideways_prob_1d*100).toFixed(0) + '%'"></div>
-            <div class="seg bear" [style.width.%]="s.bear_prob_1d * 100"
-                 [title]="'bear ' + (s.bear_prob_1d*100).toFixed(0) + '%'"></div>
+          <div class="bar" role="img"
+               [attr.aria-label]="'Markov regime distribution: bull ' + (s.bull_prob_1d*100).toFixed(0) + '%, sideways ' + (s.sideways_prob_1d*100).toFixed(0) + '%, bear ' + (s.bear_prob_1d*100).toFixed(0) + '%'">
+            <div class="seg bull" [style.width.%]="s.bull_prob_1d * 100"></div>
+            <div class="seg sideways" [style.width.%]="s.sideways_prob_1d * 100"></div>
+            <div class="seg bear" [style.width.%]="s.bear_prob_1d * 100"></div>
           </div>
           <div class="legend">
             <span><span class="sw bull"></span>bull {{ (s.bull_prob_1d*100).toFixed(0) }}%</span>
@@ -109,7 +119,9 @@ import { RegimeHistoryItem } from '../../core/models/regime.model';
     .pill.bear { background: var(--acc-short-soft); color: var(--acc-short-fg); }
     .pill.bear .dot { background: var(--acc-short); }
     .pill .stale { font-size: 10px; padding: 1px 6px; border-radius: var(--r-4);
-                   background: var(--acc-hold-soft); color: var(--acc-hold-fg); margin-left: 6px; }
+                   background: var(--acc-hold-soft); color: var(--acc-hold-fg); margin-left: 6px;
+                   position: relative; cursor: help; }
+    .pill .stale:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-4); }
     .meta { font-size: 11px; opacity: 0.7; margin-top: 4px; }
     .bar { display: flex; height: 8px; border-radius: var(--r-4); overflow: hidden;
            background: var(--surface-2); margin-top: 6px; }
@@ -126,7 +138,8 @@ import { RegimeHistoryItem } from '../../core/models/regime.model';
     .spark { width: 100%; height: 30px; margin-top: 8px; display: block; }
     .spark path { fill: none; stroke: var(--acc-info); stroke-width: 1.2; }
     .spark line { stroke: var(--border-2); stroke-dasharray: 2 3; stroke-width: 0.5; }
-    .hint { font-size: 11px; opacity: 0.6; cursor: help; }
+    .hint { font-size: 11px; opacity: 0.6; cursor: help; position: relative; }
+    .hint:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-2); }
   `],
 })
 export class RegimeContextWidgetComponent implements OnInit {

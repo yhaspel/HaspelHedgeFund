@@ -21,31 +21,30 @@ import {
   standalone: true,
   imports: [FormsModule],
   template: `
-    <section style="display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <section class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-3">
         <div>
           <div class="eyebrow">Models</div>
-          <div style="font-size:11.5px;color:var(--text-3);margin-top:4px">
-            Preset: <span class="mono" style="color:var(--text-2)">{{ activePreset() }}</span>
+          <div class="text-[11.5px] text-text-3 mt-1">
+            Preset: <span class="mono text-text-2">{{ activePreset() }}</span>
             · Est. per-ticker cost:
-            <span class="mono" style="color:var(--text-2)">$ {{ totalCost().toFixed(4) }}</span>
+            <span class="mono text-text-2">$ {{ totalCost().toFixed(4) }}</span>
             @if (multiplier() > 1) {
-              <span> · ×{{ multiplier() }} ≈ <span class="mono" style="color:var(--text-2)">$ {{ (totalCost() * multiplier()).toFixed(2) }}</span></span>
+              <span> · ×{{ multiplier() }} ≈ <span class="mono text-text-2">$ {{ (totalCost() * multiplier()).toFixed(2) }}</span></span>
             }
           </div>
         </div>
         <button
           type="button"
           (click)="expanded.set(!expanded())"
-          class="btn ghost sm"
+          class="btn ghost sm text-[var(--acc-info-fg)]"
           data-test="model-panel-expand"
-          style="color:var(--acc-info-fg)"
         >
           {{ expanded() ? 'Collapse' : 'Expand' }}
         </button>
       </div>
 
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <div class="flex flex-wrap gap-1.5">
         @for (p of presets; track p) {
           <button
             type="button"
@@ -60,13 +59,12 @@ import {
       </div>
 
       @if (expanded()) {
-        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:8px;max-height:384px;overflow-y:auto">
+        <div class="model-panel-rows">
           @for (a of agents(); track a) {
-            <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;align-items:center;font-size:13px">
-              <div style="color:var(--text-2)">{{ display(a) }}</div>
+            <div class="model-panel-row">
+              <div class="text-text-2">{{ display(a) }}</div>
               <select
-                class="input sans"
-                style="height:28px;font-size:11.5px;padding:0 8px"
+                class="input sans model-panel-select"
                 [ngModel]="currentFor(a)"
                 (ngModelChange)="setOverride(a, $event)"
                 [attr.data-test]="'select-' + a"
@@ -85,6 +83,31 @@ import {
       }
     </section>
   `,
+  styles: [
+    `
+      .model-panel-rows {
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 384px;
+        overflow-y: auto;
+      }
+      .model-panel-row {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .model-panel-select {
+        height: 28px;
+        font-size: 11.5px;
+        padding: 0 8px;
+      }
+    `,
+  ],
 })
 export class ModelPanelComponent {
   readonly store = inject(ModelsStore);

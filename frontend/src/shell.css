@@ -55,23 +55,7 @@
   border: 1px solid var(--border-2);
   color: var(--text);
 }
-.nav-btn[data-tip]:hover::after,
-.nav-btn[data-tip]:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: 48px;
-  top: 50%;
-  transform: translateY(-50%);
-  white-space: nowrap;
-  background: var(--surface-3);
-  border: 1px solid var(--border-2);
-  color: var(--text);
-  font-size: var(--fs-12);
-  padding: 4px 8px;
-  border-radius: var(--r-4);
-  box-shadow: var(--shadow-2);
-  z-index: var(--z-tooltip);
-}
+/* Sidebar nav tooltips migrated to hf-popover (WS-4.3 / DC-19). */
 .sidebar .spacer {
   flex: 1;
 }
@@ -257,6 +241,7 @@ input[type='checkbox']:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  position: relative;
   transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
 }
 .btn:hover {
@@ -1025,4 +1010,43 @@ input[type='checkbox']:focus-visible {
 .grid {
   display: grid;
   gap: 16px;
+}
+
+/* Run·Detail Decision tab layout (WS-5.4.5). Two-column grid with a sticky
+   order-ticket rail; collapses to a single column on narrow viewports. */
+.decision-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  align-items: start;
+}
+.decision-main {
+  min-width: 0;
+}
+.order-ticket-rail {
+  position: sticky;
+  top: 48px; /* matches .topbar height (see line 107) */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+}
+.stat-cell .eyebrow {
+  margin-bottom: 8px;
+}
+.stat-cell .stat-value {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.stat-cell.dim {
+  opacity: 0.55;
+}
+@media (max-width: 900px) {
+  .decision-grid { grid-template-columns: minmax(0, 1fr); }
+  .order-ticket-rail { position: static; }
+  .stat-grid { grid-template-columns: 1fr; }
 }
