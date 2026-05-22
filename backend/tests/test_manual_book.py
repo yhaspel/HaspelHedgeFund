@@ -5,7 +5,7 @@ regression, valuation, and API/permission validation.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -99,6 +99,14 @@ def clear_mark_cache():
             client.delete(key)
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def clear_refresh_marks_rate_limit():
+    """The refresh-marks view holds an in-process rate-limit dict on the
+    class; tests that share a user id would otherwise see leaked 429s."""
+    from apps.portfolios.manual_book_views import PortfolioRefreshMarksView
+    PortfolioRefreshMarksView._last_refresh_at.clear()
 
 
 @pytest.fixture
@@ -407,8 +415,8 @@ def test_value_portfolio_stale_mark_warning(db, user):
 
 
 def test_strategy_serializer_rejects_manual_book(db, user):
-    from apps.portfolios.serializers import StrategySerializer
     from apps.portfolios.models import Universe
+    from apps.portfolios.serializers import StrategySerializer
 
     manual = get_or_create_manual_book(user)
     universe = Universe.objects.create(name="t-univ", description="t", is_active=True)
@@ -676,14 +684,13 @@ def test_intraday_mark_caches_for_interval_minutes(db, user):
 
     # Patch the FMP provider to return a controlled quote and count calls.
     from datetime import datetime as dt_cls
-    from datetime import timezone as dt_tz
 
     calls = {"n": 0}
 
     class _IntradayStub:
         def get_latest_quote(self, ticker):
             calls["n"] += 1
-            return Decimal("123.45"), dt_cls.now(tz=dt_tz.utc)
+            return Decimal("123.45"), dt_cls.now(tz=UTC)
 
     with patch("apps.portfolios.valuation.get_fmp_provider") as m:
         m.return_value = _IntradayStub()
