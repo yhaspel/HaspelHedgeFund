@@ -1,14 +1,17 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ModelsStore } from '../../abstraction/models.store';
+import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/model.types';
+import { MarkCadence } from '../../core/models/portfolio.model';
 
 @Component({
   selector: 'hf-settings-models',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Settings'}, {label:'Models'}]">
       <div class="page-head">
@@ -172,6 +175,59 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
           </div>
         </section>
 
+        <!-- D2 (P3.1): Portfolio settings -->
+        <section class="card" style="grid-column:span 2" data-test="portfolio-settings-card">
+          <div class="card-hd"><span class="title">Portfolio</span></div>
+          <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
+            <p style="font-size:11.5px;color:var(--text-3);margin:0">
+              Controls how the Manual Book's positions are marked to market on
+              <a routerLink="/portfolio" style="color:var(--acc-info-fg);text-decoration:underline">/portfolio</a>.
+              Intraday cadences require a premium FMP plan.
+            </p>
+
+            <div role="radiogroup" aria-label="Mark cadence"
+                 style="display:flex;flex-direction:column;gap:10px">
+              @for (opt of cadenceOptions; track opt.value) {
+                <label class="cadence-row" [class.selected]="markCadence === opt.value">
+                  <input type="radio" name="mark_cadence"
+                         [value]="opt.value" [(ngModel)]="markCadence"
+                         [attr.data-test]="'cadence-' + opt.value" />
+                  <div>
+                    <div style="font-weight:500;font-size:13px">{{ opt.label }}</div>
+                    <div style="font-size:11.5px;color:var(--text-3)">{{ opt.help }}</div>
+                  </div>
+                </label>
+              }
+            </div>
+
+            @if (markCadence === 'delayed') {
+              <div class="field" style="max-width:280px">
+                <label class="lbl">Auto-refresh interval (minutes)</label>
+                <input class="input mono" type="number"
+                       min="5" max="1440" step="1"
+                       [(ngModel)]="intervalMinutes" name="interval_minutes"
+                       data-test="cadence-interval" />
+                <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
+                  Minimum 5 minutes, maximum 1440 (24 hours). Polling stops while the tab is hidden.
+                </p>
+              </div>
+            }
+
+            <button type="button" class="btn primary"
+                    (click)="savePortfolioPrefs()"
+                    [disabled]="savingPortfolio() || !isPortfolioDirty()"
+                    data-test="save-portfolio-prefs"
+                    style="height:32px;justify-content:center;align-self:flex-start;min-width:200px">
+              {{ savingPortfolio()
+                  ? 'Saving…'
+                  : (isPortfolioDirty() ? 'Save portfolio settings' : 'No changes') }}
+            </button>
+            @if (portfolioMsg()) {
+              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="portfolio-msg">{{ portfolioMsg() }}</p>
+            }
+          </div>
+        </section>
+
         <!-- D: Available models -->
         <section class="card" style="grid-column:span 2">
           <div class="card-hd"><span class="title">Available models ({{ store.models().length }})</span></div>
@@ -201,9 +257,28 @@ import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/mode
       </div>
     </hf-app-shell>
   `,
+  styles: [
+    `
+      .cadence-row {
+        display: grid;
+        grid-template-columns: 24px 1fr;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--r-6);
+        cursor: pointer;
+        background: var(--surface);
+        transition: border-color 80ms;
+      }
+      .cadence-row:hover { border-color: var(--text-3); }
+      .cadence-row.selected { border-color: var(--acc-info); background: var(--acc-info-soft, var(--surface)); }
+      .cadence-row input[type="radio"] { margin-top: 2px; }
+    `,
+  ],
 })
 export class SettingsModelsPage implements OnInit {
   readonly store = inject(ModelsStore);
+  readonly portfolio = inject(PortfolioStore);
   readonly providers = [
     { field: 'anthropic', label: 'Anthropic API key' },
     { field: 'openrouter', label: 'OpenRouter API key' },
@@ -252,6 +327,15 @@ export class SettingsModelsPage implements OnInit {
   }
 
   ngOnInit(): void {
+    this.portfolio.loadPreferences().subscribe({
+      next: (p) => {
+        this.markCadence = p.mark_cadence;
+        this.intervalMinutes = p.interval_minutes;
+        this.savedCadence = p.mark_cadence;
+        this.savedIntervalMinutes = p.interval_minutes;
+      },
+      error: () => { /* ignore — defaults are fine */ },
+    });
     this.store.loadAll().subscribe(() => {
       const keys = this.store.keys();
       if (keys) this.ollamaHost = keys.ollama_host ?? '';
@@ -365,6 +449,62 @@ export class SettingsModelsPage implements OnInit {
         this.savedCeiling = this.ceiling;
       },
       error: () => { this.savingPrefs.set(false); this.prefsMsg.set('Failed to save'); },
+    });
+  }
+
+  // ---- P3.1: Portfolio settings (mark cadence + interval) -----------
+  readonly cadenceOptions: { value: MarkCadence; label: string; help: string }[] = [
+    {
+      value: 'daily',
+      label: 'Daily',
+      help: 'Mark from the latest daily close. Works with the FMP free tier. No auto-polling.',
+    },
+    {
+      value: 'delayed',
+      label: 'Delayed (auto-refresh)',
+      help: 'Use FMP intraday quotes and refresh on an interval you set (minimum 5 minutes). Requires the FMP premium plan.',
+    },
+    {
+      value: 'manual',
+      label: 'Pull only (manual refresh)',
+      help: 'Use FMP intraday quotes but never auto-poll — use the "Refresh marks" button on the Portfolio tab.',
+    },
+  ];
+
+  markCadence: MarkCadence = 'daily';
+  intervalMinutes = 20;
+  savingPortfolio = signal(false);
+  portfolioMsg = signal<string | null>(null);
+  private savedCadence: MarkCadence = 'daily';
+  private savedIntervalMinutes = 20;
+
+  isPortfolioDirty(): boolean {
+    if (this.markCadence !== this.savedCadence) return true;
+    if (this.markCadence === 'delayed' && this.intervalMinutes !== this.savedIntervalMinutes) {
+      return true;
+    }
+    return false;
+  }
+
+  savePortfolioPrefs(): void {
+    if (!this.isPortfolioDirty()) return;
+    this.savingPortfolio.set(true);
+    const interval = Math.min(1440, Math.max(5, Math.floor(this.intervalMinutes || 20)));
+    this.portfolio.savePreferences({
+      mark_cadence: this.markCadence,
+      interval_minutes: interval,
+    }).subscribe({
+      next: (r) => {
+        this.savingPortfolio.set(false);
+        this.portfolioMsg.set('Saved.');
+        this.savedCadence = r.mark_cadence;
+        this.savedIntervalMinutes = r.interval_minutes;
+        this.intervalMinutes = r.interval_minutes;
+      },
+      error: (err) => {
+        this.savingPortfolio.set(false);
+        this.portfolioMsg.set(err?.error?.detail || 'Failed to save');
+      },
     });
   }
 }

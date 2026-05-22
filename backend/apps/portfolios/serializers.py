@@ -4,7 +4,9 @@ from rest_framework import serializers
 
 from .models import (
     BorrowQuote,
+    LedgerEntry,
     Portfolio,
+    PortfolioPreferences,
     PortfolioStrategy,
     PortfolioTarget,
     PortfolioTargetRun,
@@ -36,8 +38,8 @@ class UniverseMembershipSerializer(serializers.ModelSerializer):
 class PortfolioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Portfolio
-        fields = ("id", "name", "cash_balance", "created_at")
-        read_only_fields = ("created_at",)
+        fields = ("id", "name", "kind", "cash_balance", "created_at")
+        read_only_fields = ("kind", "created_at")
 
 
 class PositionSerializer(serializers.ModelSerializer):
@@ -45,7 +47,145 @@ class PositionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Position
-        fields = ("id", "ticker", "quantity", "avg_cost", "sector", "is_short", "opened_at")
+        fields = (
+            "id", "ticker", "quantity", "avg_cost", "sector", "is_short",
+            "opened_at", "opened_via", "source_run", "source_decision",
+            "note", "realized_pnl",
+        )
+
+
+class PositionValuationSerializer(serializers.Serializer):
+    """P3: position row + mark-to-market columns from valuation.value_portfolio."""
+    id = serializers.IntegerField()
+    ticker = serializers.CharField()
+    quantity = serializers.DecimalField(max_digits=18, decimal_places=6)
+    avg_cost = serializers.DecimalField(max_digits=12, decimal_places=4)
+    is_short = serializers.BooleanField()
+    sector = serializers.CharField(allow_blank=True)
+    opened_at = serializers.DateTimeField()
+    opened_via = serializers.CharField()
+    source_run_id = serializers.IntegerField(allow_null=True)
+    source_decision_id = serializers.IntegerField(allow_null=True)
+    note = serializers.CharField(allow_blank=True)
+    realized_pnl = serializers.DecimalField(max_digits=14, decimal_places=2)
+    mark_price = serializers.DecimalField(
+        max_digits=18, decimal_places=4, allow_null=True,
+    )
+    mark_as_of = serializers.DateField(allow_null=True)
+    mark_stale = serializers.BooleanField()
+    market_value = serializers.DecimalField(max_digits=14, decimal_places=2)
+    unrealized_pnl = serializers.DecimalField(max_digits=14, decimal_places=2)
+    unrealized_pnl_pct = serializers.DecimalField(
+        max_digits=10, decimal_places=2, allow_null=True,
+    )
+    weight_pct = serializers.DecimalField(max_digits=10, decimal_places=2)
+    warnings = serializers.ListField(child=serializers.CharField())
+
+
+class PortfolioPreferencesViewSerializer(serializers.Serializer):
+    """P3: portfolio preferences as embedded into the overview payload."""
+    mark_cadence = serializers.CharField()
+    interval_minutes = serializers.IntegerField()
+    last_refreshed_at = serializers.DateTimeField(allow_null=True)
+
+
+class PortfolioPreferencesSerializer(serializers.ModelSerializer):
+    """P3: GET/PUT /api/portfolio/preferences/."""
+
+    class Meta:
+        model = PortfolioPreferences
+        fields = ("mark_cadence", "interval_minutes", "last_refreshed_at")
+        read_only_fields = ("last_refreshed_at",)
+
+    def validate_interval_minutes(self, value: int) -> int:
+        if value < PortfolioPreferences.MIN_INTERVAL_MINUTES:
+            raise serializers.ValidationError(
+                f"interval_minutes must be at least "
+                f"{PortfolioPreferences.MIN_INTERVAL_MINUTES}"
+            )
+        if value > PortfolioPreferences.MAX_INTERVAL_MINUTES:
+            raise serializers.ValidationError(
+                f"interval_minutes must be at most "
+                f"{PortfolioPreferences.MAX_INTERVAL_MINUTES}"
+            )
+        return value
+
+
+class PortfolioValuationSerializer(serializers.Serializer):
+    """P3: full Manual Book snapshot — cash, totals, exposures, positions."""
+    portfolio_id = serializers.IntegerField()
+    name = serializers.CharField()
+    kind = serializers.CharField()
+    cash_balance = serializers.DecimalField(max_digits=14, decimal_places=2)
+    reserved_short_proceeds = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+    )
+    free_cash = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total_value = serializers.DecimalField(max_digits=14, decimal_places=2)
+    long_market_value = serializers.DecimalField(max_digits=14, decimal_places=2)
+    short_market_value = serializers.DecimalField(max_digits=14, decimal_places=2)
+    gross_exposure_pct = serializers.DecimalField(max_digits=10, decimal_places=2)
+    net_exposure_pct = serializers.DecimalField(max_digits=10, decimal_places=2)
+    unrealized_pnl = serializers.DecimalField(max_digits=14, decimal_places=2)
+    realized_pnl = serializers.DecimalField(max_digits=14, decimal_places=2)
+    positions = PositionValuationSerializer(many=True)
+    preferences = PortfolioPreferencesViewSerializer(allow_null=True)
+    warnings = serializers.ListField(child=serializers.CharField())
+
+
+class LedgerEntrySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LedgerEntry
+        fields = (
+            "id", "kind", "ticker", "quantity_delta", "price",
+            "cash_delta", "realized_pnl",
+            "quantity_after", "cash_balance_after",
+            "position", "source_run", "source_decision",
+            "note", "created_at",
+        )
+        read_only_fields = fields
+
+
+class SuggestionFactorSerializer(serializers.Serializer):
+    key = serializers.CharField()
+    label = serializers.CharField()
+    effect = serializers.CharField()
+    detail = serializers.CharField()
+
+
+class PositionSuggestionSerializer(serializers.Serializer):
+    ticker = serializers.CharField()
+    side = serializers.CharField()
+    suggested_weight_pct = serializers.DecimalField(
+        max_digits=10, decimal_places=2,
+    )
+    target_notional_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+    )
+    target_quantity = serializers.DecimalField(max_digits=18, decimal_places=6)
+    suggested_notional_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+    )
+    suggested_quantity = serializers.DecimalField(
+        max_digits=18, decimal_places=6,
+    )
+    quantity_mode = serializers.CharField()
+    rounding_residual_usd = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+    )
+    current_price = serializers.DecimalField(max_digits=18, decimal_places=4)
+    price_as_of = serializers.DateField(allow_null=True)
+    portfolio_total_value = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+    )
+    free_cash = serializers.DecimalField(max_digits=14, decimal_places=2)
+    existing_quantity = serializers.DecimalField(
+        max_digits=18, decimal_places=6,
+    )
+    existing_side = serializers.CharField()
+    action_label = serializers.CharField()
+    factors = SuggestionFactorSerializer(many=True)
+    warnings = serializers.ListField(child=serializers.CharField())
 
 
 class StrategySerializer(serializers.ModelSerializer):
@@ -91,6 +231,13 @@ class StrategySerializer(serializers.ModelSerializer):
         if portfolio.user_id != request.user.id:
             raise serializers.ValidationError(
                 "portfolio belongs to another user"
+            )
+        # P3 isolation guarantee: strategies must never operate on the
+        # Manual Book; that book belongs to the user and is mutated only
+        # through `/api/portfolio/...`.
+        if portfolio.kind == Portfolio.KIND_MANUAL:
+            raise serializers.ValidationError(
+                "the Manual Book cannot be used as a strategy portfolio"
             )
         return portfolio
 
@@ -163,6 +310,8 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
             "rejected_candidates", "decisions", "sector_veto_log",
             "screener_ranking", "orders",
             "candidate_runs",
+            # P3 addendum: cycle-level mark-to-market snapshot.
+            "marked_snapshot",
             "total_cost_usd", "error_message",
             "created_at", "finished_at",
         )

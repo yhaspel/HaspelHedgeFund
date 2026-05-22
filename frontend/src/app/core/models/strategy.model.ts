@@ -10,6 +10,7 @@ export interface Universe {
 export interface Portfolio {
   id: number;
   name: string;
+  kind?: 'strategy' | 'manual';
   cash_balance: string;
   created_at: string;
 }
@@ -244,6 +245,27 @@ export interface CycleDetail extends CycleSummary {
     rm_veto: boolean;
     threshold_pct: number;
   }[];
+  /** P3 addendum: cycle-level mark-to-market snapshot. */
+  marked_snapshot?: CycleMarkedSnapshot;
+}
+
+export interface CycleMarkedSnapshot {
+  snapshot_at: string;
+  mark_as_of: string;
+  since_as_of_pct: string | null;
+  marked_gross_pct: string | null;
+  marked_net_pct: string | null;
+  per_ticker: Record<string, {
+    weight_pct: string;
+    as_of_price: string | null;
+    as_of_price_date: string | null;
+    mark_price: string | null;
+    mark_price_date: string | null;
+    return_pct: string | null;
+    contribution_pp: string;
+    warnings: string[];
+  }>;
+  warnings: string[];
 }
 
 export const DEFAULT_SCREENER_WEIGHTS: Record<string, number> = {

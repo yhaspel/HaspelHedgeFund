@@ -67,6 +67,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'portfolio',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/portfolio/portfolio.page').then(
+        (m) => m.PortfolioPage,
+      ),
+  },
+  {
     path: 'strategies',
     canActivate: [authGuard],
     loadComponent: () =>

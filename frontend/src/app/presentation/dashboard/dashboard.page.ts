@@ -1,9 +1,10 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { AuthStore } from '../../abstraction/auth.store';
 import { MacroStore } from '../../abstraction/macro.store';
+import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
@@ -16,6 +17,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
   standalone: true,
   imports: [
     CommonModule,
+    DecimalPipe,
     RouterLink,
     AppShellComponent,
     KpiTileComponent,
@@ -111,20 +113,31 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             [value]="b.gross_pct + '%'"
             [sub]="'Long ' + b.longPct.toFixed(0) + '% · Short ' + b.shortPct.toFixed(0) + '%'" />
           <hf-kpi-tile
-            eyebrow="Net"
-            [value]="(b.netSigned >= 0 ? '+' : '') + b.netSigned.toFixed(1) + '%'"
-            [tone]="b.netSigned >= 0 ? 'up' : 'down'"
-            [sub]="b.strategy_name + ' · ' + b.as_of_date" />
-          <hf-kpi-tile
-            eyebrow="Positions"
+            eyebrow="Target book (latest cycle)"
             [value]="b.positionCount.toString()"
-            [sub]="b.longCount + ' L · ' + b.shortCount + ' S'" />
+            [sub]="b.longCount + ' L · ' + b.shortCount + ' S · ' + b.as_of_date" />
         } @else {
           <section class="card placeholder">
-            <p class="muted">No portfolio yet.
+            <p class="muted">No strategy cycles yet.
               <a routerLink="/strategies/new" class="link">Create a strategy →</a>
             </p>
           </section>
+          <section class="card placeholder">
+            <p class="muted">—</p>
+          </section>
+        }
+
+        <!-- P3: Real Manual Book positions, not strategy target weights. -->
+        @if (portfolio.overview(); as p) {
+          <hf-kpi-tile
+            eyebrow="Positions (Manual Book)"
+            [value]="p.positions.length.toString()"
+            [sub]="manualLongCount() + ' L · ' + manualShortCount() + ' S · $' + (+p.total_value | number: '1.0-0')" />
+        } @else {
+          <a class="card placeholder kpi-link"
+             routerLink="/portfolio" style="text-decoration:none;color:inherit">
+            <p class="muted">Loading Manual Book…</p>
+          </a>
         }
       </div>
 
@@ -421,6 +434,7 @@ export class DashboardPage implements OnInit {
   readonly runs = inject(RunsStore);
   readonly macro = inject(MacroStore);
   readonly strategies = inject(StrategiesStore);
+  readonly portfolio = inject(PortfolioStore);
 
   book = signal<{
     strategy_name: string;
@@ -457,9 +471,20 @@ export class DashboardPage implements OnInit {
     this.runs.listRuns({ source: s }).subscribe();
   }
 
+  manualLongCount(): number {
+    return (this.portfolio.overview()?.positions ?? []).filter((p) => !p.is_short).length;
+  }
+
+  manualShortCount(): number {
+    return (this.portfolio.overview()?.positions ?? []).filter((p) => p.is_short).length;
+  }
+
   ngOnInit(): void {
     this.runs.listRuns().subscribe();
     this.macro.loadSnapshot().subscribe({ error: () => {} });
+    // P3: load the Manual Book so the Positions KPI reflects the real book,
+    // not the latest strategy cycle's target-weight count.
+    this.portfolio.loadOverview().subscribe({ error: () => {} });
     this.strategies.list().subscribe((ss) => {
       const recent = ss.find((s) => !!s.last_run_at) ?? ss[0];
       if (!recent) return;

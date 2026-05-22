@@ -16,6 +16,9 @@ import { AuthStore } from '../../abstraction/auth.store';
         <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}" routerLinkActive="active" data-tip="Dashboard">
           <svg width="18" height="18"><use href="/icons.svg#i-home" /></svg>
         </a>
+        <a class="nav-btn" routerLink="/portfolio" routerLinkActive="active" data-tip="Portfolio">
+          <svg width="18" height="18"><use href="/icons.svg#i-wallet" /></svg>
+        </a>
         <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" data-tip="Runs">
           <svg width="18" height="18"><use href="/icons.svg#i-pulse" /></svg>
         </a>

@@ -133,6 +133,56 @@ class StrategyCycleDetailView(generics.RetrieveAPIView):
 
     lookup_url_kwarg = "target_id"
 
+    def retrieve(self, request, *args, **kwargs):
+        # P3 addendum: lazily compute the per-cycle marked snapshot on
+        # done targets, so the cycle detail page always renders an
+        # up-to-date mark-to-market without a separate request. Skip for
+        # active/cancelled cycles where the snapshot would be noise.
+        from .cycle_mark import ensure_cycle_snapshot
+
+        target = self.get_object()
+        if target.status == PortfolioTarget.DONE:
+            try:
+                ensure_cycle_snapshot(target)
+            except Exception:  # never block the detail render
+                pass
+        return super().retrieve(request, *args, **kwargs)
+
+
+class StrategyCycleRefreshMarkView(APIView):
+    """POST /api/strategies/<pk>/cycles/<target_id>/refresh-mark/
+
+    Force-recompute the marked snapshot for a cycle. Used by the cycle
+    detail page's "Refresh mark" affordance. Rate-limited soft cap of
+    1 call / 5 s / user via an in-process timestamp dict.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    _last_refresh_at: dict[int, float] = {}  # noqa: RUF012
+
+    def post(self, request: Request, pk: int, target_id: int) -> Response:
+        import time
+
+        from .cycle_mark import ensure_cycle_snapshot
+
+        now = time.monotonic()
+        last = self._last_refresh_at.get(request.user.id, 0.0)
+        if now - last < 5.0:
+            return Response(
+                {"detail": "Refreshing too quickly — please wait a few seconds."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        self._last_refresh_at[request.user.id] = now
+        try:
+            target = PortfolioTarget.objects.get(
+                pk=target_id, strategy_id=pk, strategy__user=request.user,
+            )
+        except PortfolioTarget.DoesNotExist:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        snapshot = ensure_cycle_snapshot(target, force=True)
+        return Response(snapshot)
+
 
 class BorrowLookupView(APIView):
     def get(self, request: Request, ticker: str) -> Response:

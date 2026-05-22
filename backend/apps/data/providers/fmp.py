@@ -53,6 +53,43 @@ class FmpProvider:
             raise RuntimeError("FMP_API_KEY is not configured")
         self._http = http or httpx.Client(timeout=30.0)
 
+    # ---- intraday quote ----------------------------------------------
+
+    def get_latest_quote(self, ticker: str) -> tuple[Decimal, dt.datetime] | None:
+        """P3: latest intraday quote for the Manual Book's `delayed` /
+        `manual` cadence modes. Returns `(price, as_of_utc)` or `None` if
+        FMP returns no payload.
+
+        Requires the FMP premium plan. Real-time vs ~15-min delayed
+        depends on the user's entitlement on the supplied key.
+        """
+        url = f"{BASE_URL}/quote-short/{ticker}"
+        params = {"apikey": self.api_key}
+        resp = self._http.get(url, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload if isinstance(payload, list) else []
+        if not rows:
+            # /quote-short returns [] for unknown tickers; try the longer endpoint.
+            url = f"{BASE_URL}/quote/{ticker}"
+            resp = self._http.get(url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            rows = payload if isinstance(payload, list) else []
+        if not rows:
+            return None
+        row = rows[0]
+        price = row.get("price") or row.get("c")
+        if price is None:
+            return None
+        ts = row.get("timestamp")
+        as_of = (
+            dt.datetime.fromtimestamp(int(ts), tz=dt.UTC)
+            if ts
+            else dt.datetime.now(tz=dt.UTC)
+        )
+        return Decimal(str(price)), as_of
+
     # ---- bars ---------------------------------------------------------
 
     def get_daily_bars(

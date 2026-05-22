@@ -35,18 +35,51 @@ class UniverseMembership(models.Model):
 
 
 class Portfolio(models.Model):
+    KIND_STRATEGY = "strategy"
+    KIND_MANUAL = "manual"
+    KIND_CHOICES = [
+        (KIND_STRATEGY, "Strategy"),
+        (KIND_MANUAL, "Manual"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="portfolios", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=64)
     cash_balance = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("100000"))
+    # P3: distinguishes the per-user Manual Book from autonomous strategy books.
+    # A strategy.portfolio FK must never point at a kind="manual" row.
+    kind = models.CharField(
+        max_length=12,
+        choices=KIND_CHOICES,
+        default=KIND_STRATEGY,
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(kind="manual"),
+                name="uniq_manual_portfolio_per_user",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
 
 
 class Position(models.Model):
+    OPENED_VIA_MANUAL = "manual"
+    OPENED_VIA_RUN = "run"
+    OPENED_VIA_STRATEGY_CYCLE = "strategy_cycle"
+    OPENED_VIA_CHOICES = [
+        (OPENED_VIA_MANUAL, "Manual entry"),
+        (OPENED_VIA_RUN, "From run decision"),
+        (OPENED_VIA_STRATEGY_CYCLE, "Strategy cycle"),
+    ]
+
     portfolio = models.ForeignKey(
         Portfolio, related_name="positions", on_delete=models.CASCADE
     )
@@ -55,6 +88,22 @@ class Position(models.Model):
     avg_cost = models.DecimalField(max_digits=12, decimal_places=4)
     sector = models.CharField(max_length=64, blank=True, default="")
     opened_at = models.DateTimeField(auto_now_add=True)
+    # P3: provenance + cumulative realized P&L (manual book).
+    opened_via = models.CharField(
+        max_length=20, choices=OPENED_VIA_CHOICES, default=OPENED_VIA_MANUAL,
+    )
+    source_run = models.ForeignKey(
+        "runs.Run", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="opened_positions",
+    )
+    source_decision = models.ForeignKey(
+        "runs.Decision", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="opened_positions",
+    )
+    note = models.TextField(blank=True, default="")
+    realized_pnl = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+    )
 
     class Meta:
         unique_together = [("portfolio", "ticker")]
@@ -65,6 +114,130 @@ class Position(models.Model):
     @property
     def is_short(self) -> bool:
         return self.quantity < 0
+
+
+class PortfolioPreferences(models.Model):
+    """P3: per-user Manual Book preferences (mark cadence + interval).
+
+    The `mark_cadence` controls how `valuation.get_mark()` resolves prices:
+
+    - ``daily``   — last daily close via ``FmpProvider.get_daily_bars()``.
+                    Cache TTL 10 minutes. Stale > 4 calendar days.
+    - ``delayed`` — intraday quote via ``FmpProvider.get_latest_quote()``
+                    (premium FMP plan; ~15-min delayed by default,
+                    near-real-time with the live entitlement). Cache TTL
+                    matches ``interval_minutes`` so manual reloads inside
+                    the window reuse the fetch.
+    - ``manual``  — same data source as ``delayed``, but the frontend never
+                    auto-polls. Cache is invalidated by
+                    ``POST /api/portfolio/refresh-marks/``.
+
+    ``interval_minutes`` only applies to ``delayed`` (auto-poll period)
+    and ``manual`` (cache TTL); ``daily`` ignores it.
+    """
+
+    CADENCE_DAILY = "daily"
+    CADENCE_DELAYED = "delayed"
+    CADENCE_MANUAL = "manual"
+    CADENCE_CHOICES = [
+        (CADENCE_DAILY, "Daily"),
+        (CADENCE_DELAYED, "Delayed (auto-refresh)"),
+        (CADENCE_MANUAL, "Pull only (manual refresh)"),
+    ]
+
+    MIN_INTERVAL_MINUTES = 5
+    MAX_INTERVAL_MINUTES = 1440
+    DEFAULT_INTERVAL_MINUTES = 20
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name="portfolio_preferences",
+        on_delete=models.CASCADE,
+    )
+    mark_cadence = models.CharField(
+        max_length=12, choices=CADENCE_CHOICES, default=CADENCE_DAILY,
+    )
+    interval_minutes = models.PositiveSmallIntegerField(
+        default=DEFAULT_INTERVAL_MINUTES,
+    )
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"portfolio_prefs u={self.user_id} cadence={self.mark_cadence}"
+
+
+class LedgerEntry(models.Model):
+    """Append-only ledger of every cash/position mutation on the Manual Book.
+
+    Every mutation is wrapped in ``transaction.atomic()`` with a matching
+    LedgerEntry row so the book reconciles: initial cash + Σ cash_delta =
+    current Portfolio.cash_balance.
+    """
+
+    KIND_DEPOSIT = "deposit"
+    KIND_WITHDRAWAL = "withdrawal"
+    KIND_OPEN = "position_open"
+    KIND_INCREASE = "position_increase"
+    KIND_REDUCE = "position_reduce"
+    KIND_CLOSE = "position_close"
+    KIND_EDIT = "edit_adjustment"
+    KIND_CHOICES = [
+        (KIND_DEPOSIT, "Cash deposit"),
+        (KIND_WITHDRAWAL, "Cash withdrawal"),
+        (KIND_OPEN, "Position opened"),
+        (KIND_INCREASE, "Position increased"),
+        (KIND_REDUCE, "Position reduced"),
+        (KIND_CLOSE, "Position closed"),
+        (KIND_EDIT, "Manual edit adjustment"),
+    ]
+
+    portfolio = models.ForeignKey(
+        Portfolio, related_name="ledger", on_delete=models.CASCADE,
+    )
+    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    ticker = models.CharField(max_length=16, blank=True, default="")
+    quantity_delta = models.DecimalField(
+        max_digits=18, decimal_places=6, default=Decimal("0"),
+    )
+    price = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+    )
+    cash_delta = models.DecimalField(max_digits=14, decimal_places=2)
+    realized_pnl = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+    )
+    quantity_after = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True,
+    )
+    cash_balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    position = models.ForeignKey(
+        Position, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="ledger_entries",
+    )
+    source_run = models.ForeignKey(
+        "runs.Run", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="ledger_entries",
+    )
+    source_decision = models.ForeignKey(
+        "runs.Decision", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="ledger_entries",
+    )
+    note = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="ledger_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["portfolio", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"ledger {self.kind} {self.ticker} {self.cash_delta}"
 
 
 class PortfolioStrategy(models.Model):
@@ -427,6 +600,15 @@ class PortfolioTarget(models.Model):
     # Sector-rotation v2: per-ETF veto reasoning. Each item:
     # {ticker, decision: "buy"|"veto", reasons: [{persona, signal, confidence}], rm_veto: bool}
     sector_veto_log = models.JSONField(default=list, blank=True)
+    # P3 addendum: per-cycle mark-to-market snapshot. Treats `target_weights`
+    # as a hypothetical-hold book and computes per-ticker return since
+    # `as_of_date` plus book-level marked gross/net/return — without
+    # requiring broker fills. See ``apps/portfolios/cycle_mark.py``.
+    # Shape: {snapshot_at, mark_as_of, since_as_of_pct, marked_gross_pct,
+    #         marked_net_pct, per_ticker: {ticker: {weight_pct, as_of_price,
+    #         mark_price, return_pct, contribution_pp, warnings}},
+    #         warnings: [str]}.
+    marked_snapshot = models.JSONField(default=dict, blank=True)
     screener_ranking = models.ForeignKey(
         ScreenerRanking, null=True, blank=True, on_delete=models.SET_NULL
     )

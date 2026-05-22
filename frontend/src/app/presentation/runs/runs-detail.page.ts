@@ -5,6 +5,8 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { RunsStore } from '../../abstraction/runs.store';
 import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
 import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
+import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
+import { PositionSide } from '../../core/models/portfolio.model';
 
 interface PersonaCard {
   id: string;
@@ -21,7 +23,7 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
@@ -135,11 +137,43 @@ interface PersonaCard {
                   <p style="margin:2px 0 0">
                     Target weight: <span class="mono" style="color:var(--text)">{{ d.target_weight_pct }}%</span>
                   </p>
+                  @if (canAddToPortfolio(d)) {
+                    <button class="btn primary sm" style="margin-top:10px"
+                            (click)="addToPortfolio(d)"
+                            [attr.data-test]="'add-to-portfolio-' + d.ticker">
+                      <svg width="12" height="12" style="margin-right:4px">
+                        <use href="/icons.svg#i-plus" />
+                      </svg>
+                      Add to portfolio
+                    </button>
+                  } @else if (d.side === 'pair') {
+                    <p style="margin:8px 0 0;font-size:11px;color:var(--text-3)">
+                      Pair decisions can't be entered manually (v1).
+                    </p>
+                  } @else if (run()!.status !== 'done') {
+                    <p style="margin:8px 0 0;font-size:11px;color:var(--text-3)">
+                      Wait for the run to complete to enter a position.
+                    </p>
+                  }
                 </div>
               </div>
               <p style="font-size:13px;line-height:20px;color:var(--text-2);margin:12px 0 0;white-space:pre-wrap">{{ d.rationale }}</p>
             </div>
           </section>
+        }
+
+        <hf-enter-position-modal
+          [open]="entryOpen()"
+          [prefill]="entryPrefill()"
+          (closed)="onEntryClosed($event)" />
+
+        @if (toastMsg(); as t) {
+          <div class="pill ok" style="position:fixed;bottom:18px;right:18px;height:auto;padding:8px 12px;z-index:var(--z-modal)"
+               data-test="position-saved-toast">
+            <span class="dot"></span>{{ t }}
+            <a routerLink="/portfolio"
+               style="margin-left:6px;color:var(--acc-info-fg);text-decoration:underline">View portfolio →</a>
+          </div>
         }
 
         <!-- CIO -->
@@ -595,4 +629,42 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   asArray(v: unknown): string[] { return Array.isArray(v) ? (v as string[]) : []; }
   displayName(id: string): string { return ALL_PERSONAS.find((p) => p.id === id)?.name ?? id; }
   protected readonly _personaIds = PERSONA_IDS;
+
+  // P3: Add-to-portfolio.
+  entryOpen = signal(false);
+  entryPrefill = signal<{ runId?: number; decisionId?: number; ticker?: string; side?: PositionSide } | null>(null);
+  toastMsg = signal<string | null>(null);
+  private toastHandle: ReturnType<typeof setTimeout> | null = null;
+
+  canAddToPortfolio(d: { side?: string; action: string }): boolean {
+    if (this.run()?.status !== 'done') return false;
+    if (d.side === 'pair') return false;
+    return true;
+  }
+
+  addToPortfolio(d: { id: number; ticker: string; side?: string; action: string }): void {
+    const run = this.run();
+    if (!run) return;
+    const inferred: PositionSide =
+      d.side === 'short' ? 'short' :
+      d.action === 'open_short' ? 'short' : 'long';
+    this.entryPrefill.set({
+      runId: run.id,
+      decisionId: d.id,
+      ticker: d.ticker,
+      side: inferred,
+    });
+    this.entryOpen.set(true);
+  }
+
+  onEntryClosed(e: { saved: boolean }): void {
+    this.entryOpen.set(false);
+    const ticker = this.entryPrefill()?.ticker;
+    this.entryPrefill.set(null);
+    if (e.saved) {
+      this.toastMsg.set(`${ticker ?? 'Position'} saved to portfolio.`);
+      if (this.toastHandle) clearTimeout(this.toastHandle);
+      this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+    }
+  }
 }

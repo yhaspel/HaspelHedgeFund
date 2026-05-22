@@ -76,7 +76,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                   <hf-info text="The simulated account this strategy trades against. Holds cash + positions; the rebalancer computes orders relative to it." />
                 </label>
                 <select class="input sans" name="portfolio" [(ngModel)]="portfolio" required>
-                  @for (p of store.portfolios(); track p.id) {
+                  @for (p of strategyPortfolios(); track p.id) {
                     <option [value]="p.id">{{ p.name }} ($ {{ p.cash_balance }})</option>
                   }
                 </select>
@@ -495,6 +495,13 @@ export class StrategiesNewPage implements OnInit {
   readonly store = inject(StrategiesStore);
   private readonly router = inject(Router);
 
+  /** Strategies cannot point at the per-user Manual Book (P3 isolation
+   *  guarantee, enforced by `StrategySerializer.validate_portfolio`).
+   *  Filter it out here so it never appears in the dropdown. */
+  strategyPortfolios(): { id: number; name: string; cash_balance: string }[] {
+    return this.store.portfolios().filter((p) => p.kind !== 'manual');
+  }
+
   /** Auto-suggested from kind + universe + nameStamp until the user edits it. */
   name = '';
   /** Last value produced by buildAutoName(); while `name` still equals it the
@@ -709,7 +716,10 @@ export class StrategiesNewPage implements OnInit {
       this.refreshAutoName();
     });
     this.store.loadPortfolios().subscribe((ps) => {
-      if (ps.length && this.portfolio === null) this.portfolio = ps[0].id;
+      const strategyPs = ps.filter((p) => p.kind !== 'manual');
+      if (strategyPs.length && this.portfolio === null) {
+        this.portfolio = strategyPs[0].id;
+      }
     });
   }
 
@@ -718,7 +728,8 @@ export class StrategiesNewPage implements OnInit {
       name: 'Default paper portfolio',
       cash_balance: 100000,
     }).subscribe(() => this.store.loadPortfolios().subscribe((ps) => {
-      if (ps.length) this.portfolio = ps[ps.length - 1].id;
+      const strategyPs = ps.filter((p) => p.kind !== 'manual');
+      if (strategyPs.length) this.portfolio = strategyPs[strategyPs.length - 1].id;
     }));
   }
 

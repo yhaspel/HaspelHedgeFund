@@ -1,5 +1,16 @@
 from django.urls import path
 
+from .manual_book_views import (
+    PortfolioCashView,
+    PortfolioLedgerView,
+    PortfolioOverviewView,
+    PortfolioPositionCloseView,
+    PortfolioPositionDetailView,
+    PortfolioPositionsView,
+    PortfolioPreferencesView,
+    PortfolioRefreshMarksView,
+    PortfolioSuggestionView,
+)
 from .views import (
     BorrowLookupView,
     CycleApproveCouncilView,
@@ -7,6 +18,7 @@ from .views import (
     PortfolioListCreateView,
     PositionsView,
     StrategyCycleDetailView,
+    StrategyCycleRefreshMarkView,
     StrategyCyclesView,
     StrategyDetailView,
     StrategyEstimateView,
@@ -44,6 +56,30 @@ urlpatterns = [
         CycleRejectView.as_view(),
         name="strategy-cycle-reject",
     ),
+    path(
+        "strategies/<int:pk>/cycles/<int:target_id>/refresh-mark/",
+        StrategyCycleRefreshMarkView.as_view(),
+        name="strategy-cycle-refresh-mark",
+    ),
 
     path("borrow/<str:ticker>/", BorrowLookupView.as_view(), name="borrow-lookup"),
+
+    # P3: Manual Book — singular `/api/portfolio/...` so the existing
+    # plural `/api/portfolios/` strategy-book endpoints stay intact.
+    path("portfolio/", PortfolioOverviewView.as_view(), name="portfolio-overview"),
+    path("portfolio/positions/", PortfolioPositionsView.as_view(),
+         name="portfolio-positions"),
+    path("portfolio/positions/<int:position_id>/",
+         PortfolioPositionDetailView.as_view(), name="portfolio-position-detail"),
+    path("portfolio/positions/<int:position_id>/close/",
+         PortfolioPositionCloseView.as_view(), name="portfolio-position-close"),
+    path("portfolio/ledger/", PortfolioLedgerView.as_view(),
+         name="portfolio-ledger"),
+    path("portfolio/cash/", PortfolioCashView.as_view(), name="portfolio-cash"),
+    path("portfolio/position-suggestion/",
+         PortfolioSuggestionView.as_view(), name="portfolio-position-suggestion"),
+    path("portfolio/preferences/", PortfolioPreferencesView.as_view(),
+         name="portfolio-preferences"),
+    path("portfolio/refresh-marks/", PortfolioRefreshMarksView.as_view(),
+         name="portfolio-refresh-marks"),
 ]

@@ -3,7 +3,7 @@ import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
-import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
+import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
 
 @Component({
@@ -316,6 +316,79 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
             <div class="card-bd" style="display:flex;flex-direction:column;gap:18px">
               @if (c.error_message) {
                 <p style="color:var(--acc-short-fg);font-size:12px;margin:0">{{ c.error_message }}</p>
+              }
+
+              @if (c.status === 'done' && c.marked_snapshot; as snap) {
+                <div data-test="marked-snapshot" style="border:1px solid var(--border);border-radius:var(--r-8);padding:12px;display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                    <div>
+                      <div class="eyebrow">Marked book (vs cycle as_of)</div>
+                      <div style="display:flex;align-items:baseline;gap:14px;margin-top:4px;flex-wrap:wrap">
+                        <div style="font-size:20px;font-weight:600"
+                             [style.color]="snap.since_as_of_pct && +snap.since_as_of_pct > 0 ? 'var(--acc-long-fg)' : (snap.since_as_of_pct && +snap.since_as_of_pct < 0 ? 'var(--acc-short-fg)' : null)">
+                          @if (snap.since_as_of_pct !== null) {
+                            {{ +snap.since_as_of_pct > 0 ? '+' : '' }}{{ +snap.since_as_of_pct | number: '1.2-2' }}%
+                          } @else { — }
+                        </div>
+                        <div class="mono" style="font-size:11.5px;color:var(--text-3)">
+                          marked gross {{ snap.marked_gross_pct !== null ? (+snap.marked_gross_pct | number: '1.2-2') : '—' }}% ·
+                          marked net {{ snap.marked_net_pct !== null ? (+snap.marked_net_pct | number: '1.2-2') : '—' }}%
+                        </div>
+                      </div>
+                      <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+                        as_of {{ c.as_of_date }} → mark {{ snap.mark_as_of }} · stamped {{ snap.snapshot_at | date: 'short' }}
+                      </div>
+                    </div>
+                    <button class="btn ghost sm" (click)="refreshCycleMark(c)" [disabled]="refreshingMark()" data-test="refresh-cycle-mark">
+                      <svg width="12" height="12" style="margin-right:4px"><use href="/icons.svg#i-rerun" /></svg>
+                      {{ refreshingMark() ? 'Refreshing…' : 'Refresh mark' }}
+                    </button>
+                  </div>
+
+                  @for (w of snap.warnings; track w) {
+                    <div class="pill warn" style="height:auto;padding:4px 8px;width:fit-content"><span class="dot"></span>{{ w }}</div>
+                  }
+
+                  @if (markedRows(snap).length > 0) {
+                    <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th>Ticker</th>
+                          <th class="right">Weight</th>
+                          <th class="right">As_of px</th>
+                          <th class="right">Mark px</th>
+                          <th class="right">Return</th>
+                          <th class="right">Contribution</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of markedRows(snap); track row.ticker) {
+                          <tr>
+                            <td class="mono"><b>{{ row.ticker }}</b></td>
+                            <td class="num mono"
+                                [style.color]="row.weight_pct >= 0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                              {{ row.weight_pct >= 0 ? '+' : '' }}{{ row.weight_pct | number: '1.2-2' }}%
+                            </td>
+                            <td class="num mono">{{ row.as_of_price ?? '—' }}</td>
+                            <td class="num mono">{{ row.mark_price ?? '—' }}</td>
+                            <td class="num mono"
+                                [style.color]="row.return_pct !== null && row.return_pct > 0 ? 'var(--acc-long-fg)' : (row.return_pct !== null && row.return_pct < 0 ? 'var(--acc-short-fg)' : null)">
+                              @if (row.return_pct === null) { — } @else {
+                                {{ row.return_pct > 0 ? '+' : '' }}{{ row.return_pct | number: '1.2-2' }}%
+                              }
+                            </td>
+                            <td class="num mono"
+                                [style.color]="row.contribution_pp > 0 ? 'var(--acc-long-fg)' : (row.contribution_pp < 0 ? 'var(--acc-short-fg)' : null)">
+                              {{ row.contribution_pp > 0 ? '+' : '' }}{{ row.contribution_pp | number: '1.2-2' }}pp
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  } @else {
+                    <p style="font-size:11.5px;color:var(--text-3);margin:0">No marked positions — empty target book.</p>
+                  }
+                </div>
               }
 
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
@@ -704,6 +777,40 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   confirmRun(): void { this.estimate.set(null); this.runNow(); }
 
   strategyId = 0;
+
+  // P3 addendum: cycle-level mark-to-market snapshot.
+  refreshingMark = signal(false);
+
+  markedRows(snap: CycleMarkedSnapshot): {
+    ticker: string;
+    weight_pct: number;
+    as_of_price: string | null;
+    mark_price: string | null;
+    return_pct: number | null;
+    contribution_pp: number;
+  }[] {
+    return Object.entries(snap.per_ticker)
+      .map(([ticker, row]) => ({
+        ticker,
+        weight_pct: Number(row.weight_pct),
+        as_of_price: row.as_of_price,
+        mark_price: row.mark_price,
+        return_pct: row.return_pct === null ? null : Number(row.return_pct),
+        contribution_pp: Number(row.contribution_pp),
+      }))
+      .sort((a, b) => Math.abs(b.contribution_pp) - Math.abs(a.contribution_pp));
+  }
+
+  refreshCycleMark(c: CycleDetail): void {
+    this.refreshingMark.set(true);
+    this.store.refreshCycleMark(this.strategyId, c.id).subscribe({
+      next: (snap) => {
+        this.refreshingMark.set(false);
+        this.cycle.set({ ...c, marked_snapshot: snap });
+      },
+      error: () => this.refreshingMark.set(false),
+    });
+  }
 
   longs() {
     const c = this.cycle(); if (!c) return [];

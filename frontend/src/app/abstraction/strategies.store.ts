@@ -3,6 +3,7 @@ import { Observable, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import {
   CycleDetail,
+  CycleMarkedSnapshot,
   CycleSummary,
   Portfolio,
   Position,
@@ -120,6 +121,19 @@ export class StrategiesStore {
     return this.api.get<CycleDetail>(
       `/strategies/${strategyId}/cycles/${targetId}/`,
     ).pipe(tap((r) => this._currentCycle.set(r)));
+  }
+  /** P3 addendum: force-recompute the cycle's marked snapshot. */
+  refreshCycleMark(
+    strategyId: number, targetId: number,
+  ): Observable<CycleMarkedSnapshot> {
+    return this.api.post<CycleMarkedSnapshot>(
+      `/strategies/${strategyId}/cycles/${targetId}/refresh-mark/`, {},
+    ).pipe(tap((snap) => {
+      const cur = this._currentCycle();
+      if (cur && cur.id === targetId) {
+        this._currentCycle.set({ ...cur, marked_snapshot: snap });
+      }
+    }));
   }
   positionsFor(portfolioId: number): Observable<Position[]> {
     return this.api.get<Position[]>(`/portfolios/${portfolioId}/positions/`).pipe(
