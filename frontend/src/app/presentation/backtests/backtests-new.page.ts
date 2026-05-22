@@ -22,27 +22,29 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </div>
       </div>
 
-      <form (ngSubmit)="submit()" style="max-width:760px;display:flex;flex-direction:column;gap:18px">
+      <form (ngSubmit)="submit()" style="max-width:760px;display:flex;flex-direction:column;gap:18px"
+            [attr.aria-describedby]="error() ? 'bt-form-error' : null">
         <section class="card">
           <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
             <div class="field">
-              <label class="lbl">Name</label>
-              <input class="input sans" name="name" [(ngModel)]="name" required />
+              <label class="lbl" for="bt-name">Name</label>
+              <input id="bt-name" class="input sans" name="name" [(ngModel)]="name" required />
             </div>
             <div class="field">
-              <label class="lbl"><hf-term key="universe">Universe</hf-term> <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· comma-separated; blank uses default 20 quality names</span></label>
-              <textarea class="input sans" name="universe" [(ngModel)]="universeStr" rows="3"
+              <label class="lbl" for="bt-universe"><hf-term key="universe">Universe</hf-term> <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· comma-separated; blank uses default 20 quality names</span></label>
+              <textarea id="bt-universe" class="input sans" name="universe" [(ngModel)]="universeStr" rows="3"
+                aria-describedby="bt-universe-default"
                 placeholder="AAPL, MSFT, GOOGL, ..."
                 style="height:auto;padding:10px;line-height:18px;font-family:var(--font-mono);font-size:13px"></textarea>
-              <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
+              <div id="bt-universe-default" class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">
                 Default universe: {{ store.defaultUniverse().join(', ') || '(loading)' }}
               </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-              <div class="field"><label class="lbl">Master start</label>
-                <input class="input" type="date" name="start" [(ngModel)]="startDate" required /></div>
-              <div class="field"><label class="lbl">Master end</label>
-                <input class="input" type="date" name="end" [(ngModel)]="endDate" required /></div>
+              <div class="field"><label class="lbl" for="bt-start">Master start</label>
+                <input id="bt-start" class="input" type="date" name="start" [(ngModel)]="startDate" required /></div>
+              <div class="field"><label class="lbl" for="bt-end">Master end</label>
+                <input id="bt-end" class="input" type="date" name="end" [(ngModel)]="endDate" required /></div>
             </div>
           </div>
         </section>
@@ -50,25 +52,26 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         <section class="card">
           <div class="card-hd"><span class="title">Walk-forward</span></div>
           <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
-            <div class="field"><label class="lbl">IS window (days)</label>
-              <input class="input" type="number" name="is_w" [(ngModel)]="isWindow" min="126" /></div>
-            <div class="field"><label class="lbl">OOS window (days)</label>
-              <input class="input" type="number" name="oos_w" [(ngModel)]="oosWindow" min="21" /></div>
-            <div class="field"><label class="lbl">Step (days)</label>
-              <input class="input" type="number" name="step_w" [(ngModel)]="stepDays" min="21" /></div>
-            <div class="field"><label class="lbl">Candidates / fold</label>
-              <input class="input" type="number" name="ncand" [(ngModel)]="nCandidates" min="5" max="200" /></div>
-            <div class="field"><label class="lbl">IS objective</label>
-              <select class="input sans" name="obj" [(ngModel)]="objective">
+            <div class="field"><label class="lbl" for="bt-is-window">IS window (days)</label>
+              <input id="bt-is-window" class="input" type="number" name="is_w" [(ngModel)]="isWindow" min="126" /></div>
+            <div class="field"><label class="lbl" for="bt-oos-window">OOS window (days)</label>
+              <input id="bt-oos-window" class="input" type="number" name="oos_w" [(ngModel)]="oosWindow" min="21" /></div>
+            <div class="field"><label class="lbl" for="bt-step">Step (days)</label>
+              <input id="bt-step" class="input" type="number" name="step_w" [(ngModel)]="stepDays" min="21" /></div>
+            <div class="field"><label class="lbl" for="bt-ncand">Candidates / fold</label>
+              <input id="bt-ncand" class="input" type="number" name="ncand" [(ngModel)]="nCandidates" min="5" max="200" /></div>
+            <div class="field"><label class="lbl" for="bt-objective">IS objective</label>
+              <select id="bt-objective" class="input sans" name="obj" [(ngModel)]="objective"
+                aria-describedby="bt-objective-note">
                 <option value="sharpe">Sharpe</option>
                 <option value="sortino">Sortino</option>
                 <option value="calmar">Calmar</option>
               </select>
-              <p style="font-size:11px;color:var(--text-3);margin:4px 0 0">
+              <p id="bt-objective-note" style="font-size:11px;color:var(--text-3);margin:4px 0 0">
                 <hf-term key="sharpe">Sharpe</hf-term> / <hf-term key="sortino">Sortino</hf-term> · the score used to pick the best parameters in-sample.
               </p></div>
-            <div class="field"><label class="lbl">Rebalance</label>
-              <select class="input sans" name="rb" [(ngModel)]="rebalance">
+            <div class="field"><label class="lbl" for="bt-rebalance">Rebalance</label>
+              <select id="bt-rebalance" class="input sans" name="rb" [(ngModel)]="rebalance">
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
@@ -78,10 +81,10 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
         <section class="card">
           <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-            <div class="field"><label class="lbl">Starting cash (USD)</label>
-              <input class="input" type="number" name="cash" [(ngModel)]="startingCash" min="1000" /></div>
-            <div class="field"><label class="lbl">Baseline</label>
-              <select class="input sans" name="bl" [(ngModel)]="baseline">
+            <div class="field"><label class="lbl" for="bt-cash">Starting cash (USD)</label>
+              <input id="bt-cash" class="input" type="number" name="cash" [(ngModel)]="startingCash" min="1000" /></div>
+            <div class="field"><label class="lbl" for="bt-baseline">Baseline</label>
+              <select id="bt-baseline" class="input sans" name="bl" [(ngModel)]="baseline">
                 <option value="universe_ew">Equal-weighted universe</option>
                 <option value="spy">SPY</option>
               </select></div>
@@ -90,13 +93,14 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
         <section class="card">
           <div class="card-bd" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
-            <div class="field"><label class="lbl">Commission (bps)</label>
-              <input class="input" type="number" name="comm" [(ngModel)]="commissionBps" min="0" /></div>
-            <div class="field"><label class="lbl">Spread (bps)</label>
-              <input class="input" type="number" name="spr" [(ngModel)]="spreadBps" min="0" /></div>
-            <div class="field"><label class="lbl">Max budget (USD)</label>
-              <input class="input" type="number" name="bud" [(ngModel)]="maxBudgetUsd" min="0.5" step="0.5" />
-              <div class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">Run aborts if spend reaches this cap.</div></div>
+            <div class="field"><label class="lbl" for="bt-comm">Commission (bps)</label>
+              <input id="bt-comm" class="input" type="number" name="comm" [(ngModel)]="commissionBps" min="0" /></div>
+            <div class="field"><label class="lbl" for="bt-spread">Spread (bps)</label>
+              <input id="bt-spread" class="input" type="number" name="spr" [(ngModel)]="spreadBps" min="0" /></div>
+            <div class="field"><label class="lbl" for="bt-budget">Max budget (USD)</label>
+              <input id="bt-budget" class="input" type="number" name="bud" [(ngModel)]="maxBudgetUsd" min="0.5" step="0.5"
+                aria-describedby="bt-budget-note" />
+              <div id="bt-budget-note" class="mono" style="font-size:11px;color:var(--text-3);margin-top:4px">Run aborts if spend reaches this cap.</div></div>
           </div>
         </section>
 
@@ -107,7 +111,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         @if (error()) {
-          <p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+          <p id="bt-form-error" role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
         }
 
         @if (!estimate()) {

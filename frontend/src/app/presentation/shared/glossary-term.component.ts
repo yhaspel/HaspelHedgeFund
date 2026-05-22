@@ -62,8 +62,12 @@ let nextId = 0;
       display: inline;
     }
     .hf-term-trigger {
-      display: inline;
-      padding: 0;
+      /* Inline-flow control inside body text — WCAG 2.2 §2.5.8 inline
+         exception applies, but axe doesn't honour it, so we bump the
+         vertical hit area to ≥24px via padding while keeping baseline
+         alignment so surrounding text doesn't reflow. */
+      display: inline-block;
+      padding: 2px 1px;
       margin: 0;
       background: transparent;
       border: 0;
@@ -73,6 +77,8 @@ let nextId = 0;
       cursor: help;
       border-bottom: 1px dotted var(--text-3);
       line-height: inherit;
+      vertical-align: baseline;
+      min-height: 24px;
     }
     .hf-term-trigger:hover,
     .hf-term-trigger:focus {

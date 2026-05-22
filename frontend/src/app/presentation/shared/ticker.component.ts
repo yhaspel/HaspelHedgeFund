@@ -59,6 +59,13 @@ let _popoverIdSeq = 0;
         cursor: default;
         outline: none;
         border-radius: 3px;
+        /* WS-3.6: WCAG 2.2 §2.5.8 — give the focusable ticker chip a 24×24
+           target footprint (vertical padding + min-height) without changing
+           the visible glyph baseline. */
+        display: inline-block;
+        min-height: 24px;
+        line-height: 24px;
+        padding: 0 2px;
       }
       .hf-tk-sym:focus-visible {
         box-shadow: var(--focus-ring);

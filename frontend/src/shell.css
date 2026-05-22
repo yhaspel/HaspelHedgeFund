@@ -89,6 +89,33 @@
   border: 0;
 }
 
+/* WS-3.6 (WCAG 2.2 §2.5.8): bump native checkboxes to 16×16 with
+   inline-block targeting so they sit comfortably in dense tables. The
+   surrounding <td> padding extends the effective click target ≥24×24. */
+input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+input[type='checkbox']:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* WS-3.6 (WCAG 1.4.1): inline links inside paragraphs must be
+   distinguishable without relying on color alone. Underline by default
+   so the contrast-only path passes axe `link-in-text-block`. The link's
+   colour token still differentiates it from running text on top of the
+   underline. */
+.link {
+  color: var(--acc-info-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link:hover {
+  text-decoration-thickness: 2px;
+}
+
 /* Topbar */
 .topbar {
   position: sticky;
@@ -956,17 +983,7 @@
   background: var(--text);
 }
 
-/* Auth shell */
-.auth {
-  display: grid;
-  grid-template-columns: 1.05fr 1fr;
-  min-height: 100vh;
-}
-.auth-form-col {
-  display: grid;
-  place-items: center;
-  padding: 60px;
-}
+/* Auth form (single-column, centered — see ADR 0003) */
 .auth-form-wrap {
   width: 100%;
   max-width: 420px;
@@ -986,41 +1003,6 @@
 .auth-form-wrap .sub {
   color: var(--text-2);
   font-size: var(--fs-14);
-}
-.auth-art-col {
-  background: var(--surface-2);
-  border-left: 1px solid var(--border);
-  padding: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  position: relative;
-}
-.auth-art-frame {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-12);
-  padding: 24px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: var(--shadow-3);
-}
-.tape {
-  font-family: var(--font-mono);
-  font-size: var(--fs-12);
-  color: var(--text-2);
-  display: flex;
-  gap: 18px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.tape .up {
-  color: var(--acc-long-fg);
-}
-.tape .down {
-  color: var(--acc-short-fg);
 }
 
 /* Util */

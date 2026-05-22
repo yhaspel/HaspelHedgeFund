@@ -1,7 +1,8 @@
-import { Component, Input, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, Input, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+import { CommandPaletteComponent } from './command-palette.component';
 
 type Theme = 'light' | 'dark';
 const THEME_KEY = 'hf.theme';
@@ -9,13 +10,13 @@ const THEME_KEY = 'hf.theme';
 @Component({
   selector: 'hf-app-shell',
   standalone: true,
-  imports: [CommonModule, RouterLink, RouterLinkActive],
+  imports: [CommonModule, RouterLink, RouterLinkActive, CommandPaletteComponent],
   template: `
     <div class="app">
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <nav class="sidebar" aria-label="Primary">
-        <div class="logo" aria-label="Haspel Hedge Fund" title="Haspel Hedge Fund">
-          <img src="/icon.svg" alt="" width="30" height="30" />
+        <div class="logo" title="Haspel Hedge Fund">
+          <img src="/icon.svg" alt="Haspel Hedge Fund" width="30" height="30" />
         </div>
         <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navHome="routerLinkActive"
@@ -73,7 +74,15 @@ const THEME_KEY = 'hf.theme';
               <span class="sep" *ngIf="!last" aria-hidden="true">/</span>
             </ng-container>
           </nav>
-          <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+          <button type="button" class="gsearch" (click)="openPalette()"
+                  aria-label="Open command palette ⌘K">
+            <svg width="14" height="14" aria-hidden="true">
+              <use href="/icons.svg#i-search" />
+            </svg>
+            <span style="flex:1;text-align:left">Search runs, strategies, backtests…</span>
+            <span class="kbd">{{ paletteShortcutHint() }}</span>
+          </button>
+          <div style="display:flex;align-items:center;gap:12px">
             <button class="icon-btn" (click)="toggleTheme()" [attr.aria-label]="themeToggleLabel()">
               <svg width="16" height="16" aria-hidden="true">
                 <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
@@ -87,6 +96,9 @@ const THEME_KEY = 'hf.theme';
           <ng-content></ng-content>
         </div>
       </main>
+      @if (paletteOpen()) {
+        <hf-command-palette (closed)="paletteOpen.set(false)" />
+      }
     </div>
   `,
   styles: [
@@ -125,6 +137,27 @@ export class AppShellComponent implements OnInit {
   readonly themeToggleLabel = computed(() =>
     this.theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
   );
+
+  // ADR 0004: global command palette state.
+  readonly paletteOpen = signal(false);
+  readonly paletteShortcutHint = computed(() => this.isMac() ? '⌘K' : 'Ctrl K');
+
+  openPalette(): void {
+    this.paletteOpen.set(true);
+  }
+
+  @HostListener('window:keydown', ['$event'])
+  onWindowKeydown(ev: KeyboardEvent): void {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      this.paletteOpen.set(true);
+    }
+  }
+
+  private isMac(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    return /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  }
 
   ngOnInit(): void {
     // Read initial theme — was applied pre-paint by main.ts; keep signal in sync.

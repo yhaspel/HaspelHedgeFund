@@ -138,14 +138,16 @@ interface PrefillInput {
               </details>
             }
 
-            @for (w of warnings(); track w) {
-              <div class="pill warn" style="height:auto;padding:6px 10px;width:fit-content">
-                <span class="dot"></span>{{ w }}
-              </div>
-            }
+            <div role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:4px">
+              @for (w of warnings(); track w) {
+                <div class="pill warn" style="height:auto;padding:6px 10px;width:fit-content">
+                  <span class="dot"></span>{{ w }}
+                </div>
+              }
+            </div>
 
             @if (error()) {
-              <div class="pill err" style="height:auto;padding:6px 10px">
+              <div role="alert" class="pill err" style="height:auto;padding:6px 10px">
                 <span class="dot"></span>{{ error() }}
               </div>
             }

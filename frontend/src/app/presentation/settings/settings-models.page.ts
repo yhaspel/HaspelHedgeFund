@@ -35,20 +35,21 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             </div>
             @for (p of providers; track p.field) {
               <div class="field">
-                <label class="lbl" style="display:flex;justify-content:space-between">
+                <label class="lbl" [attr.for]="'llm-key-' + p.field" style="display:flex;justify-content:space-between">
                   <span>{{ p.label }}</span>
                   <span class="pill" [class.ok]="statusOf(p.field) === 'set'">
                     <span class="dot"></span>{{ statusOf(p.field) }}
                   </span>
                 </label>
-                <input class="input mono" type="password" [(ngModel)]="keyEdits[p.field]" [name]="p.field"
+                <input [id]="'llm-key-' + p.field" class="input mono" type="password" autocomplete="new-password"
+                  [(ngModel)]="keyEdits[p.field]" [name]="p.field"
                   [attr.data-test]="'llm-key-' + p.field"
                   placeholder="•••• paste to replace, blank to keep" />
               </div>
             }
             <div class="field">
-              <label class="lbl">Ollama host (for local models)</label>
-              <input class="input mono" type="text" [(ngModel)]="ollamaHost" name="ollama"
+              <label class="lbl" for="ollama-host">Ollama host (for local models)</label>
+              <input id="ollama-host" class="input mono" type="text" [(ngModel)]="ollamaHost" name="ollama"
                 placeholder="http://localhost:11434" data-test="ollama-host" />
             </div>
 
@@ -60,16 +61,18 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             </p>
             @for (p of dataProviders; track p.field) {
               <div class="field">
-                <label class="lbl" style="display:flex;justify-content:space-between">
+                <label class="lbl" [attr.for]="'data-key-' + p.field" style="display:flex;justify-content:space-between">
                   <span>{{ p.label }}</span>
                   <span class="pill" [class.ok]="statusOf(p.field) === 'set'">
                     <span class="dot"></span>{{ statusOf(p.field) }}
                   </span>
                 </label>
-                <input class="input mono" type="password" [(ngModel)]="keyEdits[p.field]" [name]="p.field"
+                <input [id]="'data-key-' + p.field" class="input mono" type="password" autocomplete="new-password"
+                  [(ngModel)]="keyEdits[p.field]" [name]="p.field"
+                  [attr.aria-describedby]="'data-key-note-' + p.field"
                   [attr.data-test]="'data-key-' + p.field"
                   placeholder="•••• paste to replace, blank to keep" />
-                <p style="font-size:11px;color:var(--text-3);margin:2px 0 0">{{ p.note }}</p>
+                <p [id]="'data-key-note-' + p.field" style="font-size:11px;color:var(--text-3);margin:2px 0 0">{{ p.note }}</p>
               </div>
             }
 
@@ -89,8 +92,9 @@ import { MarkCadence } from '../../core/models/portfolio.model';
           <div class="card-hd"><span class="title">Defaults &amp; cost ceiling</span></div>
           <div class="card-bd" style="display:flex;flex-direction:column;gap:12px">
             <div class="field">
-              <label class="lbl">Default model (applies to every agent)</label>
-              <select class="input sans" [(ngModel)]="globalDefault" name="globalDefault"
+              <label class="lbl" for="global-default">Default model (applies to every agent)</label>
+              <select id="global-default" class="input sans" [(ngModel)]="globalDefault" name="globalDefault"
+                aria-describedby="global-default-note"
                 (ngModelChange)="applyGlobalDefault($event)" data-test="global-default-select">
                 <option value="">— use preset per-agent rules —</option>
                 @for (m of store.models(); track m.id) {
@@ -99,14 +103,14 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                   </option>
                 }
               </select>
-              <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
+              <p id="global-default-note" style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
                 Sets the same model for every agent. Clear to fall back to the preset rules below.
               </p>
             </div>
 
             <div class="field">
-              <label class="lbl">Preset (used when no global default is set)</label>
-              <select class="input sans" [(ngModel)]="preset" name="preset"
+              <label class="lbl" for="preset-select">Preset (used when no global default is set)</label>
+              <select id="preset-select" class="input sans" [(ngModel)]="preset" name="preset"
                 (ngModelChange)="loadPresetOverrides()" data-test="preset-select">
                 @for (p of presets; track p) {
                   <option [value]="p">{{ p }}</option>
@@ -115,8 +119,8 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             </div>
 
             <div class="field">
-              <label class="lbl">Cost ceiling per scheduled run (USD)</label>
-              <input class="input" type="number" step="0.5" min="0" [(ngModel)]="ceiling" name="ceil" />
+              <label class="lbl" for="cost-ceiling">Cost ceiling per scheduled run (USD)</label>
+              <input id="cost-ceiling" class="input" type="number" step="0.5" min="0" [(ngModel)]="ceiling" name="ceil" />
             </div>
 
             <!-- P02d review: disable Save when no dirty change so the
@@ -203,12 +207,13 @@ import { MarkCadence } from '../../core/models/portfolio.model';
 
             @if (markCadence === 'delayed') {
               <div class="field" style="max-width:280px">
-                <label class="lbl">Auto-refresh interval (minutes)</label>
-                <input class="input mono" type="number"
+                <label class="lbl" for="cadence-interval-input">Auto-refresh interval (minutes)</label>
+                <input id="cadence-interval-input" class="input mono" type="number"
                        min="5" max="1440" step="1"
                        [(ngModel)]="intervalMinutes" name="interval_minutes"
+                       aria-describedby="cadence-interval-note"
                        data-test="cadence-interval" />
-                <p style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
+                <p id="cadence-interval-note" style="font-size:11.5px;color:var(--text-3);margin:4px 0 0">
                   Minimum 5 minutes, maximum 1440 (24 hours). Polling stops while the tab is hidden.
                 </p>
               </div>

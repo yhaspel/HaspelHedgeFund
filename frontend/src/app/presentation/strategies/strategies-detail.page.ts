@@ -74,7 +74,8 @@ import { ModalComponent } from '../shared/modal.component';
             <div class="est-modal__scroll scroll-area">
               <table class="tbl">
                 <thead><tr>
-                  <th>Agent</th><th>Model</th><th>Tier</th><th class="right">$/call</th>
+                  <th scope="col">Agent</th><th scope="col">Model</th>
+                  <th scope="col">Tier</th><th scope="col" class="right">$/call</th>
                 </tr></thead>
                 <tbody>
                   @for (row of est.per_agent; track row.agent) {
@@ -112,7 +113,7 @@ import { ModalComponent } from '../shared/modal.component';
       }
 
       @if (notice()) {
-        <div class="pill info" style="margin-bottom:14px;height:auto;padding:8px 12px">
+        <div role="status" aria-live="polite" class="pill info" style="margin-bottom:14px;height:auto;padding:8px 12px">
           <span class="dot"></span>{{ notice() }}
         </div>
       }
@@ -179,10 +180,10 @@ import { ModalComponent } from '../shared/modal.component';
                     </div>
                     <table class="tbl">
                       <thead><tr>
-                        <th style="width:36px">Run?</th>
-                        <th>Ticker</th><th>Sector</th>
-                        <th class="right">Score</th>
-                        <th style="font-size:11.5px;color:var(--text-3)">Why</th>
+                        <th scope="col" style="width:36px"><span class="visually-hidden">Include in council</span></th>
+                        <th scope="col">Ticker</th><th scope="col">Name</th><th scope="col">Sector</th>
+                        <th scope="col" class="right">Score</th>
+                        <th scope="col" style="font-size:11.5px;color:var(--text-3)">Why</th>
                       </tr></thead>
                       <tbody>
                         @for (cand of reviewLongs(c); track cand.ticker) {
@@ -193,7 +194,8 @@ import { ModalComponent } from '../shared/modal.component';
                                      [attr.aria-label]="'Include long candidate ' + cand.ticker"
                                      [attr.data-test]="'review-long-' + cand.ticker" />
                             </td>
-                            <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
+                            <td><hf-ticker [ticker]="cand.ticker"></hf-ticker></td>
+                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(cand.ticker) }}</td>
                             <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
                             <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
                             <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
@@ -211,10 +213,10 @@ import { ModalComponent } from '../shared/modal.component';
                     </div>
                     <table class="tbl">
                       <thead><tr>
-                        <th style="width:36px">Run?</th>
-                        <th>Ticker</th><th>Sector</th>
-                        <th class="right">Score</th>
-                        <th style="font-size:11.5px;color:var(--text-3)">Why</th>
+                        <th scope="col" style="width:36px"><span class="visually-hidden">Include in council</span></th>
+                        <th scope="col">Ticker</th><th scope="col">Name</th><th scope="col">Sector</th>
+                        <th scope="col" class="right">Score</th>
+                        <th scope="col" style="font-size:11.5px;color:var(--text-3)">Why</th>
                       </tr></thead>
                       <tbody>
                         @for (cand of reviewShorts(c); track cand.ticker) {
@@ -225,7 +227,8 @@ import { ModalComponent } from '../shared/modal.component';
                                      [attr.aria-label]="'Include short candidate ' + cand.ticker"
                                      [attr.data-test]="'review-short-' + cand.ticker" />
                             </td>
-                            <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
+                            <td><hf-ticker [ticker]="cand.ticker"></hf-ticker></td>
+                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(cand.ticker) }}</td>
                             <td style="font-size:11.5px;color:var(--text-2)">{{ cand.sector }}</td>
                             <td class="num mono">{{ cand.score | number: '1.3-3' }}</td>
                             <td style="font-size:11.5px;color:var(--text-3)">{{ cand.rationale }}</td>
@@ -237,7 +240,7 @@ import { ModalComponent } from '../shared/modal.component';
                 }
 
                 @if (reviewError()) {
-                  <p style="color:var(--acc-short-fg);font-size:12px;margin:0" data-test="review-error">{{ reviewError() }}</p>
+                  <p role="alert" style="color:var(--acc-short-fg);font-size:12px;margin:0" data-test="review-error">{{ reviewError() }}</p>
                 }
 
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -264,8 +267,9 @@ import { ModalComponent } from '../shared/modal.component';
                 </div>
                 <table class="tbl">
                   <thead><tr>
-                    <th>#</th><th>Ticker</th><th>Side</th><th>Status</th>
-                    <th class="right">Cost</th><th>Transcript</th>
+                    <th scope="col">#</th><th scope="col">Ticker</th>
+                    <th scope="col">Side</th><th scope="col">Status</th>
+                    <th scope="col" class="right">Cost</th><th scope="col">Transcript</th>
                   </tr></thead>
                   <tbody>
                     @for (cr of c.candidate_runs; track cr.run_id) {
@@ -357,18 +361,20 @@ import { ModalComponent } from '../shared/modal.component';
                     <table class="tbl">
                       <thead>
                         <tr>
-                          <th>Ticker</th>
-                          <th class="right">Weight</th>
-                          <th class="right">As_of px</th>
-                          <th class="right">Mark px</th>
-                          <th class="right">Return</th>
-                          <th class="right">Contribution</th>
+                          <th scope="col">Ticker</th>
+                          <th scope="col">Name</th>
+                          <th scope="col" class="right">Weight</th>
+                          <th scope="col" class="right">As_of px</th>
+                          <th scope="col" class="right">Mark px</th>
+                          <th scope="col" class="right">Return</th>
+                          <th scope="col" class="right">Contribution</th>
                         </tr>
                       </thead>
                       <tbody>
                         @for (row of markedRows(snap); track row.ticker) {
                           <tr>
-                            <td class="mono"><b>{{ row.ticker }}</b></td>
+                            <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
+                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
                             <td class="num mono"
                                 [style.color]="row.weight_pct >= 0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
                               {{ row.weight_pct >= 0 ? '+' : '' }}{{ row.weight_pct | number: '1.2-2' }}%
@@ -517,14 +523,14 @@ import { ModalComponent } from '../shared/modal.component';
                   } @else {
                     <table class="tbl">
                       <thead><tr>
-                        <th>Long</th><th>Short</th><th>Sector</th>
-                        <th class="right">Hedge β</th>
-                        <th class="right">Entry gap (z)</th>
-                        <th class="right">Co-move</th>
-                        <th class="right">Fit (p)</th>
-                        <th>z trend (30d)</th>
+                        <th scope="col">Long</th><th scope="col">Short</th><th scope="col">Sector</th>
+                        <th scope="col" class="right">Hedge β</th>
+                        <th scope="col" class="right">Entry gap (z)</th>
+                        <th scope="col" class="right">Co-move</th>
+                        <th scope="col" class="right">Fit (p)</th>
+                        <th scope="col">z trend (30d)</th>
                         @if (councilEnabled()) {
-                          <th>Council</th><th class="right">Conf.</th>
+                          <th scope="col">Council</th><th scope="col" class="right">Conf.</th>
                         }
                       </tr></thead>
                       <tbody>
@@ -590,9 +596,9 @@ import { ModalComponent } from '../shared/modal.component';
                     <div class="eyebrow" style="margin-bottom:6px">Pairs closed this cycle ({{ closedPairs().length }})</div>
                     <table class="tbl">
                       <thead><tr>
-                        <th>Long leg</th><th>Short leg</th>
-                        <th>Reason</th>
-                        <th class="right">Exit gap (z)</th>
+                        <th scope="col">Long leg</th><th scope="col">Short leg</th>
+                        <th scope="col">Reason</th>
+                        <th scope="col" class="right">Exit gap (z)</th>
                       </tr></thead>
                       <tbody>
                         @for (cp of closedPairs(); track $index) {

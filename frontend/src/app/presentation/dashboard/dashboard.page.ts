@@ -172,12 +172,23 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               <span class="dot"></span>{{ activeRuns().length }} in flight
             </span>
             <!-- P2l source filter -->
-            <div class="actions" style="gap:4px;align-items:center">
-              <button class="chip" [class.chip-on]="runSource() === 'all'"
+            <div class="actions" role="radiogroup" aria-label="Filter runs by source"
+                 style="gap:4px;align-items:center"
+                 (keydown)="onRunSourceKeydown($event)">
+              <button class="chip" type="button" role="radio"
+                      [class.chip-on]="runSource() === 'all'"
+                      [attr.aria-checked]="runSource() === 'all'"
+                      [attr.tabindex]="runSource() === 'all' ? 0 : -1"
                       (click)="setRunSource('all')" data-test="runs-filter-all">All</button>
-              <button class="chip" [class.chip-on]="runSource() === 'adhoc'"
+              <button class="chip" type="button" role="radio"
+                      [class.chip-on]="runSource() === 'adhoc'"
+                      [attr.aria-checked]="runSource() === 'adhoc'"
+                      [attr.tabindex]="runSource() === 'adhoc' ? 0 : -1"
                       (click)="setRunSource('adhoc')" data-test="runs-filter-adhoc">Manual</button>
-              <button class="chip" [class.chip-on]="runSource() === 'strategy'"
+              <button class="chip" type="button" role="radio"
+                      [class.chip-on]="runSource() === 'strategy'"
+                      [attr.aria-checked]="runSource() === 'strategy'"
+                      [attr.tabindex]="runSource() === 'strategy' ? 0 : -1"
                       (click)="setRunSource('strategy')" data-test="runs-filter-strategy">Strategy</button>
             </div>
           </div>
@@ -374,8 +385,8 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         margin: 0;
       }
       .muted { font-size: 13px; color: var(--text-3); margin: 0; }
-      .link { color: var(--acc-info-fg); text-decoration: none; }
-      .link:hover { text-decoration: underline; }
+      .link { color: var(--acc-info-fg); text-decoration: underline; text-underline-offset: 2px; }
+      .link:hover { text-decoration-thickness: 2px; }
       .meter-labels {
         display: flex;
         justify-content: space-between;
@@ -439,11 +450,15 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         color: var(--text-2);
         font-size: 11px;
         line-height: 1;
-        padding: 4px 8px;
+        padding: 0 10px;
+        min-height: 24px;
+        display: inline-flex;
+        align-items: center;
         border-radius: var(--r-full);
         cursor: pointer;
       }
       .chip:hover { background: var(--surface-2); }
+      .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
       .chip-on {
         background: var(--surface-2);
         color: var(--text);
@@ -496,6 +511,23 @@ export class DashboardPage implements OnInit {
   setRunSource(s: 'all' | 'adhoc' | 'strategy'): void {
     this.runSource.set(s);
     this.runs.listRuns({ source: s }).subscribe((rows) => this._prefetchTickerNames(rows));
+  }
+
+  /** WS-3.5: roving-tabindex arrow-key navigation for the source filter radiogroup. */
+  onRunSourceKeydown(ev: KeyboardEvent): void {
+    const order: ('all' | 'adhoc' | 'strategy')[] = ['all', 'adhoc', 'strategy'];
+    const current = order.indexOf(this.runSource());
+    let next = current;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') next = (current + 1) % order.length;
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') next = (current - 1 + order.length) % order.length;
+    else if (ev.key === 'Home') next = 0;
+    else if (ev.key === 'End') next = order.length - 1;
+    else return;
+    ev.preventDefault();
+    this.setRunSource(order[next]);
+    const group = ev.currentTarget as HTMLElement;
+    const buttons = group.querySelectorAll<HTMLButtonElement>('button[role="radio"]');
+    buttons[next]?.focus();
   }
 
   private _prefetchTickerNames(rows: { tickers: string[] }[]): void {

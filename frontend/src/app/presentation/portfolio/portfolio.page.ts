@@ -64,7 +64,7 @@ import { ModalComponent } from '../shared/modal.component';
       </div>
 
       @if (loadError(); as msg) {
-        <div class="pill err" style="height:auto;padding:8px 12px;margin-bottom:14px">
+        <div role="alert" class="pill err" style="height:auto;padding:8px 12px;margin-bottom:14px">
           <span class="dot"></span>{{ msg }}
         </div>
       }
