@@ -22,7 +22,7 @@ import httpx
 from django.conf import settings
 from django.db import transaction
 
-from ..interfaces import Bar, FundamentalRow
+from ..interfaces import Bar, FundamentalRow, ProfileSnapshot
 from ..models import DailyBar, Fundamental
 
 BASE_URL = "https://financialmodelingprep.com/stable"
@@ -89,6 +89,48 @@ class FmpProvider:
             else dt.datetime.now(tz=dt.UTC)
         )
         return Decimal(str(price)), as_of
+
+    # ---- profile (name + latest quote-derived metrics) ----------------
+
+    def get_quote_profile(self, ticker: str) -> ProfileSnapshot | None:
+        """WS-2: full ticker profile — name, exchange, sector + latest
+        market cap / P/E / EPS / price. Wraps FMP `/quote/{ticker}`, the
+        same endpoint `get_latest_quote` already proves works.
+
+        Returns `None` for unknown tickers / empty payload. Caller is
+        responsible for caching (TTL) and for upserting reference fields
+        into `CompanyProfile`.
+        """
+        url = f"{BASE_URL}/quote/{ticker}"
+        params = {"apikey": self.api_key}
+        resp = self._http.get(url, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload if isinstance(payload, list) else []
+        if not rows:
+            return None
+        row = rows[0]
+        price = row.get("price") or row.get("c")
+        ts = row.get("timestamp")
+        as_of = (
+            dt.datetime.fromtimestamp(int(ts), tz=dt.UTC).date()
+            if ts
+            else dt.date.today()
+        )
+        return ProfileSnapshot(
+            ticker=ticker.upper(),
+            name=str(row.get("name") or ""),
+            exchange=str(row.get("exchange") or ""),
+            sector="",  # /quote does not return sector; left blank
+            price=Decimal(str(price)) if price is not None else None,
+            market_cap=_dec(row.get("marketCap")),
+            pe_ratio=_dec(row.get("pe")),
+            eps=_dec(row.get("eps")),
+            shares_outstanding=int(row["sharesOutstanding"])
+            if row.get("sharesOutstanding") is not None
+            else None,
+            as_of=as_of,
+        )
 
     # ---- bars ---------------------------------------------------------
 
@@ -246,3 +288,12 @@ class FmpProvider:
 def _parse_date(value: str) -> dt.date:
     # FMP returns "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS".
     return dt.date.fromisoformat(value.split(" ")[0])
+
+
+def _dec(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (ValueError, ArithmeticError):
+        return None

@@ -47,7 +47,7 @@ interface PersonaCard {
         <p style="color:var(--text-3)">Loading…</p>
       } @else {
         @if (run()!.source === 'strategy' && run()!.strategy_backlink; as link) {
-          <div class="card" style="margin-bottom:14px;background:var(--surface-1)" data-test="strategy-backlink">
+          <div class="card" style="margin-bottom:14px;background:var(--surface-2)" data-test="strategy-backlink">
             <div class="card-bd" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px">
               <span class="pill" style="background:var(--surface-2);color:var(--text-3);height:auto;padding:2px 8px">
                 <span class="dot"></span>Strategy cycle
@@ -167,6 +167,9 @@ interface PersonaCard {
           [prefill]="entryPrefill()"
           (closed)="onEntryClosed($event)" />
 
+        <div role="status" aria-live="polite" class="visually-hidden">
+          @if (toastMsg(); as t) { {{ t }} }
+        </div>
         @if (toastMsg(); as t) {
           <div class="pill ok" style="position:fixed;bottom:18px;right:18px;height:auto;padding:8px 12px;z-index:var(--z-modal)"
                data-test="position-saved-toast">
@@ -479,7 +482,7 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly cancelling = signal(false);
 
   crumbs = computed(() => [
-    { label: 'Runs', link: '/runs/new' },
+    { label: 'Runs', link: '/runs' },
     { label: `#${this.run()?.id ?? ''}` },
   ]);
 

@@ -237,6 +237,28 @@ class NewsItem(models.Model):
         return f"{self.ticker} {self.published_at:%Y-%m-%d} {self.headline[:60]}"
 
 
+class CompanyProfile(models.Model):
+    """Slow-changing public reference data for a ticker (P3 prereq 2 / WS-2).
+
+    Name / exchange / sector rarely move and are not user-specific — store
+    once, share across users. Quote-derived values (market cap, P/E, EPS)
+    move daily and are intentionally NOT persisted here; they live in
+    short-TTL Redis instead so the popover stays fresh without DB churn.
+
+    This row is *today* data — it must never be consulted by any backtest
+    or point-in-time agent path. The `TickerProfileView` is the only
+    legitimate consumer.
+    """
+    ticker = models.CharField(max_length=16, unique=True, db_index=True)
+    name = models.CharField(max_length=256, blank=True, default="")
+    exchange = models.CharField(max_length=32, blank=True, default="")
+    sector = models.CharField(max_length=64, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.ticker} ({self.name or 'unresolved'})"
+
+
 class CorporateAction(models.Model):
     """Provider-backed corporate actions (splits, dividends, symbol changes).
 

@@ -3,48 +3,51 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { CashAdjustRequest } from '../../core/models/portfolio.model';
+import { ModalComponent } from '../shared/modal.component';
 
 @Component({
   selector: 'hf-cash-adjust-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ModalComponent],
   template: `
     @if (open) {
-      <div class="modal-overlay" (click)="onCancel()">
+      <hf-modal titleId="cash-adjust-title" (closed)="onCancel()">
         <div class="card cash-modal" (click)="$event.stopPropagation()">
           <div class="card-hd">
-            <span class="title">Adjust manual cash</span>
+            <span class="title" id="cash-adjust-title">Adjust manual cash</span>
             <div class="actions">
               <button class="icon-btn" (click)="onCancel()" aria-label="Close">
-                <svg width="16" height="16"><use href="/icons.svg#i-x" /></svg>
+                <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
               </button>
             </div>
           </div>
           <div class="cash-modal__body">
             <div class="field-row">
-              <label class="lbl">Kind</label>
-              <div class="seg">
-                <button type="button" class="seg-btn"
+              <label class="lbl" for="cash-kind">Kind</label>
+              <div class="seg" id="cash-kind" role="radiogroup" aria-label="Adjustment kind">
+                <button type="button" class="seg-btn" role="radio"
+                        [attr.aria-checked]="kind === 'deposit'"
                         [class.active]="kind === 'deposit'"
                         (click)="kind = 'deposit'">Deposit</button>
-                <button type="button" class="seg-btn"
+                <button type="button" class="seg-btn" role="radio"
+                        [attr.aria-checked]="kind === 'withdrawal'"
                         [class.active]="kind === 'withdrawal'"
                         (click)="kind = 'withdrawal'">Withdrawal</button>
               </div>
             </div>
             <div class="field-row">
-              <label class="lbl">Amount</label>
-              <input class="input mono" type="number" min="0" step="0.01"
-                     [(ngModel)]="amount" style="width:160px" placeholder="0.00" />
+              <label class="lbl" for="cash-amount">Amount</label>
+              <input id="cash-amount" class="input mono" type="number" min="0" step="0.01"
+                     [(ngModel)]="amount" style="width:160px" placeholder="0.00" name="amount" />
               <span style="font-size:11.5px;color:var(--text-3)">USD</span>
             </div>
             <div class="field-row">
-              <label class="lbl">Note</label>
-              <input class="input" type="text" [(ngModel)]="note"
+              <label class="lbl" for="cash-note">Note</label>
+              <input id="cash-note" class="input" type="text" [(ngModel)]="note" name="note"
                      placeholder="optional context for the ledger" />
             </div>
             @if (error()) {
-              <div class="pill err" style="height:auto;padding:6px 10px">
+              <div role="alert" class="pill err" style="height:auto;padding:6px 10px">
                 <span class="dot"></span>{{ error() }}
               </div>
             }
@@ -57,7 +60,7 @@ import { CashAdjustRequest } from '../../core/models/portfolio.model';
             </button>
           </div>
         </div>
-      </div>
+      </hf-modal>
     }
   `,
   styles: [

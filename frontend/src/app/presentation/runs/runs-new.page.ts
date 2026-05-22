@@ -17,7 +17,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, ModelPanelComponent, AppShellComponent, PersonaCardComponent, SparklineComponent, GlossaryTermComponent],
   template: `
-    <hf-app-shell [crumbs]="[{label:'Runs', link:'/'}, {label:'New'}]">
+    <hf-app-shell [crumbs]="[{label:'Runs', link:'/runs'}, {label:'New'}]">
       <div class="page-head">
         <div>
           <div class="eyebrow">Run setup</div>
@@ -29,11 +29,11 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         <section class="card">
           <div class="card-bd" style="display:flex;flex-direction:column;gap:14px">
             <div class="field">
-              <label class="lbl"><hf-term key="ticker">Ticker</hf-term></label>
+              <label class="lbl" for="run-ticker"><hf-term key="ticker">Ticker</hf-term></label>
               <div style="display:flex;align-items:center;gap:10px">
-                <input class="input" name="ticker" [(ngModel)]="ticker"
+                <input id="run-ticker" class="input" name="ticker" [(ngModel)]="ticker"
                   (ngModelChange)="onTickerChange($event)"
-                  placeholder="AAPL" required
+                  placeholder="AAPL" required autocomplete="off"
                   style="text-transform:uppercase;flex:1" />
                 <hf-sparkline [points]="tickerSpark()" [width]="80" [height]="22" [loading]="sparkLoading()" />
               </div>
@@ -47,8 +47,8 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
               }
             </div>
             <div class="field">
-              <label class="lbl">As-of date</label>
-              <input class="input" type="date" name="asOf" [(ngModel)]="asOfDate" required />
+              <label class="lbl" for="run-asof">As-of date</label>
+              <input id="run-asof" class="input" type="date" name="asOf" [(ngModel)]="asOfDate" required />
             </div>
           </div>
         </section>
@@ -75,11 +75,11 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         </section>
 
         @if (error()) {
-          <p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+          <p role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
         }
 
         <div style="display:flex;gap:8px">
-          <a class="btn ghost" routerLink="/">Cancel</a>
+          <a class="btn ghost" routerLink="/runs">Cancel</a>
           <button type="submit" class="btn primary"
             [disabled]="submitting() || selected().size === 0"
             style="flex:1;height:36px;justify-content:center">

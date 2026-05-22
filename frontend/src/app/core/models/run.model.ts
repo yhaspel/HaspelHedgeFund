@@ -97,6 +97,8 @@ export interface RunSummary {
   portfolio_target?: number | null;
   /** P2l: strategy + cycle metadata for back-linking; null for ad-hoc. */
   strategy_backlink?: StrategyBacklink | null;
+  /** P3 prereq 2 / WS-1: persona ids requested for this run; used by Runs list. */
+  personas?: string[];
 }
 
 /** P01 review: per-source provenance entry for run outputs. */

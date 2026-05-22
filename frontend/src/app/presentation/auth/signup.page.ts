@@ -20,15 +20,21 @@ import { AuthStore } from '../../abstraction/auth.store';
 
         <form (ngSubmit)="submit()" style="display:flex;flex-direction:column;gap:14px">
           <div class="field">
-            <label class="lbl">Email</label>
-            <input class="input sans" type="email" name="email" [(ngModel)]="email" required />
+            <label class="lbl" for="signup-email">Email</label>
+            <input id="signup-email" class="input sans" type="email" name="email" autocomplete="email"
+              [(ngModel)]="email" required
+              [attr.aria-invalid]="error() ? 'true' : null"
+              [attr.aria-describedby]="error() ? 'signup-error' : null" />
           </div>
           <div class="field">
-            <label class="lbl">Password <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· min 8 chars</span></label>
-            <input class="input sans" type="password" name="password" [(ngModel)]="password" required minlength="8" />
+            <label class="lbl" for="signup-password">Password <span style="color:var(--text-3);text-transform:none;letter-spacing:0;font-weight:400">· min 8 chars</span></label>
+            <input id="signup-password" class="input sans" type="password" name="password" autocomplete="new-password"
+              [(ngModel)]="password" required minlength="8"
+              [attr.aria-invalid]="error() ? 'true' : null"
+              [attr.aria-describedby]="error() ? 'signup-error' : null" />
           </div>
           @if (error()) {
-            <p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+            <p id="signup-error" role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
           }
           <button class="btn primary" type="submit" style="width:100%;height:36px;justify-content:center">
             Sign up

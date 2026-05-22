@@ -55,7 +55,8 @@
   border: 1px solid var(--border-2);
   color: var(--text);
 }
-.nav-btn[data-tip]:hover::after {
+.nav-btn[data-tip]:hover::after,
+.nav-btn[data-tip]:focus-visible::after {
   content: attr(data-tip);
   position: absolute;
   left: 48px;
@@ -73,6 +74,19 @@
 }
 .sidebar .spacer {
   flex: 1;
+}
+
+/* WS-3: visually-hidden — used for table headers, sr-only labels, live regions. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Topbar */

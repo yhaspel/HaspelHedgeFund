@@ -21,6 +21,12 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'runs',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/runs/runs-list.page').then((m) => m.RunsListPage),
+  },
+  {
     path: 'runs/new',
     canActivate: [authGuard],
     loadComponent: () =>

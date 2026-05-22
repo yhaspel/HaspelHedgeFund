@@ -1,11 +1,14 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { PositionValuation } from '../../core/models/portfolio.model';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { TickerComponent } from '../shared/ticker.component';
 
 @Component({
   selector: 'hf-positions-table',
   standalone: true,
-  imports: [CommonModule, DatePipe, DecimalPipe],
+  imports: [CommonModule, DatePipe, DecimalPipe, RouterLink, TickerComponent],
   template: `
     @if (!positions || positions.length === 0) {
       <p style="font-size:12px;color:var(--text-3);margin:0;padding:16px">
@@ -16,22 +19,24 @@ import { PositionValuation } from '../../core/models/portfolio.model';
       <table class="tbl">
         <thead>
           <tr>
-            <th>Ticker</th>
-            <th>Side</th>
-            <th class="right">Qty</th>
-            <th class="right">Avg cost</th>
-            <th class="right">Mark</th>
-            <th class="right">Market value</th>
-            <th class="right">Unrealized P&amp;L</th>
-            <th class="right">Weight</th>
-            <th>Source</th>
-            <th></th>
+            <th scope="col">Ticker</th>
+            <th scope="col">Name</th>
+            <th scope="col">Side</th>
+            <th scope="col" class="right">Qty</th>
+            <th scope="col" class="right">Avg cost</th>
+            <th scope="col" class="right">Mark</th>
+            <th scope="col" class="right">Market value</th>
+            <th scope="col" class="right">Unrealized P&amp;L</th>
+            <th scope="col" class="right">Weight</th>
+            <th scope="col">Source</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           @for (p of positions; track p.id) {
             <tr>
-              <td class="mono"><b>{{ p.ticker }}</b></td>
+              <td><hf-ticker [ticker]="p.ticker"></hf-ticker></td>
+              <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(p.ticker) }}</td>
               <td>
                 <span class="pill" [class.ok]="!p.is_short" [class.err]="p.is_short">
                   <span class="dot"></span>{{ p.is_short ? 'Short' : 'Long' }}
@@ -60,7 +65,7 @@ import { PositionValuation } from '../../core/models/portfolio.model';
               <td class="num mono">{{ +p.weight_pct | number: '1.2-2' }}%</td>
               <td style="font-size:11.5px;color:var(--text-3)">
                 @if (p.opened_via === 'run' && p.source_run_id !== null) {
-                  <a [href]="'/runs/' + p.source_run_id" class="mono"
+                  <a [routerLink]="['/runs', p.source_run_id]" class="mono"
                      style="color:var(--acc-info-fg);text-decoration:underline">run #{{ p.source_run_id }}</a>
                 } @else if (p.opened_via === 'strategy_cycle') {
                   <span>strategy cycle</span>
@@ -76,7 +81,7 @@ import { PositionValuation } from '../../core/models/portfolio.model';
             </tr>
             @if (p.warnings && p.warnings.length > 0) {
               <tr>
-                <td colspan="10" style="padding:0 12px 6px 12px">
+                <td colspan="11" style="padding:0 12px 6px 12px">
                   @for (w of p.warnings; track w) {
                     <span class="pill warn" style="margin-right:6px;font-size:11px">
                       <span class="dot"></span>{{ w }}
@@ -91,10 +96,25 @@ import { PositionValuation } from '../../core/models/portfolio.model';
     }
   `,
 })
-export class PositionsTableComponent {
+export class PositionsTableComponent implements OnChanges {
   @Input() positions: PositionValuation[] = [];
   @Output() closeClick = new EventEmitter<PositionValuation>();
   @Output() editClick = new EventEmitter<PositionValuation>();
+
+  private readonly profiles = inject(TickerProfileStore);
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['positions']) {
+      const tickers = [...new Set((this.positions ?? []).map((p) => p.ticker))];
+      if (tickers.length) this.profiles.fetchNames(tickers).subscribe();
+    }
+  }
+
+  nameFor(ticker: string): string {
+    // _bump is read for reactivity within Angular's CD pass.
+    void this.profiles._bump();
+    return this.profiles.name(ticker) || '—';
+  }
 
   formatQty(raw: string): string {
     const n = Number(raw);

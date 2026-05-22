@@ -5,11 +5,14 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { TickerComponent } from '../shared/ticker.component';
+import { ModalComponent } from '../shared/modal.component';
 
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, RegimeContextWidgetComponent],
+  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
       <div class="page-head">
@@ -32,12 +35,11 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
       </div>
 
       @if (estimate(); as est) {
-        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:16px"
-             (click)="cancelEstimate()">
+        <hf-modal titleId="estimate-modal-title" (closed)="cancelEstimate()">
           <div class="card est-modal" (click)="$event.stopPropagation()">
 
             <div class="est-modal__head">
-              <div class="card-hd"><span class="title">Confirm cycle dispatch</span></div>
+              <div class="card-hd"><span class="title" id="estimate-modal-title">Confirm cycle dispatch</span></div>
               <div class="est-modal__head-bd">
                 <p style="font-size:11.5px;color:var(--text-3);margin:0">
                   Preset <span class="mono" style="color:var(--text)">{{ est.preset }}</span> ·
@@ -106,7 +108,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
             </div>
 
           </div>
-        </div>
+        </hf-modal>
       }
 
       @if (notice()) {
@@ -188,6 +190,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                             <td>
                               <input type="checkbox" [checked]="reviewLongsSelected().has(cand.ticker)"
                                      (change)="toggleReviewLong(cand.ticker)"
+                                     [attr.aria-label]="'Include long candidate ' + cand.ticker"
                                      [attr.data-test]="'review-long-' + cand.ticker" />
                             </td>
                             <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
@@ -219,6 +222,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                             <td>
                               <input type="checkbox" [checked]="reviewShortsSelected().has(cand.ticker)"
                                      (change)="toggleReviewShort(cand.ticker)"
+                                     [attr.aria-label]="'Include short candidate ' + cand.ticker"
                                      [attr.data-test]="'review-short-' + cand.ticker" />
                             </td>
                             <td class="mono" style="color:var(--text)">{{ cand.ticker }}</td>
@@ -398,10 +402,18 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                     <p style="font-size:11.5px;color:var(--text-3);margin:0">No longs.</p>
                   } @else {
                     <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th scope="col">Ticker</th>
+                          <th scope="col">Name</th>
+                          <th scope="col" class="right">Weight</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         @for (row of longs(); track row.ticker) {
                           <tr>
-                            <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
+                            <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
+                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
                             <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
                           </tr>
                         }
@@ -415,10 +427,18 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                     <p style="font-size:11.5px;color:var(--text-3);margin:0">No shorts.</p>
                   } @else {
                     <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th scope="col">Ticker</th>
+                          <th scope="col">Name</th>
+                          <th scope="col" class="right">Weight</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         @for (row of shorts(); track row.ticker) {
                           <tr>
-                            <td class="mono" style="color:var(--text)">{{ row.ticker }}</td>
+                            <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
+                            <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(row.ticker) }}</td>
                             <td class="num">{{ row.weight | number: '1.2-2' }}%</td>
                           </tr>
                         }
@@ -431,6 +451,12 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
               <div>
                 <div class="eyebrow" style="margin-bottom:6px">Sector exposure (signed)</div>
                 <table class="tbl">
+                  <thead>
+                    <tr>
+                      <th scope="col">Sector</th>
+                      <th scope="col" class="right">Weight</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     @for (row of sectorRows(); track row.sector) {
                       <tr>
@@ -452,9 +478,10 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                 } @else {
                   <table class="tbl">
                     <thead><tr>
-                      <th>Seq</th><th>Side</th><th>Ticker</th>
-                      <th class="right">Qty</th><th class="right">Limit</th>
-                      <th>Reason</th><th class="right">Notional</th>
+                      <th scope="col">Seq</th><th scope="col">Side</th>
+                      <th scope="col">Ticker</th><th scope="col">Name</th>
+                      <th scope="col" class="right">Qty</th><th scope="col" class="right">Limit</th>
+                      <th scope="col">Reason</th><th scope="col" class="right">Notional</th>
                     </tr></thead>
                     <tbody>
                       @for (o of c.orders; track o.id) {
@@ -464,7 +491,8 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                             [style.color]="(o.side === 'buy' || o.side === 'cover') ? 'var(--acc-long-fg)' : (o.side === 'sell' || o.side === 'short') ? 'var(--acc-short-fg)' : null">
                             {{ o.side }}
                           </td>
-                          <td class="mono" style="color:var(--text)">{{ o.ticker }}</td>
+                          <td><hf-ticker [ticker]="o.ticker"></hf-ticker></td>
+                          <td style="color:var(--text-2);font-size:12.5px">{{ nameFor(o.ticker) }}</td>
                           <td class="num">{{ o.quantity }}</td>
                           <td class="num">{{ o.limit_price ?? 'mkt' }}</td>
                           <td style="font-size:11.5px;color:var(--text-2)">{{ o.reason }}</td>
@@ -539,7 +567,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                       <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
                         @for (p of openPairs(); track $index) {
                           @if (p.council_thesis) {
-                            <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface-1)">
+                            <div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface-2)">
                               <div style="display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--text-3)">
                                 <span class="mono" style="color:var(--text);font-weight:600">{{ p.leg_a }} / {{ p.leg_b }}</span>
                                 <span>· council {{ p.council_action }} @ {{ p.council_confidence }}</span>
@@ -588,7 +616,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                     </summary>
                     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
                       @for (sk of councilSkipped(); track $index) {
-                        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-1)">
+                        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-2)">
                           <div style="font-size:11.5px;color:var(--text-3)">
                             <span class="mono" style="color:var(--text)">{{ sk.leg_a }} / {{ sk.leg_b }}</span>
                             · {{ sk.enter_count }} enter / {{ sk.skip_count }} skip · confidence {{ sk.confidence }}
@@ -623,7 +651,7 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
                   <div style="display:flex;flex-direction:column;gap:10px">
                     @for (t of theses(); track t.ticker) {
                       <div class="card" data-test="position-thesis"
-                        style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--surface-1)">
+                        style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--surface-2)">
                         <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
                           <span class="mono" style="color:var(--text);font-weight:600">{{ t.ticker }}</span>
                           <span style="font-size:11.5px;color:var(--text-3)">{{ t.sector || '—' }}</span>
@@ -736,7 +764,40 @@ import { RegimeContextWidgetComponent } from './regime-context-widget.component'
 export class StrategiesDetailPage implements OnInit, OnDestroy {
   readonly store = inject(StrategiesStore);
   private readonly route = inject(ActivatedRoute);
+  private readonly profiles = inject(TickerProfileStore);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+
+  nameFor(ticker: string | null | undefined): string {
+    if (!ticker) return '—';
+    void this.profiles._bump();
+    return this.profiles.name(ticker) || '—';
+  }
+
+  private _collectCycleTickers(d: CycleDetail | null | undefined): string[] {
+    if (!d) return [];
+    const tk = new Set<string>();
+    const addArr = (rows: { ticker?: string | null }[] | undefined) => {
+      (rows ?? []).forEach((r) => r?.ticker && tk.add(r.ticker));
+    };
+    addArr((d as { longs?: { ticker: string }[] }).longs);
+    addArr((d as { shorts?: { ticker: string }[] }).shorts);
+    addArr(d.orders as unknown as { ticker?: string }[]);
+    addArr(d.screener_ranking?.long_candidates);
+    addArr(d.screener_ranking?.short_candidates);
+    if (d.marked_snapshot?.per_ticker) {
+      for (const k of Object.keys(d.marked_snapshot.per_ticker)) tk.add(k);
+    }
+    if (Array.isArray((d as { theses?: { ticker?: string }[] }).theses)) {
+      addArr((d as { theses?: { ticker?: string }[] }).theses);
+    }
+    if (Array.isArray((d as { open_pairs?: { leg_a?: string; leg_b?: string }[] }).open_pairs)) {
+      (d as { open_pairs?: { leg_a?: string; leg_b?: string }[] }).open_pairs!.forEach((p) => {
+        if (p.leg_a) tk.add(p.leg_a);
+        if (p.leg_b) tk.add(p.leg_b);
+      });
+    }
+    return [...tk];
+  }
 
   running = signal(false);
   estimating = signal(false);
@@ -973,6 +1034,9 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     this.store.cycleDetail(this.strategyId, id).subscribe((d) => {
       const prev = this.cycle();
       this.cycle.set(d);
+      // WS-2: prefetch identity for every ticker the cycle references.
+      const tickers = this._collectCycleTickers(d);
+      if (tickers.length) this.profiles.fetchNames(tickers).subscribe();
       // Seed review selections whenever a cycle BECOMES awaiting_review
       // (covers fresh-load, cycle-switch, and same-row resurrection where
       // a cancelled target is reused on the same day).

@@ -5,13 +5,23 @@ Bare-minimum: backend computes/caches; frontend renders.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+from decimal import Decimal
 
 from rest_framework import permissions
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import DailyBar, MacroSnapshot, NewsItem, RegimeSnapshot
+from .cache import cache_get, cache_set
+from .models import CompanyProfile, DailyBar, MacroSnapshot, NewsItem, RegimeSnapshot
+
+log = logging.getLogger(__name__)
+
+# WS-2: live quote-derived metrics (mcap/PE/EPS/price) are short-lived; ~30 min.
+_PROFILE_TTL_SECONDS = 30 * 60
+# WS-2: cap batch fan-out so a runaway request can't trigger 1000 FMP calls.
+_BATCH_MAX_SYMBOLS = 50
 
 
 def _parse_as_of(request: Request) -> dt.date:
@@ -247,6 +257,163 @@ class TickerSparklineView(APIView):
         )
         bars = [{"date": d.isoformat(), "close": float(c)} for d, c in rows]
         return Response({"ticker": ticker.upper(), "as_of": as_of.isoformat(), "bars": bars})
+
+
+def _dec_to_str(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
+class TickerProfileView(APIView):
+    """WS-2: single-ticker profile — name + latest market cap / P/E / EPS.
+
+    Strict "today" data: the response is labelled `as_of` (today's date or
+    the quote timestamp). Must never be imported by a backtest/PIT path.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, ticker: str) -> Response:
+        from .providers.factory import get_fmp_provider
+
+        sym = ticker.upper()
+        cache_key = f"profile:fmp:{sym}"
+        cached = cache_get(cache_key)
+        if cached:
+            return Response(cached)
+
+        try:
+            fmp = get_fmp_provider(user=request.user)
+        except RuntimeError as exc:
+            # P2n contract: surface the actionable "Set your FMP key" message.
+            cp = CompanyProfile.objects.filter(ticker=sym).first()
+            return Response(
+                {
+                    "ticker": sym,
+                    "name": cp.name if cp else "",
+                    "exchange": cp.exchange if cp else "",
+                    "sector": cp.sector if cp else "",
+                    "price": None,
+                    "market_cap": None,
+                    "pe_ratio": None,
+                    "eps": None,
+                    "as_of": dt.date.today().isoformat(),
+                    "detail": str(exc),
+                },
+                status=200,
+            )
+
+        try:
+            snap = fmp.get_quote_profile(sym)
+        except Exception as exc:  # noqa: BLE001 — degrade gracefully
+            log.warning("ticker profile fmp failure ticker=%s err=%s", sym, exc)
+            snap = None
+
+        if snap is None:
+            return Response(
+                {
+                    "ticker": sym,
+                    "name": "",
+                    "exchange": "",
+                    "sector": "",
+                    "price": None,
+                    "market_cap": None,
+                    "pe_ratio": None,
+                    "eps": None,
+                    "as_of": dt.date.today().isoformat(),
+                    "detail": "no profile available",
+                },
+                status=200,
+            )
+
+        # Upsert slow-changing identity into shared reference table.
+        if snap.name or snap.exchange or snap.sector:
+            CompanyProfile.objects.update_or_create(
+                ticker=sym,
+                defaults={
+                    "name": snap.name,
+                    "exchange": snap.exchange,
+                    "sector": snap.sector,
+                },
+            )
+
+        payload = {
+            "ticker": sym,
+            "name": snap.name,
+            "exchange": snap.exchange,
+            "sector": snap.sector,
+            "price": _dec_to_str(snap.price),
+            "market_cap": _dec_to_str(snap.market_cap),
+            "pe_ratio": _dec_to_str(snap.pe_ratio),
+            "eps": _dec_to_str(snap.eps),
+            "shares_outstanding": snap.shares_outstanding,
+            "as_of": snap.as_of.isoformat(),
+        }
+        cache_set(cache_key, payload, ttl_seconds=_PROFILE_TTL_SECONDS)
+        return Response(payload)
+
+
+class TickerProfileBatchView(APIView):
+    """WS-2: batch identity-only lookup — drives table Name columns.
+
+    Returns `{ticker: {name, exchange, sector}}` for the requested symbols.
+    Serves from `CompanyProfile` immediately for known tickers; lazily
+    resolves unknown ones (bounded fan-out). Unresolved tickers return an
+    empty entry so the UI can fall back to the bare symbol.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        raw = request.query_params.get("symbols") or ""
+        symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+        # De-dupe while preserving order.
+        seen: set[str] = set()
+        symbols = [s for s in symbols if not (s in seen or seen.add(s))]
+        if len(symbols) > _BATCH_MAX_SYMBOLS:
+            symbols = symbols[:_BATCH_MAX_SYMBOLS]
+
+        out: dict[str, dict[str, str]] = {}
+        existing = {
+            cp.ticker: cp
+            for cp in CompanyProfile.objects.filter(ticker__in=symbols)
+        }
+        unknowns = [s for s in symbols if s not in existing]
+
+        if unknowns:
+            from .providers.factory import get_fmp_provider
+
+            try:
+                fmp = get_fmp_provider(user=request.user)
+            except RuntimeError:
+                fmp = None
+            if fmp is not None:
+                for sym in unknowns:
+                    try:
+                        snap = fmp.get_quote_profile(sym)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("batch profile failure ticker=%s err=%s", sym, exc)
+                        snap = None
+                    if snap is None:
+                        continue
+                    cp, _ = CompanyProfile.objects.update_or_create(
+                        ticker=sym,
+                        defaults={
+                            "name": snap.name,
+                            "exchange": snap.exchange,
+                            "sector": snap.sector,
+                        },
+                    )
+                    existing[sym] = cp
+
+        for sym in symbols:
+            cp = existing.get(sym)
+            out[sym] = {
+                "name": cp.name if cp else "",
+                "exchange": cp.exchange if cp else "",
+                "sector": cp.sector if cp else "",
+            }
+
+        return Response({"profiles": out})
 
 
 class TickerNewsView(APIView):

@@ -89,6 +89,7 @@ class RunListSerializer(serializers.ModelSerializer):
             "id", "tickers", "status", "as_of_date",
             "created_at", "finished_at", "total_cost_usd",
             "source", "portfolio_target", "strategy_backlink",
+            "personas",  # P3 prereq 2 / WS-1: Runs list shows persona count.
         )
 
     def get_strategy_backlink(self, run: Run) -> dict | None:

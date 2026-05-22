@@ -17,6 +17,7 @@ import {
   PositionSuggestion,
   QuantityMode,
 } from '../../core/models/portfolio.model';
+import { ModalComponent } from '../shared/modal.component';
 
 interface PrefillInput {
   runId?: number;
@@ -28,18 +29,18 @@ interface PrefillInput {
 @Component({
   selector: 'hf-enter-position-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, DatePipe],
+  imports: [CommonModule, FormsModule, DecimalPipe, DatePipe, ModalComponent],
   template: `
     @if (open) {
-      <div class="modal-overlay" (click)="onCancel()">
+      <hf-modal [titleId]="'enter-position-title'" (closed)="onCancel()">
         <div class="card entry-modal" (click)="$event.stopPropagation()">
 
           <div class="entry-modal__head">
             <div class="card-hd">
-              <span class="title">{{ titleText() }}</span>
+              <span class="title" id="enter-position-title">{{ titleText() }}</span>
               <div class="actions">
                 <button class="icon-btn" (click)="onCancel()" aria-label="Close">
-                  <svg width="16" height="16"><use href="/icons.svg#i-x" /></svg>
+                  <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
                 </button>
               </div>
             </div>
@@ -158,7 +159,7 @@ interface PrefillInput {
             </button>
           </div>
         </div>
-      </div>
+      </hf-modal>
     }
   `,
   styles: [

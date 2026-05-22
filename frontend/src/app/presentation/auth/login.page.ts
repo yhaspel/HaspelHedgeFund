@@ -14,22 +14,28 @@ import { AuthStore } from '../../abstraction/auth.store';
           <div style="display:flex;align-items:center;gap:14px;color:var(--text-2)">
             <img src="/icon-large.svg" alt="" width="52" height="52"
                  style="display:block;border:1px solid var(--border-2);border-radius:12px" />
-            <span style="font-size:24px;font-weight:600;color:var(--text-1)">Haspel Hedge Fund</span>
+            <span style="font-size:24px;font-weight:600;color:var(--text)">Haspel Hedge Fund</span>
           </div>
 
           <h1>Log in</h1>
 
           <form (ngSubmit)="submit()" style="display:flex;flex-direction:column;gap:14px">
             <div class="field">
-              <label class="lbl">Email</label>
-              <input class="input sans" type="email" name="email" [(ngModel)]="email" required />
+              <label class="lbl" for="login-email">Email</label>
+              <input id="login-email" class="input sans" type="email" name="email" autocomplete="email"
+                [(ngModel)]="email" required
+                [attr.aria-invalid]="error() ? 'true' : null"
+                [attr.aria-describedby]="error() ? 'login-error' : null" />
             </div>
             <div class="field">
-              <label class="lbl">Password</label>
-              <input class="input sans" type="password" name="password" [(ngModel)]="password" required />
+              <label class="lbl" for="login-password">Password</label>
+              <input id="login-password" class="input sans" type="password" name="password" autocomplete="current-password"
+                [(ngModel)]="password" required
+                [attr.aria-invalid]="error() ? 'true' : null"
+                [attr.aria-describedby]="error() ? 'login-error' : null" />
             </div>
             @if (error()) {
-              <p style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
+              <p id="login-error" role="alert" style="color:var(--acc-short-fg);font-size:12px">{{ error() }}</p>
             }
             <button class="btn primary" type="submit" style="width:100%;height:36px;justify-content:center">
               Log in

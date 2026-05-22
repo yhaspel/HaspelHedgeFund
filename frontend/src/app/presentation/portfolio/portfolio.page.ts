@@ -10,6 +10,9 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { CashAdjustModalComponent } from './cash-adjust.modal';
 import { EnterPositionModalComponent } from './enter-position.modal';
 import { PositionsTableComponent } from './positions-table.component';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { TickerComponent } from '../shared/ticker.component';
+import { ModalComponent } from '../shared/modal.component';
 
 @Component({
   selector: 'hf-portfolio-page',
@@ -20,6 +23,8 @@ import { PositionsTableComponent } from './positions-table.component';
     PositionsTableComponent,
     EnterPositionModalComponent,
     CashAdjustModalComponent,
+    TickerComponent,
+    ModalComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Portfolio'}]">
@@ -143,15 +148,16 @@ import { PositionsTableComponent } from './positions-table.component';
           <table class="tbl">
             <thead>
               <tr>
-                <th>When</th>
-                <th>Kind</th>
-                <th>Ticker</th>
-                <th class="right">Qty</th>
-                <th class="right">Price</th>
-                <th class="right">Cash Δ</th>
-                <th class="right">Realized P&amp;L</th>
-                <th class="right">Cash after</th>
-                <th>Note</th>
+                <th scope="col">When</th>
+                <th scope="col">Kind</th>
+                <th scope="col">Ticker</th>
+                <th scope="col">Name</th>
+                <th scope="col" class="right">Qty</th>
+                <th scope="col" class="right">Price</th>
+                <th scope="col" class="right">Cash Δ</th>
+                <th scope="col" class="right">Realized P&amp;L</th>
+                <th scope="col" class="right">Cash after</th>
+                <th scope="col">Note</th>
               </tr>
             </thead>
             <tbody>
@@ -159,7 +165,14 @@ import { PositionsTableComponent } from './positions-table.component';
                 <tr>
                   <td class="mono" style="font-size:11.5px">{{ e.created_at | date: 'short' }}</td>
                   <td><span class="pill" [class.ok]="isLong(e.kind)" [class.err]="isShortLike(e.kind)" [class.info]="e.kind === 'edit_adjustment'"><span class="dot"></span>{{ humanKind(e.kind) }}</span></td>
-                  <td class="mono">{{ e.ticker || '—' }}</td>
+                  <td>
+                    @if (e.ticker) {
+                      <hf-ticker [ticker]="e.ticker"></hf-ticker>
+                    } @else {
+                      <span class="mono">—</span>
+                    }
+                  </td>
+                  <td style="color:var(--text-2);font-size:12.5px">{{ e.ticker ? nameFor(e.ticker) : '—' }}</td>
                   <td class="num mono">{{ formatQty(e.quantity_delta) }}</td>
                   <td class="num mono">{{ e.price !== null ? (+e.price | number: '1.2-4') : '—' }}</td>
                   <td class="num mono"
@@ -185,12 +198,14 @@ import { PositionsTableComponent } from './positions-table.component';
         (closed)="onCashClosed($event)" />
 
       @if (editFor(); as pos) {
-        <div class="modal-overlay" (click)="cancelEdit()">
+        <hf-modal titleId="edit-position-title" (closed)="cancelEdit()">
           <div class="card edit-modal" (click)="$event.stopPropagation()">
             <div class="card-hd">
-              <span class="title">Edit position · {{ pos.ticker }}</span>
+              <span class="title" id="edit-position-title">Edit position · {{ pos.ticker }}</span>
               <div class="actions">
-                <button class="icon-btn" (click)="cancelEdit()"><svg width="16" height="16"><use href="/icons.svg#i-x" /></svg></button>
+                <button class="icon-btn" (click)="cancelEdit()" aria-label="Close">
+                  <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
+                </button>
               </div>
             </div>
             <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
@@ -200,22 +215,22 @@ import { PositionsTableComponent } from './positions-table.component';
                 <span class="mono">edit_adjustment</span> ledger entry.
               </p>
               <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Quantity</label>
-                <input class="input mono" type="number" step="any"
+                <label class="lbl" for="edit-pos-qty" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Quantity</label>
+                <input id="edit-pos-qty" class="input mono" type="number" step="any"
                        [value]="editQty" (input)="editQty = $any($event.target).value" style="width:160px" />
               </div>
               <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Avg cost</label>
-                <input class="input mono" type="number" step="0.0001"
+                <label class="lbl" for="edit-pos-avg" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Avg cost</label>
+                <input id="edit-pos-avg" class="input mono" type="number" step="0.0001"
                        [value]="editAvgCost" (input)="editAvgCost = $any($event.target).value" style="width:160px" />
               </div>
               <div style="display:flex;align-items:center;gap:10px">
-                <label class="lbl" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Note</label>
-                <input class="input" type="text"
+                <label class="lbl" for="edit-pos-note" style="flex:0 0 110px;font-size:12px;color:var(--text-2)">Note</label>
+                <input id="edit-pos-note" class="input" type="text"
                        [value]="editNote" (input)="editNote = $any($event.target).value" />
               </div>
               @if (editError(); as msg) {
-                <div class="pill err" style="height:auto;padding:6px 10px"><span class="dot"></span>{{ msg }}</div>
+                <div role="alert" class="pill err" style="height:auto;padding:6px 10px"><span class="dot"></span>{{ msg }}</div>
               }
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
@@ -223,7 +238,37 @@ import { PositionsTableComponent } from './positions-table.component';
               <button class="btn primary" (click)="confirmEdit()" [disabled]="store.busy()">Save</button>
             </div>
           </div>
-        </div>
+        </hf-modal>
+      }
+
+      @if (confirmClose(); as pc) {
+        <hf-modal titleId="confirm-close-title" (closed)="onCancelClose()">
+          <div class="card" style="max-width:440px;width:100%">
+            <div class="card-hd">
+              <span class="title" id="confirm-close-title">Close {{ pc.ticker }}?</span>
+            </div>
+            <div style="padding:16px;display:flex;flex-direction:column;gap:8px">
+              <p style="margin:0;font-size:13px;color:var(--text)">
+                Close {{ pc.ticker }} at the latest mark — this realises P&amp;L
+                and writes a position-close entry to the ledger.
+              </p>
+              <p style="margin:0;font-size:11.5px;color:var(--text-3)">
+                Action is irreversible from this UI; correct via Edit position if needed.
+              </p>
+              @if (closeError(); as msg) {
+                <div role="alert" class="pill err" style="height:auto;padding:6px 10px;margin-top:4px">
+                  <span class="dot"></span>{{ msg }}
+                </div>
+              }
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)">
+              <button class="btn" (click)="onCancelClose()">Cancel</button>
+              <button class="btn danger" (click)="onConfirmClose()" [disabled]="store.busy()">
+                {{ store.busy() ? 'Closing…' : 'Close position' }}
+              </button>
+            </div>
+          </div>
+        </hf-modal>
       }
     </hf-app-shell>
   `,
@@ -240,8 +285,15 @@ import { PositionsTableComponent } from './positions-table.component';
 })
 export class PortfolioPage implements OnInit, OnDestroy {
   readonly store = inject(PortfolioStore);
+  private readonly profiles = inject(TickerProfileStore);
 
   loadError = signal<string | null>(null);
+
+  nameFor(ticker: string | null | undefined): string {
+    if (!ticker) return '—';
+    void this.profiles._bump();
+    return this.profiles.name(ticker) || '—';
+  }
   entryOpen = signal(false);
   cashOpen = signal(false);
   entryPrefill = signal<{ runId?: number; decisionId?: number; ticker?: string; side?: 'long' | 'short' } | null>(null);
@@ -251,6 +303,10 @@ export class PortfolioPage implements OnInit, OnDestroy {
   editAvgCost: string = '';
   editNote: string = '';
   editError = signal<string | null>(null);
+
+  // WS-4.2: in-app confirm dialog for close-position (replaces native confirm).
+  confirmClose = signal<PositionValuation | null>(null);
+  closeError = signal<string | null>(null);
 
   // P3.1: cadence-aware auto-refresh polling.
   private pollHandle: ReturnType<typeof setInterval> | null = null;
@@ -278,6 +334,12 @@ export class PortfolioPage implements OnInit, OnDestroy {
       error: (err) => this.loadError.set(err?.error?.detail || 'Failed to load portfolio.'),
     });
     this.store.loadLedger().subscribe({
+      next: () => {
+        // WS-2: prefetch identity for every ticker the ledger references so
+        // the Name column resolves with a single batch round-trip.
+        const tickers = [...new Set(this.store.ledger().map((e) => e.ticker).filter((t): t is string => !!t))];
+        if (tickers.length) this.profiles.fetchNames(tickers).subscribe();
+      },
       error: () => { /* silently ignore — ledger optional */ },
     });
   }
@@ -381,16 +443,29 @@ export class PortfolioPage implements OnInit, OnDestroy {
   }
 
   onClose(pos: PositionValuation): void {
-    if (!confirm(`Close ${pos.ticker} at the latest mark?`)) return;
+    // WS-4.2: native confirm() replaced with in-app modal so the prompt is
+    // keyboard-accessible, screen-reader-announced, and consistent with the
+    // rest of the design system.
+    this.confirmClose.set(pos);
+    this.closeError.set(null);
+  }
+
+  onConfirmClose(): void {
+    const pos = this.confirmClose();
+    if (!pos) return;
+    this.closeError.set(null);
     this.store.closePosition(pos.id, {}).subscribe({
-      next: (r) => {
-        if (r.realized_pnl) {
-          // Lightweight feedback; the page header already reflects the new totals.
-        }
+      next: () => {
+        this.confirmClose.set(null);
         this.refresh();
       },
-      error: (err) => alert(err?.error?.detail || 'Failed to close position.'),
+      error: (err) => this.closeError.set(err?.error?.detail || 'Failed to close position.'),
     });
+  }
+
+  onCancelClose(): void {
+    this.confirmClose.set(null);
+    this.closeError.set(null);
   }
 
   onEdit(pos: PositionValuation): void {

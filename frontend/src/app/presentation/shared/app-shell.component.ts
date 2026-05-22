@@ -1,7 +1,10 @@
-import { Component, Input, inject } from '@angular/core';
+import { Component, Input, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+
+type Theme = 'light' | 'dark';
+const THEME_KEY = 'hf.theme';
 
 @Component({
   selector: 'hf-app-shell',
@@ -9,65 +12,136 @@ import { AuthStore } from '../../abstraction/auth.store';
   imports: [CommonModule, RouterLink, RouterLinkActive],
   template: `
     <div class="app">
-      <aside class="sidebar">
+      <a class="skip-link" href="#main-content">Skip to main content</a>
+      <nav class="sidebar" aria-label="Primary">
         <div class="logo" aria-label="Haspel Hedge Fund" title="Haspel Hedge Fund">
           <img src="/icon.svg" alt="" width="30" height="30" />
         </div>
-        <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}" routerLinkActive="active" data-tip="Dashboard">
-          <svg width="18" height="18"><use href="/icons.svg#i-home" /></svg>
+        <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
+           routerLinkActive="active" #navHome="routerLinkActive"
+           [attr.aria-current]="navHome.isActive ? 'page' : null"
+           aria-label="Dashboard" data-tip="Dashboard">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
         </a>
-        <a class="nav-btn" routerLink="/portfolio" routerLinkActive="active" data-tip="Portfolio">
-          <svg width="18" height="18"><use href="/icons.svg#i-wallet" /></svg>
+        <a class="nav-btn" routerLink="/portfolio" routerLinkActive="active" #navPort="routerLinkActive"
+           [attr.aria-current]="navPort.isActive ? 'page' : null"
+           aria-label="Portfolio" data-tip="Portfolio">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
         </a>
-        <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" data-tip="Runs">
-          <svg width="18" height="18"><use href="/icons.svg#i-pulse" /></svg>
+        <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
+           routerLinkActive="active" #navRuns="routerLinkActive"
+           [attr.aria-current]="navRuns.isActive ? 'page' : null"
+           aria-label="Runs" data-tip="Runs">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
         </a>
-        <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" data-tip="Backtests">
-          <svg width="18" height="18"><use href="/icons.svg#i-beaker" /></svg>
+        <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" #navNewRun="routerLinkActive"
+           [attr.aria-current]="navNewRun.isActive ? 'page' : null"
+           aria-label="New run" data-tip="New run">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
         </a>
-        <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" data-tip="Strategies">
-          <svg width="18" height="18"><use href="/icons.svg#i-layers" /></svg>
+        <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
+           [attr.aria-current]="navBt.isActive ? 'page' : null"
+           aria-label="Backtests" data-tip="Backtests">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
+        </a>
+        <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
+           [attr.aria-current]="navSt.isActive ? 'page' : null"
+           aria-label="Strategies" data-tip="Strategies">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
         </a>
         <div class="spacer"></div>
-        <a class="nav-btn" routerLink="/info" routerLinkActive="active" data-tip="Guides">
-          <svg width="18" height="18"><use href="/icons.svg#i-info" /></svg>
+        <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
+           [attr.aria-current]="navInfo.isActive ? 'page' : null"
+           aria-label="Guides" data-tip="Guides">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
         </a>
-        <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" data-tip="Settings">
-          <svg width="18" height="18"><use href="/icons.svg#i-settings" /></svg>
+        <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
+           [attr.aria-current]="navSet.isActive ? 'page' : null"
+           aria-label="Settings" data-tip="Settings">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
         </a>
-      </aside>
+      </nav>
       <main>
         <div class="topbar">
-          <nav class="crumbs">
+          <nav class="crumbs" aria-label="Breadcrumb">
             <a routerLink="/">Haspel Hedge Fund</a>
-            <span class="sep">/</span>
+            <span class="sep" aria-hidden="true">/</span>
             <ng-container *ngFor="let c of crumbs; let last = last">
-              <a *ngIf="!last" [routerLink]="c.link">{{ c.label }}</a>
-              <span class="cur" *ngIf="last">{{ c.label }}</span>
-              <span class="sep" *ngIf="!last">/</span>
+              <a *ngIf="!last && c.link" [routerLink]="c.link">{{ c.label }}</a>
+              <span *ngIf="!last && !c.link">{{ c.label }}</span>
+              <span class="cur" *ngIf="last" aria-current="page">{{ c.label }}</span>
+              <span class="sep" *ngIf="!last" aria-hidden="true">/</span>
             </ng-container>
           </nav>
           <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
-            <button class="icon-btn" (click)="toggleTheme()" aria-label="Toggle theme">
-              <svg width="16" height="16"><use href="/icons.svg#i-moon" /></svg>
+            <button class="icon-btn" (click)="toggleTheme()" [attr.aria-label]="themeToggleLabel()">
+              <svg width="16" height="16" aria-hidden="true">
+                <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
+              </svg>
             </button>
             <span *ngIf="auth.user() as u" class="mono" style="font-size:12px;color:var(--text-2)">{{ u.email }}</span>
             <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
           </div>
         </div>
-        <div class="page">
+        <div class="page" id="main-content" tabindex="-1">
           <ng-content></ng-content>
         </div>
       </main>
     </div>
   `,
+  styles: [
+    `
+      .skip-link {
+        position: absolute;
+        left: 8px;
+        top: -100px;
+        z-index: 1000;
+        padding: 8px 14px;
+        background: var(--surface);
+        border: 1px solid var(--border-2);
+        border-radius: var(--r-6);
+        color: var(--text);
+        font-size: 13px;
+        text-decoration: none;
+        box-shadow: var(--shadow-2);
+      }
+      .skip-link:focus,
+      .skip-link:focus-visible {
+        top: 8px;
+        outline: none;
+        box-shadow: var(--focus-ring);
+      }
+      .page[tabindex='-1']:focus {
+        outline: none;
+      }
+    `,
+  ],
 })
-export class AppShellComponent {
+export class AppShellComponent implements OnInit {
   @Input() crumbs: { label: string; link?: string }[] = [];
   readonly auth = inject(AuthStore);
 
-  toggleTheme() {
-    const root = document.documentElement;
-    root.dataset['theme'] = root.dataset['theme'] === 'light' ? 'dark' : 'light';
+  readonly theme = signal<Theme>('dark');
+  readonly themeToggleLabel = computed(() =>
+    this.theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+  );
+
+  ngOnInit(): void {
+    // Read initial theme — was applied pre-paint by main.ts; keep signal in sync.
+    const stored = (typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as Theme | null;
+    const current = (document.documentElement.dataset['theme'] as Theme | undefined) ?? stored ?? 'dark';
+    this.theme.set(current === 'light' ? 'light' : 'dark');
+    document.documentElement.dataset['theme'] = this.theme();
+  }
+
+  toggleTheme(): void {
+    const next: Theme = this.theme() === 'light' ? 'dark' : 'light';
+    this.theme.set(next);
+    document.documentElement.dataset['theme'] = next;
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      // localStorage may be unavailable (private mode, SSR, etc.) — degrade silently.
+    }
   }
 }

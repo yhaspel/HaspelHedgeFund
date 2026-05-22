@@ -6,6 +6,8 @@ from .views import (
     RegimeHistoryView,
     RegimeSnapshotView,
     TickerNewsView,
+    TickerProfileBatchView,
+    TickerProfileView,
     TickerSparklineView,
 )
 
@@ -18,6 +20,8 @@ urlpatterns = [
         RegimeHistoryView.as_view(),
         name="macro-regime-history",
     ),
+    path("tickers/profiles/", TickerProfileBatchView.as_view(), name="ticker-profile-batch"),
     path("tickers/<str:ticker>/news/", TickerNewsView.as_view(), name="ticker-news"),
     path("tickers/<str:ticker>/sparkline/", TickerSparklineView.as_view(), name="ticker-sparkline"),
+    path("tickers/<str:ticker>/profile/", TickerProfileView.as_view(), name="ticker-profile"),
 ]

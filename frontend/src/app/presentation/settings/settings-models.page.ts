@@ -79,7 +79,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
               {{ savingKeys() ? 'Saving…' : 'Save provider keys' }}
             </button>
             @if (keysMsg()) {
-              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="keys-msg">{{ keysMsg() }}</p>
+              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="keys-msg">{{ keysMsg() }}</p>
             }
           </div>
         </section>
@@ -128,7 +128,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
               {{ savingPrefs() ? 'Saving…' : (isPrefsDirty() ? 'Save preferences' : 'No changes') }}
             </button>
             @if (prefsMsg()) {
-              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0">{{ prefsMsg() }}</p>
+              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0">{{ prefsMsg() }}</p>
             }
           </div>
         </section>
@@ -159,6 +159,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       <select class="input sans"
                         [ngModel]="agentDefault(a)"
                         (ngModelChange)="setAgentDefault(a, $event)"
+                        [attr.aria-label]="'Model for ' + a"
                         style="height:26px;font-size:11.5px;padding:0 6px">
                         <option value="">— use preset default —</option>
                         @for (m of store.models(); track m.id) {
@@ -223,7 +224,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                   : (isPortfolioDirty() ? 'Save portfolio settings' : 'No changes') }}
             </button>
             @if (portfolioMsg()) {
-              <p style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="portfolio-msg">{{ portfolioMsg() }}</p>
+              <p role="status" aria-live="polite" style="font-size:11.5px;color:var(--acc-long-fg);margin:0" data-test="portfolio-msg">{{ portfolioMsg() }}</p>
             }
           </div>
         </section>

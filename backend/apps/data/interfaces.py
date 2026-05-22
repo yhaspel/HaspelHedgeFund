@@ -37,6 +37,25 @@ class FundamentalRow:
 
 
 @dataclass(frozen=True)
+class ProfileSnapshot:
+    """Reference data + latest quote-derived metrics for a ticker (WS-2).
+
+    This is *today* data — `as_of` is the timestamp of the latest quote
+    used. Must not be consumed by point-in-time agent paths.
+    """
+    ticker: str
+    name: str
+    exchange: str
+    sector: str
+    price: Decimal | None
+    market_cap: Decimal | None
+    pe_ratio: Decimal | None
+    eps: Decimal | None
+    shares_outstanding: int | None
+    as_of: date
+
+
+@dataclass(frozen=True)
 class Filing:
     ticker: str
     form_type: str  # "10-K", "10-Q", ...
