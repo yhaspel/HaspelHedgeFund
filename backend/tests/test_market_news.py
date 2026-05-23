@@ -42,6 +42,17 @@ from apps.data.providers.market_news_tiingo import MarketNewsTiingoProvider
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def _reset_market_news_refresh_rate_limit():
+    # The /api/news/feed/?refresh=1 endpoint uses a class-level dict keyed by
+    # user.id to throttle to 1/60s. Pytest-django rolls back the DB but recycles
+    # user ids, so the dict leaks 429s across tests under CI parallel order.
+    # Clear it before each test (mirrors the screener + manual-book fixtures).
+    from apps.data.views import MarketNewsFeedView
+
+    MarketNewsFeedView._last_refresh_at.clear()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
