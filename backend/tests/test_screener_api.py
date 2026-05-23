@@ -7,10 +7,18 @@ from rest_framework.test import APIClient
 
 from apps.screener.capabilities import ScreenerCapability
 from apps.screener.datasource import FmpScreenerDataSource
-from apps.screener.models import SavedScreen, Watchlist, WatchlistItem
-
+from apps.screener.models import SavedScreen, Watchlist
+from apps.screener.views import ScreenerRunView
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def _reset_run_rate_limit():
+    # Pytest-django rolls back the DB between tests but user-id values
+    # often recycle, so the class-level rate-limit dict leaks 429s across
+    # tests. Clear it before each test.
+    ScreenerRunView._last_run_at.clear()
 
 
 @pytest.fixture

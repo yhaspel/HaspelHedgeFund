@@ -11,7 +11,7 @@ Tuning never touches free-text fields (``behavioral_traits``,
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from .analysis import (
     AGENT_BRIEF_MAX_WORDS,

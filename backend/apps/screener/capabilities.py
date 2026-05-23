@@ -9,10 +9,10 @@ phase enables them with no rework here.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ScreenerCapability(str, Enum):
+class ScreenerCapability(StrEnum):
     BASIC_SCREEN = "basic_screen"
     """Market cap / price / volume / sector / industry / exchange /
     country / beta / dividend / isEtf — natively filterable in stage 1

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 
 from .capabilities import ScreenerCapability as C
 
-
 GROUP_DESCRIPTIVE = "Descriptive"
 GROUP_LIQUIDITY = "Liquidity & Volume"
 GROUP_PERFORMANCE = "Performance"

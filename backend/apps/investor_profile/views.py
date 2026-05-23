@@ -65,7 +65,9 @@ def _build_profile_bundle(user) -> dict:
         "user": {
             "id": user.id,
             "email": user.email,
-            "joined_at": user.date_joined.isoformat() if getattr(user, "date_joined", None) else None,
+            "joined_at": (
+                user.date_joined.isoformat() if getattr(user, "date_joined", None) else None
+            ),
         },
         "has_questionnaire": active is not None,
         "active": (

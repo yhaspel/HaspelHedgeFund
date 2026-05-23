@@ -97,7 +97,7 @@ def _build_user_prompt(rows: list[MarketNewsItem]) -> str:
         if summary:
             lines.append(f"    SUMMARY: {summary}")
     lines.append(
-        "\n\nReturn one item per idx (0..{n}). JSON only.".format(n=len(rows) - 1)
+        f"\n\nReturn one item per idx (0..{len(rows) - 1}). JSON only."
     )
     return "\n".join(lines)
 

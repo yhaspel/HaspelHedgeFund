@@ -6,8 +6,8 @@ warning — a screen must never 500 because one ticker's bars are thin.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Iterable
 
 
 def _to_float(value: Decimal | float | int | None) -> float | None:

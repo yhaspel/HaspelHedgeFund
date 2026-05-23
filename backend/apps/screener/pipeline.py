@@ -17,14 +17,14 @@ import datetime as dt
 import hashlib
 import json
 import logging
-import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal
-from typing import Any, Iterable
+from typing import Any
 
 from apps.data.cache import cache_get, cache_set
 from apps.data.interfaces import Bar, QuoteSnapshot, ScreenerRow
-from apps.data.models import DailyBar, NewsItem
+from apps.data.models import NewsItem
 
 from .capabilities import ScreenerCapability
 from .datasource import ScreenerDataSource
@@ -34,7 +34,6 @@ from .fields import (
     KIND_BOOL,
     KIND_ENUM,
     KIND_RANGE,
-    ScreenerField,
 )
 from .metrics import (
     adv,

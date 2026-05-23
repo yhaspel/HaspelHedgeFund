@@ -15,7 +15,6 @@ from __future__ import annotations
 from django.conf import settings
 from django.db import models
 
-
 ASSET_CLASS_EQUITY = "equity"
 ASSET_CLASS_ETF = "etf"
 ASSET_CLASS_ALL = "all"

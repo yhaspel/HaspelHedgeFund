@@ -15,13 +15,11 @@ from unittest import mock
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.data.market_news_rank import (
     BREADTH_CAP,
-    NewsCluster,
     SOURCE_WEIGHTS,
     rank_feed,
 )
@@ -32,10 +30,9 @@ from apps.data.market_news_sentiment import (
     frugal_sentiment_models,
     is_allowed_sentiment_model,
 )
-from apps.data.models import MarketNewsItem, NewsItem, UserNewsPreferences
+from apps.data.models import MarketNewsItem, UserNewsPreferences
 from apps.data.providers._dedup import dedup_key
 from apps.data.providers.market_news import (
-    FETCH_FRESHNESS_MINUTES,
     RETENTION_DAYS,
     MarketNewsService,
 )

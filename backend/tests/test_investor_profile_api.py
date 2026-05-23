@@ -22,8 +22,8 @@ from apps.investor_profile.models import (
     compute_nudge,
 )
 from apps.investor_profile.questionnaire import (
-    QuestionnaireValidationError,
     SCHEMA_VERSION,
+    QuestionnaireValidationError,
     validate_answers,
 )
 from apps.investor_profile.tasks import run_profile_analysis

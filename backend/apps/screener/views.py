@@ -20,7 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .datasource import get_screener_datasource
-from .fields import CAPABILITY_LABEL, FIELD_REGISTRY
+from .fields import CAPABILITY_LABEL
 from .models import SavedScreen, WatchlistItem
 from .pipeline import (
     ScreenerValidationError,

@@ -75,7 +75,13 @@ def _row(ticker: str, *, mc: int, price: float, volume: int) -> ScreenerRow:
 
 
 def _quote(
-    ticker: str, *, price: float, prev: float, vol: int, year_high: float = 100, year_low: float = 50
+    ticker: str,
+    *,
+    price: float,
+    prev: float,
+    vol: int,
+    year_high: float = 100,
+    year_low: float = 50,
 ) -> QuoteSnapshot:
     return QuoteSnapshot(
         ticker=ticker,
