@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -277,7 +278,9 @@ export class NewsPage implements OnInit {
       const articleId = Number(this.route.snapshot.queryParamMap.get('article'));
       if (!articleId) return;
       // Only set the modal once; subsequent appends shouldn't re-open it.
-      if (this.selected()) return;
+      // Read `selected` untracked so closing the modal doesn't retrigger this
+      // effect and re-open it from the still-present ?article= query param.
+      if (untracked(() => this.selected())) return;
       const found = this.store.itemById(articleId);
       if (found) this.selected.set(found);
     });

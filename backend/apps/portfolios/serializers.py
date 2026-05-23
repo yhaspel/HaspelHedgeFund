@@ -232,12 +232,16 @@ class StrategySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "portfolio belongs to another user"
             )
-        # P3 isolation guarantee: strategies must never operate on the
-        # Manual Book; that book belongs to the user and is mutated only
-        # through `/api/portfolio/...`.
+        # P3/P3a-1 isolation guarantee: strategies must never operate on
+        # the Manual Book or a broker-backed portfolio. Each kind has its
+        # own dedicated mutation surface.
         if portfolio.kind == Portfolio.KIND_MANUAL:
             raise serializers.ValidationError(
                 "the Manual Book cannot be used as a strategy portfolio"
+            )
+        if portfolio.kind == Portfolio.KIND_BROKER:
+            raise serializers.ValidationError(
+                "broker-backed portfolios cannot be used as a strategy portfolio"
             )
         return portfolio
 

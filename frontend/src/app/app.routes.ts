@@ -149,6 +149,38 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'broker-accounts',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/broker-accounts/accounts.page').then(
+        (m) => m.BrokerAccountsPage,
+      ),
+  },
+  {
+    path: 'broker-accounts/connect',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/broker-accounts/connect-wizard.page').then(
+        (m) => m.BrokerConnectWizardPage,
+      ),
+  },
+  {
+    path: 'broker-accounts/pending',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/broker-accounts/pending-orders.page').then(
+        (m) => m.PendingOrdersPage,
+      ),
+  },
+  {
+    path: 'broker-accounts/:id',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/broker-accounts/account-overview.page').then(
+        (m) => m.BrokerAccountOverviewPage,
+      ),
+  },
+  {
     path: 'info',
     loadComponent: () =>
       import('./presentation/info/info-list.page').then((m) => m.InfoListPage),

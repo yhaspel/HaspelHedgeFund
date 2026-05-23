@@ -37,9 +37,11 @@ class UniverseMembership(models.Model):
 class Portfolio(models.Model):
     KIND_STRATEGY = "strategy"
     KIND_MANUAL = "manual"
+    KIND_BROKER = "broker"
     KIND_CHOICES = [
         (KIND_STRATEGY, "Strategy"),
         (KIND_MANUAL, "Manual"),
+        (KIND_BROKER, "Broker"),
     ]
 
     user = models.ForeignKey(
@@ -182,6 +184,9 @@ class LedgerEntry(models.Model):
     KIND_REDUCE = "position_reduce"
     KIND_CLOSE = "position_close"
     KIND_EDIT = "edit_adjustment"
+    # P3a-1: broker-fill ledger entries for kind="broker" portfolios.
+    KIND_BROKER_FILL = "broker_fill"
+    KIND_RECONCILE = "reconciliation_adjustment"
     KIND_CHOICES = [
         (KIND_DEPOSIT, "Cash deposit"),
         (KIND_WITHDRAWAL, "Cash withdrawal"),
@@ -190,12 +195,14 @@ class LedgerEntry(models.Model):
         (KIND_REDUCE, "Position reduced"),
         (KIND_CLOSE, "Position closed"),
         (KIND_EDIT, "Manual edit adjustment"),
+        (KIND_BROKER_FILL, "Broker fill"),
+        (KIND_RECONCILE, "Reconciliation adjustment"),
     ]
 
     portfolio = models.ForeignKey(
         Portfolio, related_name="ledger", on_delete=models.CASCADE,
     )
-    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
     ticker = models.CharField(max_length=16, blank=True, default="")
     quantity_delta = models.DecimalField(
         max_digits=18, decimal_places=6, default=Decimal("0"),
@@ -222,6 +229,16 @@ class LedgerEntry(models.Model):
     source_decision = models.ForeignKey(
         "runs.Decision", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="ledger_entries",
+    )
+    # P3a-1: broker-side provenance. Both nullable so the prereq Manual Book
+    # rows continue to work without changes.
+    broker_order = models.ForeignKey(
+        "brokers.BrokerOrder", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="ledger_entries",
+    )
+    broker_sync_event = models.ForeignKey(
+        "brokers.BrokerSyncEvent", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="ledger_entries",
     )
     note = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(

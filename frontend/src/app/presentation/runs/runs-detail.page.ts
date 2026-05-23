@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { RunsStore } from '../../abstraction/runs.store';
 import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
+import { BrokerStore } from '../../abstraction/broker.store';
 import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
@@ -315,14 +316,24 @@ interface PersonaCard {
                           Target weight: <span class="mono text-text">{{ d.target_weight_pct }}%</span>
                         </p>
                         @if (canAddToPortfolio(d)) {
-                          <button class="btn primary sm mt-2.5"
-                                  (click)="addToPortfolio(d)"
-                                  [attr.data-test]="'add-to-portfolio-' + d.ticker">
-                            <svg width="12" height="12" class="mr-1">
-                              <use href="/icons.svg#i-plus" />
-                            </svg>
-                            Add to portfolio
-                          </button>
+                          <div class="flex flex-col gap-1 mt-2.5">
+                            <button class="btn primary sm"
+                                    (click)="addToPortfolio(d)"
+                                    [attr.data-test]="'add-to-portfolio-' + d.ticker">
+                              <svg width="12" height="12" class="mr-1">
+                                <use href="/icons.svg#i-plus" />
+                              </svg>
+                              Add to portfolio
+                            </button>
+                            <button class="btn sm"
+                                    (click)="submitAsBrokerOrder(d)"
+                                    [attr.data-test]="'submit-broker-order-' + d.ticker">
+                              <svg width="12" height="12" class="mr-1">
+                                <use href="/icons.svg#i-link" />
+                              </svg>
+                              Submit as broker order
+                            </button>
+                          </div>
                         } @else if (d.side === 'pair') {
                           <p class="m-0 mt-2 text-[11px] text-text-3">
                             Pair decisions can't be entered manually (v1).
@@ -977,6 +988,67 @@ export class RunsDetailPage implements OnInit, OnDestroy {
       side: inferred,
     });
     this.entryOpen.set(true);
+  }
+
+  // P3a-1: send a Decision off to the broker pipeline as a draft order.
+  private readonly brokerStore = inject(BrokerStore);
+
+  submitAsBrokerOrder(d: { id: number; ticker: string; side?: string; action: string }): void {
+    const run = this.run();
+    if (!run) return;
+    const accounts = this.brokerStore.accounts();
+    const finish = (list: typeof accounts) => {
+      const active = list.filter(
+        (a) => a.is_active && a.connection_status === 'active',
+      );
+      if (active.length === 0) {
+        this.toastMsg.set(
+          'No active broker accounts — connect one in Broker accounts first.',
+        );
+        if (this.toastHandle) clearTimeout(this.toastHandle);
+        this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+        return;
+      }
+      // For v1, route to the first active account. The Pending Orders page
+      // is the canonical batch-review surface; users can pick a different
+      // account from there if needed.
+      const account = active[0];
+      const inferredSide: 'buy' | 'sell' =
+        d.side === 'short' || d.action === 'open_short' ? 'sell' : 'buy';
+      this.brokerStore
+        .createDraftOrder({
+          broker_account: account.id,
+          ticker: d.ticker,
+          side: inferredSide,
+          quantity: '1',
+          order_type: 'market',
+          decision: d.id,
+        })
+        .subscribe({
+          next: () => {
+            this.toastMsg.set(
+              `Draft ${d.ticker} ${inferredSide} added to ${account.label}.`,
+            );
+            if (this.toastHandle) clearTimeout(this.toastHandle);
+            this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+          },
+          error: (err) => {
+            this.toastMsg.set(
+              err?.error?.detail ?? 'Could not create broker order draft.',
+            );
+            if (this.toastHandle) clearTimeout(this.toastHandle);
+            this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+          },
+        });
+    };
+    if (accounts.length === 0) {
+      this.brokerStore.loadAccounts().subscribe({
+        next: (list) => finish(list as unknown as typeof accounts),
+        error: () => finish([]),
+      });
+    } else {
+      finish(accounts);
+    }
   }
 
   onEntryClosed(e: { saved: boolean }): void {

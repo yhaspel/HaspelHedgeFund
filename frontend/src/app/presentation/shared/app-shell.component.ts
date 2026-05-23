@@ -57,6 +57,14 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
           <hf-popover #popWatch placement="right" align="center" size="compact" role="tooltip">Watchlist</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
+           [attr.aria-current]="navBrk.isActive ? 'page' : null"
+           aria-label="Broker accounts"
+           (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
+           (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
+          <hf-popover #popBrk placement="right" align="center" size="compact" role="tooltip">Broker accounts</hf-popover>
+        </a>
         <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navRuns="routerLinkActive"
            [attr.aria-current]="navRuns.isActive ? 'page' : null"

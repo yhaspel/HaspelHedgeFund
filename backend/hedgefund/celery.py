@@ -24,4 +24,15 @@ app.conf.beat_schedule = {
         "task": "apps.data.tasks.prewarm_macro_snapshot",
         "schedule": crontab(minute=15, hour=6),  # 06:15 UTC daily
     },
+    # P3a-1: broker reconciliation. `poll_open_orders` is what makes
+    # "fill within 30 s" hold; `reconcile_all_accounts` squares residual
+    # drift every 5 min.
+    "brokers-poll-open-orders": {
+        "task": "apps.brokers.tasks.poll_open_orders",
+        "schedule": 30.0,
+    },
+    "brokers-reconcile-accounts": {
+        "task": "apps.brokers.tasks.reconcile_all_accounts",
+        "schedule": 300.0,
+    },
 }
