@@ -23,4 +23,8 @@ export class ApiClient {
   patch<T>(path: string, body: unknown): Observable<T> {
     return this.http.patch<T>(`${this.base}${path}`, body);
   }
+
+  delete<T>(path: string): Observable<T> {
+    return this.http.delete<T>(`${this.base}${path}`);
+  }
 }

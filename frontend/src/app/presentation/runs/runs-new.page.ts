@@ -1,7 +1,8 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { take } from 'rxjs/operators';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { RunsStore } from '../../abstraction/runs.store';
@@ -105,6 +106,7 @@ export class RunsNewPage implements OnInit {
   readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
   private readonly history = inject(TickerHistoryStore);
+  private readonly route = inject(ActivatedRoute);
 
   readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
@@ -133,7 +135,13 @@ export class RunsNewPage implements OnInit {
 
   ngOnInit(): void {
     this.modelsStore.loadAll().subscribe();
-    this.loadSpark(this.ticker);
+    this.route.queryParamMap.pipe(take(1)).subscribe((params) => {
+      const t = (params.get('ticker') || '').trim().toUpperCase();
+      if (t) {
+        this.ticker = t;
+      }
+      this.loadSpark(this.ticker);
+    });
   }
 
   onTickerChange(v: string): void {

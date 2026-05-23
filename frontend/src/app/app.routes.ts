@@ -81,6 +81,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'screener',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/screener/screener.page').then(
+        (m) => m.ScreenerPage,
+      ),
+  },
+  {
     path: 'strategies',
     canActivate: [authGuard],
     loadComponent: () =>

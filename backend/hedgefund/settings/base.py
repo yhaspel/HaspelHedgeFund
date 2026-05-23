@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "apps.backtests",
     "apps.models_catalog",
     "apps.portfolios",
+    "apps.screener",
     "hedgefund_agents",
 ]
 

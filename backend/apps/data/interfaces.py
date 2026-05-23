@@ -56,6 +56,55 @@ class ProfileSnapshot:
 
 
 @dataclass(frozen=True)
+class ScreenerRow:
+    """One row of FMP `/company-screener` output (P3 prereq 3 stage 1).
+
+    *Today* data — must never be consumed by a point-in-time agent path.
+    """
+    ticker: str
+    name: str
+    market_cap: Decimal | None
+    price: Decimal | None
+    volume: int | None
+    beta: Decimal | None
+    sector: str
+    industry: str
+    exchange: str
+    country: str
+    is_etf: bool
+    is_fund: bool
+    last_annual_dividend: Decimal | None
+
+
+@dataclass(frozen=True)
+class QuoteSnapshot:
+    """Superset of an FMP `/quote` row (P3 prereq 3 stage 2 enrichment).
+
+    Every numeric field is ``Decimal | None`` — if FMP omits a field for a
+    given symbol the mapped value is ``None`` and the dependent metric
+    degrades to a neutral value with a per-row warning rather than raising.
+
+    *Today* data — must never be consumed by a point-in-time agent path.
+    """
+    ticker: str
+    price: Decimal | None
+    open: Decimal | None
+    previous_close: Decimal | None
+    day_high: Decimal | None
+    day_low: Decimal | None
+    year_high: Decimal | None
+    year_low: Decimal | None
+    price_avg_50: Decimal | None
+    price_avg_200: Decimal | None
+    volume: int | None
+    change_pct: Decimal | None
+    market_cap: Decimal | None
+    pe_ratio: Decimal | None
+    eps: Decimal | None
+    as_of: date
+
+
+@dataclass(frozen=True)
 class Filing:
     ticker: str
     form_type: str  # "10-K", "10-Q", ...

@@ -22,7 +22,7 @@ import httpx
 from django.conf import settings
 from django.db import transaction
 
-from ..interfaces import Bar, FundamentalRow, ProfileSnapshot
+from ..interfaces import Bar, FundamentalRow, ProfileSnapshot, QuoteSnapshot, ScreenerRow
 from ..models import DailyBar, Fundamental
 
 BASE_URL = "https://financialmodelingprep.com/stable"
@@ -131,6 +131,139 @@ class FmpProvider:
             else None,
             as_of=as_of,
         )
+
+    # ---- screener (P3 prereq 3) --------------------------------------
+
+    def screen_companies(self, **params: Any) -> list[ScreenerRow]:
+        """P3 prereq 3 stage 1: coarse universe filter via FMP
+        ``/company-screener``.
+
+        Caller supplies FMP-native param names (``marketCapMoreThan``,
+        ``priceLowerThan``, ``volumeMoreThan``, ``betaMoreThan``, ``sector``,
+        ``industry``, ``exchange``, ``country``, ``isEtf``, ``isFund``,
+        ``limit``, …). ``isActivelyTrading=true`` and ``isFund=false`` are
+        always sent unless the caller explicitly overrides them.
+
+        Returns ``[]`` on empty payload. Raises ``httpx.HTTPStatusError``
+        on a non-2xx response so the pipeline can catch 402/403 (plan
+        does not include the Stock Screener endpoint) and surface an
+        actionable error message.
+
+        *Today* data — not PIT-gated.
+        """
+        url = f"{BASE_URL}/company-screener"
+        query: dict[str, Any] = {"apikey": self.api_key}
+        # Caller-supplied params win, but the safety defaults below are set
+        # only when the caller has not provided them.
+        for k, v in params.items():
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                query[k] = "true" if v else "false"
+            else:
+                query[k] = v
+        query.setdefault("isActivelyTrading", "true")
+        query.setdefault("isFund", "false")
+        resp = self._http.get(url, params=query)
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload if isinstance(payload, list) else []
+        out: list[ScreenerRow] = []
+        for row in rows:
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            volume_raw = row.get("volume")
+            try:
+                volume = int(volume_raw) if volume_raw is not None else None
+            except (TypeError, ValueError):
+                volume = None
+            out.append(
+                ScreenerRow(
+                    ticker=symbol,
+                    name=str(row.get("companyName") or ""),
+                    market_cap=_dec(row.get("marketCap")),
+                    price=_dec(row.get("price")),
+                    volume=volume,
+                    beta=_dec(row.get("beta")),
+                    sector=str(row.get("sector") or ""),
+                    industry=str(row.get("industry") or ""),
+                    exchange=str(
+                        row.get("exchangeShortName") or row.get("exchange") or ""
+                    ),
+                    country=str(row.get("country") or ""),
+                    is_etf=bool(row.get("isEtf") or False),
+                    is_fund=bool(row.get("isFund") or False),
+                    last_annual_dividend=_dec(row.get("lastAnnualDividend")),
+                )
+            )
+        return out
+
+    def get_quote_batch(self, tickers: list[str]) -> dict[str, QuoteSnapshot]:
+        """P3 prereq 3 stage 2: live intraday quotes for many symbols via
+        FMP ``/batch-quote``.
+
+        Chunks at ≤ 100 symbols per request. Returns a dict keyed by the
+        upper-cased ticker. Tickers FMP drops from the payload are simply
+        absent from the dict (the caller treats absence as "not enriched"
+        rather than raising).
+
+        Requires the FMP premium plan for live intraday — non-premium keys
+        typically return an empty payload. The screener pipeline catches
+        the empty result and falls back to EOD bars with a per-row warning.
+
+        *Today* data — not PIT-gated.
+        """
+        out: dict[str, QuoteSnapshot] = {}
+        if not tickers:
+            return out
+        unique = sorted({t.upper() for t in tickers if t})
+        for i in range(0, len(unique), 100):
+            chunk = unique[i : i + 100]
+            url = f"{BASE_URL}/batch-quote"
+            params = {"symbols": ",".join(chunk), "apikey": self.api_key}
+            resp = self._http.get(url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            rows = payload if isinstance(payload, list) else []
+            for row in rows:
+                symbol = str(row.get("symbol") or "").upper()
+                if not symbol:
+                    continue
+                volume_raw = row.get("volume")
+                try:
+                    volume = int(volume_raw) if volume_raw is not None else None
+                except (TypeError, ValueError):
+                    volume = None
+                ts = row.get("timestamp")
+                as_of = (
+                    dt.datetime.fromtimestamp(int(ts), tz=dt.UTC).date()
+                    if ts
+                    else dt.date.today()
+                )
+                out[symbol] = QuoteSnapshot(
+                    ticker=symbol,
+                    price=_dec(row.get("price")),
+                    open=_dec(row.get("open")),
+                    previous_close=_dec(row.get("previousClose")),
+                    day_high=_dec(row.get("dayHigh")),
+                    day_low=_dec(row.get("dayLow")),
+                    year_high=_dec(row.get("yearHigh")),
+                    year_low=_dec(row.get("yearLow")),
+                    price_avg_50=_dec(row.get("priceAvg50")),
+                    price_avg_200=_dec(row.get("priceAvg200")),
+                    volume=volume,
+                    change_pct=_dec(
+                        row.get("changePercentage")
+                        if row.get("changePercentage") is not None
+                        else row.get("changesPercentage")
+                    ),
+                    market_cap=_dec(row.get("marketCap")),
+                    pe_ratio=_dec(row.get("pe")),
+                    eps=_dec(row.get("eps")),
+                    as_of=as_of,
+                )
+        return out
 
     # ---- bars ---------------------------------------------------------
 

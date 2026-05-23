@@ -24,6 +24,12 @@ interface PrefillInput {
   decisionId?: number;
   ticker?: string;
   side?: PositionSide;
+  /**
+   * P3 prereq 3 — Screener "Add to Portfolio" path. When set without a
+   * runId/decisionId, the modal opens in blank-manual-entry mode with
+   * the ticker (and price, if provided) pre-seeded.
+   */
+  initialPrice?: number;
 }
 
 @Component({
@@ -304,6 +310,9 @@ export class EnterPositionModalComponent implements OnChanges {
     if (!this.prefill) return;
     if (this.prefill.ticker) this.ticker = this.prefill.ticker;
     if (this.prefill.side) this.side = this.prefill.side;
+    if (this.prefill.initialPrice && this.prefill.initialPrice > 0) {
+      this.entryPrice = this.prefill.initialPrice;
+    }
     if (this.prefill.runId && this.prefill.decisionId) {
       this.loadSuggestion();
     }

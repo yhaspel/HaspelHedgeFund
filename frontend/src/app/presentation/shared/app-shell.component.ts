@@ -53,6 +53,14 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
           <hf-popover #popNewRun placement="right" align="center" size="compact" role="tooltip">New run</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
+           [attr.aria-current]="navScreener.isActive ? 'page' : null"
+           aria-label="Screener"
+           (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
+           (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
+          <hf-popover #popScreener placement="right" align="center" size="compact" role="tooltip">Screener</hf-popover>
+        </a>
         <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
            [attr.aria-current]="navBt.isActive ? 'page' : null"
            aria-label="Backtests"
