@@ -46,7 +46,7 @@ CAPABILITIES = BrokerCapabilities(
     supports_live=False,
     supports_fractional=True,
     quantity_increment=Decimal("0.0001"),
-    supported_order_types=("market", "limit"),
+    supported_order_types=("market", "limit", "stop"),
     supported_time_in_force=("day", "gtc"),
     description=(
         "An in-memory paper broker so you can walk through the order "

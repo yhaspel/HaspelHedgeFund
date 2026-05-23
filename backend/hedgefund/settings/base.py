@@ -130,6 +130,14 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # and CI should keep this True. See hedgefund_agents/llm/pricing.py.
 LLM_REQUIRE_KNOWN_PRICES = os.environ.get("LLM_REQUIRE_KNOWN_PRICES", "1") == "1"
 
+# LLM default preset — the per-agent model map applied to a portfolio strategy
+# that has not deliberately chosen one. Production keeps "hybrid" (frontier
+# models on the risk/PM/CIO decision path). The dev settings module overrides
+# this to "dev" so local development routes every agent to cheap OpenRouter
+# models and never erodes the Anthropic budget. Presets are defined in
+# apps/models_catalog/presets.py.
+LLM_DEFAULT_PRESET = os.environ.get("LLM_DEFAULT_PRESET", "hybrid")
+
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

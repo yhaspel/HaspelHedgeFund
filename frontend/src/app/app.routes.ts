@@ -73,6 +73,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'portfolios',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/portfolio/portfolios-hub.page').then(
+        (m) => m.PortfoliosHubPage,
+      ),
+  },
+  {
     path: 'portfolio',
     canActivate: [authGuard],
     loadComponent: () =>

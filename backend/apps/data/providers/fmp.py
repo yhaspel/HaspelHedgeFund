@@ -66,15 +66,15 @@ class FmpProvider:
         Requires the FMP premium plan. Real-time vs ~15-min delayed
         depends on the user's entitlement on the supplied key.
         """
-        url = f"{BASE_URL}/quote-short/{ticker}"
-        params = {"apikey": self.api_key}
+        url = f"{BASE_URL}/quote-short"
+        params = {"symbol": ticker, "apikey": self.api_key}
         resp = self._http.get(url, params=params)
         resp.raise_for_status()
         payload = resp.json()
         rows = payload if isinstance(payload, list) else []
         if not rows:
             # /quote-short returns [] for unknown tickers; try the longer endpoint.
-            url = f"{BASE_URL}/quote/{ticker}"
+            url = f"{BASE_URL}/quote"
             resp = self._http.get(url, params=params)
             resp.raise_for_status()
             payload = resp.json()

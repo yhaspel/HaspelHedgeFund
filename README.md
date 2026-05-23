@@ -28,6 +28,12 @@ Then open:
 - Django admin → http://localhost:8811/admin/
 - API health probe → http://localhost:8811/api/health/ (200, no auth required — what compose / load balancers / smoke checks should use)
 
+Restart all services:
+
+```bash
+./infra/restart.sh
+```
+
 To trigger the demo Celery task, log into `/admin/` → Periodic Tasks → run `apps.accounts.tasks.ping` and watch the `worker-1` container logs.
 
 ## Run backend without Docker (optional)

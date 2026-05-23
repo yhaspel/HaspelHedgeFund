@@ -41,13 +41,13 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
           <hf-popover #popHome placement="right" align="center" size="compact" role="tooltip">Dashboard</hf-popover>
         </a>
-        <a class="nav-btn" routerLink="/portfolio" routerLinkActive="active" #navPort="routerLinkActive"
+        <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
            [attr.aria-current]="navPort.isActive ? 'page' : null"
-           aria-label="Portfolio"
+           aria-label="Portfolios"
            (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
            (focus)="popPort.show()" (blur)="popPort.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
-          <hf-popover #popPort placement="right" align="center" size="compact" role="tooltip">Portfolio</hf-popover>
+          <hf-popover #popPort placement="right" align="center" size="compact" role="tooltip">Portfolios</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
            [attr.aria-current]="navWatch.isActive ? 'page' : null"

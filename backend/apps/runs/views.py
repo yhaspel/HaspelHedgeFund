@@ -32,7 +32,11 @@ class RunListCreateView(generics.ListCreateAPIView):
                 qs = qs.filter(portfolio_target_id=int(target_id))
             except (TypeError, ValueError):
                 pass
-        return qs.select_related("portfolio_target__strategy").order_by("-created_at")
+        return (
+            qs.select_related("portfolio_target__strategy")
+            .prefetch_related("decisions")
+            .order_by("-created_at")
+        )
 
     def get_serializer_class(self):
         return RunCreateSerializer if self.request.method == "POST" else RunListSerializer

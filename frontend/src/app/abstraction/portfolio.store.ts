@@ -17,6 +17,7 @@ import {
   LedgerEntry,
   MutationResponse,
   OpenPositionRequest,
+  PortfolioHub,
   PortfolioOverview,
   PortfolioPreferences,
   PositionSuggestion,
@@ -35,6 +36,7 @@ export class PortfolioStore {
   private readonly _error = signal<string | null>(null);
   private readonly _preferences = signal<PortfolioPreferences | null>(null);
   private readonly _refreshing = signal(false);
+  private readonly _hub = signal<PortfolioHub | null>(null);
 
   readonly overview = this._overview.asReadonly();
   readonly ledger = this._ledger.asReadonly();
@@ -44,6 +46,7 @@ export class PortfolioStore {
   readonly error = this._error.asReadonly();
   readonly preferences = this._preferences.asReadonly();
   readonly refreshing = this._refreshing.asReadonly();
+  readonly hub = this._hub.asReadonly();
 
   setError(message: string | null): void {
     this._error.set(message);
@@ -60,6 +63,13 @@ export class PortfolioStore {
         if (r.preferences) this._preferences.set(r.preferences);
       }),
     );
+  }
+
+  /** Every book the user owns (manual / broker / strategy) for the hub. */
+  loadHub(): Observable<PortfolioHub> {
+    return this.api
+      .get<PortfolioHub>('/portfolios/hub/')
+      .pipe(tap((r) => this._hub.set(r)));
   }
 
   loadPreferences(): Observable<PortfolioPreferences> {

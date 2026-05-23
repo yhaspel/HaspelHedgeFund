@@ -15,6 +15,7 @@ from .views import (
     BorrowLookupView,
     CycleApproveCouncilView,
     CycleRejectView,
+    PortfolioHubView,
     PortfolioListCreateView,
     PositionsView,
     StrategyCycleDetailView,
@@ -34,6 +35,7 @@ urlpatterns = [
          name="universe-members"),
 
     path("portfolios/", PortfolioListCreateView.as_view(), name="portfolios"),
+    path("portfolios/hub/", PortfolioHubView.as_view(), name="portfolios-hub"),
     path("portfolios/<int:portfolio_id>/positions/", PositionsView.as_view(),
          name="positions"),
 

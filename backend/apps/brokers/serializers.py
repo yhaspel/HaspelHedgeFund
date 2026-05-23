@@ -70,11 +70,12 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
         model = BrokerOrder
         fields = (
             "id", "broker_account", "client_order_id", "decision_id", "ticker",
-            "side", "quantity", "order_type", "limit_price", "time_in_force",
-            "status", "idempotency_state", "broker_order_id", "confirmed_at",
-            "confirmation_method", "queued_until_open", "submitted_at",
-            "filled_at", "cancelled_at", "avg_fill_price", "filled_quantity",
-            "error_message", "group_id", "notional_estimate", "created_at",
+            "side", "quantity", "order_type", "limit_price", "stop_price",
+            "time_in_force", "status", "idempotency_state", "broker_order_id",
+            "confirmed_at", "confirmation_method", "queued_until_open",
+            "submitted_at", "filled_at", "cancelled_at", "avg_fill_price",
+            "filled_quantity", "error_message", "group_id", "notional_estimate",
+            "created_at",
         )
         read_only_fields = (
             "id", "client_order_id", "status", "idempotency_state",
@@ -85,8 +86,15 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
         )
 
     def get_notional_estimate(self, obj: BrokerOrder) -> str:
-        price = obj.limit_price or (obj.avg_fill_price or 100)
-        return str((obj.quantity * (price or 0)).quantize(__import__("decimal").Decimal("0.01")))
+        from decimal import Decimal
+
+        # Prefer the realised fill price, then the order's own reference
+        # price (limit / stop). A market order with no fill yet has no
+        # reference price — the UI estimates notional from the live quote.
+        price = obj.avg_fill_price or obj.limit_price or obj.stop_price
+        if price is None:
+            return "0.00"
+        return str((obj.quantity * price).quantize(Decimal("0.01")))
 
 
 class BrokerFillSerializer(serializers.ModelSerializer):

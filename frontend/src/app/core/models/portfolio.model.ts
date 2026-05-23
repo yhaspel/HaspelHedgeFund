@@ -149,3 +149,28 @@ export interface MutationResponse {
   portfolio: PortfolioOverview;
   ledger_entry: LedgerEntry;
 }
+
+/** One row in the Portfolios hub — a single book the user owns. */
+export interface PortfolioHubBook {
+  kind: 'manual' | 'broker' | 'strategy';
+  portfolio_id: number;
+  name: string;
+  subtitle: string;
+  cash: string;
+  market_value: string;
+  equity: string;
+  positions_count: number;
+  /** Frontend route to that book's proper surface. */
+  link_route: string;
+  /** Broker connection status, when kind === 'broker'. */
+  status: string;
+}
+
+export interface PortfolioHub {
+  books: PortfolioHubBook[];
+  totals: {
+    books: number;
+    cash: string;
+    equity: string;
+  };
+}

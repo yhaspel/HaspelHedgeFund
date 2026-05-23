@@ -322,34 +322,62 @@ def test_double_acknowledge_blocked_by_unique_constraint(user):
 # ---------------------------------------------------------------------------
 
 
-def test_reconciliation_squares_out_of_band_drift(user):
-    account = _new_account(user)
-    # Inject a position into the mock broker that the local portfolio
-    # doesn't know about (simulates an out-of-band broker-UI trade).
-    mock_adapter.configure_account(
-        account, positions={"GOOG": (Decimal("4"), Decimal("150"))},
-        cash=Decimal("99400"),
+def test_reconciliation_engine_squares_out_of_band_drift(user):
+    """The drift engine brings a portfolio back in line with a broker's
+    reported positions/cash.
+
+    The demo book has no external venue, so ``reconcile_account`` is a
+    no-op for it (see ``test_demo_sync_rechecks_resting_orders``). The
+    engine itself is therefore exercised directly here — which is exactly
+    how a real (credentialed) broker adapter will drive it.
+    """
+    from apps.brokers.interfaces import PositionSnapshot
+    from apps.brokers.models import BrokerSyncEvent
+    from apps.brokers.reconcile import (
+        apply_drift_as_ledger_entries,
+        compute_drift,
     )
-    event = reconcile_account(account)
-    assert event.drift_detected is True
-    account.refresh_from_db()
-    assert account.portfolio.cash_balance == Decimal("99400.00")
-    assert account.portfolio.positions.filter(ticker="GOOG").count() == 1
+
+    account = _new_account(user)
+    portfolio = account.portfolio
+    broker_positions = [
+        PositionSnapshot(
+            ticker="GOOG", quantity=Decimal("4"), avg_cost=Decimal("150"),
+        ),
+    ]
+    drift = compute_drift(
+        broker_positions=broker_positions,
+        broker_cash=Decimal("99400"),
+        portfolio=portfolio,
+    )
+    assert drift.has_differences is True
+
+    event = BrokerSyncEvent.objects.create(
+        broker_account=account,
+        triggered_by=BrokerSyncEvent.TRIGGER_MANUAL,
+        started_at=timezone.now(),
+    )
+    written = apply_drift_as_ledger_entries(
+        drift=drift, portfolio=portfolio, event=event,
+        broker_positions={"GOOG": broker_positions[0]},
+    )
+    assert written >= 1
+    portfolio.refresh_from_db()
+    assert portfolio.cash_balance == Decimal("99400.00")
+    assert portfolio.positions.filter(ticker="GOOG").count() == 1
     rows = LedgerEntry.objects.filter(
-        portfolio=account.portfolio, kind=LedgerEntry.KIND_RECONCILE,
+        portfolio=portfolio, kind=LedgerEntry.KIND_RECONCILE,
     )
     assert rows.count() >= 1
 
 
-def test_post_order_reconciliation_no_drift(user):
+def test_demo_sync_is_a_noop_reconcile(user):
+    """``reconcile_account`` on a demo book never reports drift — the
+    database is its own book of record."""
     account = _new_account(user)
-    order = _draft(account, qty=Decimal("2"), limit_price=Decimal("20"))
-    gate(order, GateContext(user=user))
-    broker = get_broker(account)
-    submit_idempotent(order=order, broker=broker)
-    ingest_order_fills(order, broker)
     event = reconcile_account(account)
     assert event.drift_detected is False
+    assert "demo re-check" in event.notes
 
 
 # ---------------------------------------------------------------------------

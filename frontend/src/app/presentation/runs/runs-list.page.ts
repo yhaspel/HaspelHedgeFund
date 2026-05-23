@@ -7,7 +7,7 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
 import { RunsStore } from '../../abstraction/runs.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
-import { RunStatus, RunSummary } from '../../core/models/run.model';
+import { DecisionAction, RunStatus, RunSummary } from '../../core/models/run.model';
 
 type SourceFilter = 'all' | 'adhoc' | 'strategy';
 type StatusFilter = 'all' | RunStatus;
@@ -80,6 +80,7 @@ type StatusFilter = 'all' | RunStatus;
                 <th scope="col">Tickers</th>
                 <th scope="col" class="w-[120px]">Source</th>
                 <th scope="col" class="w-[108px]">Status</th>
+                <th scope="col" class="w-[140px]">Decision</th>
                 <th scope="col" class="right w-24">Personas</th>
                 <th scope="col" class="right w-[108px]">Cost</th>
                 <th scope="col" class="w-32">Date</th>
@@ -113,6 +114,19 @@ type StatusFilter = 'all' | RunStatus;
                       <span class="dot"></span>{{ r.status }}
                     </span>
                   </td>
+                  <td>
+                    @if (r.decisions?.length) {
+                      <span class="inline-flex gap-1 flex-wrap">
+                        @for (d of r.decisions; track d.id) {
+                          <span class="pill decision-pill" [class]="decisionToneClass(d.action)">
+                            {{ d.action }}
+                          </span>
+                        }
+                      </span>
+                    } @else {
+                      <span class="text-text-3">—</span>
+                    }
+                  </td>
                   <td class="num">{{ personaCount(r) }}</td>
                   <td class="num">$ {{ (+r.total_cost_usd).toFixed(4) }}</td>
                   <td class="mono text-text-3 text-[11.5px]">
@@ -136,6 +150,27 @@ type StatusFilter = 'all' | RunStatus;
         height: auto;
         padding: 2px 8px;
         font-size: 11px;
+      }
+      .decision-pill {
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .decision-pill.tone-long {
+        background: color-mix(in oklab, var(--acc-long) 18%, transparent);
+        color: var(--acc-long);
+      }
+      .decision-pill.tone-short {
+        background: color-mix(in oklab, var(--acc-short) 18%, transparent);
+        color: var(--acc-short);
+      }
+      .decision-pill.tone-hold {
+        background: color-mix(in oklab, var(--acc-hold) 18%, transparent);
+        color: var(--acc-hold);
+      }
+      .decision-pill.tone-skip {
+        background: var(--surface-2);
+        color: var(--text-3);
       }
       .seg {
         display: inline-flex;
@@ -215,6 +250,23 @@ export class RunsListPage implements OnInit {
 
   personaCount(r: RunSummary): number {
     return r.personas?.length ?? 0;
+  }
+
+  decisionToneClass(action: DecisionAction): string {
+    switch (action) {
+      case 'buy':
+      case 'cover_short':
+      case 'enter':
+        return 'tone-long';
+      case 'sell':
+      case 'open_short':
+        return 'tone-short';
+      case 'hold':
+        return 'tone-hold';
+      case 'skip':
+      default:
+        return 'tone-skip';
+    }
   }
 
   setSourceFilter(s: SourceFilter): void { this.sourceFilter.set(s); }

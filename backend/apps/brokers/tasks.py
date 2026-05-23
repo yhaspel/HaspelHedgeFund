@@ -12,6 +12,8 @@ import logging
 
 from celery import shared_task
 
+from .capabilities import AUTH_NONE, get_capabilities
+from .demo_fills import evaluate_resting_demo_orders
 from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
 from .reconcile import poll_open_orders_for_account, reconcile_account
 
@@ -37,8 +39,15 @@ def poll_open_orders() -> dict:
         if account is None:
             continue
         summary["accounts_scanned"] += 1
+        cap = get_capabilities(account.broker)
+        is_demo = cap is not None and cap.auth_kind == AUTH_NONE
         try:
-            summary["fills_written"] += poll_open_orders_for_account(account)
+            if is_demo:
+                # Demo books fill resting limit/stop orders against the
+                # live price — they never hit an external adapter.
+                summary["fills_written"] += evaluate_resting_demo_orders(account)
+            else:
+                summary["fills_written"] += poll_open_orders_for_account(account)
         except Exception:  # pragma: no cover - log and continue
             log.exception("poll_open_orders failed for account %s", acc_id)
     return summary

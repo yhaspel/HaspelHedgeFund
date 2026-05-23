@@ -35,6 +35,14 @@ class DecisionSerializer(serializers.ModelSerializer):
         )
 
 
+class DecisionSummarySerializer(serializers.ModelSerializer):
+    """Compact decision form for the Runs list — just enough to render a pill."""
+
+    class Meta:
+        model = Decision
+        fields = ("id", "ticker", "action", "side", "confidence")
+
+
 def _strategy_backlink(run: Run) -> dict | None:
     """Return strategy/cycle metadata for a strategy-sourced run.
 
@@ -84,6 +92,7 @@ class RunDetailSerializer(serializers.ModelSerializer):
 class RunListSerializer(serializers.ModelSerializer):
     portfolio_target = serializers.IntegerField(source="portfolio_target_id", read_only=True)
     strategy_backlink = serializers.SerializerMethodField()
+    decisions = DecisionSummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = Run
@@ -92,6 +101,7 @@ class RunListSerializer(serializers.ModelSerializer):
             "created_at", "finished_at", "total_cost_usd",
             "source", "portfolio_target", "strategy_backlink",
             "personas",  # P3 prereq 2 / WS-1: Runs list shows persona count.
+            "decisions",
         )
 
     def get_strategy_backlink(self, run: Run) -> dict | None:

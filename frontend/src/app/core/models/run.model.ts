@@ -83,6 +83,14 @@ export interface StrategyBacklink {
   strategy_kind: string;
 }
 
+export interface DecisionSummary {
+  id: number;
+  ticker: string;
+  action: DecisionAction;
+  side?: string;
+  confidence: number;
+}
+
 export interface RunSummary {
   id: number;
   tickers: string[];
@@ -99,6 +107,8 @@ export interface RunSummary {
   strategy_backlink?: StrategyBacklink | null;
   /** P3 prereq 2 / WS-1: persona ids requested for this run; used by Runs list. */
   personas?: string[];
+  /** Council decisions; empty until the run finishes. */
+  decisions?: DecisionSummary[];
 }
 
 /** P01 review: per-source provenance entry for run outputs. */

@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from apps.portfolios.models import LedgerEntry, Portfolio, Position
 
-from .capabilities import get_adapter_factory
+from .capabilities import AUTH_NONE, get_adapter_factory, get_capabilities
 from .idempotency import resolve_unknown
 from .interfaces import Broker, BrokerError, FillSnapshot, PositionSnapshot
 from .models import BrokerAccount, BrokerFill, BrokerOrder, BrokerSyncEvent
@@ -390,6 +390,33 @@ def reconcile_account(
     # may carry stale cash_balance loaded before the post-confirm fill
     # ingestion ran. We need the latest persisted state to compute drift.
     account = BrokerAccount.objects.select_related("portfolio").get(pk=account.pk)
+
+    # The demo broker has no external venue to reconcile against — the
+    # database *is* its book of record. A "sync" therefore re-checks
+    # resting limit/stop orders so a manual "Sync now" (or the periodic
+    # job) fills anything the market has since crossed.
+    cap = get_capabilities(account.broker)
+    if cap is not None and cap.auth_kind == AUTH_NONE:
+        from .demo_fills import evaluate_resting_demo_orders  # local: avoid cycle
+
+        event = BrokerSyncEvent.objects.create(
+            broker_account=account,
+            triggered_by=triggered_by,
+            started_at=timezone.now(),
+        )
+        filled = evaluate_resting_demo_orders(account)
+        event.finished_at = timezone.now()
+        event.notes = (
+            f"demo re-check — {filled} resting order(s) filled"
+            if filled
+            else "demo re-check — no resting orders triggered"
+        )
+        event.save(update_fields=["finished_at", "notes"])
+        BrokerAccount.objects.filter(pk=account.pk).update(
+            last_synced_at=timezone.now(),
+        )
+        return event
+
     broker = get_broker(account)
     event = BrokerSyncEvent.objects.create(
         broker_account=account,

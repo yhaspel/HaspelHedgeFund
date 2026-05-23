@@ -44,6 +44,7 @@ from .capabilities import (
 )
 from .confirmation import ConfirmationError, GateContext, gate
 from .credentials import set_api_key_secret, zero_credential
+from .demo_fills import place_demo_order
 from .idempotency import IdempotencyConflict, submit_idempotent
 from .models import (
     BrokerAccount,
@@ -172,12 +173,11 @@ class BrokerAccountListCreateView(generics.ListCreateAPIView):
 class BrokerAccountOverviewView(APIView):
     def get(self, request, account_id: int) -> Response:
         account = self._get(request.user, account_id)
-        broker = get_broker(account)
-        try:
-            snapshot = broker.get_account()
-        except Exception as exc:
-            return Response({"detail": str(exc)}, status=502)
+        cap = get_capabilities(account.broker)
+        is_demo = cap is not None and cap.auth_kind == AUTH_NONE
+
         positions = []
+        equity_mtm = Decimal("0")
         for pos in account.portfolio.positions.all().order_by("ticker"):
             positions.append({
                 "ticker": pos.ticker,
@@ -186,6 +186,31 @@ class BrokerAccountOverviewView(APIView):
                 "is_short": pos.is_short,
                 "realized_pnl": str(pos.realized_pnl),
             })
+            equity_mtm += pos.quantity * pos.avg_cost
+
+        if is_demo:
+            # The demo broker has no external venue — the portfolio *is*
+            # its book. Report broker cash == portfolio cash so the two
+            # overview KPIs never drift apart.
+            demo_cash = account.portfolio.cash_balance
+            broker_side = {
+                "cash": str(demo_cash),
+                "buying_power": str(demo_cash),
+                "equity": str(demo_cash + equity_mtm),
+                "currency": account.base_currency,
+            }
+        else:
+            broker = get_broker(account)
+            try:
+                snapshot = broker.get_account()
+            except Exception as exc:
+                return Response({"detail": str(exc)}, status=502)
+            broker_side = {
+                "cash": str(snapshot.cash),
+                "buying_power": str(snapshot.buying_power),
+                "equity": str(snapshot.equity),
+                "currency": snapshot.currency,
+            }
         fills = list(
             BrokerFill.objects.filter(order__broker_account=account)
             .order_by("-filled_at")[:25]
@@ -200,12 +225,7 @@ class BrokerAccountOverviewView(APIView):
         last_event_id = last_drift_event.id if last_drift_event else None
         return Response({
             "account": BrokerAccountSerializer(account).data,
-            "broker": {
-                "cash": str(snapshot.cash),
-                "buying_power": str(snapshot.buying_power),
-                "equity": str(snapshot.equity),
-                "currency": snapshot.currency,
-            },
+            "broker": broker_side,
             "portfolio": {
                 "cash_balance": str(account.portfolio.cash_balance),
                 "positions": positions,
@@ -355,14 +375,32 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
             raise ValidationError({"quantity": "must be positive"})
 
         order_type = (data.get("order_type") or "market").strip().lower()
-        limit_price = data.get("limit_price")
-        if limit_price is not None and str(limit_price) != "":
+        if order_type not in ("market", "limit", "stop"):
+            raise ValidationError(
+                {"order_type": "must be 'market', 'limit' or 'stop'"},
+            )
+
+        def _opt_price(field: str) -> Decimal | None:
+            raw = data.get(field)
+            if raw is None or str(raw).strip() == "":
+                return None
             try:
-                limit_price = Decimal(str(limit_price))
-            except Exception as exc:
-                raise ValidationError({"limit_price": "must be a number"}) from exc
-        else:
+                value = Decimal(str(raw))
+            except Exception as exc:  # noqa: BLE001
+                raise ValidationError({field: "must be a number"}) from exc
+            if value <= 0:
+                raise ValidationError({field: "must be positive"})
+            return value
+
+        limit_price = _opt_price("limit_price")
+        stop_price = _opt_price("stop_price")
+        if order_type == "limit" and limit_price is None:
+            raise ValidationError({"limit_price": "required for a limit order"})
+        if order_type == "stop" and stop_price is None:
+            raise ValidationError({"stop_price": "required for a stop order"})
+        if order_type == "market":
             limit_price = None
+            stop_price = None
         time_in_force = (data.get("time_in_force") or "day").strip().lower()
 
         order = BrokerOrder.objects.create(
@@ -373,8 +411,18 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
             quantity=quantity,
             order_type=order_type,
             limit_price=limit_price,
+            stop_price=stop_price,
             time_in_force=time_in_force,
         )
+
+        # Demo accounts skip the draft -> confirm gate: the order is
+        # submitted straight to the demo book and marketable orders fill
+        # within this request. Credentialed brokers keep the draft flow.
+        cap = get_capabilities(account.broker)
+        if cap is not None and cap.auth_kind == AUTH_NONE:
+            place_demo_order(order, user=request.user)
+            order.refresh_from_db()
+
         return Response(
             BrokerOrderSerializer(order).data, status=status.HTTP_201_CREATED,
         )
@@ -464,7 +512,11 @@ class BrokerOrderCancelView(APIView):
         )
         if not cancellable:
             return Response({"detail": "order is not cancellable"}, status=409)
-        if order.status == BrokerOrder.STATUS_DRAFT:
+        # Drafts (never sent) and demo orders (no external venue) cancel
+        # straight in the database — there is no adapter round-trip.
+        cap = get_capabilities(order.broker_account.broker)
+        is_demo = cap is not None and cap.auth_kind == AUTH_NONE
+        if order.status == BrokerOrder.STATUS_DRAFT or is_demo:
             order.status = BrokerOrder.STATUS_CANCELLED
             order.cancelled_at = timezone.now()
             order.save(update_fields=["status", "cancelled_at"])

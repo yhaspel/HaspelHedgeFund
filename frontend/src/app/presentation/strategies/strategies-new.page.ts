@@ -512,11 +512,12 @@ export class StrategiesNewPage implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  /** Strategies cannot point at the per-user Manual Book (P3 isolation
+  /** A strategy can only run on a dedicated strategy book — never the
+   *  Manual Book or a broker-backed portfolio (P3 / P3a-1 isolation
    *  guarantee, enforced by `StrategySerializer.validate_portfolio`).
-   *  Filter it out here so it never appears in the dropdown. */
+   *  Show only strategy books so an invalid choice is never offered. */
   strategyPortfolios(): { id: number; name: string; cash_balance: string }[] {
-    return this.store.portfolios().filter((p) => p.kind !== 'manual');
+    return this.store.portfolios().filter((p) => p.kind === 'strategy');
   }
 
   /** Auto-suggested from kind + universe + nameStamp until the user edits it. */
@@ -740,20 +741,29 @@ export class StrategiesNewPage implements OnInit {
       this.refreshAutoName();
     });
     this.store.loadPortfolios().subscribe((ps) => {
-      const strategyPs = ps.filter((p) => p.kind !== 'manual');
-      if (strategyPs.length && this.portfolio === null) {
-        this.portfolio = strategyPs[0].id;
-      }
+      if (this.portfolio === null) this.portfolio = this.pickDefaultPortfolioId(ps);
     });
+  }
+
+  /** Filter must match `strategyPortfolios()` (kind==='strategy') so we never
+   *  pre-select an id the dropdown can't render. Prefer the "Default paper
+   *  portfolio" by name when present so users who created it via the starter
+   *  button land on it; otherwise fall back to the newest strategy book. */
+  private pickDefaultPortfolioId(ps: { id: number; name: string; kind?: string }[]): number | null {
+    const strategyPs = ps.filter((p) => p.kind === 'strategy');
+    if (!strategyPs.length) return null;
+    const named = strategyPs.find(
+      (p) => p.name.trim().toLowerCase() === 'default paper portfolio',
+    );
+    return (named ?? strategyPs[0]).id;
   }
 
   createPortfolio(): void {
     this.store.createPortfolio({
       name: 'Default paper portfolio',
       cash_balance: 100000,
-    }).subscribe(() => this.store.loadPortfolios().subscribe((ps) => {
-      const strategyPs = ps.filter((p) => p.kind !== 'manual');
-      if (strategyPs.length) this.portfolio = strategyPs[strategyPs.length - 1].id;
+    }).subscribe((created) => this.store.loadPortfolios().subscribe(() => {
+      this.portfolio = created.id;
     }));
   }
 

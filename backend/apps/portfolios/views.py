@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date as date_cls
 from datetime import datetime
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -58,6 +59,105 @@ class PortfolioListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class PortfolioHubView(APIView):
+    """GET /api/portfolios/hub/ — every book the user owns in one list.
+
+    Unifies the three portfolio kinds (manual / broker / strategy) so the
+    user has a single place to see all their books. Each row links back to
+    the surface that actually manages that kind of book — the manual book
+    page, a broker account, or a strategy.
+    """
+
+    def get(self, request: Request) -> Response:
+        from .manual_book import get_or_create_manual_book
+
+        # Guarantee the manual book exists so it always appears on the hub.
+        get_or_create_manual_book(request.user)
+
+        portfolios = list(
+            Portfolio.objects.filter(user=request.user).prefetch_related(
+                "positions",
+            )
+        )
+
+        # A Portfolio row alone does not know which broker account or
+        # strategy owns it — build the reverse lookups once.
+        from apps.brokers.capabilities import get_capabilities
+        from apps.brokers.models import BrokerAccount
+
+        broker_by_pf = {
+            ba.portfolio_id: ba
+            for ba in BrokerAccount.objects.filter(user=request.user)
+        }
+        strat_by_pf: dict[int, PortfolioStrategy] = {}
+        for st in PortfolioStrategy.objects.filter(user=request.user):
+            strat_by_pf.setdefault(st.portfolio_id, st)
+
+        kind_order = {
+            Portfolio.KIND_MANUAL: 0,
+            Portfolio.KIND_BROKER: 1,
+            Portfolio.KIND_STRATEGY: 2,
+        }
+        books: list[dict] = []
+        for p in portfolios:
+            positions = list(p.positions.all())
+            market_value = sum(
+                (pos.quantity * pos.avg_cost for pos in positions),
+                Decimal("0"),
+            )
+            cash = p.cash_balance
+            book = {
+                "kind": p.kind,
+                "portfolio_id": p.id,
+                "name": p.name,
+                "subtitle": "",
+                "cash": str(cash),
+                "market_value": str(market_value),
+                "equity": str(cash + market_value),
+                "positions_count": len(positions),
+                "link_route": "",
+                "status": "",
+            }
+            if p.kind == Portfolio.KIND_MANUAL:
+                book["name"] = "Manual book"
+                book["subtitle"] = "Hand-managed positions & cash"
+                book["link_route"] = "/portfolio"
+            elif p.kind == Portfolio.KIND_BROKER:
+                ba = broker_by_pf.get(p.id)
+                if ba is not None:
+                    cap = get_capabilities(ba.broker)
+                    display = cap.display_name if cap else ba.broker
+                    book["name"] = ba.label
+                    book["subtitle"] = f"{display} · {ba.mode}"
+                    book["link_route"] = f"/broker-accounts/{ba.id}"
+                    book["status"] = ba.connection_status
+                else:
+                    book["subtitle"] = "Broker book"
+                    book["link_route"] = "/broker-accounts"
+            elif p.kind == Portfolio.KIND_STRATEGY:
+                st = strat_by_pf.get(p.id)
+                if st is not None:
+                    book["name"] = st.name
+                    book["subtitle"] = st.get_kind_display()
+                    book["link_route"] = f"/strategies/{st.id}"
+                else:
+                    book["subtitle"] = "Strategy book"
+                    book["link_route"] = "/strategies"
+            books.append(book)
+
+        books.sort(
+            key=lambda b: (kind_order.get(b["kind"], 9), b["name"].lower()),
+        )
+        totals = {
+            "books": len(books),
+            "cash": str(sum((Decimal(b["cash"]) for b in books), Decimal("0"))),
+            "equity": str(
+                sum((Decimal(b["equity"]) for b in books), Decimal("0")),
+            ),
+        }
+        return Response({"books": books, "totals": totals})
 
 
 class PositionsView(generics.ListAPIView):

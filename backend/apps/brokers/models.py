@@ -186,6 +186,11 @@ class BrokerOrder(models.Model):
     limit_price = models.DecimalField(
         max_digits=12, decimal_places=4, null=True, blank=True,
     )
+    # Trigger price for stop orders. A stop order rests until the market
+    # crosses this level, then fills at market. Null for market/limit orders.
+    stop_price = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+    )
     time_in_force = models.CharField(max_length=8, default="day")
     status = models.CharField(
         max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT,

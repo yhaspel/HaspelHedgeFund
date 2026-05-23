@@ -106,8 +106,9 @@ export interface BrokerOrderRow {
   ticker: string;
   side: 'buy' | 'sell';
   quantity: string;
-  order_type: 'market' | 'limit';
+  order_type: 'market' | 'limit' | 'stop';
   limit_price: string | null;
+  stop_price: string | null;
   time_in_force: 'day' | 'gtc';
   status:
     | 'draft'
@@ -139,8 +140,9 @@ export interface CreateOrderRequest {
   ticker: string;
   side: 'buy' | 'sell';
   quantity: string | number;
-  order_type?: 'market' | 'limit';
+  order_type?: 'market' | 'limit' | 'stop';
   limit_price?: string | number | null;
+  stop_price?: string | number | null;
   time_in_force?: 'day' | 'gtc';
   decision?: number | null;
 }

@@ -5,16 +5,27 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BrokerStore } from '../../abstraction/broker.store';
-import { OrderConfirmModalComponent } from './order-confirm.modal';
-import { BrokerOrderRow } from '../../core/models/broker.model';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { BrokerOrderRow, BrokerPortfolioSnapshot } from '../../core/models/broker.model';
 
+type BrokerPosition = BrokerPortfolioSnapshot['positions'][number];
+
+type OrderType = 'market' | 'limit' | 'stop';
+
+/**
+ * Broker account overview — the demo book's main surface.
+ *
+ * The demo flow is streamlined: placing an order submits it straight to
+ * the broker (no draft -> confirm gate). Market orders fill immediately at
+ * the live price; limit/stop orders rest as "working" until the market
+ * crosses their trigger.
+ */
 @Component({
   selector: 'hf-broker-account-overview-page',
   standalone: true,
   imports: [
     CommonModule, DatePipe, DecimalPipe, RouterLink,
     AppShellComponent, KpiTileComponent, EmptyStateComponent,
-    OrderConfirmModalComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[
@@ -41,10 +52,10 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
                     [disabled]="syncing()">
               {{ syncing() ? 'Syncing…' : 'Sync now' }}
             </button>
-            <button class="btn primary" (click)="openCreateDraft()" data-test="new-order-btn">
+            <button class="btn primary" (click)="openNewOrder()" data-test="new-order-btn">
               <svg width="14" height="14" class="mr-1.5" aria-hidden="true">
                 <use href="/icons.svg#i-plus" /></svg>
-              New draft order
+              New order
             </button>
           </div>
         </div>
@@ -68,24 +79,24 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
         }
 
         <section class="kpi-row mb-4">
-          <hf-kpi-tile eyebrow="Broker cash"
+          <hf-kpi-tile eyebrow="Cash"
                        [value]="'$' + (+o.broker.cash | number: '1.2-2')"
-                       [sub]="'buying power $' + (+o.broker.buying_power | number: '1.2-2')" />
-          <hf-kpi-tile eyebrow="Portfolio cash"
-                       [value]="'$' + (+o.portfolio.cash_balance | number: '1.2-2')"
-                       [sub]="'broker-backed (kind=broker)'" />
+                       sub="available to trade" />
+          <hf-kpi-tile eyebrow="Equity"
+                       [value]="'$' + (+o.broker.equity | number: '1.2-2')"
+                       sub="cash + positions at cost" />
           <hf-kpi-tile eyebrow="Positions"
                        [value]="o.portfolio.positions.length.toString()"
                        [sub]="o.portfolio.positions.length === 1 ? 'open ticker' : 'open tickers'" />
-          <hf-kpi-tile eyebrow="Recent fills"
-                       [value]="o.recent_fills.length.toString()"
-                       sub="last 25 events" />
+          <hf-kpi-tile eyebrow="Working orders"
+                       [value]="working().length.toString()"
+                       sub="awaiting a fill" />
         </section>
 
         <section class="card p-0 overflow-hidden mb-4">
           <div class="card-hd"><span class="title">Positions</span></div>
           @if (o.portfolio.positions.length === 0) {
-            <div class="p-4 text-xs text-text-3">No positions yet. Submit a draft order to begin.</div>
+            <div class="p-4 text-xs text-text-3">No positions yet. Place an order to begin.</div>
           } @else {
             <table class="tbl w-full" data-test="positions-table">
               <thead>
@@ -95,6 +106,7 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
                   <th class="text-right">Avg cost</th>
                   <th class="text-left">Side</th>
                   <th class="text-right">Realized P&amp;L</th>
+                  <th class="text-right"></th>
                 </tr>
               </thead>
               <tbody>
@@ -109,6 +121,12 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
                       </span>
                     </td>
                     <td class="text-right mono">{{ '$' + (+p.realized_pnl | number: '1.2-2') }}</td>
+                    <td class="text-right">
+                      <button class="btn ghost btn-sm" (click)="closePosition(p)"
+                              [attr.data-test]="'close-position-' + p.ticker">
+                        Close
+                      </button>
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -117,39 +135,47 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
         </section>
 
         <section class="card p-0 overflow-hidden mb-4">
-          <div class="card-hd"><span class="title">Pending orders</span></div>
-          @if (pending().length === 0) {
-            <div class="p-4 text-xs text-text-3">No drafts. Use “New draft order”.</div>
+          <div class="card-hd"><span class="title">Working orders</span>
+            <span class="hint">live orders waiting to fill — cancel any time</span>
+          </div>
+          @if (working().length === 0) {
+            <div class="p-4 text-xs text-text-3">
+              No working orders. Market orders fill instantly; limit &amp; stop
+              orders appear here until the market reaches their trigger.
+            </div>
           } @else {
-            <table class="tbl w-full" data-test="pending-orders-table">
+            <table class="tbl w-full" data-test="working-orders-table">
               <thead>
                 <tr>
                   <th class="text-left">Ticker</th>
                   <th class="text-left">Side</th>
+                  <th class="text-left">Type</th>
                   <th class="text-right">Qty</th>
-                  <th class="text-right">Notional</th>
+                  <th class="text-right">Trigger</th>
                   <th class="text-left">Status</th>
                   <th class="text-right"></th>
                 </tr>
               </thead>
               <tbody>
-                @for (ord of pending(); track ord.id) {
+                @for (ord of working(); track ord.id) {
                   <tr [attr.data-test]="'order-row-' + ord.id">
                     <td class="font-medium">{{ ord.ticker }}</td>
                     <td>
-                      <span class="pill" [class.ok]="ord.side === 'buy'" [class.warn]="ord.side === 'sell'">
+                      <span class="pill" [class.ok]="ord.side === 'buy'"
+                            [class.err]="ord.side === 'sell'">
                         <span class="dot"></span>{{ ord.side }}
                       </span>
                     </td>
+                    <td class="uppercase text-[11px] tracking-wide text-text-2">{{ ord.order_type }}</td>
                     <td class="text-right mono">{{ +ord.quantity | number: '1.0-4' }}</td>
-                    <td class="text-right mono">{{ '$' + (+ord.notional_estimate | number: '1.2-2') }}</td>
-                    <td><span class="pill"><span class="dot"></span>{{ ord.status }}</span></td>
+                    <td class="text-right mono">{{ triggerLabel(ord) }}</td>
+                    <td>
+                      <span class="pill info live" data-test="order-status">
+                        <span class="dot"></span>working
+                      </span>
+                    </td>
                     <td class="text-right">
-                      <button class="btn primary btn-sm" (click)="openConfirm(ord)"
-                              [attr.data-test]="'confirm-order-' + ord.id">
-                        Confirm &amp; submit
-                      </button>
-                      <button class="btn ghost btn-sm ml-1.5" (click)="onCancel(ord)"
+                      <button class="btn ghost btn-sm danger" (click)="onCancel(ord)"
                               [attr.data-test]="'cancel-order-' + ord.id">Cancel</button>
                     </td>
                   </tr>
@@ -160,7 +186,9 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
         </section>
 
         <section class="card p-0 overflow-hidden">
-          <div class="card-hd"><span class="title">Recent fills</span></div>
+          <div class="card-hd"><span class="title">Recent fills</span>
+            <span class="hint">completed trades — last 25 events</span>
+          </div>
           @if (o.recent_fills.length === 0) {
             <div class="p-4 text-xs text-text-3">No fills yet.</div>
           } @else {
@@ -168,7 +196,8 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
               <thead>
                 <tr>
                   <th>When</th><th>Ticker</th><th>Side</th>
-                  <th class="text-right">Qty</th><th class="text-right">Price</th>
+                  <th class="text-right">Qty</th><th class="text-right">Fill price</th>
+                  <th class="text-left">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -176,9 +205,15 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
                   <tr [attr.data-test]="'fill-row-' + f.id">
                     <td class="text-[11.5px] text-text-3">{{ f.filled_at | date:'short' }}</td>
                     <td class="font-medium">{{ f.ticker }}</td>
-                    <td>{{ f.side }}</td>
+                    <td>
+                      <span class="pill" [class.ok]="f.side === 'buy'"
+                            [class.err]="f.side === 'sell'">
+                        <span class="dot"></span>{{ f.side }}
+                      </span>
+                    </td>
                     <td class="text-right mono">{{ +f.quantity | number: '1.0-6' }}</td>
-                    <td class="text-right mono">{{ +f.price | number: '1.2-4' }}</td>
+                    <td class="text-right mono">{{ '$' + (+f.price | number: '1.2-4') }}</td>
+                    <td><span class="pill ok"><span class="dot"></span>filled</span></td>
                   </tr>
                 }
               </tbody>
@@ -193,81 +228,159 @@ import { BrokerOrderRow } from '../../core/models/broker.model';
       }
     </hf-app-shell>
 
-    @if (newDraftOpen()) {
-      <div class="modal-overlay" (click)="newDraftOpen.set(false)">
-        <div class="card" style="max-width:420px" (click)="$event.stopPropagation()">
-          <div class="card-hd"><span class="title">New draft order</span></div>
-          <div class="p-3.5 space-y-2.5">
+    @if (newOrderOpen()) {
+      <div class="modal-overlay" (click)="newOrderOpen.set(false)">
+        <div class="card order-modal" (click)="$event.stopPropagation()"
+             role="dialog" aria-label="New order">
+          <div class="card-hd"><span class="title">New order</span></div>
+          <div class="p-3.5 space-y-3">
             <label class="lbl block">Ticker
-              <input class="input mono" type="text" [value]="draftTicker()"
-                     (input)="draftTicker.set($any($event.target).value.toUpperCase())"
-                     data-test="new-order-ticker" />
+              <input class="input mono" type="text" [value]="ticker()"
+                     (input)="onTickerInput($any($event.target).value)"
+                     (change)="fetchPrice()"
+                     data-test="new-order-ticker" autocomplete="off" />
             </label>
-            <div class="seg" role="radiogroup">
-              <button class="seg-btn" type="button" [class.active]="draftSide() === 'buy'"
-                      (click)="draftSide.set('buy')" data-test="new-order-side-buy">Buy</button>
-              <button class="seg-btn" type="button" [class.active]="draftSide() === 'sell'"
-                      (click)="draftSide.set('sell')" data-test="new-order-side-sell">Sell</button>
+
+            <div class="field">
+              <span class="lbl">Side</span>
+              <div class="seg" role="radiogroup" aria-label="Side">
+                <button type="button" class="opt buy" role="radio"
+                        [attr.aria-checked]="side() === 'buy'"
+                        [class.on]="side() === 'buy'"
+                        (click)="side.set('buy')" data-test="new-order-side-buy">Buy</button>
+                <button type="button" class="opt sell" role="radio"
+                        [attr.aria-checked]="side() === 'sell'"
+                        [class.on]="side() === 'sell'"
+                        (click)="side.set('sell')" data-test="new-order-side-sell">Sell</button>
+              </div>
             </div>
+
+            <div class="field">
+              <span class="lbl">Order type</span>
+              <div class="seg" role="radiogroup" aria-label="Order type">
+                @for (t of orderTypes; track t) {
+                  <button type="button" class="opt" role="radio"
+                          [attr.aria-checked]="orderType() === t"
+                          [class.on]="orderType() === t"
+                          (click)="setOrderType(t)"
+                          [attr.data-test]="'new-order-type-' + t">{{ t }}</button>
+                }
+              </div>
+              <span class="help">{{ typeHelp() }}</span>
+            </div>
+
             <label class="lbl block">Quantity
               <input class="input mono" type="number" step="0.0001" min="0"
-                     [value]="draftQty()"
-                     (input)="draftQty.set($any($event.target).value)"
+                     [value]="qty()"
+                     (input)="qty.set($any($event.target).value)"
                      data-test="new-order-qty" />
             </label>
-            <label class="lbl block">Limit price (optional)
-              <input class="input mono" type="number" step="0.01"
-                     [value]="draftLimit()"
-                     (input)="draftLimit.set($any($event.target).value)"
-                     data-test="new-order-limit" />
-            </label>
+
+            @if (orderType() === 'limit') {
+              <label class="lbl block">Limit price
+                <input class="input mono" type="number" step="0.01" min="0"
+                       [value]="limitPrice()"
+                       (input)="limitPrice.set($any($event.target).value)"
+                       data-test="new-order-limit" />
+              </label>
+            }
+            @if (orderType() === 'stop') {
+              <label class="lbl block">Stop (trigger) price
+                <input class="input mono" type="number" step="0.01" min="0"
+                       [value]="stopPrice()"
+                       (input)="stopPrice.set($any($event.target).value)"
+                       data-test="new-order-stop" />
+              </label>
+            }
+
+            <div class="quote-row">
+              @if (priceLoading()) {
+                <span class="text-text-3">Fetching last price…</span>
+              } @else if (livePrice() !== null) {
+                <span>Last price
+                  <strong class="mono">\${{ livePrice() | number: '1.2-2' }}</strong>
+                </span>
+                <span>Est. cost
+                  <strong class="mono" [class.long]="side() === 'buy'"
+                          [class.short]="side() === 'sell'">
+                    {{ estCost() }}
+                  </strong>
+                </span>
+              } @else {
+                <span class="text-text-3">No live price for this ticker.</span>
+              }
+            </div>
+
             @if (lastError(); as e) {
               <div role="alert" class="pill err h-auto py-1.5 px-2.5"><span class="dot"></span>{{ e }}</div>
             }
-            <div class="text-right">
-              <button class="btn" (click)="newDraftOpen.set(false)">Cancel</button>
-              <button class="btn primary ml-2" (click)="submitDraft()"
-                      [disabled]="!canSubmitDraft()"
-                      data-test="new-order-submit">Create</button>
+            <div class="text-right pt-1">
+              <button class="btn" (click)="newOrderOpen.set(false)">Cancel</button>
+              <button class="btn primary ml-2" (click)="submitOrder()"
+                      [disabled]="!canSubmit() || placing()"
+                      data-test="new-order-submit">
+                {{ placing() ? 'Placing…' : 'Place ' + side() + ' order' }}
+              </button>
             </div>
           </div>
         </div>
       </div>
     }
-
-    @if (confirmingOrder(); as ord) {
-      <hf-order-confirm-modal [order]="ord" [account]="overview()?.account || null"
-                              (closed)="confirmingOrder.set(null)"
-                              (confirmed)="onConfirmed($event)" />
-    }
   `,
   styles: [`
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-      z-index: var(--z-modal); display:flex; align-items:center; justify-content:center; padding:16px;
+      z-index: var(--z-modal); display:flex; align-items:center;
+      justify-content:center; padding:16px;
     }
+    .order-modal { width: 100%; max-width: 440px; }
+    .card-hd .hint {
+      margin-left: auto; font-size: var(--fs-11); color: var(--text-3);
+      font-weight: 400; text-transform: none; letter-spacing: normal;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field .lbl { margin: 0; }
+    .help { font-size: var(--fs-11); color: var(--text-3); }
+    .quote-row {
+      display: flex; justify-content: space-between; gap: 12px;
+      font-size: var(--fs-12); color: var(--text-2);
+      padding: 8px 10px; background: var(--surface-2);
+      border-radius: var(--r-6); border: 1px solid var(--border);
+    }
+    .long { color: var(--acc-long-fg); }
+    .short { color: var(--acc-short-fg); }
   `],
 })
 export class BrokerAccountOverviewPage implements OnInit {
   private readonly store = inject(BrokerStore);
+  private readonly profiles = inject(TickerProfileStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
   protected readonly overview = this.store.overview;
-  protected readonly busy = this.store.busy;
   protected readonly loading = signal(true);
   protected readonly syncing = signal(false);
+  protected readonly placing = signal(false);
   protected readonly account = computed(() => this.overview()?.account ?? null);
-  protected readonly newDraftOpen = signal(false);
-  protected readonly draftTicker = signal('AAPL');
-  protected readonly draftSide = signal<'buy' | 'sell'>('buy');
-  protected readonly draftQty = signal('5');
-  protected readonly draftLimit = signal('');
-  protected readonly confirmingOrder = signal<BrokerOrderRow | null>(null);
+
+  protected readonly orderTypes: OrderType[] = ['market', 'limit', 'stop'];
+
+  // --- new-order modal state ---
+  protected readonly newOrderOpen = signal(false);
+  protected readonly ticker = signal('AAPL');
+  protected readonly side = signal<'buy' | 'sell'>('buy');
+  protected readonly orderType = signal<OrderType>('market');
+  protected readonly qty = signal('5');
+  protected readonly limitPrice = signal('');
+  protected readonly stopPrice = signal('');
+  protected readonly livePrice = signal<number | null>(null);
+  protected readonly priceLoading = signal(false);
+
   protected readonly lastError = signal<string | null>(null);
-  protected readonly pending = computed(() =>
+
+  protected readonly working = computed(() =>
     this.store.orders().filter(
-      (o) => o.status === 'draft' || o.status === 'confirmed',
+      (o) => o.status === 'submitted' || o.status === 'partial',
     ),
   );
 
@@ -306,58 +419,164 @@ export class BrokerAccountOverviewPage implements OnInit {
   ackDrift(): void {
     const id = this.account()?.id;
     if (!id) return;
-    this.store.acknowledgeDrift(id).subscribe({
-      next: () => this.refresh(id),
+    this.store.acknowledgeDrift(id).subscribe({ next: () => this.refresh(id) });
+  }
+
+  // --- new-order modal ---
+
+  openNewOrder(): void {
+    this.lastError.set(null);
+    this.livePrice.set(null);
+    this.limitPrice.set('');
+    this.stopPrice.set('');
+    this.newOrderOpen.set(true);
+    this.fetchPrice();
+  }
+
+  closePosition(pos: BrokerPosition): void {
+    // Closing = opposite-side market order for the full position size. We
+    // open the New Order modal pre-filled so the user can still adjust qty
+    // or swap to a limit before sending — no separate /close endpoint, the
+    // demo broker fills it like any other market order.
+    const absQty = Math.abs(parseFloat(pos.quantity));
+    if (!(absQty > 0)) return;
+    this.lastError.set(null);
+    this.ticker.set(pos.ticker);
+    this.side.set(pos.is_short ? 'buy' : 'sell');
+    this.orderType.set('market');
+    this.qty.set(String(absQty));
+    this.limitPrice.set('');
+    this.stopPrice.set('');
+    this.livePrice.set(null);
+    this.newOrderOpen.set(true);
+    this.fetchPrice();
+  }
+
+  onTickerInput(value: string): void {
+    this.ticker.set((value || '').toUpperCase());
+  }
+
+  setOrderType(t: OrderType): void {
+    this.orderType.set(t);
+    // Pre-fill the trigger price from the live price the first time a
+    // price-bearing type is chosen (item 3).
+    const price = this.livePrice();
+    if (price === null) return;
+    if (t === 'limit' && !this.limitPrice()) this.limitPrice.set(price.toFixed(2));
+    if (t === 'stop' && !this.stopPrice()) this.stopPrice.set(price.toFixed(2));
+  }
+
+  fetchPrice(): void {
+    const sym = this.ticker().trim().toUpperCase();
+    if (!sym) return;
+    this.priceLoading.set(true);
+    this.profiles.fetchProfile(sym).subscribe({
+      next: (p) => {
+        this.priceLoading.set(false);
+        const price = p && p.price ? Number(p.price) : NaN;
+        if (Number.isFinite(price) && price > 0) {
+          this.livePrice.set(price);
+          // Prefill the active trigger field if the user hasn't typed one.
+          if (this.orderType() === 'limit' && !this.limitPrice()) {
+            this.limitPrice.set(price.toFixed(2));
+          }
+          if (this.orderType() === 'stop' && !this.stopPrice()) {
+            this.stopPrice.set(price.toFixed(2));
+          }
+        } else {
+          this.livePrice.set(null);
+        }
+      },
+      error: () => { this.priceLoading.set(false); this.livePrice.set(null); },
     });
   }
 
-  openCreateDraft(): void {
-    this.lastError.set(null);
-    this.newDraftOpen.set(true);
+  typeHelp(): string {
+    switch (this.orderType()) {
+      case 'market': return 'Fills immediately at the current market price.';
+      case 'limit': return 'Rests until the price reaches your limit, then fills.';
+      case 'stop': return 'Rests until the price crosses your stop, then fills at market.';
+    }
   }
 
-  canSubmitDraft(): boolean {
-    const qty = parseFloat(this.draftQty() || '0');
-    return Boolean(this.draftTicker()) && qty > 0;
+  private refPrice(): number | null {
+    if (this.orderType() === 'limit') {
+      const v = parseFloat(this.limitPrice());
+      return Number.isFinite(v) ? v : this.livePrice();
+    }
+    if (this.orderType() === 'stop') {
+      const v = parseFloat(this.stopPrice());
+      return Number.isFinite(v) ? v : this.livePrice();
+    }
+    return this.livePrice();
   }
 
-  submitDraft(): void {
+  estCost(): string {
+    const q = parseFloat(this.qty() || '0');
+    const p = this.refPrice();
+    if (!Number.isFinite(q) || q <= 0 || p === null) return '—';
+    const total = q * p;
+    return '$' + total.toLocaleString('en-US', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    });
+  }
+
+  canSubmit(): boolean {
+    const q = parseFloat(this.qty() || '0');
+    if (!this.ticker().trim() || !(q > 0)) return false;
+    if (this.orderType() === 'limit' && !(parseFloat(this.limitPrice()) > 0)) {
+      return false;
+    }
+    if (this.orderType() === 'stop' && !(parseFloat(this.stopPrice()) > 0)) {
+      return false;
+    }
+    return true;
+  }
+
+  submitOrder(): void {
     const id = this.account()?.id;
-    if (!id) return;
-    const limit = this.draftLimit() ? parseFloat(this.draftLimit()) : null;
+    if (!id || !this.canSubmit()) return;
+    this.lastError.set(null);
+    this.placing.set(true);
+    const type = this.orderType();
     this.store.createDraftOrder({
       broker_account: id,
-      ticker: this.draftTicker(),
-      side: this.draftSide(),
-      quantity: this.draftQty(),
-      order_type: limit ? 'limit' : 'market',
-      limit_price: limit,
+      ticker: this.ticker().trim().toUpperCase(),
+      side: this.side(),
+      quantity: this.qty(),
+      order_type: type,
+      limit_price: type === 'limit' ? this.limitPrice() : null,
+      stop_price: type === 'stop' ? this.stopPrice() : null,
     }).subscribe({
       next: () => {
-        this.newDraftOpen.set(false);
+        this.placing.set(false);
+        this.newOrderOpen.set(false);
         this.refresh(id);
       },
-      error: (err) => this.lastError.set(
-        err?.error?.detail ?? Object.values(err?.error ?? {}).join('; ') ?? 'Failed.',
-      ),
+      error: (err) => {
+        this.placing.set(false);
+        this.lastError.set(
+          err?.error?.detail
+          ?? Object.values(err?.error ?? {}).join('; ')
+          ?? 'Failed to place order.',
+        );
+      },
     });
   }
 
-  openConfirm(ord: BrokerOrderRow): void {
-    this.lastError.set(null);
-    this.confirmingOrder.set(ord);
-  }
-
-  onConfirmed(_row: BrokerOrderRow): void {
-    this.confirmingOrder.set(null);
-    const id = this.account()?.id;
-    if (id) this.refresh(id);
+  triggerLabel(ord: BrokerOrderRow): string {
+    if (ord.order_type === 'limit' && ord.limit_price) {
+      return '$' + Number(ord.limit_price).toFixed(2);
+    }
+    if (ord.order_type === 'stop' && ord.stop_price) {
+      return '$' + Number(ord.stop_price).toFixed(2);
+    }
+    return '—';
   }
 
   onCancel(ord: BrokerOrderRow): void {
-    if (!confirm(`Cancel order ${ord.ticker} ${ord.side} ${ord.quantity}?`)) return;
-    this.store.cancelOrder(ord.id).subscribe({
-      next: () => this.refresh(),
-    });
+    // Cancelling a working order is low-stakes and reversible (just place
+    // again), so it's a single click — no blocking confirm dialog.
+    this.store.cancelOrder(ord.id).subscribe({ next: () => this.refresh() });
   }
 }

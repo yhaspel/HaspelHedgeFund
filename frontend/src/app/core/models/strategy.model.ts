@@ -10,7 +10,7 @@ export interface Universe {
 export interface Portfolio {
   id: number;
   name: string;
-  kind?: 'strategy' | 'manual';
+  kind?: 'strategy' | 'manual' | 'broker';
   cash_balance: string;
   created_at: string;
 }

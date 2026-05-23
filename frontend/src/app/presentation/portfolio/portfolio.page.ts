@@ -33,11 +33,11 @@ import { PopoverComponent } from '../shared/popover.component';
     PopoverComponent,
   ],
   template: `
-    <hf-app-shell [crumbs]="[{label:'Portfolio'}]">
+    <hf-app-shell [crumbs]="[{label:'Portfolios', link:'/portfolios'}, {label:'Manual book'}]">
       <div class="page-head">
         <div>
           <div class="eyebrow">Manual Book · Paper</div>
-          <h1 class="mt-1.5">Portfolio</h1>
+          <h1 class="mt-1.5">Manual book</h1>
           <p class="text-xs text-text-2 mt-1">
             A local paper book seeded with $100,000. No broker, no real money.
             <span data-test="cadence-summary">{{ cadenceSummary() }}</span>

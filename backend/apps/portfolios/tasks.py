@@ -23,6 +23,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from celery import chord, shared_task
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -85,12 +86,27 @@ def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
          selector populates this with the same model for every agent).
       2. The strategy's model_preset (e.g. 'frugal', 'hybrid') expanded into a
          per-agent map.
-      3. Empty dict → registry DEFAULT_MODELS applies.
+      3. settings.LLM_DEFAULT_PRESET — the env-gated fallback for a strategy
+         that never deliberately picked a preset. Production resolves this to
+         'hybrid'; the dev settings module pins it to 'dev' so local
+         development can't leak Anthropic frontier spend.
+      4. Empty dict → registry DEFAULT_MODELS applies.
+
+    `model_preset` carries a DB-level default of "hybrid", so a strategy that
+    was never given a deliberate preset is indistinguishable from one that
+    explicitly chose "hybrid". When the environment default is itself a
+    non-frontier preset (dev), that bare "hybrid" is treated as "unchosen" and
+    falls through to the env default — otherwise dev strategies created before
+    this guard would keep resolving to the frontier `hybrid` map.
     """
+    default_preset = getattr(settings, "LLM_DEFAULT_PRESET", "hybrid")
     user_prefs = getattr(strategy.user, "model_prefs", None)
     if user_prefs and user_prefs.per_agent_defaults:
         return dict(user_prefs.per_agent_defaults)
-    preset_map = expand_preset(strategy.model_preset or "hybrid")
+    preset = strategy.model_preset or default_preset
+    if preset == "hybrid" and default_preset != "hybrid":
+        preset = default_preset
+    preset_map = expand_preset(preset)
     return preset_map or {}
 
 
