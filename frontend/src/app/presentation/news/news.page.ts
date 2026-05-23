@@ -104,7 +104,10 @@ import { NewsDetailModalComponent } from './news-detail.modal';
                   <ng-container *ngIf="!store.loadingMore(); else loadingMoreTxt">
                     Load more news ({{ remainingCount() }} more)
                   </ng-container>
-                  <ng-template #loadingMoreTxt>Loading…</ng-template>
+                  <ng-template #loadingMoreTxt>
+                    <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                    <span aria-live="polite">{{ loadMoreStageLabel() }}</span>
+                  </ng-template>
                 </button>
               </ng-container>
               <ng-template #noMore>
@@ -240,6 +243,29 @@ import { NewsDetailModalComponent } from './news-detail.modal';
         font-size: 11px;
         color: var(--text-3);
       }
+      .dots {
+        display: inline-flex;
+        gap: 3px;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+      .dots span {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.35;
+        animation: dot-bounce 1.1s ease-in-out infinite;
+      }
+      .dots span:nth-child(2) { animation-delay: 0.15s; }
+      .dots span:nth-child(3) { animation-delay: 0.3s; }
+      @keyframes dot-bounce {
+        0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
+        40% { opacity: 1; transform: translateY(-2px); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dots span { animation: none; opacity: 0.7; }
+      }
     `,
   ],
 })
@@ -248,8 +274,14 @@ export class NewsPage implements OnInit {
   private readonly route = inject(ActivatedRoute);
 
   readonly selected = signal<MarketNewsItem | null>(null);
+  readonly loadMoreStage = signal<'news' | 'sentiment'>('news');
 
   readonly sentimentEnabled = computed(() => this.store.sentimentEnabled());
+  readonly loadMoreStageLabel = computed(() =>
+    this.loadMoreStage() === 'sentiment'
+      ? 'AI sentiment analysis…'
+      : 'Loading news…',
+  );
   readonly updatedAt = computed(() => {
     const meta = this.store.meta();
     if (!meta) return '';
@@ -283,6 +315,18 @@ export class NewsPage implements OnInit {
       if (untracked(() => this.selected())) return;
       const found = this.store.itemById(articleId);
       if (found) this.selected.set(found);
+    });
+
+    // Stage the load-more label: "Loading news…" first, then flip to
+    // "AI sentiment analysis…" since the backend runs sentiment synchronously
+    // on each page request (see MarketNewsFeedView).
+    effect((onCleanup) => {
+      const loading = this.store.loadingMore();
+      if (!loading) return;
+      this.loadMoreStage.set('news');
+      if (!untracked(() => this.sentimentEnabled())) return;
+      const t = setTimeout(() => this.loadMoreStage.set('sentiment'), 700);
+      onCleanup(() => clearTimeout(t));
     });
   }
 

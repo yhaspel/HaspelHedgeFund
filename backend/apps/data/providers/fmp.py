@@ -15,6 +15,7 @@ guarantee is also tested in `tests/test_data_provider.py`.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -27,6 +28,8 @@ from ..models import DailyBar, Fundamental
 
 BASE_URL = "https://financialmodelingprep.com/stable"
 SOURCE = "fmp"
+
+log = logging.getLogger(__name__)
 
 # Map our canonical metric names to (statement, json field).
 METRIC_MAP: dict[str, tuple[str, str]] = {
@@ -93,17 +96,22 @@ class FmpProvider:
     # ---- profile (name + latest quote-derived metrics) ----------------
 
     def get_quote_profile(self, ticker: str) -> ProfileSnapshot | None:
-        """WS-2: full ticker profile — name, exchange, sector + latest
-        market cap / P/E / EPS / price. Wraps FMP `/quote/{ticker}`, the
-        same endpoint `get_latest_quote` already proves works.
+        """WS-2: full ticker profile — name, exchange + latest price,
+        market cap, P/E and EPS.
 
-        Returns `None` for unknown tickers / empty payload. Caller is
-        responsible for caching (TTL) and for upserting reference fields
-        into `CompanyProfile`.
+        Name / price / market cap come from the FMP *stable* `/quote`
+        endpoint. `/quote` does **not** carry P/E or EPS, so those are
+        pulled from `/ratios-ttm`. Both take the ticker as a `?symbol=`
+        query param — the convention every other stable call here uses.
+
+        Returns `None` for unknown tickers / empty `/quote` payload.
+        Caller is responsible for caching (TTL) and for upserting
+        reference fields into `CompanyProfile`.
         """
-        url = f"{BASE_URL}/quote/{ticker}"
-        params = {"apikey": self.api_key}
-        resp = self._http.get(url, params=params)
+        resp = self._http.get(
+            f"{BASE_URL}/quote",
+            params={"symbol": ticker, "apikey": self.api_key},
+        )
         resp.raise_for_status()
         payload = resp.json()
         rows = payload if isinstance(payload, list) else []
@@ -117,6 +125,10 @@ class FmpProvider:
             if ts
             else dt.date.today()
         )
+        # /quote carries name + price + market cap but not P/E or EPS;
+        # those come from /ratios-ttm. A ratios failure degrades to
+        # (None, None) so the rest of the profile still renders.
+        pe_ratio, eps = self._get_ttm_ratios(ticker)
         return ProfileSnapshot(
             ticker=ticker.upper(),
             name=str(row.get("name") or ""),
@@ -124,12 +136,38 @@ class FmpProvider:
             sector="",  # /quote does not return sector; left blank
             price=Decimal(str(price)) if price is not None else None,
             market_cap=_dec(row.get("marketCap")),
-            pe_ratio=_dec(row.get("pe")),
-            eps=_dec(row.get("eps")),
-            shares_outstanding=int(row["sharesOutstanding"])
-            if row.get("sharesOutstanding") is not None
-            else None,
+            pe_ratio=pe_ratio,
+            eps=eps,
+            shares_outstanding=None,  # not returned by /quote
             as_of=as_of,
+        )
+
+    def _get_ttm_ratios(
+        self, ticker: str
+    ) -> tuple[Decimal | None, Decimal | None]:
+        """Trailing-twelve-month P/E and EPS from FMP `/ratios-ttm`.
+
+        Returns ``(pe_ratio, eps)``; either element is ``None`` when the
+        metric is absent. Never raises — a ratios outage must not sink the
+        whole profile popover, it just drops P/E and EPS.
+        """
+        try:
+            resp = self._http.get(
+                f"{BASE_URL}/ratios-ttm",
+                params={"symbol": ticker, "apikey": self.api_key},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:  # noqa: BLE001 — degrade gracefully
+            log.warning("fmp ratios-ttm failure ticker=%s err=%s", ticker, exc)
+            return None, None
+        rows = payload if isinstance(payload, list) else []
+        if not rows:
+            return None, None
+        row = rows[0]
+        return (
+            _dec(row.get("priceToEarningsRatioTTM")),
+            _dec(row.get("netIncomePerShareTTM")),
         )
 
     # ---- screener (P3 prereq 3) --------------------------------------

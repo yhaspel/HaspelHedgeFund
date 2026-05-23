@@ -30,14 +30,12 @@ def _clear_factory_caches():
 
 
 def _quote_payload(**overrides: Any) -> list[dict]:
+    """FMP stable /quote response — name, price, market cap. No P/E/EPS."""
     row = {
         "symbol": "AAPL",
         "name": "Apple Inc.",
         "price": 234.55,
         "marketCap": 3500000000000,
-        "pe": 38.2,
-        "eps": 6.14,
-        "sharesOutstanding": 14920000000,
         "exchange": "NASDAQ",
         "timestamp": 1734566400,
     }
@@ -45,12 +43,29 @@ def _quote_payload(**overrides: Any) -> list[dict]:
     return [row]
 
 
-def _build_provider_with_response(payload: Any) -> FmpProvider:
+def _ratios_payload(**overrides: Any) -> list[dict]:
+    """FMP stable /ratios-ttm response — carries P/E and trailing EPS."""
+    row = {
+        "symbol": "AAPL",
+        "priceToEarningsRatioTTM": 38.2,
+        "netIncomePerShareTTM": 6.14,
+    }
+    row.update(overrides)
+    return [row]
+
+
+def _build_provider(*, quote: Any = None, ratios: Any = None) -> FmpProvider:
+    """FmpProvider whose mock HTTP routes by endpoint: /ratios-ttm gets the
+    ``ratios`` payload, /quote gets the ``quote`` payload."""
+
+    def _get(url: str, params: Any = None) -> Any:
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = ratios if "ratios-ttm" in url else quote
+        return resp
+
     mock_http = MagicMock()
-    response = MagicMock()
-    response.json.return_value = payload
-    response.raise_for_status.return_value = None
-    mock_http.get.return_value = response
+    mock_http.get.side_effect = _get
     return FmpProvider(api_key="fake", http=mock_http)
 
 
@@ -60,7 +75,7 @@ def _build_provider_with_response(payload: Any) -> FmpProvider:
 
 
 def test_get_quote_profile_maps_fmp_quote_fields() -> None:
-    provider = _build_provider_with_response(_quote_payload())
+    provider = _build_provider(quote=_quote_payload(), ratios=_ratios_payload())
     snap = provider.get_quote_profile("AAPL")
     assert snap is not None
     assert snap.ticker == "AAPL"
@@ -68,26 +83,54 @@ def test_get_quote_profile_maps_fmp_quote_fields() -> None:
     assert snap.exchange == "NASDAQ"
     assert snap.price == Decimal("234.55")
     assert snap.market_cap == Decimal("3500000000000")
+    # P/E + EPS are sourced from /ratios-ttm, not /quote.
     assert snap.pe_ratio == Decimal("38.2")
     assert snap.eps == Decimal("6.14")
-    assert snap.shares_outstanding == 14920000000
 
 
 def test_get_quote_profile_returns_none_on_empty_payload() -> None:
-    provider = _build_provider_with_response([])
+    provider = _build_provider(quote=[], ratios=_ratios_payload())
     assert provider.get_quote_profile("ZZZZ") is None
 
 
 def test_get_quote_profile_handles_missing_optional_fields() -> None:
-    # FMP /quote may omit pe / eps for tickers without earnings.
-    payload = _quote_payload(pe=None, eps=None, marketCap=None)
-    provider = _build_provider_with_response(payload)
+    # /quote may omit market cap; /ratios-ttm may omit P/E and EPS.
+    provider = _build_provider(
+        quote=_quote_payload(marketCap=None),
+        ratios=_ratios_payload(
+            priceToEarningsRatioTTM=None, netIncomePerShareTTM=None
+        ),
+    )
     snap = provider.get_quote_profile("AAPL")
     assert snap is not None
     assert snap.pe_ratio is None
     assert snap.eps is None
     assert snap.market_cap is None
     assert snap.price == Decimal("234.55")
+
+
+def test_get_quote_profile_survives_ratios_failure() -> None:
+    # A /ratios-ttm outage must not sink the profile — name / price /
+    # market cap still render; P/E and EPS just drop to None.
+    def _get(url: str, params: Any = None) -> Any:
+        resp = MagicMock()
+        if "ratios-ttm" in url:
+            resp.raise_for_status.side_effect = RuntimeError("ratios 503")
+        else:
+            resp.raise_for_status.return_value = None
+            resp.json.return_value = _quote_payload()
+        return resp
+
+    mock_http = MagicMock()
+    mock_http.get.side_effect = _get
+    provider = FmpProvider(api_key="fake", http=mock_http)
+    snap = provider.get_quote_profile("AAPL")
+    assert snap is not None
+    assert snap.name == "Apple Inc."
+    assert snap.price == Decimal("234.55")
+    assert snap.market_cap == Decimal("3500000000000")
+    assert snap.pe_ratio is None
+    assert snap.eps is None
 
 
 # ---------------------------------------------------------------------------

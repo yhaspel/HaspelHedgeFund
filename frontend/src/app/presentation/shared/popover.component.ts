@@ -304,6 +304,40 @@ export class PopoverComponent implements OnDestroy {
     return this.anchor() ?? (this.hostEl.nativeElement.parentElement as HTMLElement | null);
   }
 
+  /**
+   * The rect the popover must stay inside: the viewport, intersected with
+   * every scroll/clip ancestor (overflow != visible) between the anchor
+   * and the document root. A popover inside an `overflow:auto`/`hidden`
+   * container — e.g. a table wrapper — is visually clipped by that
+   * container, so the flip math has to account for it, not just the
+   * viewport. Returns the bare viewport when there is no clip ancestor
+   * (the common case), so placement is unchanged for those popovers.
+   */
+  private clipBounds(anchorEl: HTMLElement): {
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+  } {
+    let top = 0;
+    let left = 0;
+    let right = window.innerWidth;
+    let bottom = window.innerHeight;
+    let el: HTMLElement | null = anchorEl.parentElement;
+    while (el && el !== document.body && el !== document.documentElement) {
+      const cs = getComputedStyle(el);
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        const r = el.getBoundingClientRect();
+        top = Math.max(top, r.top);
+        left = Math.max(left, r.left);
+        right = Math.min(right, r.right);
+        bottom = Math.min(bottom, r.bottom);
+      }
+      el = el.parentElement;
+    }
+    return { top, left, right, bottom };
+  }
+
   private measureAndFlip(): void {
     const popEl = this.popRef?.nativeElement;
     const anchorEl = this.getAnchor();
@@ -315,13 +349,16 @@ export class PopoverComponent implements OnDestroy {
 
     const anchorRect = anchorEl.getBoundingClientRect();
     const popRect = popEl.getBoundingClientRect();
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
+    // Stay inside the viewport *and* every scroll/clip ancestor (e.g. a
+    // table wrapper with overflow:auto). Measuring against the viewport
+    // alone lets the flip logic think a popover "fits below" when the
+    // container actually clips it — the bottom-of-list bug. WS-4.3.
+    const bounds = this.clipBounds(anchorEl);
 
-    const fitsAbove = anchorRect.top - popRect.height - margin >= 0;
-    const fitsBelow = anchorRect.bottom + popRect.height + margin <= vh;
-    const fitsLeft = anchorRect.left - popRect.width - margin >= 0;
-    const fitsRight = anchorRect.right + popRect.width + margin <= vw;
+    const fitsAbove = anchorRect.top - popRect.height - margin >= bounds.top;
+    const fitsBelow = anchorRect.bottom + popRect.height + margin <= bounds.bottom;
+    const fitsLeft = anchorRect.left - popRect.width - margin >= bounds.left;
+    const fitsRight = anchorRect.right + popRect.width + margin <= bounds.right;
 
     let placement: 'top' | 'bottom' | 'left' | 'right';
     if (desiredPlacement === 'auto') {
@@ -347,8 +384,8 @@ export class PopoverComponent implements OnDestroy {
       align = 'center';
     } else if (placement === 'top' || placement === 'bottom') {
       // Horizontal alignment for vertical placements.
-      const startOverflow = anchorRect.left + popRect.width + margin > vw;
-      const endOverflow = anchorRect.right - popRect.width - margin < 0;
+      const startOverflow = anchorRect.left + popRect.width + margin > bounds.right;
+      const endOverflow = anchorRect.right - popRect.width - margin < bounds.left;
       if (desiredAlign === 'start' || desiredAlign === 'auto') {
         align = startOverflow && !endOverflow ? 'end' : 'start';
       } else {
@@ -356,8 +393,8 @@ export class PopoverComponent implements OnDestroy {
       }
     } else {
       // Vertical alignment for horizontal placements.
-      const startOverflow = anchorRect.top + popRect.height + margin > vh;
-      const endOverflow = anchorRect.bottom - popRect.height - margin < 0;
+      const startOverflow = anchorRect.top + popRect.height + margin > bounds.bottom;
+      const endOverflow = anchorRect.bottom - popRect.height - margin < bounds.top;
       if (desiredAlign === 'start' || desiredAlign === 'auto') {
         align = startOverflow && !endOverflow ? 'end' : 'start';
       } else {
