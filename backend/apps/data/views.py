@@ -538,8 +538,12 @@ class MarketNewsFeedView(APIView):
         force = request.query_params.get("refresh") in ("1", "true", "yes")
         if force:
             now = time.monotonic()
-            last = self._last_refresh_at.get(request.user.id, 0.0)
-            if now - last < 60.0:
+            last = self._last_refresh_at.get(request.user.id)
+            # `last is None` means "this user has never refreshed in this
+            # process". Treat as "long ago" — the bare `.get(..., 0.0)` shape
+            # incorrectly rate-limited the user's first call during the first
+            # 60s of process uptime (CI hit this).
+            if last is not None and now - last < 60.0:
                 wait = int(60 - (now - last))
                 return Response(
                     {"detail": f"Refreshing too fast — try again in {wait}s."},
