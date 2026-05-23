@@ -118,8 +118,12 @@ class ScreenerRunView(APIView):
 
     def post(self, request: Request) -> Response:
         now = time.monotonic()
-        last = self._last_run_at.get(request.user.id, 0.0)
-        if now - last < 5.0:
+        # `last is None` ⇒ "this user has never run a screen in this process".
+        # Bare `.get(..., 0.0)` incorrectly throttled the first call during
+        # the first 5s of process uptime (see data/views.py for the news
+        # variant of the same bug).
+        last = self._last_run_at.get(request.user.id)
+        if last is not None and now - last < 5.0:
             return _err(
                 "Running screens too quickly — please wait a few seconds.",
                 code=status.HTTP_429_TOO_MANY_REQUESTS,

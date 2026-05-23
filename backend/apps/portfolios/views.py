@@ -267,8 +267,10 @@ class StrategyCycleRefreshMarkView(APIView):
         from .cycle_mark import ensure_cycle_snapshot
 
         now = time.monotonic()
-        last = self._last_refresh_at.get(request.user.id, 0.0)
-        if now - last < 5.0:
+        # `last is None` ⇒ "this user has never refreshed in this process".
+        # See data/views.py for the news variant of the same bug.
+        last = self._last_refresh_at.get(request.user.id)
+        if last is not None and now - last < 5.0:
             return Response(
                 {"detail": "Refreshing too quickly — please wait a few seconds."},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,

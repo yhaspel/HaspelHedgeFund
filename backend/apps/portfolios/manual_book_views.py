@@ -321,8 +321,10 @@ class PortfolioRefreshMarksView(APIView):
         import time
 
         now = time.monotonic()
-        last = self._last_refresh_at.get(request.user.id, 0.0)
-        if now - last < 5.0:
+        # `last is None` ⇒ "this user has never refreshed in this process".
+        # See data/views.py for the news variant of the same bug.
+        last = self._last_refresh_at.get(request.user.id)
+        if last is not None and now - last < 5.0:
             return _err(
                 "Refreshing too quickly — please wait a few seconds.",
                 code=429,
