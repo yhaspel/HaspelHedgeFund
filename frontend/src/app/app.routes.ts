@@ -127,6 +127,28 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'profile',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/profile/profile.page').then((m) => m.ProfilePage),
+  },
+  {
+    path: 'profile/questionnaire',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/profile/questionnaire.page').then(
+        (m) => m.QuestionnairePage,
+      ),
+  },
+  {
+    path: 'watchlist',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/watchlist/watchlist.page').then(
+        (m) => m.WatchlistPage,
+      ),
+  },
+  {
     path: 'info',
     loadComponent: () =>
       import('./presentation/info/info-list.page').then((m) => m.InfoListPage),

@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import {
@@ -413,6 +413,15 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                 }
               </p>
             </div>
+            <div class="field col-span-full">
+              <label class="flex items-center gap-2 text-2xs text-text-2 cursor-pointer">
+                <input type="checkbox" name="applyInvestorProfile" [(ngModel)]="applyInvestorProfile" />
+                <span>
+                  Apply my investor profile to this strategy's cycles
+                  <hf-info text="Per-strategy opt-in (default off). When ON and your profile master switch is on, this strategy's cycle Runs are personalized: the CIO, the persona analysts and the Risk Manager's narrative see your investor profile. Hard caps, the deterministic Portfolio Manager and all backtests are unaffected." />
+                </span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -501,6 +510,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
 export class StrategiesNewPage implements OnInit {
   readonly store = inject(StrategiesStore);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   /** Strategies cannot point at the per-user Manual Book (P3 isolation
    *  guarantee, enforced by `StrategySerializer.validate_portfolio`).
@@ -566,6 +576,7 @@ export class StrategiesNewPage implements OnInit {
   /** P2l: false → cycle pauses at awaiting_review, true → council fans out
    *  immediately after screening (default — preserves pre-P2l behavior). */
   autoRunCouncil = true;
+  applyInvestorProfile = false;
 
   // Persona picker. Recommended defaults per kind are applied in onKindChange
   // and on first render via the field initializer below. personaMeta drives the
@@ -717,6 +728,12 @@ export class StrategiesNewPage implements OnInit {
   tooltip(k: string): string { return SCREENER_WEIGHT_TOOLTIPS[k] ?? ''; }
 
   ngOnInit(): void {
+    // P3-prereq-5 WS-D: Profile-page "Create this strategy" deep-link uses
+    // ?kind=<kind> to pre-select the dropdown.
+    const qpKind = this.route.snapshot.queryParamMap.get('kind') as StrategyKind | null;
+    if (qpKind && this.kindOptions.some((k) => k.value === qpKind)) {
+      this.kind = qpKind;
+    }
     this.refreshAutoName();
     this.store.loadUniverses().subscribe((us) => {
       if (us.length && this.universe === null) this.universe = us[0].id;
@@ -761,6 +778,7 @@ export class StrategiesNewPage implements OnInit {
       cost_ceiling_per_cycle_usd: String(this.costCeiling),
       model_preset: this.modelPreset,
       auto_run_council: this.autoRunCouncil,
+      apply_investor_profile: this.applyInvestorProfile,
       screener_weights: this.weights,
       // Empty list = no persona filter on the backend (full default council);
       // otherwise pass the explicit picks. Either way, the user owns the choice.

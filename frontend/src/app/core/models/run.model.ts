@@ -128,6 +128,15 @@ export interface RunRiskContext {
   notes?: string;
 }
 
+/** P3-prereq-5 WS-C: audit snapshot of the investor-profile injection. */
+export interface InvestorProfileApplied {
+  applied: boolean;
+  response_id: number | null;
+  schema_version: number | null;
+  agent_brief: string;
+  reason: '' | 'no_profile' | 'personalization_off' | 'strategy_opt_out';
+}
+
 export interface RunDetail extends RunSummary {
   model_overrides: Record<string, string>;
   personas: string[];
@@ -140,6 +149,8 @@ export interface RunDetail extends RunSummary {
   evidence?: RunEvidence;
   /** P02a review: whether sizing was stub/real/research-only. */
   risk_context?: RunRiskContext;
+  /** P3-prereq-5 WS-C: investor-profile audit snapshot, {} when unset. */
+  investor_profile_applied?: InvestorProfileApplied | Record<string, never>;
 }
 
 export interface CreateRunRequest {

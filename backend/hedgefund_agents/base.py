@@ -69,6 +69,12 @@ class AgentState(TypedDict, total=False):
     use_llm_cache: bool  # backtests: read/write LLMResponseCache (L2)
     backtest_id: int  # for cache scoping / telemetry
 
+    # P3-prereq-5 WS-C/WS-G: investor profile injected by execute_run (ad-hoc
+    # runs always, opted-in strategy cycles). Empty dict {} ⇒ no
+    # personalization (no-op in every consumer). NEVER set by the backtest
+    # engine — see apps/backtests/tests for the import-boundary guard.
+    investor_profile: dict[str, Any]
+
 
 def pick_model(state: AgentState, agent_name: str, default: tuple[str, str]) -> tuple[str, str]:
     """Returns (provider, model) for an agent, honoring per-run overrides.

@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, of, shareReplay, tap } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 import { ApiClient } from '../core/api/api-client';
 import {
@@ -15,12 +16,14 @@ import {
   WatchlistItem,
   WatchlistResponse,
 } from '../core/models/screener.model';
+import { WatchlistStore } from './watchlist.store';
 
 const CATALOG_TTL_MS = 30 * 60 * 1000;
 
 @Injectable({ providedIn: 'root' })
 export class ScreenerStore {
   private readonly api = inject(ApiClient);
+  private readonly watchlistStore = inject(WatchlistStore);
 
   private readonly _fields = signal<ScreenerField[]>([]);
   private readonly _capabilities = signal<string[]>([]);
@@ -36,8 +39,6 @@ export class ScreenerStore {
   private readonly _running = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _saved = signal<SavedScreen[]>([]);
-  private readonly _watchlist = signal<WatchlistItem[]>([]);
-  private readonly _watchlistBusy = signal(false);
 
   private _fieldsFetchedAt = 0;
   private _fieldsInFlight: Observable<ScreenerFieldsResponse> | null = null;
@@ -55,8 +56,13 @@ export class ScreenerStore {
   readonly running = this._running.asReadonly();
   readonly error = this._error.asReadonly();
   readonly saved = this._saved.asReadonly();
-  readonly watchlist = this._watchlist.asReadonly();
-  readonly watchlistBusy = this._watchlistBusy.asReadonly();
+
+  // Watchlist signals delegated to WatchlistStore so every surface
+  // (Screener tab, /watchlist page, Dashboard card, Profile card) sees the
+  // same data. Public API is unchanged from the pre-extraction shape.
+  readonly watchlist = this.watchlistStore.items;
+  readonly watchlistBusy = this.watchlistStore.busy;
+  readonly watchlistTickers = this.watchlistStore.tickers;
 
   readonly fieldsByGroup = computed(() => {
     const groups: Record<string, ScreenerField[]> = {};
@@ -66,10 +72,6 @@ export class ScreenerStore {
     }
     return groups;
   });
-
-  readonly watchlistTickers = computed(
-    () => new Set(this._watchlist().map((i) => i.ticker.toUpperCase())),
-  );
 
   setError(message: string | null): void {
     this._error.set(message);
@@ -201,68 +203,51 @@ export class ScreenerStore {
   loadSavedInto(screen: SavedScreen): void {
     this._activeAssetClass.set(screen.asset_class);
     this._activeCriteria.set({ ...screen.filters });
-    this._activeSort.set({ ...screen.sort });
     this._activePresetId.set(screen.based_on || '');
+    this._activeSort.set({ ...screen.sort });
   }
 
   loadWatchlist(): Observable<WatchlistResponse> {
-    this._watchlistBusy.set(true);
-    return this.api.get<WatchlistResponse>('/screener/watchlist/').pipe(
-      tap({
-        next: (r) => {
-          this._watchlist.set(r.items);
-          this._watchlistBusy.set(false);
-        },
-        error: () => this._watchlistBusy.set(false),
+    return this.watchlistStore.load();
+  }
+
+  addToWatchlist(ticker: string, note = ''): Observable<WatchlistItem> {
+    return this.watchlistStore.add(ticker, note).pipe(
+      tap((item) => {
+        const upper = item.ticker.toUpperCase();
+        // Reflect in any currently-displayed result rows.
+        const res = this._result();
+        if (res) {
+          this._result.set({
+            ...res,
+            rows: res.rows.map((r) =>
+              r.ticker.toUpperCase() === upper
+                ? { ...r, in_watchlist: true }
+                : r,
+            ),
+          });
+        }
       }),
     );
   }
 
-  addToWatchlist(ticker: string, note = ''): Observable<WatchlistItem> {
-    return this.api
-      .post<WatchlistItem>('/screener/watchlist/', { ticker, note })
-      .pipe(
-        tap((item) => {
-          const upper = item.ticker.toUpperCase();
-          if (!this._watchlist().some((i) => i.ticker.toUpperCase() === upper)) {
-            this._watchlist.update((rows) => [item, ...rows]);
-          }
-          // Reflect in any currently-displayed result rows.
-          const res = this._result();
-          if (res) {
-            this._result.set({
-              ...res,
-              rows: res.rows.map((r) =>
-                r.ticker.toUpperCase() === upper
-                  ? { ...r, in_watchlist: true }
-                  : r,
-              ),
-            });
-          }
-        }),
-      );
-  }
-
   removeFromWatchlist(ticker: string): Observable<void> {
-    return this.api
-      .delete<void>(`/screener/watchlist/${ticker.toUpperCase()}/`)
-      .pipe(
-        tap(() => {
-          this._watchlist.update((rows) =>
-            rows.filter((r) => r.ticker.toUpperCase() !== ticker.toUpperCase()),
-          );
-          const res = this._result();
-          if (res) {
-            this._result.set({
-              ...res,
-              rows: res.rows.map((r) =>
-                r.ticker.toUpperCase() === ticker.toUpperCase()
-                  ? { ...r, in_watchlist: false }
-                  : r,
-              ),
-            });
-          }
-        }),
-      );
+    return this.watchlistStore.remove(ticker).pipe(
+      tap(() => {
+        const upper = ticker.toUpperCase();
+        const res = this._result();
+        if (res) {
+          this._result.set({
+            ...res,
+            rows: res.rows.map((r) =>
+              r.ticker.toUpperCase() === upper
+                ? { ...r, in_watchlist: false }
+                : r,
+            ),
+          });
+        }
+      }),
+      map(() => undefined),
+    );
   }
 }

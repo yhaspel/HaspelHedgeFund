@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .._persist import record_llm_call
 from ..base import AgentState, pick_model
+from ..investor_profile_block import PERSONA_FRAMING, format_profile_block
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import PersonaOutput
@@ -84,6 +85,10 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
                 f"RECENT FILINGS:\n{filing_block}\n\n"
                 "Produce your PersonaOutput JSON now."
             )
+            # P3-prereq-5 WS-C: investor-profile context (no-op when unset).
+            # Sector-rotation branch is left untouched (profile flows to the
+            # non-sector book; sector ETFs reason against macro/sector data).
+            user += format_profile_block(state.get("investor_profile"), PERSONA_FRAMING)
             system_prompt = spec.prompt
         # Honor the global default flip in registry (Haiku 4.5) for personas
         # whose spec.default_model wasn't given a per-spec override. Persona

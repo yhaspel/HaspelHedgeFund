@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "apps.models_catalog",
     "apps.portfolios",
     "apps.screener",
+    "apps.investor_profile",
     "hedgefund_agents",
 ]
 

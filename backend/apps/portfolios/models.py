@@ -402,6 +402,18 @@ class PortfolioStrategy(models.Model):
         ),
     )
 
+    # P3-prereq-5 WS-G: opt this strategy's autonomous cycle Runs in to
+    # investor-profile personalization. Default off preserves existing
+    # strategy behaviour when the owner takes the questionnaire.
+    apply_investor_profile = models.BooleanField(
+        default=False,
+        help_text=(
+            "When true and the owner's profile master switch is on, this "
+            "strategy's cycle Runs are personalized to the owner's investor "
+            "profile (CIO, personas and Risk Manager narrative only)."
+        ),
+    )
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -73,6 +73,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
             "messages", "decisions", "llm_calls",
             # P01/P02a review: surface evidence and risk-context to the UI.
             "evidence", "risk_context",
+            # P3-prereq-5 WS-C: investor-profile audit snapshot for the badge.
+            "investor_profile_applied",
         )
 
     def get_strategy_backlink(self, run: Run) -> dict | None:

@@ -25,7 +25,7 @@ import { FilterEditorComponent } from './filter-editor.component';
 import { PresetBarComponent } from './preset-bar.component';
 import { ResultsTableComponent } from './results-table.component';
 import { SavedScreensComponent } from './saved-screens.component';
-import { WatchlistPanelComponent } from './watchlist-panel.component';
+import { WatchlistPanelComponent } from '../watchlist/watchlist-panel.component';
 
 type ViewMode = 'results' | 'watchlist';
 

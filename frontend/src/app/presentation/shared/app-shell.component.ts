@@ -2,10 +2,12 @@ import { Component, HostListener, Input, OnInit, computed, inject, signal } from
 import { CommonModule } from '@angular/common';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+import { InvestorProfileStore } from '../../abstraction/investor-profile.store';
 import { NewsStore } from '../../abstraction/news.store';
 import { MarketNewsItem } from '../../core/models/news.model';
 import { CommandPaletteComponent } from './command-palette.component';
 import { NewsChyronComponent } from '../news/news-chyron.component';
+import { NeedsPromptModalComponent } from '../profile/needs-prompt.modal';
 import { PopoverComponent } from './popover.component';
 
 type Theme = 'light' | 'dark';
@@ -20,6 +22,7 @@ const THEME_KEY = 'hf.theme';
     RouterLinkActive,
     CommandPaletteComponent,
     NewsChyronComponent,
+    NeedsPromptModalComponent,
     PopoverComponent,
   ],
   template: `
@@ -45,6 +48,14 @@ const THEME_KEY = 'hf.theme';
            (focus)="popPort.show()" (blur)="popPort.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
           <hf-popover #popPort placement="right" align="center" size="compact" role="tooltip">Portfolio</hf-popover>
+        </a>
+        <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
+           [attr.aria-current]="navWatch.isActive ? 'page' : null"
+           aria-label="Watchlist"
+           (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
+           (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
+          <hf-popover #popWatch placement="right" align="center" size="compact" role="tooltip">Watchlist</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navRuns="routerLinkActive"
@@ -96,6 +107,14 @@ const THEME_KEY = 'hf.theme';
           <hf-popover #popNews placement="right" align="center" size="compact" role="tooltip">News</hf-popover>
         </a>
         <div class="spacer"></div>
+        <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
+           [attr.aria-current]="navProfile.isActive ? 'page' : null"
+           aria-label="Profile"
+           (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
+           (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
+          <hf-popover #popProfile placement="right" align="center" size="compact" role="tooltip">Profile</hf-popover>
+        </a>
         <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
            [attr.aria-current]="navInfo.isActive ? 'page' : null"
            aria-label="Guides"
@@ -139,10 +158,45 @@ const THEME_KEY = 'hf.theme';
                 <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
               </svg>
             </button>
-            <span *ngIf="auth.user() as u" class="mono text-2xs text-text-2">{{ u.email }}</span>
+            @if (auth.user(); as u) {
+              <a routerLink="/profile"
+                 class="email-link mono text-2xs text-text-2"
+                 aria-label="Your profile"
+                 (mouseenter)="popEmail.show()" (mouseleave)="popEmail.maybeHide()"
+                 (focus)="popEmail.show()" (blur)="popEmail.maybeHide()">
+                {{ u.email }}
+              </a>
+              <hf-popover #popEmail placement="bottom" align="end" size="compact" role="tooltip">
+                @if (profile.hasProfile()) {
+                  <strong>{{ profileType() }}</strong>
+                  <span class="block text-text-3 text-[11px]">View profile</span>
+                } @else {
+                  Personalize your analyses — take the 2-minute questionnaire.
+                }
+              </hf-popover>
+            }
             <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
           </div>
         </div>
+        @if (showBanner()) {
+          <div class="nudge-banner" role="status">
+            <span>
+              Personalize your analyses — take the 2-minute investor
+              questionnaire and the council will calibrate to you.
+            </span>
+            <div class="actions">
+              <a class="btn primary sm" routerLink="/profile/questionnaire">
+                Take it
+              </a>
+              <button type="button"
+                      class="btn ghost sm"
+                      (click)="dismissNudge()"
+                      aria-label="Dismiss reminder for ~30 days">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        }
         @if (news.chyronEnabled()) {
           <hf-news-chyron
             [items]="news.chyronItems()"
@@ -156,6 +210,11 @@ const THEME_KEY = 'hf.theme';
       @if (paletteOpen()) {
         <hf-command-palette (closed)="paletteOpen.set(false)" />
       }
+      <hf-needs-prompt-modal
+        [open]="showWelcomeModal()"
+        (dismissed)="dismissNudge()"
+        (take)="dismissNudge()"
+      />
     </div>
   `,
   styles: [
@@ -183,6 +242,24 @@ const THEME_KEY = 'hf.theme';
       .page[tabindex='-1']:focus {
         outline: none;
       }
+      .email-link {
+        text-decoration: none;
+        cursor: pointer;
+        position: relative;
+      }
+      .email-link:hover { color: var(--text); text-decoration: underline; }
+      .nudge-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 16px;
+        background: var(--acc-info-soft);
+        color: var(--text);
+        border-bottom: 1px solid var(--border);
+        font-size: 12.5px;
+      }
+      .nudge-banner .actions { display: flex; gap: 8px; }
     `,
   ],
 })
@@ -190,6 +267,7 @@ export class AppShellComponent implements OnInit {
   @Input() crumbs: { label: string; link?: string }[] = [];
   readonly auth = inject(AuthStore);
   readonly news = inject(NewsStore);
+  readonly profile = inject(InvestorProfileStore);
   private readonly router = inject(Router);
 
   readonly theme = signal<Theme>('dark');
@@ -200,6 +278,16 @@ export class AppShellComponent implements OnInit {
   // ADR 0004: global command palette state.
   readonly paletteOpen = signal(false);
   readonly paletteShortcutHint = computed(() => this.isMac() ? '⌘K' : 'Ctrl K');
+
+  readonly showWelcomeModal = computed(
+    () => this.profile.nudge().form === 'modal' && this.profile.nudge().due,
+  );
+  readonly showBanner = computed(
+    () => this.profile.nudge().form === 'banner' && this.profile.nudge().due,
+  );
+  readonly profileType = computed(
+    () => this.profile.active()?.analysis?.investor_type ?? '',
+  );
 
   openPalette(): void {
     this.paletteOpen.set(true);
@@ -236,11 +324,19 @@ export class AppShellComponent implements OnInit {
       },
       error: () => { /* not fatal — chyron just stays hidden */ },
     });
+
+    // Load profile bundle so the welcome modal / banner / hover popover have
+    // data. TTL-cached + in-flight-deduped so re-mounting doesn't re-fetch.
+    this.profile.load().subscribe({ error: () => undefined });
   }
 
   /** Click a chyron headline → deep-link to /news with the article modal open. */
   onChyronOpen(item: MarketNewsItem): void {
     this.router.navigate(['/news'], { queryParams: { article: item.id } });
+  }
+
+  dismissNudge(): void {
+    this.profile.dismissNudge().subscribe();
   }
 
   toggleTheme(): void {

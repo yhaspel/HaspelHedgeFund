@@ -11,8 +11,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { WatchlistItem } from '../../core/models/screener.model';
-import { TickerComponent } from '../shared/ticker.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { TickerComponent } from '../shared/ticker.component';
 
 @Component({
   selector: 'hf-screener-watchlist-panel',

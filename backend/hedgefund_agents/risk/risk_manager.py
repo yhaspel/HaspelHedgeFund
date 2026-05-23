@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .._persist import record_llm_call
 from ..base import AgentState, pick_model
+from ..investor_profile_block import RISK_MANAGER_FRAMING, format_profile_block
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import RiskOutput
@@ -147,6 +148,10 @@ def run_risk_manager(state: AgentState) -> AgentState:
         f"Recent volatility (atr_pct): {technicals.get('atr_pct', 0.0):.2f}\n"
         f"Markov persistence check (SPY): {markov_check}\n"
     )
+    # P3-prereq-5 WS-G / R17: narrative-only profile injection. apply_hard_caps
+    # and the post-call min/OR backstops below ensure the LLM can never relax
+    # a cap, flip the veto, or move a number — only the wording shifts.
+    user += format_profile_block(state.get("investor_profile"), RISK_MANAGER_FRAMING)
     from apps.backtests.cache import make_cache_ctx
     parsed, resp = call_structured(
         client,

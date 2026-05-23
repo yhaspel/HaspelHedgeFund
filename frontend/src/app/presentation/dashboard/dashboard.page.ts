@@ -13,6 +13,7 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { GrossNetMeterComponent } from '../shared/gross-net-meter.component';
 import { PopoverComponent } from '../shared/popover.component';
 import { TickerComponent } from '../shared/ticker.component';
+import { WatchlistCardComponent } from '../watchlist/watchlist-card.component';
 
 type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
 
@@ -29,6 +30,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
     GrossNetMeterComponent,
     PopoverComponent,
     TickerComponent,
+    WatchlistCardComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Dashboard'}]">
@@ -343,6 +345,11 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
             </table>
           }
         </section>
+      </div>
+
+      <!-- P3-prereq-5: Watchlist card. -->
+      <div class="watchlist-row">
+        <hf-watchlist-card></hf-watchlist-card>
       </div>
     </hf-app-shell>
   `,

@@ -70,6 +70,13 @@ class Run(models.Model):
     #             "stub_nav_usd": Decimal-as-string}
     risk_context = models.JSONField(default=dict, blank=True)
 
+    # P3-prereq-5 WS-C: audit snapshot of the investor-profile injection.
+    # Structure: {"applied": bool, "response_id": int|null,
+    #             "schema_version": int|null, "agent_brief": str,
+    #             "reason": ""|"no_profile"|"personalization_off"|"strategy_opt_out"}.
+    # Empty {} for every existing run and every backtest.
+    investor_profile_applied = models.JSONField(default=dict, blank=True)
+
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"
 

@@ -22,6 +22,81 @@ from hedgefund_agents.versioning import ensure_versions_synced, snapshot_version
 from .evidence import build_evidence, build_risk_context
 from .models import AgentMessage, Decision, Run
 
+NOT_APPLIED_EMPTY_META = {
+    "applied": False,
+    "response_id": None,
+    "schema_version": None,
+    "agent_brief": "",
+    "reason": "",
+}
+
+
+def _resolve_investor_profile(run: Run) -> tuple[dict, dict]:
+    """Resolve the investor profile for a run, once per ``execute_run``.
+
+    Returns ``(profile_ctx, profile_meta)`` where ``profile_ctx == {}`` means
+    no personalization (every consumer is a no-op). The metadata is written to
+    ``run.investor_profile_applied`` for the audit / Personalized badge.
+
+    Eligibility (plan §1, §3, §11):
+        - ad-hoc runs always eligible;
+        - strategy-sourced runs eligible only when the strategy has
+          ``apply_investor_profile`` on;
+        - backtests are a SEPARATE path (apps.backtests) that never calls
+          this function — the key is unset there.
+    """
+    def not_applied(reason: str) -> tuple[dict, dict]:
+        meta = dict(NOT_APPLIED_EMPTY_META)
+        meta["reason"] = reason
+        return {}, meta
+
+    if run.source == Run.ADHOC:
+        pass
+    elif run.source == Run.STRATEGY:
+        portfolio_target = getattr(run, "portfolio_target", None)
+        strategy = (
+            getattr(portfolio_target, "strategy", None)
+            if portfolio_target is not None
+            else None
+        )
+        if not (strategy and getattr(strategy, "apply_investor_profile", False)):
+            return not_applied("strategy_opt_out")
+    else:  # unknown sources are excluded by default
+        return not_applied("strategy_opt_out")
+
+    try:
+        from apps.investor_profile.models import (
+            InvestorProfileState,
+            QuestionnaireResponse,
+        )
+    except ImportError:  # pragma: no cover — app always installed in prod
+        return not_applied("no_profile")
+
+    state = InvestorProfileState.objects.filter(user=run.user).first()
+    if state is not None and not state.apply_to_runs:
+        return not_applied("personalization_off")
+
+    active = QuestionnaireResponse.objects.active_for(run.user)
+    if active is None:
+        return not_applied("no_profile")
+
+    analysis = active.analysis or {}
+    ctx = {
+        "response_id": active.id,
+        "investor_type": analysis.get("investor_type", ""),
+        "risk_band": analysis.get("risk_band", ""),
+        "horizon_band": analysis.get("horizon_band", ""),
+        "agent_brief": active.agent_brief or "",
+    }
+    meta = {
+        "applied": True,
+        "response_id": active.id,
+        "schema_version": active.schema_version,
+        "agent_brief": active.agent_brief or "",
+        "reason": "",
+    }
+    return ctx, meta
+
 log = logging.getLogger(__name__)
 
 ANALYTICAL_AGENTS = list(ANALYTICAL_NODES.keys())
@@ -105,6 +180,11 @@ def execute_run(run_id: int) -> None:
         run.risk_context = build_risk_context(portfolio=None)
         run.save(update_fields=["risk_context"])
 
+        # P3-prereq-5 WS-C/WS-G: resolve the investor profile once per run.
+        profile_ctx, profile_meta = _resolve_investor_profile(run)
+        run.investor_profile_applied = profile_meta
+        run.save(update_fields=["investor_profile_applied"])
+
         for ticker in run.tickers:
             initial_state = {
                 "ticker": ticker,
@@ -113,6 +193,7 @@ def execute_run(run_id: int) -> None:
                 "model_overrides": run.model_overrides or {},
                 "data_provider": data_provider,
                 "filings_provider": filings_provider,
+                "investor_profile": profile_ctx,
             }
             final_state = graph.invoke(initial_state)
             _persist_outputs(run, final_state, selected_personas)

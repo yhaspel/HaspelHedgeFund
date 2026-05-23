@@ -13,6 +13,7 @@ import logging
 
 from .._persist import record_llm_call
 from ..base import AgentState, pick_model
+from ..investor_profile_block import CIO_FRAMING, format_profile_block
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import CioOutput
@@ -80,6 +81,7 @@ def run_cio(state: AgentState) -> AgentState:
         "Decide. If you ratify, copy the PM action/qty/weight. If you change "
         "anything, set overrode_pm=True and explain in override_reason."
     )
+    user += format_profile_block(state.get("investor_profile"), CIO_FRAMING)
     try:
         from apps.backtests.cache import make_cache_ctx
         parsed, resp = call_structured(

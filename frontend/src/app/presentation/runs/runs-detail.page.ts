@@ -8,6 +8,7 @@ import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { InfoTooltipComponent } from '../shared/info-tooltip.component';
+import { PopoverComponent } from '../shared/popover.component';
 import { PositionSide } from '../../core/models/portfolio.model';
 import { RangeRailComponent } from '../shared/range-rail.component';
 import { TickerComponent } from '../shared/ticker.component';
@@ -31,7 +32,7 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, GlossaryTermComponent, InfoTooltipComponent, RangeRailComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, GlossaryTermComponent, InfoTooltipComponent, PopoverComponent, RangeRailComponent, TickerComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
@@ -77,6 +78,31 @@ interface PersonaCard {
                   open cycle →
                 </a>
               </span>
+            </div>
+          </div>
+        }
+
+        @if (personalized(); as p) {
+          <div class="card mb-3.5 bg-surface-2" data-test="personalized-badge">
+            <div class="card-bd flex items-center gap-2.5 flex-wrap text-2xs">
+              <span class="pill"
+                    tabindex="0"
+                    [attr.aria-describedby]="popPersonalized.open() ? popPersonalized.popoverId : null"
+                    (mouseenter)="popPersonalized.show()" (mouseleave)="popPersonalized.maybeHide()"
+                    (focus)="popPersonalized.show()" (blur)="popPersonalized.maybeHide()">
+                <span class="dot"></span>Personalized
+                <hf-popover #popPersonalized placement="bottom" align="start" size="default" role="tooltip">
+                  <strong class="block mb-1">Investor profile applied</strong>
+                  <span class="block text-text-3 text-[11px]">{{ p }}</span>
+                </hf-popover>
+              </span>
+              <span class="text-text-2">
+                The CIO, persona analysts and Risk Manager narrative for this
+                run were calibrated to your investor profile.
+              </span>
+              <a routerLink="/profile" class="text-[var(--acc-info-fg)] no-underline ml-auto">
+                View profile →
+              </a>
             </div>
           </div>
         }
@@ -678,6 +704,16 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly canCancel = computed(() => {
     const s = this.run()?.status;
     return s === 'queued' || s === 'running';
+  });
+
+  /** P3-prereq-5 WS-C/WS-D: agent_brief that was injected for this run,
+   *  empty string when no personalization was applied. */
+  readonly personalized = computed<string | null>(() => {
+    const meta = this.run()?.investor_profile_applied as
+      | { applied?: boolean; agent_brief?: string }
+      | undefined;
+    if (!meta?.applied) return null;
+    return meta.agent_brief || '(no agent brief recorded)';
   });
 
   cancel(): void {
