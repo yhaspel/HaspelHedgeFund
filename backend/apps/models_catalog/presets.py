@@ -13,8 +13,19 @@ ALL_AGENTS = PERSONA_AGENTS | ANALYTICAL_AGENTS | {
 }
 
 PRESETS: dict[str, dict[str, str]] = {
+    # Dev preset routes every agent to an OpenRouter :free slug — zero $-cost
+    # and zero Anthropic spend (pairs with settings.BLOCK_ANTHROPIC=True).
+    # Mix biased toward GPT-OSS 120B + Nemotron 3 Super 120B per user pref;
+    # gemma-4-31b for fast structured extraction, deepseek-v4-flash for the
+    # 1M-context macro snapshot.
     "dev": {
-        "*": "openrouter:qwen/qwen3.6-27b",
+        "*persona*": "openrouter:openai/gpt-oss-120b:free",
+        "*analytical*": "openrouter:google/gemma-4-31b-it:free",
+        "macro": "openrouter:deepseek/deepseek-v4-flash:free",
+        "news_digest": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "risk_manager": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "portfolio_manager": "openrouter:openai/gpt-oss-120b:free",
+        "cio": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
     },
     "research": {
         "*persona*": "anthropic:claude-sonnet-4-6",

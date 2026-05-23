@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
+from django.conf import settings
+
 from .llm.adapters import AnthropicClient, OllamaClient, OpenRouterClient
 from .llm.client import LLMClient
 
@@ -69,26 +71,48 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
 # invocations). Used for ANALYTICAL + macro/news (structured extraction tasks
 # that don't need frontier synthesis). Personas + risk/PM stay on Haiku since
 # they synthesize multi-source context.
-_PERSONA = ("anthropic", "claude-haiku-4-5-20251001")
-_ANALYTICAL = ("openrouter", "meta-llama/llama-3.3-70b-instruct")
-DEFAULT_MODELS: dict[str, tuple[str, str]] = {
-    "fundamentals": _ANALYTICAL,
-    "technicals": _ANALYTICAL,
-    "valuation": _ANALYTICAL,
-    "sentiment": _ANALYTICAL,
-    "macro": _ANALYTICAL,
-    "news_digest": _ANALYTICAL,
-    "buffett": _PERSONA,
-    "munger": _PERSONA,
-    "graham": _PERSONA,
-    "wood": _PERSONA,
-    "druckenmiller": _PERSONA,
-    "burry": _PERSONA,
-    "damodaran": _PERSONA,
-    "lynch": _PERSONA,
-    "risk_manager": _PERSONA,
-    "cio": _PERSONA,
-}
+_PROD_PERSONA = ("anthropic", "claude-haiku-4-5-20251001")
+_PROD_ANALYTICAL = ("openrouter", "meta-llama/llama-3.3-70b-instruct")
+# Dev/blocked fallback: every agent on a free OpenRouter slug. Used when an
+# environment sets BLOCK_ANTHROPIC=True so a missing per-agent override can
+# never resolve to Haiku and silently spend credits. GPT-OSS 120B chosen as
+# the universal fallback — flagship-grade and $0/Mtok.
+_BLOCKED_FALLBACK = ("openrouter", "openai/gpt-oss-120b:free")
+
+_ALL_AGENT_NAMES = (
+    "fundamentals", "technicals", "valuation", "sentiment",
+    "macro", "news_digest",
+    "buffett", "munger", "graham", "wood",
+    "druckenmiller", "burry", "damodaran", "lynch",
+    "risk_manager", "cio",
+)
+
+
+def _compute_default_models() -> dict[str, tuple[str, str]]:
+    """Build the agent → (provider, model) map.
+
+    When settings.BLOCK_ANTHROPIC is True, every entry is OpenRouter — even the
+    persona slots that prod sends to Haiku. This is the second leg of the
+    "no Anthropic in dev" guarantee: the adapter raise (in
+    anthropic.py:__init__) is the safety net; this prevents the safety net
+    from ever firing on a happy-path run.
+    """
+    if getattr(settings, "BLOCK_ANTHROPIC", False):
+        return {name: _BLOCKED_FALLBACK for name in _ALL_AGENT_NAMES}
+    persona = _PROD_PERSONA
+    analytical = _PROD_ANALYTICAL
+    return {
+        "fundamentals": analytical, "technicals": analytical,
+        "valuation": analytical, "sentiment": analytical,
+        "macro": analytical, "news_digest": analytical,
+        "buffett": persona, "munger": persona, "graham": persona,
+        "wood": persona, "druckenmiller": persona, "burry": persona,
+        "damodaran": persona, "lynch": persona,
+        "risk_manager": persona, "cio": persona,
+    }
+
+
+DEFAULT_MODELS: dict[str, tuple[str, str]] = _compute_default_models()
 
 
 # Catalog for GET /api/models/ (stub for P2d).

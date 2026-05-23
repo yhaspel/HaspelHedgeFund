@@ -24,6 +24,12 @@ class AnthropicClient:
     provider = "anthropic"
 
     def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+        if getattr(settings, "BLOCK_ANTHROPIC", False):
+            raise RuntimeError(
+                "Anthropic API is blocked in this environment "
+                "(settings.BLOCK_ANTHROPIC=True). Route this agent through "
+                "OpenRouter or unset BLOCK_ANTHROPIC."
+            )
         self.api_key = api_key or settings.ANTHROPIC_API_KEY
         if not self.api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is not configured")

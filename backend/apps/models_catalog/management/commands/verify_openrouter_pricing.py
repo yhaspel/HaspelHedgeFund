@@ -26,7 +26,10 @@ class Command(BaseCommand):
             "--model",
             action="append",
             dest="models",
-            help="Limit to one or more ModelEntry ids (repeatable). Default: all openrouter:* rows.",
+            help=(
+                "Limit to one or more ModelEntry ids (repeatable). "
+                "Default: all openrouter:* rows."
+            ),
         )
         parser.add_argument("--json", action="store_true", help="Emit JSON report.")
 

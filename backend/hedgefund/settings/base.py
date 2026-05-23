@@ -138,6 +138,20 @@ LLM_REQUIRE_KNOWN_PRICES = os.environ.get("LLM_REQUIRE_KNOWN_PRICES", "1") == "1
 # apps/models_catalog/presets.py.
 LLM_DEFAULT_PRESET = os.environ.get("LLM_DEFAULT_PRESET", "hybrid")
 
+# Hard block on Anthropic API use. When True:
+#   1. `AnthropicClient.__init__` raises before any HTTP call.
+#   2. `DEFAULT_MODELS` in hedgefund_agents.registry swaps every persona/decision
+#      agent off Haiku and onto an OpenRouter route.
+# Dev settings force this on so an incomplete per-agent override map (which
+# falls through to DEFAULT_MODELS for missing agents) can never leak spend.
+BLOCK_ANTHROPIC = os.environ.get("BLOCK_ANTHROPIC", "0") == "1"
+
+# Restrict every model selector in the UI to OpenRouter :free models. When True,
+# `/api/models/` marks non-free rows as `available: false` so every dropdown
+# (Settings → Models, backtest config, runs, news sentiment) auto-disables the
+# paid options. Pairs with BLOCK_ANTHROPIC for zero-spend dev environments.
+LLM_FREE_ONLY = os.environ.get("LLM_FREE_ONLY", "0") == "1"
+
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

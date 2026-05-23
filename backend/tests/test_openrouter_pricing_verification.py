@@ -22,7 +22,6 @@ from rest_framework.test import APIClient
 
 from apps.models_catalog.models import ModelEntry
 from apps.models_catalog.verification import (
-    VerificationResult,
     verify_models,
 )
 

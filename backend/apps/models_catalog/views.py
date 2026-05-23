@@ -54,8 +54,20 @@ class ModelsView(APIView):
             "openai": pk.has_key("openai"),
             "ollama": bool(pk.ollama_host),
         }
+        free_only = bool(getattr(dj, "LLM_FREE_ONLY", False))
+        block_anthropic = bool(getattr(dj, "BLOCK_ANTHROPIC", False))
         for it in items:
-            it["available"] = creds.get(it["provider"], False)
+            available = creds.get(it["provider"], False)
+            # The runtime adapter refuses to init when BLOCK_ANTHROPIC is on,
+            # so flag those rows unavailable up front rather than letting the
+            # UI offer them and crash at run time.
+            if block_anthropic and it["provider"] == "anthropic":
+                available = False
+            # In free-only mode (dev), every paid model is off-limits — even
+            # OpenRouter routes that the platform key technically reaches.
+            if free_only and not it.get("is_free"):
+                available = False
+            it["available"] = available
         return Response({"models": items})
 
 
