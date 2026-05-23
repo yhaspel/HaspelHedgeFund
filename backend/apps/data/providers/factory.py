@@ -25,6 +25,9 @@ from django.conf import settings
 from .edgar import EdgarProvider
 from .fmp import FmpProvider
 from .fred import FredProvider
+from .market_news import MarketNewsService
+from .market_news_fmp import MarketNewsFmpProvider
+from .market_news_tiingo import MarketNewsTiingoProvider
 from .news import NewsService
 from .news_fmp import FmpNewsProvider
 from .news_tiingo import TiingoNewsProvider
@@ -93,6 +96,18 @@ def _cached_tiingo_news(user_id: int | None, api_key: str) -> TiingoNewsProvider
 
 
 @lru_cache(maxsize=128)
+def _cached_market_news_fmp(user_id: int | None, api_key: str) -> MarketNewsFmpProvider:
+    return MarketNewsFmpProvider(api_key=api_key or None)
+
+
+@lru_cache(maxsize=128)
+def _cached_market_news_tiingo(
+    user_id: int | None, api_key: str
+) -> MarketNewsTiingoProvider:
+    return MarketNewsTiingoProvider(api_key=api_key or None)
+
+
+@lru_cache(maxsize=128)
 def _cached_fred(user_id: int | None, api_key: str) -> FredProvider:
     return FredProvider(api_key=api_key or None)
 
@@ -139,6 +154,54 @@ def get_fred_provider(user: Any = None, *, force_platform: bool = False) -> Fred
     return _cached_fred(_uid(user) if source == "user" else None, key)
 
 
+def get_market_news_fmp_provider(
+    user: Any = None, *, force_platform: bool = False
+) -> MarketNewsFmpProvider:
+    key, source = _resolve_data_key(
+        user, "fmp", "FMP_API_KEY", force_platform=force_platform
+    )
+    log.info(
+        "data_provider provider=market_news_fmp user_id=%s key_source=%s",
+        _uid(user), source,
+    )
+    return _cached_market_news_fmp(_uid(user) if source == "user" else None, key)
+
+
+def get_market_news_tiingo_provider(
+    user: Any = None, *, force_platform: bool = False
+) -> MarketNewsTiingoProvider:
+    key, source = _resolve_data_key(
+        user, "tiingo", "TIINGO_API_KEY", force_platform=force_platform
+    )
+    log.info(
+        "data_provider provider=market_news_tiingo user_id=%s key_source=%s",
+        _uid(user), source,
+    )
+    return _cached_market_news_tiingo(_uid(user) if source == "user" else None, key)
+
+
+def get_market_news_service(
+    user: Any = None, *, force_platform: bool = False
+) -> MarketNewsService:
+    """Build a ``MarketNewsService`` with whichever provider keys are available.
+
+    Missing-key ``RuntimeError`` is swallowed so a user with only one key still
+    gets a partial feed. With no keys at all, the service has no providers and
+    ``fetch_latest`` will return whatever rows are already persisted.
+    """
+    fmp: MarketNewsFmpProvider | None = None
+    tiingo: MarketNewsTiingoProvider | None = None
+    try:
+        fmp = get_market_news_fmp_provider(user, force_platform=force_platform)
+    except RuntimeError:
+        pass
+    try:
+        tiingo = get_market_news_tiingo_provider(user, force_platform=force_platform)
+    except RuntimeError:
+        pass
+    return MarketNewsService(fmp=fmp, tiingo=tiingo)
+
+
 def get_news_service(user: Any = None, *, force_platform: bool = False) -> NewsService:
     """Tries both Tiingo and FMP news factories. Missing-key RuntimeErrors are
     silently swallowed so a user with only one provider key still gets news.
@@ -172,5 +235,7 @@ def _reset_caches_for_tests() -> None:
     _cached_fmp.cache_clear()
     _cached_fmp_news.cache_clear()
     _cached_tiingo_news.cache_clear()
+    _cached_market_news_fmp.cache_clear()
+    _cached_market_news_tiingo.cache_clear()
     _cached_fred.cache_clear()
     _cached_edgar.cache_clear()

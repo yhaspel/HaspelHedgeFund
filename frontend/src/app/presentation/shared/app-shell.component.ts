@@ -1,8 +1,11 @@
 import { Component, HostListener, Input, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+import { NewsStore } from '../../abstraction/news.store';
+import { MarketNewsItem } from '../../core/models/news.model';
 import { CommandPaletteComponent } from './command-palette.component';
+import { NewsChyronComponent } from '../news/news-chyron.component';
 import { PopoverComponent } from './popover.component';
 
 type Theme = 'light' | 'dark';
@@ -11,7 +14,14 @@ const THEME_KEY = 'hf.theme';
 @Component({
   selector: 'hf-app-shell',
   standalone: true,
-  imports: [CommonModule, RouterLink, RouterLinkActive, CommandPaletteComponent, PopoverComponent],
+  imports: [
+    CommonModule,
+    RouterLink,
+    RouterLinkActive,
+    CommandPaletteComponent,
+    NewsChyronComponent,
+    PopoverComponent,
+  ],
   template: `
     <div class="app">
       <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -77,6 +87,14 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
           <hf-popover #popSt placement="right" align="center" size="compact" role="tooltip">Strategies</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
+           [attr.aria-current]="navNews.isActive ? 'page' : null"
+           aria-label="News"
+           (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
+           (focus)="popNews.show()" (blur)="popNews.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
+          <hf-popover #popNews placement="right" align="center" size="compact" role="tooltip">News</hf-popover>
+        </a>
         <div class="spacer"></div>
         <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
            [attr.aria-current]="navInfo.isActive ? 'page' : null"
@@ -125,6 +143,12 @@ const THEME_KEY = 'hf.theme';
             <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
           </div>
         </div>
+        @if (news.chyronEnabled()) {
+          <hf-news-chyron
+            [items]="news.chyronItems()"
+            (open)="onChyronOpen($event)"
+          ></hf-news-chyron>
+        }
         <div class="page" id="main-content" tabindex="-1">
           <ng-content></ng-content>
         </div>
@@ -165,6 +189,8 @@ const THEME_KEY = 'hf.theme';
 export class AppShellComponent implements OnInit {
   @Input() crumbs: { label: string; link?: string }[] = [];
   readonly auth = inject(AuthStore);
+  readonly news = inject(NewsStore);
+  private readonly router = inject(Router);
 
   readonly theme = signal<Theme>('dark');
   readonly themeToggleLabel = computed(() =>
@@ -198,6 +224,23 @@ export class AppShellComponent implements OnInit {
     const current = (document.documentElement.dataset['theme'] as Theme | undefined) ?? stored ?? 'dark';
     this.theme.set(current === 'light' ? 'light' : 'dark');
     document.documentElement.dataset['theme'] = this.theme();
+
+    // Load news prefs + first page of feed so the global chyron is populated
+    // across the app. Both are TTL-cached + in-flight-deduped, so re-mounting
+    // the shell on route change does not re-fetch.
+    this.news.loadPreferences().subscribe({
+      next: (r) => {
+        if (r.preferences?.chyron_enabled) {
+          this.news.loadFeed().subscribe();
+        }
+      },
+      error: () => { /* not fatal — chyron just stays hidden */ },
+    });
+  }
+
+  /** Click a chyron headline → deep-link to /news with the article modal open. */
+  onChyronOpen(item: MarketNewsItem): void {
+    this.router.navigate(['/news'], { queryParams: { article: item.id } });
   }
 
   toggleTheme(): void {

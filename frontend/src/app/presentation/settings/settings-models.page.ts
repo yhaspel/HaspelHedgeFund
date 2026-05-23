@@ -1,12 +1,14 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ModelsStore } from '../../abstraction/models.store';
+import { NewsStore } from '../../abstraction/news.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/model.types';
 import { MarkCadence } from '../../core/models/portfolio.model';
+import { NewsPreferences } from '../../core/models/news.model';
 
 @Component({
   selector: 'hf-settings-models',
@@ -231,6 +233,93 @@ import { MarkCadence } from '../../core/models/portfolio.model';
           </div>
         </section>
 
+        <!-- D3 (P3-prereq-4): News settings -->
+        <section class="card col-span-2" data-test="news-settings-card">
+          <div class="card-hd"><span class="title">News</span></div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
+              Controls the
+              <a routerLink="/news" class="text-[var(--acc-info-fg)] underline">/news</a>
+              tab and the always-visible Chyron banner. The
+              <a routerLink="/news" class="text-[var(--acc-info-fg)] underline">News</a>
+              page itself paginates 12 stories at a time, up to 48 total.
+            </p>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl flex items-center justify-between" for="news-sentiment-enabled">
+                <span>Sentiment analysis</span>
+                <input id="news-sentiment-enabled" type="checkbox"
+                       [(ngModel)]="newsForm.sentiment_enabled"
+                       name="news_sentiment_enabled"
+                       data-test="news-sentiment-toggle" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                One frugal LLM pass labels each headline bullish / bearish /
+                neutral. Off = no LLM cost; tiles render with no sentiment colour.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl" for="news-sentiment-model">Sentiment model</label>
+              <select id="news-sentiment-model" class="input sans"
+                      [(ngModel)]="newsForm.sentiment_model"
+                      name="news_sentiment_model"
+                      [disabled]="!newsForm.sentiment_enabled"
+                      data-test="news-sentiment-model">
+                @for (m of newsStore.sentimentChoices(); track m.id) {
+                  <option [value]="m.id">
+                    {{ m.display_name }} ·
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                  </option>
+                }
+              </select>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Restricted to the Llama and Qwen families for cost discipline.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl flex items-center justify-between" for="news-chyron-enabled">
+                <span>Chyron banner</span>
+                <input id="news-chyron-enabled" type="checkbox"
+                       [(ngModel)]="newsForm.chyron_enabled"
+                       name="news_chyron_enabled"
+                       data-test="news-chyron-toggle" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Continuous-scroll TV-style headline ticker, shown as a header
+                line across every page when enabled.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]" *ngIf="newsForm.chyron_enabled">
+              <label class="lbl" for="news-chyron-count">Headlines in the chyron (5–10)</label>
+              <input id="news-chyron-count" class="input mono" type="number"
+                     min="5" max="10" step="1"
+                     [(ngModel)]="newsForm.chyron_item_count"
+                     name="news_chyron_count"
+                     data-test="news-chyron-count" />
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                The chyron appears as a header line across every page when enabled.
+              </p>
+            </div>
+
+            <button type="button" class="btn primary save-btn save-btn--portfolio"
+                    (click)="saveNewsPrefs()"
+                    [disabled]="savingNews() || !isNewsDirty()"
+                    data-test="save-news-prefs">
+              {{ savingNews()
+                  ? 'Saving…'
+                  : (isNewsDirty() ? 'Save News settings' : 'No changes') }}
+            </button>
+            @if (newsMsg()) {
+              <p role="status" aria-live="polite"
+                 class="text-[11.5px] text-[var(--acc-long-fg)] m-0"
+                 data-test="news-prefs-msg">{{ newsMsg() }}</p>
+            }
+          </div>
+        </section>
+
         <!-- D: Available models -->
         <section class="card col-span-2">
           <div class="card-hd"><span class="title">Available models ({{ store.models().length }})</span></div>
@@ -301,6 +390,48 @@ import { MarkCadence } from '../../core/models/portfolio.model';
 export class SettingsModelsPage implements OnInit {
   readonly store = inject(ModelsStore);
   readonly portfolio = inject(PortfolioStore);
+  readonly newsStore = inject(NewsStore);
+
+  // News settings form state.
+  newsForm: NewsPreferences = {
+    sentiment_enabled: true,
+    sentiment_model: 'openrouter:qwen/qwen3.6-27b',
+    chyron_enabled: true,
+    chyron_item_count: 8,
+    feed_item_count: 20,
+  };
+  private savedNews: NewsPreferences = { ...this.newsForm };
+  savingNews = signal(false);
+  newsMsg = signal<string | null>(null);
+
+  isNewsDirty(): boolean {
+    return JSON.stringify(this.newsForm) !== JSON.stringify(this.savedNews);
+  }
+
+  saveNewsPrefs(): void {
+    this.savingNews.set(true);
+    this.newsMsg.set(null);
+    const patch = { ...this.newsForm };
+    // Clamp client-side so UX matches the backend validators.
+    patch.chyron_item_count = Math.min(10, Math.max(5, patch.chyron_item_count));
+    // feed_item_count is legacy/unused now that the feed paginates; keep it
+    // on the model but never expose to the user.
+    delete (patch as Partial<typeof patch>).feed_item_count;
+    this.newsStore.savePreferences(patch).subscribe({
+      next: (r) => {
+        this.newsForm = { ...r.preferences };
+        this.savedNews = { ...r.preferences };
+        this.savingNews.set(false);
+        this.newsMsg.set('Saved.');
+        setTimeout(() => this.newsMsg.set(null), 2500);
+      },
+      error: (err) => {
+        this.savingNews.set(false);
+        this.newsMsg.set(err?.error?.detail || 'Failed to save News settings.');
+      },
+    });
+  }
+
   readonly providers = [
     { field: 'anthropic', label: 'Anthropic API key' },
     { field: 'openrouter', label: 'OpenRouter API key' },
@@ -355,6 +486,13 @@ export class SettingsModelsPage implements OnInit {
         this.intervalMinutes = p.interval_minutes;
         this.savedCadence = p.mark_cadence;
         this.savedIntervalMinutes = p.interval_minutes;
+      },
+      error: () => { /* ignore — defaults are fine */ },
+    });
+    this.newsStore.loadPreferences().subscribe({
+      next: (r) => {
+        this.newsForm = { ...r.preferences };
+        this.savedNews = { ...r.preferences };
       },
       error: () => { /* ignore — defaults are fine */ },
     });

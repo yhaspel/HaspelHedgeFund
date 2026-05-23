@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 
 
@@ -299,3 +300,78 @@ class CorporateAction(models.Model):
 
     def __str__(self) -> str:
         return f"{self.ticker} {self.kind} {self.as_of_date}"
+
+
+class MarketNewsItem(models.Model):
+    """One market-news story from one provider (P3-prereq-4).
+
+    Parallel to ``NewsItem`` but market-wide, not ticker-scoped. This is *today*
+    data — it must never be consulted by any backtest or point-in-time agent
+    path. The market-news view layer + service is the only legitimate consumer.
+
+    Sentiment fields are populated by the frugal market-news sentiment
+    classifier (``apps.data.market_news_sentiment``) and keyed to the
+    ``sentiment_model`` that produced them so a model switch re-scores.
+    """
+
+    SENTIMENT_BULLISH = "bullish"
+    SENTIMENT_BEARISH = "bearish"
+    SENTIMENT_NEUTRAL = "neutral"
+    SENTIMENT_CHOICES = [
+        (SENTIMENT_BULLISH, "Bullish"),
+        (SENTIMENT_BEARISH, "Bearish"),
+        (SENTIMENT_NEUTRAL, "Neutral"),
+    ]
+
+    provider = models.CharField(max_length=16)  # "fmp" | "tiingo"
+    headline = models.CharField(max_length=512)
+    summary = models.TextField(blank=True, default="")
+    url = models.URLField(max_length=1000)
+    image_url = models.URLField(max_length=1000, blank=True, default="")
+    source = models.CharField(max_length=128, blank=True, default="")
+    published_at = models.DateTimeField(db_index=True)
+    symbols = models.JSONField(default=list, blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    dedup_key = models.CharField(max_length=64, db_index=True, blank=True, default="")
+    # Sentiment (populated by market_news_sentiment; blank until classified).
+    sentiment = models.CharField(
+        max_length=8, choices=SENTIMENT_CHOICES, blank=True, default=""
+    )
+    sentiment_score = models.FloatField(null=True, blank=True)
+    sentiment_rationale = models.CharField(max_length=240, blank=True, default="")
+    sentiment_model = models.CharField(max_length=128, blank=True, default="")
+    sentiment_at = models.DateTimeField(null=True, blank=True)
+    fetched_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        unique_together = [("provider", "url")]
+        indexes = [models.Index(fields=["published_at", "dedup_key"])]
+        ordering = ["-published_at"]
+
+    def __str__(self) -> str:
+        return f"{self.provider}:{self.published_at:%Y-%m-%d} {self.headline[:60]}"
+
+
+class UserNewsPreferences(models.Model):
+    """Per-user News settings (P3-prereq-4).
+
+    Mirrors ``apps.portfolios.models.PortfolioPreferences`` — feature-local,
+    one row per user, auto-created on first read.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        related_name="news_prefs",
+        on_delete=models.CASCADE,
+    )
+    sentiment_enabled = models.BooleanField(default=True)
+    sentiment_model = models.CharField(
+        max_length=128, default="openrouter:qwen/qwen3.6-27b"
+    )
+    chyron_enabled = models.BooleanField(default=True)
+    chyron_item_count = models.PositiveSmallIntegerField(default=8)  # clamp 5–10
+    feed_item_count = models.PositiveSmallIntegerField(default=20)  # clamp 10–20
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"news_prefs u={self.user_id}"

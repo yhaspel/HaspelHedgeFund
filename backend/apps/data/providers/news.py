@@ -2,27 +2,13 @@
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
-import re
 
 from django.db import transaction
 
 from ..models import NewsItem
+from ._dedup import dedup_key as _dedup_key
 from .news_fmp import FmpNewsProvider
 from .news_tiingo import TiingoNewsProvider
-
-_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _dedup_key(headline: str, published_at: dt.datetime) -> str:
-    """Bucket near-duplicate headlines from different providers.
-
-    Two items with the same normalized headline within a 24h window collide.
-    """
-    norm = _NORMALIZE_RE.sub(" ", headline.lower()).strip()
-    norm = " ".join(norm.split()[:12])  # first 12 words capture the gist
-    day_bucket = published_at.strftime("%Y-%m-%d")
-    return hashlib.sha256(f"{norm}|{day_bucket}".encode()).hexdigest()[:32]
 
 
 class NewsService:

@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     MacroSnapshotView,
+    MarketNewsFeedView,
+    NewsPreferencesView,
     RegimeBatchView,
     RegimeHistoryView,
     RegimeSnapshotView,
@@ -24,4 +26,6 @@ urlpatterns = [
     path("tickers/<str:ticker>/news/", TickerNewsView.as_view(), name="ticker-news"),
     path("tickers/<str:ticker>/sparkline/", TickerSparklineView.as_view(), name="ticker-sparkline"),
     path("tickers/<str:ticker>/profile/", TickerProfileView.as_view(), name="ticker-profile"),
+    path("news/feed/", MarketNewsFeedView.as_view(), name="market-news-feed"),
+    path("news/preferences/", NewsPreferencesView.as_view(), name="news-preferences"),
 ]

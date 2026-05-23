@@ -89,6 +89,12 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'news',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/news/news.page').then((m) => m.NewsPage),
+  },
+  {
     path: 'strategies',
     canActivate: [authGuard],
     loadComponent: () =>

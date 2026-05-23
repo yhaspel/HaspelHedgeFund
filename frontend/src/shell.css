@@ -2,8 +2,15 @@
 
 .app {
   display: grid;
-  grid-template-columns: 56px 1fr;
+  /* `minmax(0, 1fr)` lets the main column shrink below its content's min-content
+     size. Without this, wide flex children (e.g. the news chyron's nowrap track)
+     blow out the column and force horizontal page scroll. */
+  grid-template-columns: 56px minmax(0, 1fr);
   min-height: 100vh;
+}
+.app > main {
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 /* Sidebar */
