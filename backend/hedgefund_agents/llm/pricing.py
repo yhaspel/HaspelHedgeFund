@@ -45,7 +45,7 @@ PRICING: dict[str, ModelPrice] = {
 }
 
 
-def _lookup_catalog_price(model: str) -> ModelPrice | None:
+def lookup_catalog_price(model: str) -> ModelPrice | None:
     """Read pricing from `ModelEntry` (P2d catalog) if available.
 
     Catalog rows are the single source of truth for cost estimates and
@@ -90,7 +90,7 @@ def estimate_cost(
     if strict is None:
         strict = bool(getattr(settings, "LLM_REQUIRE_KNOWN_PRICES", True))
     # Catalog (ModelEntry) wins; static PRICING is a bootstrap fallback.
-    price = _lookup_catalog_price(model)
+    price = lookup_catalog_price(model)
     if price is None:
         price = PRICING.get(model)
         if price is not None:

@@ -13,6 +13,24 @@ export interface ModelEntry {
   price_out_per_mtok: string | number | null;
   notes: string;
   available: boolean;
+  is_free?: boolean;
+  last_verified_at?: string | null;
+  last_verified_note?: string;
+}
+
+export interface VerifyPricingResult {
+  model_id: string;
+  ok: boolean;
+  note: string;
+  upstream_price_in_per_mtok: string | null;
+  upstream_price_out_per_mtok: string | null;
+  db_price_in_per_mtok: string | null;
+  db_price_out_per_mtok: string | null;
+}
+
+export interface VerifyPricingResponse {
+  results: VerifyPricingResult[];
+  models: ModelEntry[];
 }
 
 export interface AgentInfo {

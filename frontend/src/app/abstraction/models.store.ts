@@ -7,6 +7,7 @@ import {
   ModelEntry,
   ModelPreferences,
   ProviderKeyStatus,
+  VerifyPricingResponse,
 } from '../core/models/model.types';
 
 @Injectable({ providedIn: 'root' })
@@ -72,6 +73,25 @@ export class ModelsStore {
   saveKeys(body: Record<string, string>): Observable<ProviderKeyStatus> {
     return this.api.put<ProviderKeyStatus>('/me/provider-keys/', body).pipe(
       tap((r) => this._keys.set(r)),
+    );
+  }
+
+  verifyPricing(modelIds?: string[]): Observable<VerifyPricingResponse> {
+    return this.api.post<VerifyPricingResponse>(
+      '/models/verify-pricing/',
+      modelIds && modelIds.length ? { model_ids: modelIds } : {},
+    ).pipe(
+      tap((r) => {
+        if (!r.models?.length) return;
+        const byId = new Map(r.models.map((m) => [m.id, m]));
+        this._models.update((rows) =>
+          rows.map((row) => {
+            const fresh = byId.get(row.id);
+            if (!fresh) return row;
+            return { ...row, ...fresh, available: row.available };
+          }),
+        );
+      }),
     );
   }
 }

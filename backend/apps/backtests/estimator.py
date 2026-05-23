@@ -18,7 +18,7 @@ from statistics import mean
 from typing import Any
 
 from apps.data.models import DailyBar
-from hedgefund_agents.llm.pricing import PRICING
+from hedgefund_agents.llm.pricing import PRICING, lookup_catalog_price
 from hedgefund_agents.models import LLMCall
 from hedgefund_agents.personas import ALL_PERSONAS
 from hedgefund_agents.registry import DEFAULT_MODELS
@@ -87,11 +87,16 @@ def _avg_latency_for(agent: str, model: str) -> float | None:
     return float(mean(int(r or 0) for r in rows))
 
 
-def _per_call_cost(agent: str, model: str, is_persona: bool) -> float:
+def _per_call_cost(agent: str, provider: str, model: str, is_persona: bool) -> float:
     avg = _avg_cost_for(agent, model)
     if avg is not None:
         return avg
-    price = PRICING.get(model)
+    # ModelEntry catalog is the source of truth (includes the free OpenRouter
+    # rows whose price is 0). The static PRICING dict is only a bootstrap for
+    # bare models that don't have a provider prefix.
+    price = lookup_catalog_price(f"{provider}:{model}") if provider else None
+    if price is None:
+        price = PRICING.get(model)
     if price is not None:
         # Coarse: 1800 in / 700 out tokens for non-personas, 3000/1000 for personas.
         toks_in, toks_out = (3000, 1000) if is_persona else (1800, 700)
@@ -133,7 +138,7 @@ def estimate_cost(
     ]
     for agent, is_persona in agents_with_role:
         provider, model = _resolve_model(agent, overrides)
-        cpc = _per_call_cost(agent, model, is_persona)
+        cpc = _per_call_cost(agent, provider, model, is_persona)
         agent_cost = cpc * n_invocations
         total_cost += agent_cost
         lat = _avg_latency_for(agent, model) or FALLBACK_LATENCY_MS

@@ -31,7 +31,6 @@ from apps.brokers.market_calendar import (
 )
 from apps.brokers.models import (
     BrokerAccount,
-    BrokerCredential,
     BrokerOrder,
     DisclaimerAcceptance,
     LiveTradingDisclaimer,
@@ -449,7 +448,7 @@ def test_multi_account_attribution(user):
 
 @pytest.mark.django_db
 def test_broker_portfolio_blocked_from_strategy_serializer(user):
-    from apps.portfolios.models import PortfolioStrategy, Universe
+    from apps.portfolios.models import Universe
     from apps.portfolios.serializers import StrategySerializer
     universe = Universe.objects.create(name="u-test", description="t", source="manual")
     account = _new_account(user)

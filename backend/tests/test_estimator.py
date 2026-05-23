@@ -142,6 +142,40 @@ def test_estimate_and_create_use_same_personas_p02c():
     assert per_inv_full - per_inv_subset == 5, (per_inv_full, per_inv_subset)
 
 
+def test_estimate_with_all_free_models_is_zero_cost():
+    """Regression: when every agent override points at an OpenRouter free
+    model (price_in=0, price_out=0), the estimator must consult the
+    ModelEntry catalog and return $0.00 — not fall through to the per-call
+    fallback constants. Previously this produced ~$195 because PRICING.get()
+    bypassed the catalog and the FALLBACK_COST_PER_CALL kicked in.
+    """
+    from hedgefund_agents.personas import ALL_PERSONAS
+
+    _seed_bars(["AAA"], n_days=20)
+    free = "openrouter:openai/gpt-oss-120b:free"
+    overrides = {
+        agent: free
+        for agent in [
+            "fundamentals", "technicals", "valuation", "sentiment",
+            "macro", "news_digest", "risk_manager", "portfolio_manager",
+            *ALL_PERSONAS,
+        ]
+    }
+    est = estimate_cost(
+        universe=["AAA"],
+        start_date=dt.date(2025, 3, 1),
+        end_date=dt.date(2025, 4, 1),
+        rebalance_frequency="weekly",
+        model_overrides=overrides,
+        max_budget_usd=Decimal("4.00"),
+    )
+    assert est["est_total_usd"] == 0.0, est
+    for row in est["by_agent"]:
+        assert row["per_call_usd"] == 0.0, row
+        assert row["total_usd"] == 0.0, row
+        assert row["model"] == free, row
+
+
 def test_compare_endpoint_returns_paired_payload_p02c():
     """P02c review: compare endpoint smoke — same shape on each side so the
     UI can render two equity curves with consistent axes. We don't need a

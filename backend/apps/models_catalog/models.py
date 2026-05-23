@@ -31,9 +31,18 @@ class ModelEntry(models.Model):
     )
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default="")
+    last_verified_at = models.DateTimeField(null=True, blank=True)
+    last_verified_note = models.TextField(blank=True, default="")
 
     def __str__(self) -> str:
         return self.display_name
+
+    @property
+    def is_free(self) -> bool:
+        return (
+            (self.price_in_per_mtok is None or self.price_in_per_mtok == 0)
+            and (self.price_out_per_mtok is None or self.price_out_per_mtok == 0)
+        )
 
 
 class ProviderKey(models.Model):

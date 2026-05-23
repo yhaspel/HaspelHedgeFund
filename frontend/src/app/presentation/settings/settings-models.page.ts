@@ -6,7 +6,12 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { NewsStore } from '../../abstraction/news.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
-import { AGENT_DISPLAY, GROUP_LABEL, PRESET_NAMES } from '../../core/models/model.types';
+import {
+  AGENT_DISPLAY,
+  GROUP_LABEL,
+  ModelEntry,
+  PRESET_NAMES,
+} from '../../core/models/model.types';
 import { MarkCadence } from '../../core/models/portfolio.model';
 import { NewsPreferences } from '../../core/models/news.model';
 
@@ -322,16 +327,36 @@ import { NewsPreferences } from '../../core/models/news.model';
 
         <!-- D: Available models -->
         <section class="card col-span-2">
-          <div class="card-hd"><span class="title">Available models ({{ store.models().length }})</span></div>
+          <div class="card-hd flex items-center justify-between">
+            <span class="title">Available models ({{ store.models().length }})</span>
+            <button type="button" class="btn"
+              (click)="verifyAllOpenRouter()"
+              [disabled]="verifyingAll() || openRouterCount() === 0"
+              data-test="verify-all-openrouter">
+              {{ verifyingAll() ? 'Verifying…' : 'Verify all OpenRouter pricing' }}
+            </button>
+          </div>
+          @if (verifyMsg()) {
+            <p role="status" aria-live="polite"
+              class="text-[11.5px] m-0 px-3 pt-2"
+              [style.color]="verifyHasFailures() ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'"
+              data-test="verify-msg">{{ verifyMsg() }}</p>
+          }
           <table class="tbl">
             <thead><tr>
               <th>Model</th><th>Provider</th><th>Tier</th>
-              <th class="right">$/Mtok in</th><th class="right">$/Mtok out</th><th>Status</th>
+              <th class="right">$/Mtok in</th><th class="right">$/Mtok out</th>
+              <th>Status</th><th>Verified</th><th></th>
             </tr></thead>
             <tbody>
               @for (m of store.models(); track m.id) {
-                <tr>
-                  <td class="mono text-text">{{ m.display_name }}</td>
+                <tr [attr.data-test-row]="m.id">
+                  <td class="mono text-text">
+                    {{ m.display_name }}
+                    @if (isFree(m)) {
+                      <span class="badge-free" data-test="badge-free">FREE</span>
+                    }
+                  </td>
                   <td>{{ m.provider }}</td>
                   <td>{{ m.tier }}</td>
                   <td class="num">{{ m.price_in_per_mtok ?? '0' }}</td>
@@ -340,6 +365,32 @@ import { NewsPreferences } from '../../core/models/news.model';
                     <span class="pill" [class.ok]="m.available">
                       <span class="dot"></span>{{ m.available ? 'available' : 'no key' }}
                     </span>
+                  </td>
+                  <td class="text-[11.5px]" [attr.data-test-verified]="m.id">
+                    @if (m.provider !== 'openrouter') {
+                      <span class="text-text-3">—</span>
+                    } @else if (m.last_verified_note) {
+                      <span class="text-[var(--acc-short-fg)]"
+                        [title]="m.last_verified_note">
+                        drift · {{ relTime(m.last_verified_at) }}
+                      </span>
+                    } @else if (m.last_verified_at) {
+                      <span class="text-[var(--acc-long-fg)]">
+                        ✓ {{ relTime(m.last_verified_at) }}
+                      </span>
+                    } @else {
+                      <span class="text-text-3">never</span>
+                    }
+                  </td>
+                  <td>
+                    @if (m.provider === 'openrouter') {
+                      <button type="button" class="btn btn-xs"
+                        (click)="verifyOne(m.id)"
+                        [disabled]="isVerifying(m.id) || verifyingAll()"
+                        [attr.data-test]="'verify-' + m.id">
+                        {{ isVerifying(m.id) ? '…' : 'Verify' }}
+                      </button>
+                    }
                   </td>
                 </tr>
               }
@@ -383,6 +434,23 @@ import { NewsPreferences } from '../../core/models/news.model';
         height: 26px;
         font-size: 11.5px;
         padding: 0 6px;
+      }
+      .badge-free {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        border-radius: 4px;
+        background: var(--acc-long-soft, #e6f4ea);
+        color: var(--acc-long-fg, #1b5e20);
+        vertical-align: middle;
+      }
+      .btn-xs {
+        height: 22px;
+        padding: 0 8px;
+        font-size: 11px;
       }
     `,
   ],
@@ -664,6 +732,93 @@ export class SettingsModelsPage implements OnInit {
       error: (err) => {
         this.savingPortfolio.set(false);
         this.portfolioMsg.set(err?.error?.detail || 'Failed to save');
+      },
+    });
+  }
+
+  // ---- OpenRouter pricing verification --------------------------------
+  private verifyingIds = signal<Set<string>>(new Set());
+  verifyingAll = signal(false);
+  verifyMsg = signal<string | null>(null);
+  verifyHasFailures = signal(false);
+
+  readonly openRouterCount = computed(
+    () => this.store.models().filter((m) => m.provider === 'openrouter').length,
+  );
+
+  isFree(m: ModelEntry): boolean {
+    if (m.is_free !== undefined) return m.is_free;
+    const pin = Number(m.price_in_per_mtok ?? 0);
+    const pout = Number(m.price_out_per_mtok ?? 0);
+    return pin === 0 && pout === 0;
+  }
+
+  isVerifying(id: string): boolean {
+    return this.verifyingIds().has(id);
+  }
+
+  relTime(iso: string | null | undefined): string {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return '';
+    const diff = Date.now() - t;
+    const min = Math.round(diff / 60_000);
+    if (min < 1) return 'just now';
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.round(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.round(hr / 24);
+    return `${day}d ago`;
+  }
+
+  verifyOne(id: string): void {
+    const next = new Set(this.verifyingIds());
+    next.add(id);
+    this.verifyingIds.set(next);
+    this.verifyMsg.set(null);
+    this.store.verifyPricing([id]).subscribe({
+      next: (r) => {
+        const after = new Set(this.verifyingIds());
+        after.delete(id);
+        this.verifyingIds.set(after);
+        const result = r.results[0];
+        const failed = result && !result.ok;
+        this.verifyHasFailures.set(!!failed);
+        this.verifyMsg.set(
+          failed
+            ? `${id}: ${result.note}`
+            : `${id}: pricing matches OpenRouter ($${result?.upstream_price_in_per_mtok ?? '0'} / $${result?.upstream_price_out_per_mtok ?? '0'} per Mtok).`,
+        );
+      },
+      error: (err) => {
+        const after = new Set(this.verifyingIds());
+        after.delete(id);
+        this.verifyingIds.set(after);
+        this.verifyHasFailures.set(true);
+        this.verifyMsg.set(err?.error?.detail || `Verification failed for ${id}.`);
+      },
+    });
+  }
+
+  verifyAllOpenRouter(): void {
+    this.verifyingAll.set(true);
+    this.verifyMsg.set(null);
+    this.store.verifyPricing().subscribe({
+      next: (r) => {
+        this.verifyingAll.set(false);
+        const total = r.results.length;
+        const failed = r.results.filter((x) => !x.ok);
+        this.verifyHasFailures.set(failed.length > 0);
+        this.verifyMsg.set(
+          failed.length === 0
+            ? `Verified ${total} OpenRouter model(s) — all pricing matches.`
+            : `Verified ${total} OpenRouter model(s) — ${failed.length} failed: ${failed.map((f) => f.model_id).join(', ')}.`,
+        );
+      },
+      error: (err) => {
+        this.verifyingAll.set(false);
+        this.verifyHasFailures.set(true);
+        this.verifyMsg.set(err?.error?.detail || 'Verification failed.');
       },
     });
   }

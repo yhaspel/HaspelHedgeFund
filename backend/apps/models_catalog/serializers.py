@@ -6,13 +6,15 @@ from .models import ModelEntry, ProviderKey, UserModelPreferences
 
 
 class ModelEntrySerializer(serializers.ModelSerializer):
+    is_free = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = ModelEntry
         fields = (
             "id", "provider", "display_name", "tier",
             "context_window", "supports_caching", "supports_structured_output",
             "supports_long_context", "price_in_per_mtok", "price_out_per_mtok",
-            "notes",
+            "notes", "is_free", "last_verified_at", "last_verified_note",
         )
 
 

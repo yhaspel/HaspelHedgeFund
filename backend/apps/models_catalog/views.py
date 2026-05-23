@@ -15,6 +15,7 @@ from .serializers import (
     ProviderKeyWriteSerializer,
     UserModelPreferencesSerializer,
 )
+from .verification import verify_models
 
 AGENT_RECOMMENDATIONS = {
     "buffett": "frontier", "munger": "frontier", "graham": "frontier",
@@ -56,6 +57,30 @@ class ModelsView(APIView):
         for it in items:
             it["available"] = creds.get(it["provider"], False)
         return Response({"models": items})
+
+
+class VerifyOpenRouterPricingView(APIView):
+    """POST /api/models/verify-pricing/
+
+    Body (optional): {"model_ids": ["openrouter:..."]}.
+    Empty body verifies every active openrouter:* row. Returns the same
+    payload shape as the management command, plus refreshed model rows so
+    the UI can update last_verified_at/note without a second fetch.
+    """
+
+    def post(self, request: Request) -> Response:
+        ids = request.data.get("model_ids") if isinstance(request.data, dict) else None
+        try:
+            results = verify_models(model_ids=ids or None)
+        except Exception as e:
+            return Response({"detail": f"verification failed: {e}"}, status=502)
+        refreshed = ModelEntry.objects.filter(
+            id__in=[r.model_id for r in results]
+        )
+        return Response({
+            "results": [r.as_dict() for r in results],
+            "models": ModelEntrySerializer(refreshed, many=True).data,
+        })
 
 
 AGENT_ORDER = [
