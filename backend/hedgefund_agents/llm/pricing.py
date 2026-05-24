@@ -18,6 +18,12 @@ log = logging.getLogger(__name__)
 # downstream code (LLMCall serializer, totals) treats < 0 as "unknown".
 UNKNOWN_COST_SENTINEL = -1.0
 
+# Provider qualifiers used in ModelEntry.id ("anthropic:claude-...", "openrouter:openai/...").
+# Adapters call estimate_cost with the BARE slug (no prefix), so the catalog lookup needs
+# to try both shapes regardless of whether the bare slug itself happens to contain a ":"
+# (free-tier OpenRouter routes always do, e.g. "openai/gpt-oss-120b:free").
+_KNOWN_PROVIDER_PREFIXES = ("anthropic:", "openrouter:", "ollama:")
+
 
 class UnknownModelPriceError(LookupError):
     """Raised when `estimate_cost` is asked for a model with no PRICING entry
@@ -58,11 +64,19 @@ def lookup_catalog_price(model: str) -> ModelPrice | None:
         from apps.models_catalog.models import ModelEntry
     except Exception:
         return None
-    # `model` may be a bare id ("claude-sonnet-4-6") or provider-qualified
-    # ("anthropic:claude-sonnet-4-6"). Try both shapes.
-    candidates = {model, model.split(":", 1)[-1]}
-    if ":" not in model:
-        candidates.update({f"anthropic:{model}", f"openrouter:{model}"})
+    # `model` may be a bare slug ("claude-sonnet-4-6", "openai/gpt-oss-120b:free")
+    # or provider-qualified ("anthropic:claude-sonnet-4-6"). Build candidates that
+    # cover both shapes — and don't rely on a naive `":" in model` check, because
+    # free-tier OpenRouter slugs embed ":free" in the bare slug itself.
+    candidates: set[str] = {model}
+    matched_prefix = next(
+        (p for p in _KNOWN_PROVIDER_PREFIXES if model.startswith(p)),
+        None,
+    )
+    if matched_prefix is not None:
+        candidates.add(model[len(matched_prefix):])
+    else:
+        candidates.update(f"{p}{model}" for p in _KNOWN_PROVIDER_PREFIXES)
     try:
         entry = ModelEntry.objects.filter(id__in=candidates, is_active=True).first()
     except Exception:

@@ -13,6 +13,12 @@ from ..pricing import estimate_cost
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
+# Non-retriable, non-transient client errors: every subsequent call to the same
+# model will fail the same way. Surfaced as ModelUnavailable so prime_agent_cache
+# can abort the run with a clear config error instead of accumulating silent
+# graph.invoke failures until prime_min_completeness trips. 402 is the canonical
+# case: OpenRouter "free" routes whose backend provider is out of credits.
+MODEL_UNAVAILABLE_STATUSES = {401, 402, 403, 404}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
 
@@ -54,6 +60,10 @@ class OpenRouterClient:
         t0 = time.perf_counter()
         resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
+            from apps.backtests.exceptions import ModelUnavailable
+
+            raise ModelUnavailable(model=model, status_code=resp.status_code, body=resp.text)
         if resp.status_code >= 400:
             raise httpx.HTTPStatusError(
                 f"OpenRouter {resp.status_code}: {resp.text[:500]}",
@@ -70,6 +80,22 @@ class OpenRouterClient:
         choice = payload["choices"][0]
         text = choice["message"].get("content") or ""
         finish_reason = choice.get("finish_reason") or ""
+        # Some OpenRouter upstreams (notably Llama-3.3-70B-Instruct via certain
+        # providers) interpret our `response_format: json_object` request as
+        # "you should emit a tool call" and return finish_reason='tool_calls'
+        # with content=null. The structured JSON lives in
+        # message.tool_calls[0].function.arguments — surface it as the response
+        # text so call_structured can parse it. We don't care which function
+        # name the provider invented; we only requested JSON.
+        if not text and finish_reason == "tool_calls":
+            tool_calls = choice["message"].get("tool_calls") or []
+            if tool_calls:
+                args = tool_calls[0].get("function", {}).get("arguments")
+                if isinstance(args, str) and args.strip():
+                    text = args
+                    # Re-stamp finish_reason so structured.py treats this as a
+                    # normal "stop" — otherwise its empty-content branch fires.
+                    finish_reason = "stop"
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))

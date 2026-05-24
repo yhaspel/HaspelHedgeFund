@@ -33,3 +33,29 @@ class BudgetExceeded(RuntimeError):
         self.cap = cap
         self.done = done
         self.total = total
+
+
+class ModelUnavailable(RuntimeError):
+    """Raised by an LLM adapter on a non-retriable, non-transient error that
+    will repeat on every subsequent call to the same model: HTTP 401/402/403/404.
+
+    The canonical case (and the one we got burned by) is HTTP 402 from an
+    OpenRouter "free" route whose upstream provider has run out of pre-funded
+    credits ("Out of credits. Top up at /dashboard/billing to continue."). The
+    adapter's exponential-backoff retry is designed for transient failures
+    (429/5xx); it does nothing for a permanently-broken model and just delays
+    the eventual run-killing error by many seconds.
+
+    prime_agent_cache catches this once, then re-raises so the backtest aborts
+    immediately with a clear config-error status instead of silently failing
+    every ticker-day and eventually hitting prime_min_completeness.
+    """
+
+    def __init__(self, model: str, status_code: int, body: str) -> None:
+        super().__init__(
+            f"Model {model!r} is unavailable (HTTP {status_code}): "
+            f"{body[:300]}"
+        )
+        self.model = model
+        self.status_code = status_code
+        self.body = body

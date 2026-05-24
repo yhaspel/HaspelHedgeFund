@@ -53,8 +53,26 @@ class Backtest(models.Model):
     hold_semantics = models.CharField(max_length=16, default="hold_existing")
     # Fraction of ticker-days the cache-prime phase actually populated (0–1).
     # If too low, the run transitions to ABORTED_PARTIAL rather than DONE.
-    prime_completeness = models.FloatField(default=1.0)
-    prime_min_completeness = models.FloatField(default=0.85)
+    # Defaults to 0.0 (not yet measured) — was 1.0 historically, which falsely
+    # signalled "fully primed" on every fresh backtest until prime_agent_cache
+    # overwrote it at the end of the loop, misleading the UI and any operator
+    # querying the API mid-run.
+    prime_completeness = models.FloatField(default=0.0)
+    # Floor on the prime success-rate before the run is allowed to advance
+    # to the fold phase. 0.85 was the original production-quality bar; smoke
+    # validation runs in 2026-05 surfaced sporadic upstream-provider failures
+    # (Llama 3.3 70B 'tool_calls' empty-content, OpenInference 502s, JSON
+    # parse races) that pushed ~22% of ticker-days to fail even after the
+    # tool_calls adapter fix landed. 0.65 is the looser bar so a smoke run
+    # with one bad upstream day still proceeds to fold construction; users
+    # who care about signal density can raise it per-backtest.
+    prime_min_completeness = models.FloatField(default=0.65)
+    # CIO is a discretionary veto layer that runs after the PM aggregation.
+    # Backtests defaulted to skipping it (engine.py hardcoded disable_cio=True)
+    # to keep cache priming deterministic. The field exists so a per-backtest
+    # opt-in (e.g. when validating a council pipeline that mirrors live runs)
+    # is one POST flag away rather than a code change.
+    disable_cio = models.BooleanField(default=True)
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=QUEUED)
     progress_pct = models.IntegerField(default=0)

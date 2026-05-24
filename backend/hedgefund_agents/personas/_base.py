@@ -21,6 +21,17 @@ from ..outputs import PersonaOutput
 from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AGENT_VERSIONS, AgentSpec, register
 
+# Appended to every persona system prompt. The PersonaOutput schema now caps
+# thesis at 600 chars and key_risks at 4 entries; without this hint reasoning
+# models still produce 2-3 paragraph theses that get truncated by the schema
+# validator (forcing a retry that burns the whole output budget). Asking
+# explicitly cuts persona output ~5× and tracks with downstream cost.
+TERSE_OUTPUT_INSTRUCTION = (
+    "\n\nOUTPUT BUDGET: be terse. Thesis ≤100 words (≤600 chars), "
+    "≤3 key risks. Personas downstream of you don't read the prose — they "
+    "consume the structured signal + confidence. Save tokens for them."
+)
+
 
 @lru_cache(maxsize=1)
 def _sector_context_prefix() -> str:
@@ -51,7 +62,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
                 f"SECTOR INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
                 "Produce your PersonaOutput JSON now."
             )
-            system_prompt = _sector_context_prefix() + "\n\n---\n\n" + spec.prompt
+            system_prompt = _sector_context_prefix() + "\n\n---\n\n" + spec.prompt + TERSE_OUTPUT_INSTRUCTION
         else:
             # Filings are best-effort. Some providers (EDGAR) raise LookupError
             # for tickers without a CIK (e.g. ETFs accidentally screened by an
@@ -89,7 +100,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             # Sector-rotation branch is left untouched (profile flows to the
             # non-sector book; sector ETFs reason against macro/sector data).
             user += format_profile_block(state.get("investor_profile"), PERSONA_FRAMING)
-            system_prompt = spec.prompt
+            system_prompt = spec.prompt + TERSE_OUTPUT_INSTRUCTION
         # Honor the global default flip in registry (Haiku 4.5) for personas
         # whose spec.default_model wasn't given a per-spec override. Persona
         # specs hardcode "openrouter:qwen/qwen3.6-27b" historically; treat

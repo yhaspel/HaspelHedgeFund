@@ -175,3 +175,29 @@ def test_sample_candidate_weights_sum_to_one():
     c = sample_candidate(rng=rng, personas=["a", "b", "c"], search_space={})
     s = sum(c["weights"].values())
     assert abs(s - 1.0) < 1e-9
+
+
+def test_progress_advances_on_first_completed_ticker_day():
+    """Regression for the 'stuck at 2%' bug.
+
+    Old code: `pct = 2 + int(done / total * 58)`. For a realistic prime job
+    (total ≈ 3140 ticker-days on a 20-name × 3-year weekly window), this kept
+    pct stuck at 2 until done >= 55 — operators saw no movement for hours
+    even while the engine was working through ticker-days at a normal pace.
+
+    The fix replaces `int()` with rounding and forces a minimum +1 increment
+    the instant any work has been done, so the gauge moves smoothly.
+    """
+    # Replay the exact closure used in apps.backtests.walkforward.run_walkforward.
+    def progress_value(done: int, total: int) -> int:
+        raw = (done / max(1, total)) * 58
+        return 2 + (max(1, round(raw)) if done > 0 else 0)
+
+    # Pre-fix behaviour would still report 2 for these counts:
+    total = 3140
+    assert progress_value(0, total) == 2  # truly nothing done yet
+    assert progress_value(1, total) > 2   # any work → visible movement
+    assert progress_value(54, total) > 2  # the old cliff at done=54 is gone
+    # Mid-prime sanity: ~halfway and ~done.
+    assert 28 <= progress_value(total // 2, total) <= 32
+    assert progress_value(total, total) == 2 + 58

@@ -110,8 +110,15 @@ def run_walkforward(bt: Backtest) -> None:
     _save_progress(bt, 2, f"priming agent cache for {len(bt.universe)} tickers × master window")
 
     def progress(done: int, total: int, note: str) -> None:
-        pct = min(60, 2 + int(done / max(1, total) * 58))
-        _save_progress(bt, pct, note)
+        # Use round(), not int(): for a 20-name × 157-week master window
+        # (total≈3140), int() truncation would keep pct stuck at 2 until ~55
+        # ticker-days completed — hours of apparent no-progress in the UI
+        # while the engine is actually working. round() advances on every ~27
+        # ticker-days so the gauge moves smoothly. Also bump by 1 the instant
+        # any work has happened so users see immediate liveness.
+        raw = (done / max(1, total)) * 58
+        pct = 2 + (max(1, round(raw)) if done > 0 else 0)
+        _save_progress(bt, min(60, pct), note)
 
     agent_outputs_cache = prime_agent_cache(
         bt=bt,

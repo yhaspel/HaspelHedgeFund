@@ -65,8 +65,15 @@ class TechnicalsOutput(BaseModel):
 class PersonaOutput(BaseModel):
     signal: Signal
     confidence: int = Field(ge=0, le=100)
-    thesis: str
-    key_risks: list[str]
+    # Bounded sizes. Pre-bound, Qwen3 personas were averaging ~3000 output
+    # tokens per call ($0.012 each on the catalog out-rate of $3.20/Mtok) —
+    # 97% of the per-ticker-day council cost was persona essays. The optimizer
+    # and PM only need the signal/confidence; the thesis is for the operator
+    # reading the run transcript, not for downstream agents. Keeping it short
+    # also reduces the risk of the reasoning-model retry escalation in
+    # llm/structured.py (since outputs that *don't* fit force a 4× budget bump).
+    thesis: str = Field(max_length=600)
+    key_risks: list[str] = Field(max_length=4)
     intrinsic_value_estimate: float | None = None
     margin_of_safety_pct: float | None = None
 

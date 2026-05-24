@@ -81,6 +81,7 @@ export interface CreateBacktestRequest {
   is_objective: 'sharpe' | 'sortino' | 'calmar';
   baseline: 'universe_ew' | 'spy';
   max_budget_usd?: number;
+  disable_cio?: boolean;
 }
 
 export interface EstimateRequest {

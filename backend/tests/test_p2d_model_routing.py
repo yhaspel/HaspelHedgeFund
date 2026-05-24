@@ -93,6 +93,40 @@ def test_estimate_cost_uses_modelentry_when_present() -> None:
     assert abs(cost - 12.0) < 1e-6
 
 
+@pytest.mark.django_db
+def test_estimate_cost_resolves_bare_openrouter_free_slug() -> None:
+    """Regression for the P2c live-acceptance run.
+
+    Adapters (OpenRouterClient.complete) call estimate_cost with the BARE
+    slug ("openai/gpt-oss-120b:free"), not the qualified id
+    ("openrouter:openai/gpt-oss-120b:free"). The lookup must still find the
+    catalog row — a naive `":" in model` short-circuit misses because the
+    free-tier slug already contains a colon (":free"), and that prevented
+    the entire backtest's council from producing a single LLM call.
+    """
+    from apps.models_catalog.models import ModelEntry
+    from hedgefund_agents.llm.pricing import estimate_cost
+
+    # Synthetic slug containing ":free" — confirms the lookup doesn't bail out
+    # just because the bare slug already has a colon. Using a fresh id avoids
+    # collision with rows the catalog seed inserts at migrate time.
+    ModelEntry.objects.create(
+        id="openrouter:acme/regression-test-only:free",
+        provider="openrouter",
+        display_name="Regression Test (free)",
+        tier="fast",
+        price_in_per_mtok=Decimal("0.0"),
+        price_out_per_mtok=Decimal("0.0"),
+        is_active=True,
+    )
+    # Bare slug — what the OpenRouter adapter passes into estimate_cost.
+    cost = estimate_cost("acme/regression-test-only:free", 1_000_000, 1_000_000)
+    assert cost == 0.0
+    # Qualified id — what the budget estimator passes.
+    cost = estimate_cost("openrouter:acme/regression-test-only:free", 1_000_000, 1_000_000)
+    assert cost == 0.0
+
+
 # --- 4. Model override validation ----------------------------------------
 
 

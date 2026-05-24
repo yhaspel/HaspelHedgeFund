@@ -209,7 +209,23 @@ def prime_agent_cache(
 ) -> dict[tuple[str, dt.date], dict]:
     """Walk every (ticker, rebalance day) once with a fresh agent graph
     invocation. Fills L2 cache (LLMResponseCache) and returns an in-memory
-    map of agent outputs for the executor."""
+    map of agent outputs for the executor.
+
+    Parallelism: ticker-days fan out across a ThreadPoolExecutor (default 8
+    threads, override with `settings.BACKTEST_PRIME_PARALLELISM`). graph.invoke
+    is IO-bound (LLM HTTP + provider HTTP + small DB writes), so threads scale
+    linearly until LLM provider rate limits push back. We use a thread pool
+    rather than a Celery chord because (a) each ticker-day is a pure
+    function with no orchestration needs, (b) chord overhead for ~3000+
+    sub-tasks would be substantial, and (c) keeping the prime in a single
+    Celery task leaves the other 7 ForkPoolWorkers free for non-backtest
+    work (broker polling, news refreshes, etc.).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from django.conf import settings
+    from django.db import close_old_connections
+
     from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
     from hedgefund_agents.graphs.council import (
         ANALYTICAL_NODES,
@@ -217,6 +233,8 @@ def prime_agent_cache(
     )
     from hedgefund_agents.personas import ALL_PERSONAS
     from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
+
+    from .exceptions import BudgetExceeded, ModelUnavailable
 
     ensure_versions_synced()
     selected_personas = list(bt.personas or ALL_PERSONAS)
@@ -227,7 +245,9 @@ def prime_agent_cache(
     bt.agent_versions = versions
     bt.save(update_fields=["agent_versions"])
 
+    # LangGraph compiled graphs are stateless under invoke(); shared across threads.
     graph = build_council_graph(personas=selected_personas)
+    # FMP / EDGAR providers wrap an httpx.Client; httpx Client is thread-safe.
     data_provider = get_fmp_provider(user=bt.user)
     filings_provider = get_edgar_provider()
 
@@ -235,60 +255,140 @@ def prime_agent_cache(
     days = trading_days(start, end, universe)
     rebal = sorted(rebalance_dates_for(days, rebalance_freq))
 
-    from django.db import close_old_connections
-
-    from .exceptions import BudgetExceeded
+    work_items = [(ticker, day) for day in rebal for ticker in universe]
+    total = len(work_items)
+    budget_cap = float(getattr(bt, "max_budget_usd", 0) or 0)
+    max_workers = int(getattr(settings, "BACKTEST_PRIME_PARALLELISM", 8))
 
     cache_map: dict[tuple[str, dt.date], dict] = {}
-    total = len(rebal) * len(universe)
     done = 0
     failures = 0
-    budget_cap = float(getattr(bt, "max_budget_usd", 0) or 0)
-    for day in rebal:
-        for ticker in universe:
-            # Long-running scripts/Celery tasks accumulate stale DB connections.
-            # Recycle here so we don't blow past Postgres' max_connections.
-            close_old_connections()
-            # Hard budget kill-switch — total_cost_usd is bumped atomically by
-            # record_llm_call after every LLM response, so re-reading here gives
-            # us an upper bound on spend before issuing the next invocation.
-            if budget_cap > 0:
-                spent = float(
-                    type(bt).objects.filter(pk=bt.pk)
-                    .values_list("total_cost_usd", flat=True).first() or 0
-                )
-                if spent >= budget_cap:
-                    raise BudgetExceeded(spent, budget_cap, done, total)
-            initial_state: dict[str, Any] = {
-                "ticker": ticker,
-                "as_of_date": day,
-                "model_overrides": bt.model_overrides or {},
-                "data_provider": data_provider,
-                "filings_provider": filings_provider,
-                "use_llm_cache": True,
-                "backtest_id": bt.id,
-                "agent_versions": versions,
-                "disable_cio": True,  # CIO is a discretionary layer; skip in backtests
-            }
-            try:
-                final = graph.invoke(initial_state)
-            except Exception as e:
-                log.warning("graph.invoke failed for %s %s: %s", ticker, day, e)
-                failures += 1
-                done += 1
-                continue
-            entry: dict[str, Any] = {}
-            for k in selected_personas:
-                if final.get(k):
-                    entry[k] = final[k]
-            for k in ("risk", "valuation", "fundamentals", "technicals", "sentiment",
-                      "macro", "news_digest"):
-                if final.get(k):
-                    entry[k] = final[k]
-            cache_map[(ticker, day)] = entry
-            done += 1
+    budget_exceeded: BudgetExceeded | None = None
+    # First ModelUnavailable wins: subsequent calls to the same model would
+    # raise the same way, so we abort the entire run rather than grinding
+    # through 3000+ guaranteed-failing invocations.
+    model_unavailable: ModelUnavailable | None = None
+
+    def _unwrap_model_unavailable(err: BaseException) -> ModelUnavailable | None:
+        # graph.invoke may wrap our adapter exception in LangGraph's own error
+        # type (or any agent-layer wrapper). Walk the cause/context chain so we
+        # catch the underlying ModelUnavailable regardless of how it's nested.
+        cur: BaseException | None = err
+        seen: set[int] = set()
+        while cur is not None and id(cur) not in seen:
+            if isinstance(cur, ModelUnavailable):
+                return cur
+            seen.add(id(cur))
+            cur = cur.__cause__ or cur.__context__
+        return None
+
+    def _invoke_one(ticker: str, day: dt.date) -> tuple[str, dt.date, dict | None, Exception | None]:
+        # Each thread gets its own DB connection — recycle on entry so we don't
+        # accumulate idle conns past Postgres' max_connections.
+        close_old_connections()
+        initial_state: dict[str, Any] = {
+            "ticker": ticker,
+            "as_of_date": day,
+            "model_overrides": bt.model_overrides or {},
+            "data_provider": data_provider,
+            "filings_provider": filings_provider,
+            "use_llm_cache": True,
+            "backtest_id": bt.id,
+            "agent_versions": versions,
+            # CIO is a discretionary veto layer. Default-off in backtests for
+            # reproducibility; per-backtest opt-in via Backtest.disable_cio.
+            "disable_cio": bool(getattr(bt, "disable_cio", True)),
+        }
+        try:
+            final = graph.invoke(initial_state)
+        except Exception as e:
+            return ticker, day, None, e
+        entry: dict[str, Any] = {}
+        for k in selected_personas:
+            if final.get(k):
+                entry[k] = final[k]
+        for k in ("risk", "valuation", "fundamentals", "technicals", "sentiment",
+                  "macro", "news_digest"):
+            if final.get(k):
+                entry[k] = final[k]
+        return ticker, day, entry, None
+
+    def _ingest(ticker: str, day: dt.date, entry: dict | None, err: Exception | None) -> bool:
+        """Handle one completed unit. Returns True if the run should stop
+        dispatching new work (budget exceeded OR a model is permanently
+        unavailable — see ModelUnavailable in apps/backtests/exceptions)."""
+        nonlocal done, failures, budget_exceeded, model_unavailable
+        done += 1
+        # ModelUnavailable: every subsequent call to the same model would fail
+        # the same way (HTTP 402 out-of-credits, 401 bad key, 404 wrong slug,
+        # 403 access denied). Stop the run *now* with a clear error rather
+        # than count it as a normal ticker-day failure and grind through
+        # thousands more guaranteed-doomed invocations.
+        unwrapped = _unwrap_model_unavailable(err) if err is not None else None
+        if unwrapped is not None:
+            model_unavailable = unwrapped
+            failures += 1
+            log.error(
+                "graph.invoke for %s %s hit a permanent model error; aborting prime: %s",
+                ticker, day, unwrapped,
+            )
             if progress_cb:
-                progress_cb(done, total, f"primed {ticker} {day.isoformat()}")
+                progress_cb(done, total, f"aborted on unavailable model: {unwrapped.model}")
+            return True
+        if err is not None:
+            log.warning("graph.invoke failed for %s %s: %s", ticker, day, err)
+            failures += 1
+        elif entry is not None:
+            cache_map[(ticker, day)] = entry
+        if progress_cb:
+            note = (
+                f"primed {ticker} {day.isoformat()}"
+                if err is None
+                else f"failed {ticker} {day.isoformat()}"
+            )
+            progress_cb(done, total, note)
+        if budget_cap > 0:
+            spent = float(
+                type(bt).objects.filter(pk=bt.pk)
+                .values_list("total_cost_usd", flat=True).first() or 0
+            )
+            if spent >= budget_cap:
+                budget_exceeded = BudgetExceeded(spent, budget_cap, done, total)
+                return True
+        return False
+
+    if max_workers <= 1:
+        # Serial path — used by tests that need deterministic single-connection
+        # DB semantics, and by anyone explicitly disabling parallelism. Avoids
+        # the ThreadPoolExecutor entirely so the budget check sees writes from
+        # the same connection that issued them.
+        for t, d in work_items:
+            close_old_connections()
+            _ticker, _day, _entry, _err = _invoke_one(t, d)
+            if _ingest(_ticker, _day, _entry, _err):
+                break
+    else:
+        # Parallel path — IO-bound graph.invoke calls fan out across threads.
+        # Budget kill-switch over-shoots by up to (max_workers - 1) already-
+        # running futures; that's acceptable given the order-of-magnitude
+        # wall-time speed-up.
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="prime") as pool:
+            futures = {pool.submit(_invoke_one, t, d): (t, d) for t, d in work_items}
+            for fut in as_completed(futures):
+                ticker, day, entry, err = fut.result()
+                if _ingest(ticker, day, entry, err):
+                    for pending in futures:
+                        pending.cancel()
+                    break
+
+    if model_unavailable is not None:
+        # Surface the upstream provider error verbatim so the user sees the
+        # actual "Out of credits" / "Invalid API key" / etc. text without
+        # having to scrape worker logs.
+        raise model_unavailable
+    if budget_exceeded is not None:
+        raise budget_exceeded
+
     # Quality gate: persist the actual completeness ratio so the UI can show
     # whether a run is complete or partial, and abort below the configured
     # `prime_min_completeness` (default 0.85). Failures inside this band still

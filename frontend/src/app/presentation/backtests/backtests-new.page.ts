@@ -104,8 +104,33 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
+          <div class="card-hd"><span class="title">Council shape</span></div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <div class="field">
+              <span class="lbl">Personas <span class="text-text-3 normal-case tracking-normal font-normal">· each persona = one LLM call per ticker-day. Default to a single persona for backtests (the council is for live runs).</span></span>
+              <div class="flex flex-wrap gap-2 mt-1.5">
+                @for (p of ALL_PERSONAS; track p) {
+                  <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input type="checkbox" [checked]="selectedPersonas.has(p)"
+                      (change)="togglePersona(p)" [attr.data-test]="'persona-' + p" />
+                    <span class="mono">{{ p }}</span>
+                  </label>
+                }
+              </div>
+            </div>
+            <div class="field">
+              <label class="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" name="include_cio" [(ngModel)]="includeCio"
+                  data-test="include-cio" />
+                <span><strong>Include CIO</strong> · runs the discretionary veto layer per ticker-day (matches live runs). Off by default — reproducibility-first.</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
           <div class="card-bd">
-            <hf-model-panel [agents]="councilAgents" [multiplier]="rebalanceCountEstimate()" [(overrides)]="overrides" />
+            <hf-model-panel [agents]="activeAgents()" [multiplier]="rebalanceCountEstimate()" [(overrides)]="overrides" />
           </div>
         </section>
 
@@ -195,11 +220,31 @@ export class BacktestsNewPage implements OnInit {
   readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
 
-  readonly councilAgents = [
+  readonly ALL_PERSONAS = [
     'buffett', 'munger', 'graham', 'wood', 'druckenmiller',
+    'burry', 'damodaran', 'lynch',
+  ];
+  readonly NON_PERSONA_AGENTS = [
     'fundamentals', 'technicals', 'valuation', 'sentiment',
     'macro', 'news_digest', 'risk_manager', 'portfolio_manager',
   ];
+  // Default = single persona. The optimizer can still sweep PM thresholds /
+  // sizing / vol-targeting against one persona; running all 8 is a 5-8×
+  // cost multiplier with no proportional signal gain in a backtest.
+  selectedPersonas = new Set<string>(['buffett']);
+  includeCio = true;
+
+  activeAgents = (): string[] => {
+    const base = [...Array.from(this.selectedPersonas), ...this.NON_PERSONA_AGENTS];
+    return this.includeCio ? [...base, 'cio'] : base;
+  };
+
+  togglePersona(p: string): void {
+    if (this.selectedPersonas.has(p)) this.selectedPersonas.delete(p);
+    else this.selectedPersonas.add(p);
+    this.selectedPersonas = new Set(this.selectedPersonas);  // trigger CD
+  }
+
   overrides = signal<Record<string, string>>({});
 
   rebalanceCountEstimate(): number {
@@ -209,7 +254,9 @@ export class BacktestsNewPage implements OnInit {
     const days = (end - start) / 86400000;
     const stride = this.rebalance === 'daily' ? 1 : this.rebalance === 'weekly' ? 5 : 21;
     const nUniv = (this.parsedUniverse().length || 20);
-    return Math.max(1, Math.round((days / stride) * nUniv));
+    // Multiplier should track agents actually firing, not the full council.
+    const agentMultiplier = this.activeAgents().length;
+    return Math.max(1, Math.round((days / stride) * nUniv * (agentMultiplier / 13)));
   }
 
   name = 'WF ' + new Date().toISOString().slice(0, 10);
@@ -262,6 +309,7 @@ export class BacktestsNewPage implements OnInit {
       rebalance_frequency: this.rebalance,
       max_budget_usd: this.maxBudgetUsd,
       model_overrides: this.overrides(),
+      personas: Array.from(this.selectedPersonas),
     }).subscribe({
       next: (est) => { this.estimating.set(false); this.estimate.set(est); },
       error: (e) => {
@@ -298,6 +346,8 @@ export class BacktestsNewPage implements OnInit {
       baseline: this.baseline,
       max_budget_usd: this.maxBudgetUsd,
       model_overrides: this.overrides(),
+      personas: Array.from(this.selectedPersonas),
+      disable_cio: !this.includeCio,
     }).subscribe({
       next: (bt) => this.router.navigate(['/backtests', bt.id]),
       error: (e) => {

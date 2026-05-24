@@ -12,6 +12,15 @@ from pydantic import BaseModel, ValidationError
 
 from .client import LLMClient, LLMResponse, Message
 
+# Hard ceiling on the per-call output budget the empty-content retry loop is
+# allowed to escalate to. Without this, a reasoning model that burns the whole
+# budget on hidden thinking tokens triggers a 4× escalation chain (8K → 32K →
+# 131K) that eventually crashes against the model's context-window ceiling
+# (OpenRouter returns HTTP 400 "max context 131072"). Pinning the cap at 16K
+# means we still get one big-budget retry for genuinely-large outputs, but we
+# never burn 40K+ output tokens chasing a model that's just churning thoughts.
+MAX_ATTEMPT_TOKENS = 16_384
+
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
@@ -91,7 +100,7 @@ def call_structured[T: BaseModel](
                 f"empty content (finish_reason={resp.finish_reason!r}); "
                 "likely reasoning-token exhaustion"
             )
-            attempt_tokens = max(attempt_tokens * 4, 8192)
+            attempt_tokens = min(max(attempt_tokens * 4, 8192), MAX_ATTEMPT_TOKENS)
             continue
         try:
             parsed = schema.model_validate_json(_extract_json(resp.text))

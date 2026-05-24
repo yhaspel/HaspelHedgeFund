@@ -131,15 +131,23 @@ export class ModelPanelComponent {
   );
 
   // React to async preference loads — the prefs() signal may still be null
-  // when the panel first renders; flipping it must update the active preset.
-  // Only adopt the server preset if the user hasn't already touched the
-  // dropdown locally (preserve user intent during the GET round-trip).
+  // when the panel first renders. Adopt the saved preset by *applying* it
+  // (populating `overrides`), not just by updating the display label.
+  // Previously the effect only flipped `activePreset`, so a user who landed
+  // on the form, saw "Preset: frugal", and submitted without re-clicking the
+  // button would send `overrides: {}` → backend fell through to the
+  // BLOCK_ANTHROPIC fallback (gpt-oss-120b:free), not to frugal. Skip if the
+  // user has already touched the dropdown or clicked a different preset.
   private prefsApplied = false;
   private readonly _syncPreset = effect(() => {
     const prefs = this.store.prefs();
     if (!prefs?.preset || this.prefsApplied) return;
-    this.activePreset.set(prefs.preset);
+    if (Object.keys(this.overrides()).length > 0) {
+      this.prefsApplied = true;
+      return;
+    }
     this.prefsApplied = true;
+    this.applyPreset(prefs.preset);
   });
 
   display(a: string): string {

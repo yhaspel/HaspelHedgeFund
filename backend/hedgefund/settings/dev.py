@@ -20,7 +20,9 @@ LLM_DEFAULT_PRESET = "dev"
 # to OpenRouter, not Haiku.
 BLOCK_ANTHROPIC = True
 
-# Restrict every model selector in the UI to free OpenRouter slugs in dev.
-# Paired with the dev preset (apps/models_catalog/presets.py "dev") so the
-# entire local environment is zero-spend by default.
-LLM_FREE_ONLY = True
+# Paid OpenRouter routes (Qwen3.6 27B, Llama 3.3 70B, etc.) stay selectable in
+# dev so the frugal / research / quality presets can be exercised locally —
+# BLOCK_ANTHROPIC above is the actual cost-safety guard (it blocks the much
+# pricier Anthropic direct API). Flip this back to True if you want a truly
+# zero-spend local environment.
+LLM_FREE_ONLY = False
