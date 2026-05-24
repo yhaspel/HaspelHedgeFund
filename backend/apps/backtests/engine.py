@@ -282,7 +282,9 @@ def prime_agent_cache(
             cur = cur.__cause__ or cur.__context__
         return None
 
-    def _invoke_one(ticker: str, day: dt.date) -> tuple[str, dt.date, dict | None, Exception | None]:
+    def _invoke_one(
+        ticker: str, day: dt.date,
+    ) -> tuple[str, dt.date, dict | None, Exception | None]:
         # Each thread gets its own DB connection — recycle on entry so we don't
         # accumulate idle conns past Postgres' max_connections.
         close_old_connections()

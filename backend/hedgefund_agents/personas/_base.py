@@ -62,7 +62,10 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
                 f"SECTOR INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
                 "Produce your PersonaOutput JSON now."
             )
-            system_prompt = _sector_context_prefix() + "\n\n---\n\n" + spec.prompt + TERSE_OUTPUT_INSTRUCTION
+            system_prompt = (
+                _sector_context_prefix() + "\n\n---\n\n"
+                + spec.prompt + TERSE_OUTPUT_INSTRUCTION
+            )
         else:
             # Filings are best-effort. Some providers (EDGAR) raise LookupError
             # for tickers without a CIK (e.g. ETFs accidentally screened by an
