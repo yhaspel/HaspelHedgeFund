@@ -103,6 +103,28 @@ def test_tool_calls_with_empty_arguments_does_not_overwrite():
     assert resp.finish_reason == "tool_calls"  # NOT re-stamped
 
 
+def test_does_not_send_response_format_json_object():
+    """Regression for bt15/bt16: certain OpenRouter upstreams treat
+    `response_format: {type: "json_object"}` as 'emit a tool call' and return
+    finish_reason='tool_calls' with empty content + empty tool_calls. We rely
+    on the prompt-level 'respond with JSON only' instruction that
+    call_structured already injects, NOT on response_format."""
+    http = _fake_http({
+        "choices": [{
+            "message": {"content": '{"ok":true}'},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+    })
+    _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[Message("user", "hi")],
+        json_mode=True,  # explicitly asking for JSON mode
+    )
+    body = http.post.call_args.kwargs["json"]
+    assert "response_format" not in body
+
+
 def test_tool_calls_with_content_present_does_not_overwrite():
     """If both content and tool_calls are present, prefer content (the user
     explicitly asked for json_object and got it; no need to walk tool_calls)."""

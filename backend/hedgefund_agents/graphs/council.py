@@ -44,6 +44,7 @@ from ..personas import ALL_PERSONAS, PERSONA_NODES
 from ..portfolio.cio import run_cio
 from ..portfolio.portfolio_manager import run_portfolio_manager
 from ..risk.risk_manager import run_risk_manager
+from ._node_fallback import wrap_backtest_tolerant
 
 ANALYTICAL_NODES = {
     "fundamentals": run_fundamentals,
@@ -74,17 +75,23 @@ def build_council_graph(personas: list[str] | None = None):
     graph.add_node("entry", _entry)
     graph.add_node("analytical_join", _join)
     graph.add_node("persona_join", _join)
-    graph.add_node("risk_manager", run_risk_manager)
-    graph.add_node("portfolio_manager", run_portfolio_manager)
-    graph.add_node("cio", run_cio)
+    # Each agent node is wrapped so that, in backtest context, an LLM failure
+    # collapses to a null-signal state delta instead of raising and aborting
+    # the entire graph.invoke. Without this, a 5% per-agent failure rate
+    # compounds to a 40%+ ticker-day failure rate over a 10-agent council —
+    # which is what caused bt15/bt16 to abort_partial despite a clean prime
+    # path. Live runs (state.backtest_id is None) keep raising on failure.
+    graph.add_node("risk_manager", wrap_backtest_tolerant(run_risk_manager, "risk"))
+    graph.add_node("portfolio_manager", wrap_backtest_tolerant(run_portfolio_manager, "decision"))
+    graph.add_node("cio", wrap_backtest_tolerant(run_cio, "cio"))
 
     for name, fn in ANALYTICAL_NODES.items():
-        graph.add_node(name, fn)
+        graph.add_node(name, wrap_backtest_tolerant(fn, name))
         graph.add_edge("entry", name)
         graph.add_edge(name, "analytical_join")
 
     for name in selected:
-        graph.add_node(name, PERSONA_NODES[name])
+        graph.add_node(name, wrap_backtest_tolerant(PERSONA_NODES[name], name))
         graph.add_edge("analytical_join", name)
         graph.add_edge(name, "persona_join")
 
@@ -126,17 +133,19 @@ def build_sector_council_graph(personas: list[str] | None = None):
     graph.add_node("entry", _entry)
     graph.add_node("analytical_join", _join)
     graph.add_node("persona_join", _join)
-    graph.add_node("risk_manager", run_risk_manager)
-    graph.add_node("portfolio_manager", run_portfolio_manager)
-    graph.add_node("cio", run_cio)
+    # Same backtest-tolerant wrapping as the standard council graph — see
+    # build_council_graph above for the rationale.
+    graph.add_node("risk_manager", wrap_backtest_tolerant(run_risk_manager, "risk"))
+    graph.add_node("portfolio_manager", wrap_backtest_tolerant(run_portfolio_manager, "decision"))
+    graph.add_node("cio", wrap_backtest_tolerant(run_cio, "cio"))
 
     for name, fn in SECTOR_ANALYTICAL_NODES.items():
-        graph.add_node(name, fn)
+        graph.add_node(name, wrap_backtest_tolerant(fn, name))
         graph.add_edge("entry", name)
         graph.add_edge(name, "analytical_join")
 
     for name in selected:
-        graph.add_node(name, PERSONA_NODES[name])
+        graph.add_node(name, wrap_backtest_tolerant(PERSONA_NODES[name], name))
         graph.add_edge("analytical_join", name)
         graph.add_edge(name, "persona_join")
 

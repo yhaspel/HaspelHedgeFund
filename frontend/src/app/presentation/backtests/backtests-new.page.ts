@@ -6,13 +6,15 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { EstimateResponse } from '../../core/models/backtest.model';
+import { ALL_PERSONAS } from '../../core/models/run.model';
 import { ModelPanelComponent } from '../shared/model-panel.component';
+import { PersonaCardComponent } from '../shared/persona-card.component';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, ModelPanelComponent, AppShellComponent, GlossaryTermComponent],
+  imports: [CommonModule, FormsModule, DecimalPipe, ModelPanelComponent, PersonaCardComponent, AppShellComponent, GlossaryTermComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label:'New'}]">
       <div class="page-head">
@@ -104,17 +106,19 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
-          <div class="card-hd"><span class="title">Council shape</span></div>
+          <div class="card-hd">
+            <span class="title">Council shape</span>
+            <span class="pill"><span class="dot"></span>{{ selectedPersonas.size }} of {{ allPersonas.length }}</span>
+          </div>
           <div class="card-bd flex flex-col gap-3.5">
             <div class="field">
               <span class="lbl">Personas <span class="text-text-3 normal-case tracking-normal font-normal">· each persona = one LLM call per ticker-day. Default to a single persona for backtests (the council is for live runs).</span></span>
-              <div class="flex flex-wrap gap-2 mt-1.5">
-                @for (p of ALL_PERSONAS; track p) {
-                  <label class="flex items-center gap-1.5 text-xs cursor-pointer">
-                    <input type="checkbox" [checked]="selectedPersonas.has(p)"
-                      (change)="togglePersona(p)" [attr.data-test]="'persona-' + p" />
-                    <span class="mono">{{ p }}</span>
-                  </label>
+              <div class="persona-grid mt-1.5">
+                @for (p of allPersonas; track p.id) {
+                  <hf-persona-card
+                    [persona]="p"
+                    [selected]="selectedPersonas.has(p.id)"
+                    (toggled)="togglePersona(p.id)" />
                 }
               </div>
             </div>
@@ -212,6 +216,16 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         cursor: pointer;
         padding: 0;
       }
+      /* Mirrors the persona-grid layout in runs-new.page.ts so the two
+         surfaces feel like the same UI primitive. */
+      .persona-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      @media (max-width: 540px) {
+        .persona-grid { grid-template-columns: 1fr; }
+      }
     `,
   ],
 })
@@ -220,10 +234,10 @@ export class BacktestsNewPage implements OnInit {
   readonly modelsStore = inject(ModelsStore);
   private readonly router = inject(Router);
 
-  readonly ALL_PERSONAS = [
-    'buffett', 'munger', 'graham', 'wood', 'druckenmiller',
-    'burry', 'damodaran', 'lynch',
-  ];
+  // Shared `PersonaMeta[]` from runs.model — same source the Runs Console uses,
+  // so the persona card UX stays consistent across surfaces (icon + tagline +
+  // info tooltip + selected-state styling).
+  readonly allPersonas = ALL_PERSONAS;
   readonly NON_PERSONA_AGENTS = [
     'fundamentals', 'technicals', 'valuation', 'sentiment',
     'macro', 'news_digest', 'risk_manager', 'portfolio_manager',

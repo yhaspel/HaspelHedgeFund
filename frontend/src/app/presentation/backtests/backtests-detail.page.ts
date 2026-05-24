@@ -32,6 +32,15 @@ Chart.register(
           @if (store.current(); as bt) {
             <span class="pill"><span class="dot"></span>Run cost · $ {{ (bt.total_cost_usd || 0) | number: '1.2-2' }}</span>
             <a class="btn" [routerLink]="['/backtests', bt.id, 'compare']">Compare…</a>
+            @if (bt.status === 'running' || bt.status === 'queued') {
+              <button type="button" class="btn"
+                style="color: var(--acc-short-fg); border-color: var(--acc-short-soft);"
+                [disabled]="cancelling"
+                (click)="cancelRun(bt.id)"
+                data-test="cancel-backtest">
+                {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
+              </button>
+            }
           }
           <a class="btn ghost" routerLink="/backtests">Back to list</a>
         </div>
@@ -170,6 +179,21 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   ngOnInit(): void {
     this.id = Number(this.route.snapshot.paramMap.get('id'));
     this.store.poll(this.id, 3000);
+  }
+
+  cancelling = false;
+
+  cancelRun(id: number): void {
+    // Native confirm — the action is reversible only by submitting a new run,
+    // so a one-tap interstitial is worth the friction. Cancellation surfaces
+    // as `status='cancelled'` on the next poll tick (3s window) and the
+    // button hides itself via the @if guard above.
+    if (!window.confirm('Cancel this backtest? Work already done will be lost.')) return;
+    this.cancelling = true;
+    this.store.cancel(id).subscribe({
+      next: () => { this.cancelling = false; },
+      error: () => { this.cancelling = false; },
+    });
   }
 
   ngAfterViewInit(): void {

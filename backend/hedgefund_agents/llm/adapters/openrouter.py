@@ -49,8 +49,15 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        if json_mode:
-            body["response_format"] = {"type": "json_object"}
+        # NOTE: `json_mode=True` previously emitted `response_format={"type":
+        # "json_object"}`. We dropped that because certain OpenRouter upstream
+        # providers (notably Llama 3.3 70B via at least one route) re-interpret
+        # it as "you should emit a tool call", then return finish_reason='tool_calls'
+        # with empty content AND empty tool_calls — defeating call_structured's
+        # retry loop and silently failing ~30% of agent invocations. The
+        # prompt-level "respond with JSON only" instruction + schema hint that
+        # call_structured already injects is sufficient and model-agnostic.
+        _ = json_mode  # kwarg preserved for API stability across adapters
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "HTTP-Referer": "https://github.com/yhaspel/HaspelHedgeFund",
