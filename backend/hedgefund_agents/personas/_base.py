@@ -47,6 +47,12 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
         ticker = state["ticker"]
         as_of = state["as_of_date"]
         is_sector = state.get("flavor") == "sector_rotation"
+        # Terse-output bound is a backtest-only cost guard (compresses persona
+        # essays from ~3000 → ~500 output tokens). Live runs keep the original
+        # prompt so the verbose rationale users actually read in the transcript
+        # stays full-length — and so previously recorded VCR cassettes still
+        # match (changing the system prompt invalidates the request body hash).
+        terse = TERSE_OUTPUT_INSTRUCTION if state.get("backtest_id") else ""
 
         if is_sector:
             # ETFs have no per-company filings; persona reasons over sector inputs.
@@ -63,8 +69,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
                 "Produce your PersonaOutput JSON now."
             )
             system_prompt = (
-                _sector_context_prefix() + "\n\n---\n\n"
-                + spec.prompt + TERSE_OUTPUT_INSTRUCTION
+                _sector_context_prefix() + "\n\n---\n\n" + spec.prompt + terse
             )
         else:
             # Filings are best-effort. Some providers (EDGAR) raise LookupError
@@ -103,7 +108,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             # Sector-rotation branch is left untouched (profile flows to the
             # non-sector book; sector ETFs reason against macro/sector data).
             user += format_profile_block(state.get("investor_profile"), PERSONA_FRAMING)
-            system_prompt = spec.prompt + TERSE_OUTPUT_INSTRUCTION
+            system_prompt = spec.prompt + terse
         # Honor the global default flip in registry (Haiku 4.5) for personas
         # whose spec.default_model wasn't given a per-spec override. Persona
         # specs hardcode "openrouter:qwen/qwen3.6-27b" historically; treat
