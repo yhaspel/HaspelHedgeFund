@@ -103,12 +103,13 @@ def test_tool_calls_with_empty_arguments_does_not_overwrite():
     assert resp.finish_reason == "tool_calls"  # NOT re-stamped
 
 
-def test_does_not_send_response_format_json_object():
-    """Regression for bt15/bt16: certain OpenRouter upstreams treat
-    `response_format: {type: "json_object"}` as 'emit a tool call' and return
-    finish_reason='tool_calls' with empty content + empty tool_calls. We rely
-    on the prompt-level 'respond with JSON only' instruction that
-    call_structured already injects, NOT on response_format."""
+def test_sends_response_format_json_object_when_json_mode_true():
+    """`json_mode=True` must put `response_format={"type":"json_object"}` on
+    the request body. OpenAI-compatible upstreams that respect it produce
+    parseable JSON; the cassette-replay integration tests recorded request
+    bodies with this field present (removing it broke cassette matching for
+    test_full_run_aapl_qwen). The Llama-3.3-70B "tool_calls" misbehavior is
+    handled response-side by the tool_calls→content fallback below."""
     http = _fake_http({
         "choices": [{
             "message": {"content": '{"ok":true}'},
@@ -119,7 +120,24 @@ def test_does_not_send_response_format_json_object():
     _build_client(http).complete(
         model="meta-llama/llama-3.3-70b-instruct",
         messages=[Message("user", "hi")],
-        json_mode=True,  # explicitly asking for JSON mode
+        json_mode=True,
+    )
+    body = http.post.call_args.kwargs["json"]
+    assert body.get("response_format") == {"type": "json_object"}
+
+
+def test_omits_response_format_when_json_mode_false():
+    """Negative half of the regression: when json_mode=False, the request
+    body must NOT carry `response_format` (so plain-text completions still
+    work for callers that didn't ask for JSON)."""
+    http = _fake_http({
+        "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+    })
+    _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[Message("user", "hi")],
+        json_mode=False,
     )
     body = http.post.call_args.kwargs["json"]
     assert "response_format" not in body
