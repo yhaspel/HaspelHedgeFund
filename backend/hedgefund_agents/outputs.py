@@ -65,15 +65,15 @@ class TechnicalsOutput(BaseModel):
 class PersonaOutput(BaseModel):
     signal: Signal
     confidence: int = Field(ge=0, le=100)
-    # Bounded sizes. Pre-bound, Qwen3 personas were averaging ~3000 output
-    # tokens per call ($0.012 each on the catalog out-rate of $3.20/Mtok) —
-    # 97% of the per-ticker-day council cost was persona essays. The optimizer
-    # and PM only need the signal/confidence; the thesis is for the operator
-    # reading the run transcript, not for downstream agents. Keeping it short
-    # also reduces the risk of the reasoning-model retry escalation in
-    # llm/structured.py (since outputs that *don't* fit force a 4× budget bump).
-    thesis: str = Field(max_length=600)
-    key_risks: list[str] = Field(max_length=4)
+    # No schema-level bound on thesis / key_risks length. We previously
+    # capped these (max_length=600 / max_length=4) to compress backtest
+    # cost, but that rejected pre-bound VCR cassette responses on replay
+    # and triggered call_structured retries that exhausted the cassette.
+    # Cost discipline lives at the prompt layer instead: backtest runs
+    # append TERSE_OUTPUT_INSTRUCTION (only when state.backtest_id is set),
+    # plus call_structured's retry budget is capped at 16K tokens.
+    thesis: str
+    key_risks: list[str]
     intrinsic_value_estimate: float | None = None
     margin_of_safety_pct: float | None = None
 
