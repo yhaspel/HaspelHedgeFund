@@ -147,6 +147,14 @@ export interface InvestorProfileApplied {
   reason: '' | 'no_profile' | 'personalization_off' | 'strategy_opt_out';
 }
 
+/** P3-D WS-D: audit snapshot of which persona-evolution revisions were
+ *  injected for this run. {} when unset / no persona had a revision. */
+export interface PersonaEvolutionApplied {
+  applied: boolean;
+  as_of_date: string;
+  revisions: Record<string, number>;
+}
+
 export interface RunDetail extends RunSummary {
   model_overrides: Record<string, string>;
   personas: string[];
@@ -161,6 +169,8 @@ export interface RunDetail extends RunSummary {
   risk_context?: RunRiskContext;
   /** P3-prereq-5 WS-C: investor-profile audit snapshot, {} when unset. */
   investor_profile_applied?: InvestorProfileApplied | Record<string, never>;
+  /** P3-D WS-D: persona-evolution audit snapshot, {} when unset. */
+  persona_evolution_applied?: PersonaEvolutionApplied | Record<string, never>;
 }
 
 export interface CreateRunRequest {

@@ -18,6 +18,7 @@ from ..investor_profile_block import PERSONA_FRAMING, format_profile_block
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import PersonaOutput
+from ..persona_evolution_block import EVOLUTION_FRAMING, format_evolution_block
 from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AGENT_VERSIONS, AgentSpec, register
 
@@ -108,6 +109,12 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
             # Sector-rotation branch is left untouched (profile flows to the
             # non-sector book; sector ETFs reason against macro/sector data).
             user += format_profile_block(state.get("investor_profile"), PERSONA_FRAMING)
+            # P3-D WS-D: per-persona evolving note. Empty/missing → no-op,
+            # so backtests and any caller without state["persona_evolution"]
+            # produce byte-identical request bodies to pre-phase.
+            user += format_evolution_block(
+                (state.get("persona_evolution") or {}).get(name), EVOLUTION_FRAMING
+            )
             system_prompt = spec.prompt + terse
         # Honor the global default flip in registry (Haiku 4.5) for personas
         # whose spec.default_model wasn't given a per-spec override. Persona

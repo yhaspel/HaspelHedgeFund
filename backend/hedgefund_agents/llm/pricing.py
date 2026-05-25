@@ -109,6 +109,15 @@ def estimate_cost(
         price = PRICING.get(model)
         if price is not None:
             log.debug("pricing fallback (static table) for model=%r", model)
+    # OpenRouter `:online` suffix adds a web-search capability but uses the
+    # same per-token billing as the base slug; if the base is priced, accept
+    # the online variant at the same per-token rate. The web-search surcharge
+    # is billed separately by OpenRouter and is not modeled here.
+    if price is None and model.endswith(":online"):
+        base = model[: -len(":online")]
+        price = lookup_catalog_price(base) or PRICING.get(base)
+        if price is not None:
+            log.debug("pricing :online → base passthrough for model=%r", model)
     if price is None:
         if strict:
             raise UnknownModelPriceError(

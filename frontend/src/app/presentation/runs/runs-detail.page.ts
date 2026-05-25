@@ -108,6 +108,36 @@ interface PersonaCard {
           </div>
         }
 
+        @if (evolutionApplied(); as ev) {
+          <div class="card mb-3.5 bg-surface-2" data-test="evolved-badge">
+            <div class="card-bd flex items-center gap-2.5 flex-wrap text-2xs">
+              <span class="pill"
+                    tabindex="0"
+                    [attr.aria-describedby]="popEvolved.open() ? popEvolved.popoverId : null"
+                    (mouseenter)="popEvolved.show()" (mouseleave)="popEvolved.maybeHide()"
+                    (focus)="popEvolved.show()" (blur)="popEvolved.maybeHide()">
+                <span class="dot"></span>Evolved
+                <hf-popover #popEvolved placement="bottom" align="start" size="default" role="tooltip">
+                  <strong class="block mb-1">Persona evolution applied</strong>
+                  <span class="block text-text-3 text-[11px]">
+                    @for (entry of evolutionEntries(); track entry.persona) {
+                      <span class="block">{{ entry.persona }} · seq {{ entry.seq }}</span>
+                    }
+                  </span>
+                </hf-popover>
+              </span>
+              <span class="text-text-2">
+                Real-world dossiers for
+                {{ evolutionEntries().length }} persona{{ evolutionEntries().length === 1 ? '' : 's' }}
+                were appended to their reasoning prompts for this run.
+              </span>
+              <a routerLink="/settings/models" class="text-[var(--acc-info-fg)] no-underline ml-auto">
+                Persona evolution settings →
+              </a>
+            </div>
+          </div>
+        }
+
         @if (run()!.error_message) {
           <section class="card mb-3.5 border-[var(--acc-short-soft)]">
             <div class="card-bd">
@@ -725,6 +755,33 @@ export class RunsDetailPage implements OnInit, OnDestroy {
       | undefined;
     if (!meta?.applied) return null;
     return meta.agent_brief || '(no agent brief recorded)';
+  });
+
+  /** P3-D WS-D: per-persona evolving notes injected into this run. Empty
+   *  object when no persona had an applicable revision (live-only by design;
+   *  always empty for backtest-derived data). */
+  readonly evolutionApplied = computed<{
+    asOfDate: string;
+    revisions: Record<string, number>;
+  } | null>(() => {
+    const meta = this.run()?.persona_evolution_applied as
+      | { applied?: boolean; as_of_date?: string; revisions?: Record<string, number> }
+      | undefined;
+    if (!meta?.applied || !meta.revisions) return null;
+    if (Object.keys(meta.revisions).length === 0) return null;
+    return {
+      asOfDate: meta.as_of_date || '',
+      revisions: meta.revisions,
+    };
+  });
+
+  readonly evolutionEntries = computed<{ persona: string; seq: number }[]>(() => {
+    const applied = this.evolutionApplied();
+    if (!applied) return [];
+    return Object.entries(applied.revisions).map(([persona, seq]) => ({
+      persona,
+      seq: Number(seq),
+    }));
   });
 
   cancel(): void {

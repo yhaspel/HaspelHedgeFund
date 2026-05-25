@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.portfolios",
     "apps.screener",
     "apps.investor_profile",
+    "apps.persona_evolution",
     "apps.brokers",
     "hedgefund_agents",
 ]

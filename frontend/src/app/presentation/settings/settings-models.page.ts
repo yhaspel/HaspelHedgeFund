@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { NewsStore } from '../../abstraction/news.store';
+import { PersonaEvolutionStore } from '../../abstraction/persona-evolution.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import {
   AGENT_DISPLAY,
@@ -14,6 +15,10 @@ import {
 } from '../../core/models/model.types';
 import { MarkCadence } from '../../core/models/portfolio.model';
 import { NewsPreferences } from '../../core/models/news.model';
+import {
+  EvolutionCadence,
+  PersonaEvolutionSettings as EvolutionSettings,
+} from '../../core/models/persona-evolution.model';
 
 @Component({
   selector: 'hf-settings-models',
@@ -325,6 +330,219 @@ import { NewsPreferences } from '../../core/models/news.model';
           </div>
         </section>
 
+        <!-- D4 (P3-D): Persona Evolution -->
+        <section class="card col-span-2" data-test="persona-evolution-card">
+          <div class="card-hd flex items-center justify-between">
+            <span class="title">Persona Evolution</span>
+            @if (evoSettings()?.cost_cap_reached_at) {
+              <span class="pill" style="background: var(--acc-short-soft); color: var(--acc-short-fg);" data-test="evo-cap-reached">
+                <span class="dot"></span>monthly cost cap reached
+              </span>
+            }
+          </div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
+              Periodically refresh a short, dated note on what each living-investor
+              persona has done and said in the real world, and inject it into the
+              persona's LLM call at run time. Backtests are never touched, and the
+              core persona prompt is never modified.
+              <a routerLink="/runs" class="text-[var(--acc-info-fg)] underline">Run detail</a>
+              shows an "Evolved" badge when a note was applied.
+            </p>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl flex items-center justify-between" for="evo-enabled">
+                <span>Enable persona evolution</span>
+                <input id="evo-enabled" type="checkbox"
+                       [(ngModel)]="evoForm.enabled" name="evo_enabled"
+                       data-test="evo-enabled" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Default off. Six personas evolve (Buffett, Wood, Druckenmiller,
+                Burry, Damodaran, Lynch); Graham and Munger stay canon.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl" for="evo-cadence">Cadence</label>
+              <select id="evo-cadence" class="input sans"
+                      [(ngModel)]="evoForm.cadence" name="evo_cadence"
+                      [disabled]="!evoForm.enabled"
+                      data-test="evo-cadence">
+                <option value="off">Off</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl" for="evo-model">Evolution model</label>
+              <select id="evo-model" class="input sans"
+                      [(ngModel)]="evoForm.model_id" name="evo_model"
+                      [disabled]="!evoForm.enabled"
+                      data-test="evo-model">
+                <option value="">— Llama 3.3 70B (recommended) —</option>
+                @for (m of evoModelChoices(); track m.id) {
+                  <option [value]="m.id" [disabled]="!m.available">
+                    {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                  </option>
+                }
+              </select>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Anthropic models are excluded in dev. Frugal OpenRouter models only.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl flex items-center justify-between" for="evo-web">
+                <span>Web search (OpenRouter :online)</span>
+                <input id="evo-web" type="checkbox"
+                       [(ngModel)]="evoForm.web_search_enabled" name="evo_web"
+                       [disabled]="!evoForm.enabled"
+                       data-test="evo-web" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                When off, only the FMP/Tiingo news filter feeds the merge call.
+              </p>
+            </div>
+
+            <div class="field max-w-[380px]">
+              <label class="lbl" for="evo-cap">Monthly cost cap (USD)</label>
+              <input id="evo-cap" class="input mono" type="number" step="0.5" min="0"
+                     [(ngModel)]="evoForm.monthly_cost_cap_usd" name="evo_cap"
+                     [disabled]="!evoForm.enabled"
+                     data-test="evo-cap" />
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Hard kill-switch. When reached, the task skips all cycles until next month.
+                Month-to-date: {{ evoMtdCostLabel() }}.
+              </p>
+            </div>
+
+            <div class="flex gap-2">
+              <button type="button" class="btn primary save-btn save-btn--portfolio"
+                      (click)="saveEvoSettings()"
+                      [disabled]="savingEvo() || !isEvoDirty()"
+                      data-test="save-evo">
+                {{ savingEvo() ? 'Saving…' : (isEvoDirty() ? 'Save Persona Evolution' : 'No changes') }}
+              </button>
+              <button type="button" class="btn"
+                      (click)="runEvoNow()"
+                      [disabled]="evoStore.running() || !evoSettings()?.enabled"
+                      data-test="evo-run-now">
+                {{ evoStore.running() ? 'Running…' : 'Run evolution now' }}
+              </button>
+            </div>
+            @if (evoMsg()) {
+              <p role="status" aria-live="polite"
+                 class="text-[11.5px] text-[var(--acc-long-fg)] m-0"
+                 data-test="evo-msg">{{ evoMsg() }}</p>
+            }
+            @if (evoStore.runMsg()) {
+              <p role="status" aria-live="polite"
+                 class="text-[11.5px] text-text-2 m-0"
+                 data-test="evo-run-msg">{{ evoStore.runMsg() }}</p>
+            }
+
+            <div class="eyebrow border-b border-solid border-border pb-1.5 mt-1.5">
+              Personas
+            </div>
+            <table class="tbl" data-test="evo-persona-table">
+              <thead><tr>
+                <th>Persona</th><th>Status</th><th>Last cycle</th>
+                <th>Latest revision</th><th></th>
+              </tr></thead>
+              <tbody>
+                @for (p of evoStore.profiles(); track p.persona_name) {
+                  <tr [attr.data-test-evo-row]="p.persona_name"
+                      [style.opacity]="p.is_evolvable ? 1 : 0.55">
+                    <td>
+                      <div>{{ p.display_name }}</div>
+                      @if (p.firm_name) {
+                        <div class="text-[11px] text-text-3">{{ p.firm_name }}</div>
+                      }
+                      @if (!p.is_evolvable) {
+                        <div class="text-[11px] text-text-3 italic">
+                          Frozen — philosophy is canon{{ p.lifecycle_note ? ' (' + p.lifecycle_note + ')' : '' }}
+                        </div>
+                      }
+                    </td>
+                    <td>
+                      <span class="pill"
+                            [class.ok]="p.last_cycle_status === 'ok'"
+                            [attr.data-test-status]="p.persona_name">
+                        <span class="dot"></span>{{ p.last_cycle_status }}
+                      </span>
+                    </td>
+                    <td class="text-[11.5px] text-text-3">
+                      {{ p.last_cycle_at ? relTime(p.last_cycle_at) : '—' }}
+                    </td>
+                    <td class="text-[11.5px]">
+                      @if (p.current_revision; as rev) {
+                        seq {{ rev.seq }} · {{ rev.as_of_date }} ·
+                        {{ rev.char_count }} chars{{ rev.over_budget ? ' (over budget)' : '' }}
+                      } @else {
+                        <span class="text-text-3">no revisions</span>
+                      }
+                    </td>
+                    <td>
+                      @if (p.is_evolvable) {
+                        <button type="button" class="btn btn-xs"
+                                (click)="toggleViewRevisions(p.persona_name)"
+                                [attr.data-test]="'evo-view-' + p.persona_name">
+                          {{ revisionsOpenFor() === p.persona_name ? 'Hide' : 'View' }}
+                        </button>
+                      }
+                    </td>
+                  </tr>
+                  @if (revisionsOpenFor() === p.persona_name && evoStore.revisions(); as rv) {
+                    <tr>
+                      <td colspan="5">
+                        <div class="rev-block" [attr.data-test]="'evo-revisions-' + p.persona_name">
+                          @if (rv.items.length === 0) {
+                            <p class="text-[11.5px] text-text-3 m-0">No revisions yet.</p>
+                          }
+                          @for (r of rv.items; track r.id) {
+                            <details class="rev-item">
+                              <summary>
+                                <b>seq {{ r.seq }}</b> · {{ r.as_of_date }} ·
+                                {{ r.char_count }} chars
+                                @if (r.over_budget) {
+                                  <span class="badge-free" style="background: var(--acc-short-soft); color: var(--acc-short-fg);">truncated</span>
+                                }
+                                @if (!r.material_change) {
+                                  <span class="badge-free">no-change</span>
+                                }
+                              </summary>
+                              <div class="rev-body">
+                                <pre class="rev-md">{{ r.composite_markdown }}</pre>
+                                @if (r.source_urls?.length) {
+                                  <div class="text-[11px] text-text-3 mt-1">
+                                    Sources:
+                                    @for (u of r.source_urls; track u) {
+                                      <a [href]="u" target="_blank" rel="noopener noreferrer"
+                                         class="text-[var(--acc-info-fg)] underline mr-2">{{ u }}</a>
+                                    }
+                                  </div>
+                                }
+                                @if (r.dropped_facts?.length) {
+                                  <div class="text-[11px] text-text-3 mt-1">
+                                    Dropped: {{ r.dropped_facts.join('; ') }}
+                                  </div>
+                                }
+                              </div>
+                            </details>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <!-- D: Available models -->
         <section class="card col-span-2">
           <div class="card-hd flex items-center justify-between">
@@ -452,6 +670,32 @@ import { NewsPreferences } from '../../core/models/news.model';
         padding: 0 8px;
         font-size: 11px;
       }
+      .rev-block {
+        padding: 8px 4px 8px 4px;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+      }
+      .rev-item {
+        padding: 4px 0;
+        border-bottom: 1px dashed var(--border);
+      }
+      .rev-item summary {
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .rev-body {
+        padding: 6px 0 6px 12px;
+      }
+      .rev-md {
+        white-space: pre-wrap;
+        font-family: var(--font-mono, monospace);
+        font-size: 11.5px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--r-6, 6px);
+        padding: 8px;
+        margin: 0;
+      }
     `,
   ],
 })
@@ -459,6 +703,71 @@ export class SettingsModelsPage implements OnInit {
   readonly store = inject(ModelsStore);
   readonly portfolio = inject(PortfolioStore);
   readonly newsStore = inject(NewsStore);
+  readonly evoStore = inject(PersonaEvolutionStore);
+
+  // Persona Evolution form state.
+  evoForm: EvolutionSettings = {
+    enabled: false,
+    cadence: 'off',
+    model_id: '',
+    web_search_enabled: true,
+    monthly_cost_cap_usd: '2.00',
+    cost_cap_reached_at: null,
+    updated_at: '',
+  };
+  private savedEvo: EvolutionSettings = { ...this.evoForm };
+  savingEvo = signal(false);
+  evoMsg = signal<string | null>(null);
+  revisionsOpenFor = signal<string | null>(null);
+
+  evoSettings = computed(() => this.evoStore.settings());
+  evoMtdCostLabel = computed(
+    () => `$${this.evoSettings()?.month_to_date_cost_usd ?? '0.00'}`,
+  );
+
+  evoModelChoices = computed(() =>
+    this.store
+      .models()
+      .filter((m) => m.provider !== 'anthropic')
+      .filter((m) => m.tier === 'fast_cheap' || m.tier === 'hosted_open'),
+  );
+
+  isEvoDirty(): boolean {
+    return JSON.stringify(this.evoForm) !== JSON.stringify(this.savedEvo);
+  }
+
+  saveEvoSettings(): void {
+    this.savingEvo.set(true);
+    this.evoMsg.set(null);
+    const body = { ...this.evoForm };
+    this.evoStore.patchSettings(body).subscribe({
+      next: (s) => {
+        this.evoForm = { ...s };
+        this.savedEvo = { ...s };
+        this.savingEvo.set(false);
+        this.evoMsg.set('Saved.');
+        setTimeout(() => this.evoMsg.set(null), 2500);
+      },
+      error: (err) => {
+        this.savingEvo.set(false);
+        this.evoMsg.set(err?.error?.detail || 'Failed to save.');
+      },
+    });
+  }
+
+  runEvoNow(): void {
+    this.evoStore.runNow().subscribe();
+  }
+
+  toggleViewRevisions(persona: string): void {
+    if (this.revisionsOpenFor() === persona) {
+      this.revisionsOpenFor.set(null);
+      this.evoStore.clearRevisions();
+      return;
+    }
+    this.revisionsOpenFor.set(persona);
+    this.evoStore.loadRevisions(persona).subscribe();
+  }
 
   // News settings form state.
   newsForm: NewsPreferences = {
@@ -581,6 +890,14 @@ export class SettingsModelsPage implements OnInit {
       }
       this.loadPresetOverrides();
     });
+    this.evoStore.loadSettings().subscribe({
+      next: (s) => {
+        this.evoForm = { ...s };
+        this.savedEvo = { ...s };
+      },
+      error: () => { /* ignore — defaults are fine */ },
+    });
+    this.evoStore.loadProfiles().subscribe();
   }
 
   applyGlobalDefault(modelId: string): void {

@@ -35,4 +35,11 @@ app.conf.beat_schedule = {
         "task": "apps.brokers.tasks.reconcile_all_accounts",
         "schedule": 300.0,
     },
+    # P3-D: persona evolution. Daily 05:30 UTC tick; cadence (daily/weekly/
+    # monthly) is decided inside the task by `is_cycle_due`, so one static
+    # schedule serves all three.
+    "evolve-personas": {
+        "task": "apps.persona_evolution.tasks.evolve_personas",
+        "schedule": crontab(minute=30, hour=5),
+    },
 }

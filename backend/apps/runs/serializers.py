@@ -83,6 +83,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
             "evidence", "risk_context",
             # P3-prereq-5 WS-C: investor-profile audit snapshot for the badge.
             "investor_profile_applied",
+            # P3-D WS-D: persona-evolution audit snapshot for the Evolved badge.
+            "persona_evolution_applied",
         )
 
     def get_strategy_backlink(self, run: Run) -> dict | None:

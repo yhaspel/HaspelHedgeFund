@@ -97,6 +97,41 @@ def _resolve_investor_profile(run: Run) -> tuple[dict, dict]:
     }
     return ctx, meta
 
+def _resolve_persona_evolution(run: Run) -> tuple[dict[str, str], dict]:
+    """Resolve persona-evolution revisions for a run, once per ``execute_run``.
+
+    Live-only (decision 7). The PIT resolver picks the latest revision whose
+    ``as_of_date <= run.as_of_date`` per evolvable persona (§6.4) — so an
+    ad-hoc past-dated run never sees an evolving note dated after its
+    as-of date.
+
+    Returns ``(ctx, meta)`` where ``ctx == {persona_name: composite_markdown}``
+    is what gets threaded into ``state["persona_evolution"]``, and ``meta``
+    is the audit blob persisted to ``run.persona_evolution_applied``.
+    """
+    try:
+        from apps.persona_evolution.engine import (
+            resolve_evolution_for_run,
+            revision_seq_map_for_run,
+        )
+    except ImportError:  # pragma: no cover — app always installed in prod
+        return {}, {}
+
+    try:
+        ctx = resolve_evolution_for_run(run.as_of_date)
+        seq_map = revision_seq_map_for_run(run.as_of_date)
+    except Exception:  # noqa: BLE001 — never let evolution wiring break a run
+        log.exception("persona_evolution: resolver failed for run=%s", run.pk)
+        return {}, {}
+
+    meta = {
+        "applied": bool(ctx),
+        "as_of_date": run.as_of_date.isoformat(),
+        "revisions": seq_map,
+    }
+    return ctx, meta
+
+
 log = logging.getLogger(__name__)
 
 ANALYTICAL_AGENTS = list(ANALYTICAL_NODES.keys())
@@ -185,6 +220,13 @@ def execute_run(run_id: int) -> None:
         run.investor_profile_applied = profile_meta
         run.save(update_fields=["investor_profile_applied"])
 
+        # P3-D WS-D: resolve persona-evolution revisions once per run.
+        # Live-only: the backtest engine never imports apps.persona_evolution,
+        # so this code path cannot reach a backtest.
+        persona_evolution_ctx, persona_evolution_meta = _resolve_persona_evolution(run)
+        run.persona_evolution_applied = persona_evolution_meta
+        run.save(update_fields=["persona_evolution_applied"])
+
         for ticker in run.tickers:
             initial_state = {
                 "ticker": ticker,
@@ -194,6 +236,7 @@ def execute_run(run_id: int) -> None:
                 "data_provider": data_provider,
                 "filings_provider": filings_provider,
                 "investor_profile": profile_ctx,
+                "persona_evolution": persona_evolution_ctx,
             }
             final_state = graph.invoke(initial_state)
             _persist_outputs(run, final_state, selected_personas)

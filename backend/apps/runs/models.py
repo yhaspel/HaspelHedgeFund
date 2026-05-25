@@ -77,6 +77,15 @@ class Run(models.Model):
     # Empty {} for every existing run and every backtest.
     investor_profile_applied = models.JSONField(default=dict, blank=True)
 
+    # P3-D WS-D: audit snapshot of which persona-evolution revision (if any)
+    # was injected into each persona's user message for this run.
+    # Structure: {"applied": bool,
+    #             "as_of_date": iso-date,
+    #             "revisions": {persona_name: seq}}.
+    # Empty {} for every existing run, every backtest, and any run where
+    # no persona had an applicable revision.
+    persona_evolution_applied = models.JSONField(default=dict, blank=True)
+
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"
 
