@@ -433,6 +433,13 @@ import {
                 {{ evoStore.running() ? 'Running…' : 'Run evolution now' }}
               </button>
             </div>
+            @if (evoStore.running() && evoStore.currentPersonaLabel(); as label) {
+              <p role="status" aria-live="polite"
+                 class="text-[11.5px] text-text-2 m-0"
+                 data-test="evo-current-persona">
+                Analysing: <b>{{ label }}</b>
+              </p>
+            }
             @if (evoMsg()) {
               <p role="status" aria-live="polite"
                  class="text-[11.5px] text-[var(--acc-long-fg)] m-0"
@@ -468,11 +475,19 @@ import {
                       }
                     </td>
                     <td>
-                      <span class="pill"
-                            [class.ok]="p.last_cycle_status === 'ok'"
-                            [attr.data-test-status]="p.persona_name">
-                        <span class="dot"></span>{{ p.last_cycle_status }}
-                      </span>
+                      @if (p.current_cycle_started_at) {
+                        <span class="pill"
+                              style="background: var(--acc-info-soft); color: var(--acc-info-fg);"
+                              [attr.data-test-status]="p.persona_name">
+                          <span class="dot"></span>running…
+                        </span>
+                      } @else {
+                        <span class="pill"
+                              [class.ok]="p.last_cycle_status === 'ok'"
+                              [attr.data-test-status]="p.persona_name">
+                          <span class="dot"></span>{{ p.last_cycle_status }}
+                        </span>
+                      }
                     </td>
                     <td class="text-[11.5px] text-text-3">
                       {{ p.last_cycle_at ? relTime(p.last_cycle_at) : '—' }}
@@ -897,7 +912,15 @@ export class SettingsModelsPage implements OnInit {
       },
       error: () => { /* ignore — defaults are fine */ },
     });
-    this.evoStore.loadProfiles().subscribe();
+    this.evoStore.loadProfiles().subscribe({
+      next: () => {
+        // If a cycle was already running before the page loaded, kick the
+        // polling loop so the badge advances without the user clicking again.
+        if (this.evoStore.runningPersonas().length > 0) {
+          this.evoStore.startPolling();
+        }
+      },
+    });
   }
 
   applyGlobalDefault(modelId: string): void {

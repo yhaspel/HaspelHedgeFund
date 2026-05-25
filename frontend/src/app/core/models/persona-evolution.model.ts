@@ -39,13 +39,13 @@ export interface PersonaEvolutionProfile {
   last_cycle_at: string | null;
   last_cycle_status: 'never' | 'ok' | 'skipped' | 'failed';
   last_cycle_note: string;
+  current_cycle_started_at: string | null;
   current_revision: PersonaEvolutionRevision | null;
   updated_at: string;
 }
 
-export interface PersonaEvolutionRunResult {
-  ran: string[];
-  skipped: string[];
-  failed: string[];
-  reason?: string;
+export interface PersonaEvolutionRunAck {
+  queued: boolean;
+  persona: string | null;
+  ran_inline?: boolean;
 }

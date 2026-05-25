@@ -66,6 +66,7 @@ class PersonaEvolutionProfileSerializer(serializers.ModelSerializer):
             "last_cycle_at",
             "last_cycle_status",
             "last_cycle_note",
+            "current_cycle_started_at",
             "current_revision",
             "updated_at",
         )

@@ -456,7 +456,6 @@ def core_prompt_for_persona(persona_name: str) -> str:
     return spec.prompt or ""
 
 
-@transaction.atomic
 def run_cycle_for_persona(
     profile: PersonaEvolutionProfile,
     user_settings: PersonaEvolutionSettings,
@@ -465,7 +464,13 @@ def run_cycle_for_persona(
 ) -> CycleResult:
     """Run one full cycle for one persona. Idempotent on same-day re-runs:
     a revision with ``as_of_date == today`` is overwritten in place rather
-    than stacked (§8.6)."""
+    than stacked (§8.6).
+
+    Sets ``profile.current_cycle_started_at`` on entry so the frontend
+    polling endpoint can show "running" state; always clears it before
+    return so a crashing cycle does not strand the badge as permanently
+    running.
+    """
     today = today or timezone.now().date()
     if not profile.is_evolvable:
         return CycleResult(
@@ -474,6 +479,31 @@ def run_cycle_for_persona(
             note="non-evolvable",
         )
 
+    # Mark "in-flight". This single-row write is intentionally outside the
+    # cycle's atomic block so the UI sees it immediately; the wrapper below
+    # always clears it.
+    PersonaEvolutionProfile.objects.filter(pk=profile.pk).update(
+        current_cycle_started_at=timezone.now()
+    )
+
+    try:
+        return _run_cycle_inner(profile, user_settings, today=today)
+    finally:
+        PersonaEvolutionProfile.objects.filter(pk=profile.pk).update(
+            current_cycle_started_at=None
+        )
+
+
+@transaction.atomic
+def _run_cycle_inner(
+    profile: PersonaEvolutionProfile,
+    user_settings: PersonaEvolutionSettings,
+    *,
+    today: dt.date,
+) -> CycleResult:
+    """Inner body of ``run_cycle_for_persona``. Split out so the wrapper can
+    own the ``current_cycle_started_at`` mark/clear pair around the atomic
+    block — otherwise a rollback would also unset the in-flight marker."""
     window_days = CADENCE_INTERVAL_DAYS.get(user_settings.cadence, 30)
 
     web_text, source_urls, _web_call = fetch_web_inputs(

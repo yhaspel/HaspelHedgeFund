@@ -110,19 +110,42 @@ class PersonaEvolutionRunNowView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request: Request) -> Response:
+        """Enqueue an evolution run on the Celery worker and return 202.
+
+        The cycle is long-running (one ~10-30s LLM round per persona). We
+        dispatch via ``.delay()`` so the HTTP request returns immediately
+        and the UI can poll ``GET /profiles/`` for per-persona
+        ``current_cycle_started_at`` updates. State lives in the DB, so a
+        page reload during the run still shows the in-flight persona.
+        """
         body = request.data or {}
         persona = body.get("persona") or None
         # Make sure the row exists so the task can find an "enabled" user
         # downstream — but for the on-demand trigger we don't require enabled.
         _get_or_create_settings(request.user)
         try:
-            result = evolve_personas(
+            evolve_personas.delay(
                 user_id=request.user.id, persona=persona, force=True
             )
-        except Exception as exc:  # noqa: BLE001
-            log.exception("persona_evolution: run-now failed")
-            return _err(
-                f"Run failed: {exc.__class__.__name__}: {exc}",
-                code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            return Response(
+                {"queued": True, "persona": persona},
+                status=status.HTTP_202_ACCEPTED,
             )
-        return Response(result)
+        except Exception:  # noqa: BLE001 — broker unavailable: inline fallback
+            log.exception(
+                "persona_evolution: celery enqueue failed; running inline"
+            )
+            try:
+                evolve_personas(
+                    user_id=request.user.id, persona=persona, force=True
+                )
+                return Response(
+                    {"queued": False, "persona": persona, "ran_inline": True},
+                    status=status.HTTP_200_OK,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.exception("persona_evolution: inline fallback also failed")
+                return _err(
+                    f"Run failed: {exc.__class__.__name__}: {exc}",
+                    code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )

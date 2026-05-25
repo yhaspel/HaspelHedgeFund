@@ -56,6 +56,11 @@ class PersonaEvolutionProfile(models.Model):
         max_length=12, choices=STATUS_CHOICES, default=NEVER
     )
     last_cycle_note = models.TextField(blank=True, default="")
+    # Set when a cycle is in-flight for this persona; cleared when the cycle
+    # finishes (success or failure). The frontend polls profiles and shows
+    # a "running" badge for any profile with this non-null. Survives a page
+    # reload — the running state lives in the DB, not in the browser tab.
+    current_cycle_started_at = models.DateTimeField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
