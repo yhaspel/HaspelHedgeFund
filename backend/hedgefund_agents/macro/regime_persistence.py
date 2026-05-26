@@ -3,22 +3,21 @@
 This module is the integration layer between the deterministic fitter in
 ``markov_regime`` and the rest of the project. It owns:
 
-* ``ALWAYS_MODELLED_TICKERS`` — the 16-ticker universe the daily Celery
-  prewarm task fits unconditionally (SPY, QQQ, the 11 SPDR sector ETFs,
-  TLT, GLD, UUP).
+* ``ALWAYS_MODELLED_TICKERS`` — the 16-ticker reference universe (SPY, QQQ,
+  the 11 SPDR sector ETFs, TLT, GLD, UUP). No background prewarm fits this
+  universe; user-triggered cycles populate ``RegimeSnapshot`` rows on demand
+  via their own user-keyed provider.
 * ``fit_and_persist`` — fits a model for one ticker at one as_of_date and
   saves ``RegimeModel`` + ``RegimeSnapshot`` rows. Idempotent on
-  ``(ticker, as_of_date, model_type, config_hash)``.
+  ``(ticker, as_of_date, model_type, config_hash)``. **Requires** a caller-
+  injected ``data_provider`` — there is no platform-key fallback for paid
+  providers under the BYOK-only data-licensing policy.
 * ``get_latest_snapshot`` / ``get_batch_snapshots`` — read helpers used by
-  the views and downstream strategies.
-* ``compute_markov_consensus`` — vote-aggregation across the
-  always-modelled universe for ``MacroSnapshot.markov_consensus``.
+  the views and downstream strategies. Read-only; never fetch.
+* ``compute_markov_consensus`` — vote-aggregation across the reference
+  universe for ``MacroSnapshot.markov_consensus``. Read-only.
 
-The fit path uses the factory-supplied FMP provider so backtest replay
-providers stay honest. Callers must pass an ``as_of_date`` - there's no
-implicit "today" magic. The prewarm Celery task passes ``force_platform=True``
-because it fits the always-modelled universe ahead of any user-triggered
-access (see data-licensing.md trade-off in P2n risk #3).
+Callers must pass an ``as_of_date`` — there's no implicit "today" magic.
 """
 from __future__ import annotations
 
@@ -65,19 +64,21 @@ def _fetch_bars(
     ticker: str, *, as_of_date: dt.date, lookback_observations: int, window_days: int,
     data_provider: Any | None = None,
 ) -> list[Any]:
-    """Pull daily bars before ``as_of_date`` using the registered provider.
+    """Pull daily bars before ``as_of_date`` using the caller-injected provider.
 
     Uses calendar-day padding ``~ (lookback + window) * 1.6`` to be robust
     to weekends/holidays. Returns the raw Bar dataclasses unchanged.
+
+    Callers must inject a user-keyed ``data_provider``. There is no
+    platform-key fallback for paid providers (BYOK-only per data-licensing.md).
     """
     if data_provider is None:
-        from apps.data.providers.factory import get_fmp_provider
-
-        # No user context inside the regime fitter — callers (prewarm task,
-        # portfolio cycles) own the user-keyed provider and inject it.
-        # Default falls back to a platform-keyed provider when policy allows
-        # (dev/test, or prod via force_platform from prewarm).
-        data_provider = get_fmp_provider(force_platform=True)
+        raise RuntimeError(
+            "regime _fetch_bars requires a caller-injected data_provider; "
+            "no platform-key fallback exists for paid providers under the "
+            "BYOK-only data-licensing policy. Pass "
+            "data_provider=get_fmp_provider(user=<user>)."
+        )
     days_needed = int((lookback_observations + window_days) * 1.6) + 30
     start = as_of_date - dt.timedelta(days=days_needed)
     end = as_of_date - dt.timedelta(days=1)

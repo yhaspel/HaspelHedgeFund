@@ -1,0 +1,47 @@
+# Secrets — never bake into an image layer.
+.env
+.env.*
+!.env.example
+
+# VCS
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+frontend/.pnpm-store/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local overrides + scratch
+infra/docker-compose.override.yml
+backend/media/
+MEMORY.md
+.tmp-screenshots/
+
+# Claude Code session state — never relevant to a built image.
+.claude/

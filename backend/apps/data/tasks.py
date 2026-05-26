@@ -1,16 +1,9 @@
-"""Periodic data tasks: macro snapshot + Markov regime pre-warm.
+"""Periodic data tasks: macro snapshot pre-warm.
 
-Schedule these via Celery beat (or trigger manually) so the live dashboard
-always has today's MacroSnapshot + regime snapshots ready without making a
-user wait.
-
-P2n BYOK note: these tasks have no per-user context. They rely on the
-platform-keyed providers via the factory's ``force_platform=True`` path
-(applied implicitly by ``_fetch_bars`` and ``compute_snapshot`` when no
-provider is injected). FRED is always-allowed (public data); FMP runs on
-the platform key because the always-modelled regime universe warms a shared
-cache. Trade-off documented in phase-02n-byok-data-providers.md risk #3 —
-revisit before P4a multi-tenant.
+The macro snapshot beat task uses the FRED public-data provider only, which is
+policy-exempt from the BYOK-only rule under data-licensing.md. There is no
+platform-key path for any paid provider (FMP, Tiingo) — those go through
+user-keyed factories on user-triggered code paths.
 """
 from __future__ import annotations
 
@@ -35,58 +28,3 @@ def prewarm_macro_snapshot(as_of_iso: str | None = None) -> str:
         snap.yield_curve_state, snap.policy_stance,
     )
     return f"{as_of.isoformat()}:{snap.growth_quadrant}"
-
-
-@shared_task
-def prewarm_regime_snapshots(
-    as_of_iso: str | None = None, tickers: list[str] | None = None
-) -> dict:
-    """Daily pre-warm: fit Markov regime models for the always-modelled universe.
-
-    Failures are logged and surfaced as ``missing`` entries — never crashes
-    the task. After fitting we also refresh ``MacroSnapshot.markov_consensus``
-    for the same ``as_of`` so the dashboard sees the latest vote.
-    """
-    from apps.data.models import MacroSnapshot
-    from hedgefund_agents.macro.markov_regime import (
-        InsufficientHistoryError,
-        UndertrainedStateError,
-    )
-    from hedgefund_agents.macro.regime_persistence import (
-        ALWAYS_MODELLED_TICKERS,
-        compute_markov_consensus,
-        fit_and_persist,
-    )
-
-    as_of = dt.date.fromisoformat(as_of_iso) if as_of_iso else dt.date.today()
-    universe = list(tickers) if tickers else list(ALWAYS_MODELLED_TICKERS)
-
-    fitted: list[str] = []
-    missing: list[dict] = []
-    for ticker in universe:
-        try:
-            fit_and_persist(ticker=ticker, as_of_date=as_of)
-            fitted.append(ticker)
-        except InsufficientHistoryError as exc:
-            log.info("regime prewarm: insufficient history for %s: %s", ticker, exc)
-            missing.append({"ticker": ticker, "reason": "insufficient_history"})
-        except UndertrainedStateError as exc:
-            log.info("regime prewarm: undertrained state for %s: %s", ticker, exc)
-            missing.append({"ticker": ticker, "reason": "undertrained_state"})
-        except Exception as exc:  # pragma: no cover - provider/transient
-            log.exception("regime prewarm: failed to fit %s: %s", ticker, exc)
-            missing.append({"ticker": ticker, "reason": "fit_error"})
-
-    consensus = compute_markov_consensus(as_of_date=as_of, tickers=universe)
-    if MacroSnapshot.objects.filter(as_of_date=as_of).exists():
-        MacroSnapshot.objects.filter(as_of_date=as_of).update(
-            markov_consensus=consensus
-        )
-
-    return {
-        "as_of": as_of.isoformat(),
-        "fitted": fitted,
-        "missing": missing,
-        "consensus_state": consensus.get("consensus_state"),
-        "consensus_strength": consensus.get("consensus_strength"),
-    }

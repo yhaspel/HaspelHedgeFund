@@ -134,9 +134,10 @@ def compute_snapshot(
 
     if provider is None:
         user_id = (state or {}).get("user_id") if state else None
-        # FRED is public-data — force_platform=True keeps the prewarm path
-        # working in prod without weakening the gate for paid providers.
-        provider = get_fred_provider(user=user_id, force_platform=True)
+        # FRED is public-data (in `_PUBLIC`), so the factory naturally falls
+        # back to env-key when no user key is set. Honors a user's BYOK FRED
+        # key first when present.
+        provider = get_fred_provider(user=user_id)
     obs = _fetch_observations(provider, as_of)
     regime = classify_regime(obs)
     series_used = {

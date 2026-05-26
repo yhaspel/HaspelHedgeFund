@@ -85,7 +85,10 @@ def test_get_fred_provider_falls_back_to_env_even_when_gate_closed() -> None:
 @pytest.mark.django_db
 @override_settings(ALLOW_PLATFORM_DATA_KEYS=False, FMP_API_KEY="platform-fmp-key")
 def test_get_fmp_provider_force_platform_overrides_gate() -> None:
-    """Celery prewarm tasks pass force_platform=True to keep working in prod."""
+    """The factory still honors ``force_platform=True`` for FMP — but only
+    test fixtures and operator scripts may use this path. Production code is
+    enforced BYOK by ``test_grep_guard_no_force_platform_for_paid_providers``.
+    """
     from apps.data.providers.factory import get_fmp_provider
 
     provider = get_fmp_provider(user=None, force_platform=True)
@@ -294,6 +297,51 @@ def test_grep_guard_no_bare_provider_instantiation() -> None:
     assert not actual, (
         "Found bare provider instantiations outside factory.py / tests/:\n"
         + "\n".join(actual)
+    )
+
+
+def test_grep_guard_no_force_platform_for_paid_providers() -> None:
+    """Enforce BYOK-only for paid data providers in production code.
+
+    No production module under ``backend/`` may call any of the paid-provider
+    factory entry points with ``force_platform=True``. Tests and operator
+    scripts are exempt (they run with ``ALLOW_PLATFORM_DATA_KEYS=True`` or
+    against a developer's own env-var key).
+    """
+    import pytest
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0 or check.stdout.strip() != "true":
+        pytest.skip("not running inside a git working tree; grep-guard skipped")
+    paid_factories = (
+        "get_fmp_provider",
+        "get_fmp_news_provider",
+        "get_tiingo_news_provider",
+        "get_market_news_fmp_provider",
+        "get_market_news_tiingo_provider",
+        "get_news_service",
+    )
+    pattern = r"(" + "|".join(paid_factories) + r")\([^)]*force_platform\s*=\s*True"
+    proc = subprocess.run(
+        [
+            "git", "grep", "-nE", pattern,
+            "--",
+            "backend/**/*.py",
+            ":(exclude)backend/tests/",
+            ":(exclude)backend/scripts/",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    matches = [line for line in proc.stdout.strip().splitlines() if line]
+    assert not matches, (
+        "Found force_platform=True calls to paid-provider factories outside "
+        "tests/ and scripts/. Paid providers are BYOK-only in production "
+        "(see data-licensing.md). Offending lines:\n" + "\n".join(matches)
     )
 
 
