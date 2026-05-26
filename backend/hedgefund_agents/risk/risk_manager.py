@@ -127,7 +127,7 @@ def run_risk_manager(state: AgentState) -> AgentState:
     # contradict the rules.
     default = DEFAULT_MODELS.get("risk_manager", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = pick_model(state, "risk_manager", default)
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a risk manager. The hard caps have already been computed by deterministic "
         "rules — your job is to write the narrative and optionally suggest a tighter cap "

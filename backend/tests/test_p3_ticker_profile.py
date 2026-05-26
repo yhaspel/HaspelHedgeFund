@@ -317,7 +317,16 @@ def test_grep_guard_profile_not_imported_by_pit_paths() -> None:
     must not appear in backtest engines, agent council nodes, or strategy
     runners (where point-in-time discipline is mandatory).
     """
+    import pytest
     repo_root = Path(__file__).resolve().parent.parent.parent
+    # See the matching guard in test_p2n_byok_data_providers.py — skip when
+    # the working tree isn't a git checkout (e.g. /app-only docker mount).
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0 or check.stdout.strip() != "true":
+        pytest.skip("not running inside a git working tree; grep-guard skipped")
     # Search backend code outside the data app's view/url layer.
     proc = subprocess.run(
         [

@@ -73,7 +73,7 @@ def run_cio(state: AgentState) -> AgentState:
     }
 
     provider, model = pick_model(state, "cio", DEFAULT_MODELS["cio"])
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     user = (
         f"TICKER: {pm.get('ticker')}\n"
         f"AS-OF: {state['as_of_date'].isoformat()}\n\n"

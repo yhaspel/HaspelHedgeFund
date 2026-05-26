@@ -164,23 +164,51 @@ class RunCreateSerializer(serializers.ModelSerializer):
         try:
             from django.db.models import Q
 
-            from apps.models_catalog.models import ModelEntry
+            from apps.models_catalog.models import ModelEntry, ProviderKey
+            from apps.models_catalog.ollama_discovery import discover_ollama_models
         except Exception:
             return v
-        qualified = {str(mid) for mid in v.values()}
-        bare = {mid.split(":", 1)[-1] for mid in qualified}
-        known = set(
-            ModelEntry.objects.filter(is_active=True)
-            .filter(Q(id__in=qualified) | Q(id__in=bare))
-            .values_list("id", flat=True)
-        )
-        known_short = {k.split(":", 1)[-1] for k in known}
+
+        # P3-C §12.2 (Gap F): split overrides by provider prefix. ollama:
+        # ids are validated against the requesting user's live discovery —
+        # they are intentionally per-user/ephemeral and have no ModelEntry
+        # row. Everything else validates against the catalog.
+        ollama_overrides: dict[str, str] = {}
+        catalog_overrides: dict[str, str] = {}
         for agent, mid in v.items():
-            short = str(mid).split(":", 1)[-1]
-            if str(mid) not in known and short not in known_short:
-                raise serializers.ValidationError(
-                    f"model_overrides[{agent!r}] = {mid!r} is not a known active model"
-                )
+            if str(mid).startswith("ollama:"):
+                ollama_overrides[agent] = str(mid)
+            else:
+                catalog_overrides[agent] = str(mid)
+
+        if ollama_overrides:
+            user = getattr(self.context.get("request"), "user", None)
+            host = ""
+            if user is not None and getattr(user, "is_authenticated", False):
+                pk = ProviderKey.objects.filter(user=user).first()
+                host = pk.ollama_host if pk else ""
+            discovered = {m["id"] for m in discover_ollama_models(host)}
+            for agent, mid in ollama_overrides.items():
+                if mid not in discovered:
+                    raise serializers.ValidationError(
+                        f"model_overrides[{agent!r}] = {mid!r} is not a known active model"
+                    )
+
+        if catalog_overrides:
+            qualified = {mid for mid in catalog_overrides.values()}
+            bare = {mid.split(":", 1)[-1] for mid in qualified}
+            known = set(
+                ModelEntry.objects.filter(is_active=True)
+                .filter(Q(id__in=qualified) | Q(id__in=bare))
+                .values_list("id", flat=True)
+            )
+            known_short = {k.split(":", 1)[-1] for k in known}
+            for agent, mid in catalog_overrides.items():
+                short = mid.split(":", 1)[-1]
+                if mid not in known and short not in known_short:
+                    raise serializers.ValidationError(
+                        f"model_overrides[{agent!r}] = {mid!r} is not a known active model"
+                    )
         return v
 
     def validate_personas(self, v: list) -> list:

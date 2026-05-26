@@ -28,7 +28,11 @@ class OllamaClient:
 
     def __init__(self, host: str | None = None, http: httpx.Client | None = None) -> None:
         self.host = (host or getattr(settings, "OLLAMA_HOST", "") or "http://localhost:11434").rstrip("/")
-        self._http = http or httpx.Client(timeout=300.0)
+        # 900s timeout: a 7-8B local model on consumer Apple Silicon can take
+        # 3-5 min per structured-output call (P3-C §12.6 live-gate observation:
+        # qwen2.5:7b fundamentals=193s, valuation=257s). Hosted APIs are fast
+        # enough that 30s would do; the bigger cap is the local-model concession.
+        self._http = http or httpx.Client(timeout=900.0)
 
     def complete(
         self,

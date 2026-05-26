@@ -33,7 +33,7 @@ from apps.data.providers.factory import (
     get_fmp_provider,
     get_news_service,
 )
-from apps.models_catalog.presets import expand_preset
+from apps.models_catalog.presets import PRESETS, expand_preset
 from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
@@ -106,7 +106,27 @@ def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
     preset = strategy.model_preset or default_preset
     if preset == "hybrid" and default_preset != "hybrid":
         preset = default_preset
-    preset_map = expand_preset(preset)
+
+    # P3-C §12.3: when the resolved preset actually uses the <local-tier-a>
+    # token, discover the user's local models and pass the best local-A
+    # entry to expand_preset. Probe only when needed — the rest of the
+    # presets get an empty-cost no-op fallback.
+    local_a: str | None = None
+    raw_rules = PRESETS.get(preset, {})
+    if "<local-tier-a>" in raw_rules.values():
+        from apps.models_catalog.models import ProviderKey
+        from apps.models_catalog.ollama_discovery import discover_ollama_models
+
+        pk = ProviderKey.objects.filter(user=strategy.user).first()
+        host = pk.ollama_host if pk else ""
+        if host:
+            discovered = discover_ollama_models(host)
+            local_a = next(
+                (m["id"] for m in discovered if (m.get("notes") or "").startswith("local-A")),
+                None,
+            ) or next((m["id"] for m in discovered), None)
+
+    preset_map = expand_preset(preset, local_tier_a=local_a)
     return preset_map or {}
 
 

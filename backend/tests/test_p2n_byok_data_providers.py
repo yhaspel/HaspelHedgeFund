@@ -242,7 +242,17 @@ def test_grep_guard_no_bare_provider_instantiation() -> None:
     """Enforce: only `apps/data/providers/factory.py` and `backend/tests/` may
     construct FmpProvider / TiingoNewsProvider / etc. directly.
     """
+    import pytest
     repo_root = Path(__file__).resolve().parent.parent.parent  # → repo root
+    # This guard is contract-against-the-checked-in-source — it only makes
+    # sense when the working tree is a git repo. Skip when it isn't (e.g.
+    # the docker container mounts only /app, not the parent .git).
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0 or check.stdout.strip() != "true":
+        pytest.skip("not running inside a git working tree; grep-guard skipped")
     # Run git grep restricted to backend/ python, excluding factory.py and tests/.
     proc = subprocess.run(
         [

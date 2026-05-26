@@ -47,7 +47,7 @@ def run_sentiment(state: AgentState) -> AgentState:
 
     default = DEFAULT_MODELS.get("sentiment", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = pick_model(state, "sentiment", default)
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a financial news sentiment scorer. Given headlines and summaries "
         "about a single company, return a SentimentOutput JSON with a score in "

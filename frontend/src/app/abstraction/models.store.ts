@@ -4,11 +4,21 @@ import { ApiClient } from '../core/api/api-client';
 import {
   AgentInfo,
   AgentsResponse,
+  FetchModelsResponse,
   ModelEntry,
   ModelPreferences,
+  PresetResponse,
   ProviderKeyStatus,
   VerifyPricingResponse,
 } from '../core/models/model.types';
+
+function _sortByDisplayName(rows: ModelEntry[]): ModelEntry[] {
+  return [...rows].sort((a, b) =>
+    (a.display_name ?? '').toLocaleLowerCase().localeCompare(
+      (b.display_name ?? '').toLocaleLowerCase(),
+    ),
+  );
+}
 
 @Injectable({ providedIn: 'root' })
 export class ModelsStore {
@@ -37,7 +47,7 @@ export class ModelsStore {
   loadAll(): Observable<unknown> {
     return forkJoin({
       models: this.api.get<{ models: ModelEntry[] }>('/models/').pipe(
-        tap((r) => this._models.set(r.models)),
+        tap((r) => this._models.set(_sortByDisplayName(r.models))),
       ),
       agents: this.api.get<AgentsResponse>('/agents/').pipe(
         tap((r) => {
@@ -56,12 +66,12 @@ export class ModelsStore {
 
   loadModels(): Observable<{ models: ModelEntry[] }> {
     return this.api.get<{ models: ModelEntry[] }>('/models/').pipe(
-      tap((r) => this._models.set(r.models)),
+      tap((r) => this._models.set(_sortByDisplayName(r.models))),
     );
   }
 
-  fetchPreset(name: string): Observable<{ preset: string; overrides: Record<string, string> }> {
-    return this.api.get(`/presets/${name}/`);
+  fetchPreset(name: string): Observable<PresetResponse> {
+    return this.api.get<PresetResponse>(`/presets/${name}/`);
   }
 
   savePrefs(p: Partial<ModelPreferences>): Observable<ModelPreferences> {
@@ -85,12 +95,35 @@ export class ModelsStore {
         if (!r.models?.length) return;
         const byId = new Map(r.models.map((m) => [m.id, m]));
         this._models.update((rows) =>
-          rows.map((row) => {
+          _sortByDisplayName(
+            rows.map((row) => {
+              const fresh = byId.get(row.id);
+              if (!fresh) return row;
+              return { ...row, ...fresh, available: row.available };
+            }),
+          ),
+        );
+      }),
+    );
+  }
+
+  fetchOpenRouterModels(): Observable<FetchModelsResponse> {
+    return this.api.post<FetchModelsResponse>('/models/fetch/', {}).pipe(
+      tap((r) => {
+        if (!r.models?.length) return;
+        const byId = new Map(r.models.map((m) => [m.id, m]));
+        this._models.update((rows) => {
+          // Merge: refreshed rows replace existing entries; rows the fetch
+          // deactivated also drop out of the visible catalog (`available`
+          // is recomputed by /models/ on next load, but a fetched row
+          // arrives with the freshest is_active flag).
+          const merged = rows.map((row) => {
             const fresh = byId.get(row.id);
             if (!fresh) return row;
             return { ...row, ...fresh, available: row.available };
-          }),
-        );
+          });
+          return _sortByDisplayName(merged);
+        });
       }),
     );
   }

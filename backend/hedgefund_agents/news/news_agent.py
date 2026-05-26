@@ -164,7 +164,7 @@ def run_news(state: AgentState) -> AgentState:
     ]
 
     provider, model = pick_model(state, "news_digest", DEFAULT_MODELS["news_digest"])
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are an equity-research analyst. You will receive: (a) a list of "
         "recent news items about a single ticker, already deduped and filtered "

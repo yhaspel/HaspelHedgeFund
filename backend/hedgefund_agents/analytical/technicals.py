@@ -82,7 +82,7 @@ def run_technicals(state: AgentState) -> AgentState:
     last = closes[-1]
 
     provider, model = pick_model(state, "technicals", DEFAULT_MODELS["technicals"])
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a technical analyst. Given pre-computed indicators, label "
         "the regime and assign a directional signal. Echo the indicator "

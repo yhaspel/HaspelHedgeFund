@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ModelsStore } from '../../abstraction/models.store';
 import {
   AGENT_DISPLAY,
+  ModelEntry,
   PRESET_NAMES,
   estimateAgentCost,
   estimateRunCost,
@@ -15,6 +16,10 @@ import {
  * - Two-way `overrides`: {agent_id: model_id}.
  * - Shows current preset, total cost estimate, and "Expand" affordance.
  * - Preset buttons populate `overrides` in one click.
+ * - Per-agent dropdowns are scoped to the active tier's curated menu
+ *   (P3-C §7.1). Discovered local models (provider==="ollama") stay
+ *   first-class and visible regardless of the tier. "Show all models"
+ *   restores the full catalog as an escape hatch.
  */
 @Component({
   selector: 'hf-model-panel',
@@ -60,6 +65,17 @@ import {
 
       @if (expanded()) {
         <div class="model-panel-rows">
+          <label class="show-all-row">
+            <input
+              type="checkbox"
+              [checked]="showAll()"
+              (change)="showAll.set($any($event.target).checked)"
+              data-test="model-panel-show-all"
+            />
+            <span class="text-[11.5px] text-text-3">
+              Show all models (default: scope to the active tier's menu).
+            </span>
+          </label>
           @for (a of agents(); track a) {
             <div class="model-panel-row">
               <div class="text-text-2">{{ display(a) }}</div>
@@ -69,7 +85,7 @@ import {
                 (ngModelChange)="setOverride(a, $event)"
                 [attr.data-test]="'select-' + a"
               >
-                @for (m of store.models(); track m.id) {
+                @for (m of visibleModels(a); track m.id) {
                   <option [value]="m.id" [disabled]="!m.available">
                     {{ m.display_name }} · {{ m.tier }} ·
                     $ {{ estimate(a, m.id).toFixed(4) }}
@@ -106,6 +122,12 @@ import {
         font-size: 11.5px;
         padding: 0 8px;
       }
+      .show-all-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-bottom: 4px;
+      }
     `,
   ],
 })
@@ -117,9 +139,11 @@ export class ModelPanelComponent {
   overrides = model<Record<string, string>>({});
 
   expanded = signal(false);
+  showAll = signal(false);
   presets = PRESET_NAMES;
 
   activePreset = signal<string>('research');
+  tierMenu = signal<string[]>([]);
 
   totalCost = computed(() =>
     estimateRunCost(
@@ -162,6 +186,34 @@ export class ModelPanelComponent {
     return estimateAgentCost(a, modelId, this.store.models());
   }
 
+  /**
+   * The list of <option> models for a given agent's select.
+   *
+   * - default: tier menu ∪ all discovered Ollama models (always first-class)
+   * - "Show all" on: full catalog
+   * - empty menu: fall back to full catalog so the dropdown never renders
+   *   empty (e.g. before applyPreset()'s fetch resolves, or unknown preset)
+   * - always append `currentFor(a)` if it would otherwise be missing — a
+   *   <select> with a value not among its options renders blank and silently
+   *   loses the user's selection.
+   */
+  visibleModels(a: string): ModelEntry[] {
+    const all = this.store.models();
+    if (this.showAll()) return all;
+    const menu = this.tierMenu();
+    if (!menu.length) return all;
+    const menuSet = new Set(menu);
+    const out = all.filter(
+      (m) => menuSet.has(m.id) || m.provider === 'ollama',
+    );
+    const current = this.currentFor(a);
+    if (current && !out.some((m) => m.id === current)) {
+      const stale = all.find((m) => m.id === current);
+      if (stale) out.push(stale);
+    }
+    return out;
+  }
+
   setOverride(a: string, modelId: string): void {
     this.overrides.set({ ...this.overrides(), [a]: modelId });
   }
@@ -169,6 +221,7 @@ export class ModelPanelComponent {
   applyPreset(name: string): void {
     this.activePreset.set(name);
     this.store.fetchPreset(name).subscribe((r) => {
+      this.tierMenu.set(r.menu ?? []);
       const next: Record<string, string> = {};
       for (const a of this.agents()) {
         if (r.overrides[a]) next[a] = r.overrides[a];

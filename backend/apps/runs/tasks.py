@@ -232,6 +232,7 @@ def execute_run(run_id: int) -> None:
                 "ticker": ticker,
                 "as_of_date": run.as_of_date,
                 "run_id": run.id,
+                "user_id": run.user_id,
                 "model_overrides": run.model_overrides or {},
                 "data_provider": data_provider,
                 "filings_provider": filings_provider,

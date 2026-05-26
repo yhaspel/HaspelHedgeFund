@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AgentsView,
+    FetchOpenRouterModelsView,
     ModelsView,
     MyModelPreferencesView,
     MyProviderKeysView,
@@ -15,6 +16,11 @@ urlpatterns = [
         "models/verify-pricing/",
         VerifyOpenRouterPricingView.as_view(),
         name="models-verify-pricing",
+    ),
+    path(
+        "models/fetch/",
+        FetchOpenRouterModelsView.as_view(),
+        name="models-fetch",
     ),
     path("agents/", AgentsView.as_view(), name="agents-list"),
     path("presets/<str:name>/", PresetView.as_view(), name="preset-detail"),

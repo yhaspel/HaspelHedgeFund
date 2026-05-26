@@ -49,6 +49,21 @@ export const INFO_GUIDES: InfoGuide[] = [
     keywords: ['byok', 'api', 'key', 'anthropic', 'openrouter', 'openai', 'ollama', 'fmp', 'tiingo', 'fred'],
   },
   {
+    slug: 'local-model-setup',
+    title: 'Local Model Setup with Ollama',
+    summary:
+      'Run AI models on your own computer for free — install Ollama, pull a model, and select it for an agent.',
+    group: 'getting-started',
+    icon: 'i-cpu',
+    keywords: [
+      'ollama', 'local', 'model', 'free', 'self-host', 'on-prem',
+      'pull', 'install', 'brew', 'serve', 'daemon',
+      'qwen', 'llama', 'mistral', 'phi',
+      'gpu', 'metal', 'apple silicon', 'cpu', 'ram',
+      'hybrid', 'dev', 'cost', 'budget',
+    ],
+  },
+  {
     slug: 'models-and-cost',
     title: 'Models & Cost Disclaimer',
     summary:

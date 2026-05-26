@@ -154,10 +154,18 @@ import {
           <div class="card-bd flex flex-col gap-3.5">
             <p class="text-[11.5px] text-text-3 m-0">
               "Current default" = what the active preset (<b>{{ preset }}</b>) resolves to. Pick an explicit model to override it for this agent.
+              Selects are scoped to the preset's curated menu; toggle "Show all models" to reach the full catalog.
             </p>
             <p class="text-[11.5px] text-text-3 m-0 italic" data-test="per-agent-autosave-note">
               Per-agent selections save automatically. Preset and cost ceiling save via the button above.
             </p>
+            <label class="show-all-row">
+              <input type="checkbox" id="per-agent-show-all"
+                     [checked]="showAllPerAgent()"
+                     (change)="showAllPerAgent.set($any($event.target).checked)"
+                     data-test="per-agent-show-all" />
+              <span class="text-[11.5px] text-text-3">Show all models</span>
+            </label>
             @for (g of groupedAgents(); track g.group) {
               <div>
                 <div class="eyebrow border-b border-solid border-border pb-1.5 mb-2">
@@ -176,7 +184,7 @@ import {
                         (ngModelChange)="setAgentDefault(a, $event)"
                         [attr.aria-label]="'Model for ' + a">
                         <option value="">— use preset default —</option>
-                        @for (m of store.models(); track m.id) {
+                        @for (m of visiblePerAgentModels(a); track m.id) {
                           <option [value]="m.id" [disabled]="!m.available">
                             {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
                           </option>
@@ -562,13 +570,27 @@ import {
         <section class="card col-span-2">
           <div class="card-hd flex items-center justify-between">
             <span class="title">Available models ({{ store.models().length }})</span>
-            <button type="button" class="btn"
-              (click)="verifyAllOpenRouter()"
-              [disabled]="verifyingAll() || openRouterCount() === 0"
-              data-test="verify-all-openrouter">
-              {{ verifyingAll() ? 'Verifying…' : 'Verify all OpenRouter pricing' }}
-            </button>
+            <div class="flex gap-2">
+              <button type="button" class="btn"
+                (click)="fetchOpenRouter()"
+                [disabled]="fetchingOpenRouter()"
+                data-test="fetch-openrouter">
+                {{ fetchingOpenRouter() ? 'Fetching…' : 'Fetch latest OpenRouter models' }}
+              </button>
+              <button type="button" class="btn"
+                (click)="verifyAllOpenRouter()"
+                [disabled]="verifyingAll() || openRouterCount() === 0"
+                data-test="verify-all-openrouter">
+                {{ verifyingAll() ? 'Verifying…' : 'Verify all OpenRouter pricing' }}
+              </button>
+            </div>
           </div>
+          @if (fetchMsg()) {
+            <p role="status" aria-live="polite"
+              class="text-[11.5px] m-0 px-3 pt-2"
+              [style.color]="fetchHasIssues() ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'"
+              data-test="fetch-msg">{{ fetchMsg() }}</p>
+          }
           @if (verifyMsg()) {
             <p role="status" aria-live="polite"
               class="text-[11.5px] m-0 px-3 pt-2"
@@ -655,6 +677,12 @@ import {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px 24px;
+      }
+      .show-all-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-bottom: 4px;
       }
       .agent-row {
         display: grid;
@@ -862,6 +890,11 @@ export class SettingsModelsPage implements OnInit {
   keysMsg = signal<string | null>(null);
   prefsMsg = signal<string | null>(null);
   presetOverrides = signal<Record<string, string>>({});
+  presetMenu = signal<string[]>([]);
+  showAllPerAgent = signal(false);
+  fetchingOpenRouter = signal(false);
+  fetchMsg = signal<string | null>(null);
+  fetchHasIssues = signal(false);
   // P02d review: track which preset/ceiling values are persisted so the
   // Save button can be disabled when nothing is dirty (consistent save UX).
   private savedPreset = 'research';
@@ -936,6 +969,69 @@ export class SettingsModelsPage implements OnInit {
   loadPresetOverrides(): void {
     this.store.fetchPreset(this.preset).subscribe((r) => {
       this.presetOverrides.set(r.overrides);
+      this.presetMenu.set(r.menu ?? []);
+    });
+  }
+
+  /**
+   * The list of <option> models for a given per-agent default select.
+   *
+   * - default: tier menu ∪ all discovered local models; always include
+   *   the saved per-agent default even if it falls outside the current
+   *   menu (e.g. chosen under a different preset)
+   * - "Show all": full catalog
+   * - empty menu: fall back to the full catalog so the dropdown never
+   *   renders empty before loadPresetOverrides() resolves
+   */
+  visiblePerAgentModels(a: string): ModelEntry[] {
+    const all = this.store.models();
+    if (this.showAllPerAgent()) return all;
+    const menu = this.presetMenu();
+    if (!menu.length) return all;
+    const menuSet = new Set(menu);
+    const out = all.filter(
+      (m) => menuSet.has(m.id) || m.provider === 'ollama',
+    );
+    const saved = this.agentDefault(a);
+    if (saved && !out.some((m) => m.id === saved)) {
+      const stale = all.find((m) => m.id === saved);
+      if (stale) out.push(stale);
+    }
+    return out;
+  }
+
+  fetchOpenRouter(): void {
+    this.fetchingOpenRouter.set(true);
+    this.fetchMsg.set(null);
+    this.fetchHasIssues.set(false);
+    this.store.fetchOpenRouterModels().subscribe({
+      next: (r) => {
+        this.fetchingOpenRouter.set(false);
+        const parts: string[] = [];
+        if (r.synced?.length) parts.push(`synced ${r.synced.length}`);
+        if (r.created?.length) parts.push(`created ${r.created.length}`);
+        if (r.deactivated?.length) {
+          parts.push(`deactivated ${r.deactivated.length} (${r.deactivated.join(', ')})`);
+        }
+        if (r.excluded?.length) {
+          parts.push(
+            `excluded ${r.excluded.length} (${r.excluded.map((e) => `${e.slug}: ${e.reason}`).join('; ')})`,
+          );
+        }
+        this.fetchHasIssues.set(
+          (r.deactivated?.length ?? 0) + (r.excluded?.length ?? 0) > 0,
+        );
+        this.fetchMsg.set(parts.length ? parts.join(' · ') : 'No changes.');
+        // Refresh availability flags by reloading the catalog (the fetch
+        // response merges in pricing but availability is recomputed by
+        // /models/ from the user's keys + LLM_FREE_ONLY/BLOCK_ANTHROPIC).
+        this.store.loadModels().subscribe();
+      },
+      error: (err) => {
+        this.fetchingOpenRouter.set(false);
+        this.fetchHasIssues.set(true);
+        this.fetchMsg.set(err?.error?.detail || 'Fetch failed.');
+      },
     });
   }
 

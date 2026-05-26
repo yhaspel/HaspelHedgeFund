@@ -15,6 +15,9 @@ class AgentState(TypedDict, total=False):
     ticker: str
     as_of_date: dt.date
     run_id: int  # FK target for LLMCall rows
+    user_id: int  # owner of the run — lets agent nodes resolve per-user
+                  # provider keys (P3-C §12.6: needed so get_llm("ollama", state=state)
+                  # picks up pk.ollama_host instead of the localhost default).
     model_overrides: dict[str, str]
 
     # Wiring

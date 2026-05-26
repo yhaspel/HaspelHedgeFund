@@ -33,6 +33,26 @@ export interface VerifyPricingResponse {
   models: ModelEntry[];
 }
 
+export interface PresetResponse {
+  preset: string;
+  overrides: Record<string, string>;
+  menu?: string[];
+}
+
+export interface FetchModelsExcluded {
+  slug: string;
+  reason: string;
+}
+
+export interface FetchModelsResponse {
+  synced: string[];
+  created: string[];
+  deactivated: string[];
+  excluded: FetchModelsExcluded[];
+  fetched_at: string | null;
+  models: ModelEntry[];
+}
+
 export interface AgentInfo {
   id: string;
   default_model: string;

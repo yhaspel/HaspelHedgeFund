@@ -129,7 +129,7 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
         if spec_default == ("openrouter", "qwen/qwen3.6-27b"):
             spec_default = fallback
         provider, model = pick_model(state, name, spec_default)
-        client = get_llm(provider)
+        client = get_llm(provider, state=state)
         from apps.backtests.cache import make_cache_ctx
         parsed, resp = call_structured(
             client,

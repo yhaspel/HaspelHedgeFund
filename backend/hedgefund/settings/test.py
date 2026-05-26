@@ -1,5 +1,15 @@
 from .base import *  # noqa: F401,F403
 
+# Test-only sentinels. Override the env vars the docker-compose stack sets
+# (which are short, dev-only values) so the JWT-length and CORS-default
+# assertions stay independent of the container env.
+SECRET_KEY = "dev-insecure-not-for-prod-not-for-prod-32b-sentinel"
+SIMPLE_JWT = {  # noqa: F405 - re-declares base.SIMPLE_JWT
+    **SIMPLE_JWT,  # noqa: F405
+    "SIGNING_KEY": SECRET_KEY,
+}
+CORS_ALLOWED_ORIGINS = ["http://localhost:4111", "http://127.0.0.1:4111"]
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

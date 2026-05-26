@@ -46,7 +46,7 @@ def run_fundamentals(state: AgentState) -> AgentState:
     table = _build_table(rows)
 
     provider, model = pick_model(state, "fundamentals", DEFAULT_MODELS["fundamentals"])
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a quantitative equity analyst. Given the company's last 8 "
         "quarters of fundamentals, compute trailing ratios and produce a "

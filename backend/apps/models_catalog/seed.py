@@ -1,7 +1,17 @@
-"""Seed canonical ModelEntry rows on post_migrate."""
+"""Seed canonical ModelEntry rows on post_migrate.
+
+Allowlisted (dev/frugal) rows are inserted with `get_or_create` so a
+later live `sync_tier_models()` fetch is never reverted by a subsequent
+`post_migrate` run (P3-C §6.5). Non-allowlisted rows keep
+`update_or_create` so a seed edit still propagates.
+"""
 from __future__ import annotations
 
 from decimal import Decimal
+
+from .tier_menus import DEV_TIER_SLUGS, FRUGAL_TIER_SLUGS
+
+_FETCHED_IDS = {f"openrouter:{s}" for s in (*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS)}
 
 CANONICAL_MODELS = [
     # Anthropic frontier
@@ -121,4 +131,9 @@ CANONICAL_MODELS = [
 def seed_models(sender, **kwargs):
     from .models import ModelEntry
     for spec in CANONICAL_MODELS:
-        ModelEntry.objects.update_or_create(id=spec["id"], defaults=spec)
+        if spec["id"] in _FETCHED_IDS:
+            # Fetched rows: cold-start baseline only — never overwrite live
+            # metadata that sync_tier_models() may have written.
+            ModelEntry.objects.get_or_create(id=spec["id"], defaults=spec)
+        else:
+            ModelEntry.objects.update_or_create(id=spec["id"], defaults=spec)

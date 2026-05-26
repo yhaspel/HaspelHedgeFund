@@ -181,7 +181,7 @@ def _llm_narrative(
 ):
     default = DEFAULT_MODELS.get("macro", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = default
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a macro strategist. The growth/inflation/yield-curve/policy "
         "regime is ALREADY classified deterministically — do not re-classify. "

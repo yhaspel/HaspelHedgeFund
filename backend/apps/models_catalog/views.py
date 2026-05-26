@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from hedgefund_agents.registry import DEFAULT_MODELS
 
+from .fetching import sync_tier_models
 from .models import ModelEntry, ProviderKey, UserModelPreferences
 from .ollama_discovery import discover_ollama_models
 from .presets import ALL_AGENTS, PRESETS, expand_preset
@@ -15,6 +16,7 @@ from .serializers import (
     ProviderKeyWriteSerializer,
     UserModelPreferencesSerializer,
 )
+from .tier_menus import tier_menu
 from .verification import verify_models
 
 AGENT_RECOMMENDATIONS = {
@@ -140,16 +142,48 @@ class AgentsView(APIView):
 
 
 class PresetView(APIView):
-    """GET /api/presets/<name>/ — returns the expanded per-agent map."""
+    """GET /api/presets/<name>/ — returns the expanded per-agent map and
+    the active tier's curated model menu (P3-C §6.6)."""
 
     def get(self, request: Request, name: str) -> Response:
         if name not in PRESETS:
             return Response({"detail": "unknown preset"}, status=404)
-        # Pick best local for hybrid placeholder
         pk = _get_provider_keys(request.user)
         local = discover_ollama_models(pk.ollama_host)
-        local_a = next((m["id"] for m in local), None)
-        return Response({"preset": name, "overrides": expand_preset(name, local_a)})
+        # Prefer a local-A tier model for hybrid's analytical/macro/news,
+        # falling back to the first discovered model.
+        local_a = next(
+            (m["id"] for m in local if (m.get("notes") or "").startswith("local-A")),
+            None,
+        ) or next((m["id"] for m in local), None)
+        return Response({
+            "preset": name,
+            "overrides": expand_preset(name, local_a),
+            "menu": tier_menu(name),
+        })
+
+
+class FetchOpenRouterModelsView(APIView):
+    """POST /api/models/fetch/ — refresh dev+frugal ModelEntry rows from
+    the live OpenRouter catalog.
+
+    Body (optional): {"dry_run": true}. Returns the SyncResult shape plus
+    refreshed ModelEntry rows so the UI can update without a second fetch.
+    """
+
+    def post(self, request: Request) -> Response:
+        body = request.data if isinstance(request.data, dict) else {}
+        dry_run = bool(body.get("dry_run", False))
+        try:
+            result = sync_tier_models(dry_run=dry_run)
+        except Exception as e:
+            return Response({"detail": f"fetch failed: {e}"}, status=502)
+        refreshed = ModelEntry.objects.filter(
+            id__in=[*result.synced, *result.deactivated]
+        )
+        payload = result.as_dict()
+        payload["models"] = ModelEntrySerializer(refreshed, many=True).data
+        return Response(payload)
 
 
 class MyModelPreferencesView(APIView):

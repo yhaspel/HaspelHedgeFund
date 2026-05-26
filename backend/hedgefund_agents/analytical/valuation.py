@@ -164,7 +164,7 @@ def run_valuation(state: AgentState) -> AgentState:
 
     default = DEFAULT_MODELS.get("valuation", ("openrouter", "qwen/qwen3.6-27b"))
     provider, model = pick_model(state, "valuation", default)
-    client = get_llm(provider)
+    client = get_llm(provider, state=state)
     system = (
         "You are a valuation analyst. You will be given three fair-value estimates "
         "(DCF, multiples, residual income), the current price, and the assumptions used. "

@@ -225,7 +225,7 @@ def test_quality_preset_routes_decision_path_to_opus() -> None:
     mapping = expand_preset("quality")
     # Decision-path agents should land on Opus.
     for agent in ("buffett", "munger", "portfolio_manager", "risk_manager", "cio"):
-        assert mapping[agent] == "anthropic:claude-opus-4-6", (
+        assert mapping[agent] == "anthropic:claude-opus-4-7", (
             f"quality preset must route {agent} to opus; got {mapping[agent]}"
         )
     # Analytical path stays on Sonnet (Opus is overkill for extraction).
