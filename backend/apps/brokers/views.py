@@ -23,6 +23,7 @@ Routes:
 """
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -36,8 +37,10 @@ from apps.portfolios.models import Portfolio
 from apps.runs.models import Decision
 
 from . import market_calendar
+from .adapters.ibkr_gateway import IBKRGatewaySession
 from .adapters.mock import seed_demo_book
 from .capabilities import (
+    AUTH_GATEWAY,
     AUTH_NONE,
     all_capabilities,
     get_capabilities,
@@ -46,8 +49,10 @@ from .confirmation import ConfirmationError, GateContext, gate
 from .credentials import set_api_key_secret, zero_credential
 from .demo_fills import place_demo_order
 from .idempotency import IdempotencyConflict, submit_idempotent
+from .interfaces import BrokerError, BrokerTransientError
 from .models import (
     BrokerAccount,
+    BrokerCredential,
     BrokerFill,
     BrokerOrder,
     BrokerSyncEvent,
@@ -126,13 +131,25 @@ class BrokerAccountListCreateView(generics.ListCreateAPIView):
         if mode == BrokerAccount.MODE_LIVE and not cap.supports_live:
             raise ValidationError({"mode": f"{cap.display_name} has no live mode"})
 
-        # For the Demo broker (auth_kind=none) we generate a synthetic
-        # account_id so two demo books can coexist. For credentialed
-        # brokers the connect step (or OAuth callback) sets the real id.
-        account_id = (
-            request.data.get("account_id")
-            or f"demo-{request.user.id}-{int(timezone.now().timestamp())}"
-        )
+        # account_id resolution by auth_kind:
+        #   - AUTH_NONE (Demo): synthetic `demo-{userid}-{ts}` so two demo
+        #     books can coexist.
+        #   - AUTH_GATEWAY (IBKR): `pending-{uuid4}` placeholder; the
+        #     activate endpoint rewrites it to the real id after the user
+        #     picks one from /iserver/accounts. The `pending-` namespace
+        #     guarantees the unique constraint can't collide across users
+        #     or retries. See ADR 0011 §2. Any caller-supplied account_id
+        #     is ignored — the real id is broker-discovered.
+        #   - Other credentialed kinds (api_key / oauth*): caller may
+        #     supply account_id; otherwise the connect step / OAuth
+        #     callback sets it.
+        if cap.auth_kind == AUTH_GATEWAY:
+            account_id = f"pending-{uuid.uuid4()}"
+        else:
+            account_id = (
+                request.data.get("account_id")
+                or f"demo-{request.user.id}-{int(timezone.now().timestamp())}"
+            )
 
         try:
             with transaction.atomic():
@@ -264,17 +281,20 @@ class BrokerAccountCredentialsView(APIView):
 
 class BrokerAccountOAuthStartView(APIView):
     def post(self, request, account_id: int) -> Response:
-        # Stub in this sub-phase. 3a-2 / 3a-3 implement the real handshake.
+        # Stub for the OAuth brokers. P3a-2 removed gateway_session from
+        # this branch (IBKR uses its own /api/broker-accounts/<id>/gateway/*
+        # endpoints — see ADR 0011 §1); P3a-3 implements oauth2 for
+        # TradeStation. Until then, every OAuth/gateway broker returns 501.
         account = BrokerAccountOverviewView._get(request.user, account_id)
         cap = get_capabilities(account.broker)
-        if cap is None or cap.auth_kind not in ("oauth2", "oauth1", "gateway_session"):
+        if cap is None or cap.auth_kind not in ("oauth2", "oauth1"):
             raise ValidationError({"detail": "this broker does not use OAuth"})
         return Response({
             "authorization_url": "",
             "status": "stub",
             "detail": (
                 "OAuth handshake is implemented in the broker-specific "
-                "phase (3a-2 / 3a-3)."
+                "phase (3a-3 — TradeStation)."
             ),
         }, status=status.HTTP_501_NOT_IMPLEMENTED)
 
@@ -288,6 +308,231 @@ class BrokerAccountOAuthCallbackView(APIView):
             "status": "stub",
             "detail": "OAuth callback is implemented in the broker-specific phase.",
         }, status=status.HTTP_501_NOT_IMPLEMENTED)
+
+
+# --- IBKR gateway_session connect endpoints (P3a-2, ADR 0011) ---------------
+#
+# These five routes drive the IBKR-specific connect-wizard step. They are
+# gateway_session-specific by name (`/gateway/*`) so a future credentialed
+# broker with the same shape can reuse the pattern without overloading
+# generic routes. The Django-settings `IBKR_GATEWAY_BASE_URL` and
+# `IBKR_GATEWAY_LOGIN_URL` describe deployment topology; per-account
+# `BrokerAccount.config` stays empty in v1 (ADR 0011 §1).
+
+
+def _require_ibkr_account(user, account_id: int) -> BrokerAccount:
+    """Resolve an IBKR account scoped to `user`; raise 400 if it isn't IBKR."""
+    account = BrokerAccountOverviewView._get(user, account_id)
+    if account.broker != "ibkr":
+        raise ValidationError({"detail": "this account is not IBKR"})
+    return account
+
+
+class IBKRRuntimeConfigView(APIView):
+    """GET /api/broker-accounts/ibkr/runtime-config/ — the connect wizard
+    fetches this to surface the user-browser login URL without baking the
+    deployment topology into the frontend (ADR 0011 §1)."""
+
+    def get(self, request) -> Response:
+        from django.conf import settings as _settings
+        return Response({
+            "gateway_login_url": _settings.IBKR_GATEWAY_LOGIN_URL,
+        })
+
+
+class BrokerGatewayProbeView(APIView):
+    """POST .../gateway/probe/ — reachability check against
+    settings.IBKR_GATEWAY_BASE_URL via POST /v1/api/tickle.
+
+    Returns 200 regardless — `reachable: false` is a legitimate state the
+    wizard reacts to with "show setup instructions + Retry".
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        _require_ibkr_account(request.user, account_id)
+        try:
+            with IBKRGatewaySession() as session:
+                payload = session.tickle()
+        except BrokerTransientError as exc:
+            return Response({"reachable": False, "detail": str(exc)})
+        except BrokerError as exc:
+            # 4xx from the gateway is still "reachable" — the service is
+            # up, it just didn't like the call. Surface it so the user
+            # knows the gateway is there but unhappy.
+            return Response({"reachable": True, "detail": str(exc)})
+        return Response({"reachable": True, "payload": payload})
+
+
+class BrokerGatewayAuthStatusView(APIView):
+    """POST .../gateway/auth-status/ — proxies POST /v1/api/iserver/auth/status.
+
+    The frontend polls this while the user logs in via the gateway's own
+    browser page. Returns 200 always so the polling client has a clean
+    contract — the body carries `authenticated: bool`, `connected: bool`,
+    and a derived `ready` flag.
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        _require_ibkr_account(request.user, account_id)
+        try:
+            with IBKRGatewaySession() as session:
+                status_payload = session.auth_status()
+        except BrokerTransientError as exc:
+            return Response({
+                "authenticated": False,
+                "connected": False,
+                "ready": False,
+                "detail": str(exc),
+            })
+        ready = bool(status_payload.get("authenticated")) and bool(
+            status_payload.get("connected"),
+        )
+        return Response({
+            "authenticated": bool(status_payload.get("authenticated")),
+            "connected": bool(status_payload.get("connected")),
+            "competing": bool(status_payload.get("competing")),
+            "ready": ready,
+            "raw": status_payload,
+        })
+
+
+class BrokerGatewayDiscoverAccountsView(APIView):
+    """POST .../gateway/discover-accounts/ — proxies GET /v1/api/iserver/accounts.
+
+    Returns the list of broker account ids the gateway session can see,
+    each annotated with a derived `is_paper` (DU-prefix per ADR 0011 §6 /
+    Risks #6) so the wizard can render a clean picker.
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        _require_ibkr_account(request.user, account_id)
+        try:
+            with IBKRGatewaySession() as session:
+                payload = session.get("/iserver/accounts") or {}
+        except BrokerTransientError as exc:
+            return Response({"detail": f"gateway query failed: {exc}"}, status=502)
+        except BrokerError as exc:
+            # 401-ish from the gateway: not authenticated yet.
+            return Response(
+                {"detail": f"gateway refused: {exc}"}, status=409,
+            )
+        ids = payload.get("accounts") if isinstance(payload, dict) else payload
+        if not isinstance(ids, list):
+            ids = []
+        accounts = [
+            {"account_id": str(aid), "is_paper": str(aid).startswith("DU")}
+            for aid in ids
+        ]
+        selected = (
+            payload.get("selectedAccount") if isinstance(payload, dict) else None
+        )
+        return Response({
+            "accounts": accounts,
+            "selected": selected,
+        })
+
+
+class BrokerGatewayActivateView(APIView):
+    """POST .../gateway/activate/ {account_id} — atomically rewrite the
+    `pending-{uuid}` placeholder to the real IBKR id, validate paper/live
+    via DU-prefix, create the BrokerCredential row (no secret), flip
+    connection_status to active. ADR 0011 §2 + §6.
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        account = _require_ibkr_account(request.user, account_id)
+        if account.connection_status == BrokerAccount.STATUS_ACTIVE:
+            raise ValidationError({"detail": "account is already active"})
+        picked = (request.data.get("account_id") or "").strip()
+        if not picked:
+            raise ValidationError({"account_id": "required"})
+
+        # DU-prefix validation (paper-vs-live discriminator). live mode is
+        # structurally unreachable today because supports_live=False blocks
+        # account creation, but the check is defensive — it costs nothing
+        # and unblocks the live path the moment P3a-6 flips the flag.
+        is_paper_id = picked.startswith("DU")
+        if account.mode == BrokerAccount.MODE_PAPER and not is_paper_id:
+            raise ValidationError({
+                "detail": (
+                    f"account {picked!r} does not look like a paper account; "
+                    "IBKR paper account ids start with 'DU'"
+                ),
+            })
+        if account.mode == BrokerAccount.MODE_LIVE and is_paper_id:
+            raise ValidationError({
+                "detail": (
+                    f"account {picked!r} looks like a paper account but "
+                    "this BrokerAccount is configured for live mode"
+                ),
+            })
+
+        # Live disclaimer check — defensive (unreachable today; required
+        # post-3a-6). Mirrors confirmation.gate's disclaimer logic.
+        if account.mode == BrokerAccount.MODE_LIVE:
+            current = LiveTradingDisclaimer.objects.filter(is_current=True).first()
+            if current is None:
+                raise ValidationError({
+                    "detail": "no live-trading disclaimer is configured",
+                })
+            if not DisclaimerAcceptance.objects.filter(
+                user=request.user, disclaimer=current,
+            ).exists():
+                raise ValidationError({
+                    "detail": (
+                        "accept the current live-trading disclaimer before "
+                        "connecting a live account"
+                    ),
+                })
+
+        # Sanity: confirm the picked id is visible to the gateway session.
+        try:
+            with IBKRGatewaySession() as session:
+                accounts_payload = session.get("/iserver/accounts") or {}
+        except BrokerTransientError as exc:
+            return Response(
+                {"detail": f"gateway query failed: {exc}"}, status=502,
+            )
+        except BrokerError as exc:
+            return Response(
+                {"detail": f"gateway refused: {exc}"}, status=409,
+            )
+        visible_ids = (
+            accounts_payload.get("accounts")
+            if isinstance(accounts_payload, dict)
+            else accounts_payload
+        ) or []
+        if picked not in visible_ids:
+            raise ValidationError({
+                "detail": (
+                    f"account {picked!r} is not in the current gateway "
+                    "session — log in again or pick a different account"
+                ),
+            })
+
+        # Collision: this user already has this IBKR account connected on a
+        # different BrokerAccount row.
+        collision = BrokerAccount.objects.filter(
+            user=request.user, broker="ibkr", account_id=picked,
+        ).exclude(pk=account.pk).first()
+        if collision is not None:
+            raise ValidationError({
+                "detail": (
+                    f"you already have IBKR account {picked!r} connected "
+                    f"(label: {collision.label!r})"
+                ),
+            })
+
+        with transaction.atomic():
+            account.account_id = picked
+            account.connection_status = BrokerAccount.STATUS_ACTIVE
+            account.save(update_fields=["account_id", "connection_status"])
+            BrokerCredential.objects.get_or_create(
+                account=account,
+                defaults={"auth_kind": BrokerCredential.AUTH_GATEWAY},
+            )
+
+        return Response(BrokerAccountSerializer(account).data)
 
 
 class BrokerAccountDisconnectView(APIView):

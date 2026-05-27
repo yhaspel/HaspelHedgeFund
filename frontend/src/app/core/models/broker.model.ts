@@ -167,3 +167,34 @@ export interface LiveDisclaimer {
   is_current: boolean;
   accepted: boolean;
 }
+
+// --- P3a-2: IBKR gateway connect endpoints ---------------------------------
+
+export interface IBKRRuntimeConfig {
+  gateway_login_url: string;
+}
+
+export interface IBKRGatewayProbeResult {
+  reachable: boolean;
+  payload?: unknown;
+  detail?: string;
+}
+
+export interface IBKRGatewayAuthStatus {
+  authenticated: boolean;
+  connected: boolean;
+  competing: boolean;
+  ready: boolean;
+  raw?: Record<string, unknown>;
+  detail?: string;
+}
+
+export interface IBKRDiscoveredAccount {
+  account_id: string;
+  is_paper: boolean;
+}
+
+export interface IBKRGatewayDiscoverResult {
+  accounts: IBKRDiscoveredAccount[];
+  selected: string | null;
+}

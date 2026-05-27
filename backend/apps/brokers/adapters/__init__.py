@@ -3,4 +3,7 @@ with `apps.brokers.capabilities.register_broker(...)`. The brokers app
 config imports this on `ready()` so the registry is populated by the time
 views, tasks, or tests reach for it.
 """
-from . import mock  # noqa: F401
+from . import (
+    ibkr,  # noqa: F401  # P3a-2
+    mock,  # noqa: F401
+)

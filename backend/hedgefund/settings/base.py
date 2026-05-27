@@ -164,6 +164,24 @@ FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# P3a-2: IBKR Client Portal Gateway URLs. The gateway is a docker-compose
+# sidecar (`ibkr-gateway` service) reached two different ways:
+#   - The Django app / Celery workers reach it over the compose network at
+#     IBKR_GATEWAY_BASE_URL — the IBKR adapter prepends /v1/api to this.
+#   - The user's browser reaches the gateway login page at
+#     IBKR_GATEWAY_LOGIN_URL for the one-time interactive 2FA. The connect
+#     wizard fetches this URL via GET /api/broker-accounts/ibkr/runtime-config/
+#     and surfaces it as a clickable button — the user never types it.
+# The defaults match the single-machine self-host topology; split-host
+# deployments override via infra/docker-compose.override.yml or env vars.
+# Recorded in ADR 0011 (gateway sidecar with loopback publishing).
+IBKR_GATEWAY_BASE_URL = os.environ.get(
+    "IBKR_GATEWAY_BASE_URL", "https://ibkr-gateway:5000",
+)
+IBKR_GATEWAY_LOGIN_URL = os.environ.get(
+    "IBKR_GATEWAY_LOGIN_URL", "https://localhost:5000",
+)
+
 # P2n: BYOK gate for paid data providers (FMP, Tiingo). When False, the
 # resolver in apps.data.providers.factory refuses to fall back to the env var
 # and raises with an actionable error pointing the user at /settings/models.

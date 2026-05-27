@@ -16,6 +16,10 @@ import {
   CalendarSummary,
   ConfirmOrderRequest,
   CreateOrderRequest,
+  IBKRGatewayAuthStatus,
+  IBKRGatewayDiscoverResult,
+  IBKRGatewayProbeResult,
+  IBKRRuntimeConfig,
   LiveDisclaimer,
 } from '../core/models/broker.model';
 
@@ -214,6 +218,56 @@ export class BrokerStore {
           if (d && d.version === version) {
             this._disclaimer.set({ ...d, accepted: true });
           }
+        }),
+      );
+  }
+
+  // --- P3a-2: IBKR gateway connect actions -------------------------------
+
+  getIBKRRuntimeConfig(): Observable<IBKRRuntimeConfig> {
+    return this.api.get<IBKRRuntimeConfig>('/broker-accounts/ibkr/runtime-config/');
+  }
+
+  probeIBKRGateway(accountId: number): Observable<IBKRGatewayProbeResult> {
+    return this.api.post<IBKRGatewayProbeResult>(
+      `/broker-accounts/${accountId}/gateway/probe/`,
+      {},
+    );
+  }
+
+  getIBKRGatewayAuthStatus(accountId: number): Observable<IBKRGatewayAuthStatus> {
+    return this.api.post<IBKRGatewayAuthStatus>(
+      `/broker-accounts/${accountId}/gateway/auth-status/`,
+      {},
+    );
+  }
+
+  discoverIBKRAccounts(accountId: number): Observable<IBKRGatewayDiscoverResult> {
+    return this.api.post<IBKRGatewayDiscoverResult>(
+      `/broker-accounts/${accountId}/gateway/discover-accounts/`,
+      {},
+    );
+  }
+
+  activateIBKRAccount(
+    accountId: number,
+    ibkrAccountId: string,
+  ): Observable<BrokerAccount> {
+    this._busy.set(true);
+    return this.api
+      .post<BrokerAccount>(
+        `/broker-accounts/${accountId}/gateway/activate/`,
+        { account_id: ibkrAccountId },
+      )
+      .pipe(
+        tap({
+          next: (acc) => {
+            this._accounts.update((rows) =>
+              rows.map((r) => (r.id === acc.id ? acc : r)),
+            );
+            this._busy.set(false);
+          },
+          error: () => this._busy.set(false),
         }),
       );
   }

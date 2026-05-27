@@ -241,6 +241,36 @@ def test_gate_live_requires_phrase_and_disclaimer(user):
     assert order.status == BrokerOrder.STATUS_CONFIRMED
 
 
+def test_gate_refuses_inactive_account(user):
+    """P3a-2 amendment (ADR 0011 §4): a draft confirmation against a non-
+    active account is blocked at the gate. Cross-cutting — protects every
+    credentialed adapter from submitting into a dead session."""
+    account = _new_account(user)
+    order = _draft(account, qty=Decimal("1"), limit_price=Decimal("10"))
+    # Flip the account to needs_reauth after the draft is created — this
+    # is the exact race the amendment is defending against.
+    account.connection_status = BrokerAccount.STATUS_NEEDS_REAUTH
+    account.save(update_fields=["connection_status"])
+    with pytest.raises(ConfirmationError) as exc:
+        gate(order, GateContext(user=user))
+    assert exc.value.code == "account_inactive"
+    assert exc.value.status_code == 409
+    # The order stays draft — the gate's side effects don't run.
+    order.refresh_from_db()
+    assert order.status == BrokerOrder.STATUS_DRAFT
+    # Other non-active statuses are also blocked.
+    for status in (
+        BrokerAccount.STATUS_CONNECTING,
+        BrokerAccount.STATUS_DISABLED,
+        BrokerAccount.STATUS_ERROR,
+    ):
+        account.connection_status = status
+        account.save(update_fields=["connection_status"])
+        with pytest.raises(ConfirmationError) as exc:
+            gate(order, GateContext(user=user))
+        assert exc.value.code == "account_inactive"
+
+
 def test_gate_writes_audit_with_request_metadata(user):
     account = _new_account(user)
     order = _draft(account, qty=Decimal("2"), limit_price=Decimal("10"))
@@ -377,6 +407,52 @@ def test_demo_sync_is_a_noop_reconcile(user):
     event = reconcile_account(account)
     assert event.drift_detected is False
     assert "demo re-check" in event.notes
+
+
+def test_reconcile_skips_non_active_credentialed_account(user):
+    """P3a-2 amendment (ADR 0011 §4): a credentialed account in needs_reauth
+    /disabled/error is skipped — reconcile_account writes a "skipped"
+    BrokerSyncEvent rather than calling a dead remote session.
+
+    The demo broker (auth_kind="none") is exempt because it has no remote
+    session to fail.
+    """
+    from decimal import Decimal as _D
+
+    # Demo accounts are always reconcilable regardless of status — covered
+    # by the existing test above. Here we simulate a credentialed account
+    # by switching the broker code to one whose capability is non-none.
+    # We construct a fake registry entry to avoid needing IBKR/Alpaca
+    # adapters to land first.
+    from apps.brokers import capabilities as caps_mod
+    from apps.brokers.capabilities import BrokerCapabilities
+    from apps.brokers.models import BrokerSyncEvent
+    fake_cap = BrokerCapabilities(
+        code="fake_credentialed",
+        display_name="Fake (test only)",
+        auth_kind="api_key",
+        supports_paper=True, supports_live=False,
+        supports_fractional=False, quantity_increment=_D("1"),
+        supported_order_types=("market",), supported_time_in_force=("day",),
+    )
+    caps_mod._REGISTRY["fake_credentialed"] = caps_mod.BrokerRegistryEntry(
+        capabilities=fake_cap, adapter_factory=lambda a: None,
+    )
+    try:
+        account = _new_account(user, broker="fake_credentialed")
+        account.connection_status = BrokerAccount.STATUS_NEEDS_REAUTH
+        account.save(update_fields=["connection_status"])
+
+        event = reconcile_account(account, triggered_by=BrokerSyncEvent.TRIGGER_MANUAL)
+        assert event.drift_detected is False
+        assert event.ledger_entries_written == 0
+        assert "skipped" in event.notes
+        assert "needs_reauth" in event.notes
+        # No external call should have happened — last_synced_at stays None.
+        account.refresh_from_db()
+        assert account.last_synced_at is None
+    finally:
+        caps_mod._REGISTRY.pop("fake_credentialed", None)
 
 
 # ---------------------------------------------------------------------------
@@ -552,3 +628,493 @@ def test_new_disclaimer_version_reprompts(user):
     gate(order, GateContext(user=user, live_confirmation="LIVE"))
     order.refresh_from_db()
     assert order.status == BrokerOrder.STATUS_CONFIRMED
+
+
+# ---------------------------------------------------------------------------
+# P3a-2 framework amendments: gateway_session bootstrap + OAuth-stub scope
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _fake_gateway_capability():
+    """Register a gateway_session capability for tests since the IBKR
+    adapter is built incrementally — the bootstrap path is testable on
+    its own before the adapter lands."""
+    from apps.brokers import capabilities as caps_mod
+    from apps.brokers.capabilities import BrokerCapabilities
+    cap = BrokerCapabilities(
+        code="fake_gateway",
+        display_name="Fake Gateway (test only)",
+        auth_kind="gateway_session",
+        supports_paper=True, supports_live=False,
+        supports_fractional=False, quantity_increment=Decimal("1"),
+        supported_order_types=("market",), supported_time_in_force=("day",),
+    )
+    caps_mod._REGISTRY["fake_gateway"] = caps_mod.BrokerRegistryEntry(
+        capabilities=cap, adapter_factory=lambda a: None,
+    )
+    try:
+        yield cap
+    finally:
+        caps_mod._REGISTRY.pop("fake_gateway", None)
+
+
+def test_create_account_gateway_session_uses_pending_uuid(
+    auth_client, _fake_gateway_capability,
+):
+    """P3a-2 (ADR 0011 §2): a gateway_session create yields a draft
+    BrokerAccount with account_id="pending-{uuid4}", connection_status
+    ="connecting", and no credential row. Any caller-supplied account_id
+    is ignored."""
+    resp = auth_client.post(
+        "/api/broker-accounts/",
+        {
+            "broker": "fake_gateway",
+            "mode": "paper",
+            "label": "IBKR paper test",
+            "account_id": "ATTACKER-SUPPLIED-DU1234567",  # should be ignored
+        },
+        format="json",
+    )
+    assert resp.status_code == 201, resp.json()
+    body = resp.json()
+    assert body["account_id"].startswith("pending-")
+    # UUID4 stringified is 36 chars → "pending-" + 36 = 44.
+    assert len(body["account_id"]) == len("pending-") + 36
+    assert "DU1234567" not in body["account_id"]
+    assert body["connection_status"] == "connecting"
+    assert body["mode"] == "paper"
+
+
+def test_create_account_gateway_session_two_drafts_dont_collide(
+    auth_client, _fake_gateway_capability,
+):
+    """The pending- namespace + UUID4 means two back-to-back drafts for the
+    same user/broker can't trip the `(user, broker, account_id)` unique
+    constraint."""
+    for i in range(2):
+        resp = auth_client.post(
+            "/api/broker-accounts/",
+            {"broker": "fake_gateway", "mode": "paper", "label": f"draft {i}"},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.json()
+
+
+def test_oauth_start_rejects_gateway_session(
+    auth_client, user, _fake_gateway_capability,
+):
+    """P3a-2 (ADR 0011 §1): /oauth/start/ used to accept gateway_session
+    and return 501. That branch is removed — gateway_session goes through
+    /gateway/* endpoints instead, so /oauth/start/ now returns 400."""
+    # Create a gateway_session account first.
+    resp = auth_client.post(
+        "/api/broker-accounts/",
+        {"broker": "fake_gateway", "mode": "paper", "label": "g"},
+        format="json",
+    )
+    assert resp.status_code == 201
+    acc_id = resp.json()["id"]
+    # /oauth/start/ should now reject — gateway_session is not an OAuth kind.
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/oauth/start/", {}, format="json",
+    )
+    assert resp.status_code == 400
+    assert "OAuth" in resp.json().get("detail", "")
+
+
+# ---------------------------------------------------------------------------
+# P3a-2 IBKR gateway_session connect endpoints
+# ---------------------------------------------------------------------------
+
+
+class _FakeIBKRSession:
+    """Stub IBKRGatewaySession installed via monkeypatch. Each test sets
+    its own canned responses on the instance — same shape as the real
+    one but with no httpx involvement."""
+
+    # Class-level defaults; tests override via monkeypatch.
+    _tickle_payload: object = {"iserver": {"authStatus": "x"}}
+    _tickle_raises: object = None
+    _auth_status_payload: dict = {"authenticated": True, "connected": True, "competing": False}
+    _auth_status_raises: object = None
+    _accounts_payload: object = {"accounts": ["DU1234567"], "selectedAccount": "DU1234567"}
+    _accounts_raises: object = None
+
+    def __init__(self, *a, **kw) -> None:
+        pass
+
+    def __enter__(self) -> _FakeIBKRSession:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    def tickle(self):
+        if self._tickle_raises is not None:
+            raise self._tickle_raises
+        return self._tickle_payload
+
+    def auth_status(self):
+        if self._auth_status_raises is not None:
+            raise self._auth_status_raises
+        return self._auth_status_payload
+
+    def get(self, path: str, params: dict | None = None):
+        if path == "/iserver/accounts":
+            if self._accounts_raises is not None:
+                raise self._accounts_raises
+            return self._accounts_payload
+        raise AssertionError(f"unexpected GET {path}")
+
+
+@pytest.fixture
+def _patch_ibkr_session(monkeypatch):
+    """Install _FakeIBKRSession in views.py and return the class so tests
+    can override its class-level cans."""
+    from apps.brokers import views as views_mod
+    monkeypatch.setattr(views_mod, "IBKRGatewaySession", _FakeIBKRSession)
+    # Reset class-level cans between tests so test order doesn't matter.
+    _FakeIBKRSession._tickle_payload = {"iserver": {"authStatus": "x"}}
+    _FakeIBKRSession._tickle_raises = None
+    _FakeIBKRSession._auth_status_payload = {
+        "authenticated": True, "connected": True, "competing": False,
+    }
+    _FakeIBKRSession._auth_status_raises = None
+    _FakeIBKRSession._accounts_payload = {
+        "accounts": ["DU1234567"], "selectedAccount": "DU1234567",
+    }
+    _FakeIBKRSession._accounts_raises = None
+    return _FakeIBKRSession
+
+
+def _create_ibkr_draft(auth_client) -> int:
+    """Create a draft IBKR BrokerAccount and return its id."""
+    resp = auth_client.post(
+        "/api/broker-accounts/",
+        {"broker": "ibkr", "mode": "paper", "label": "IBKR paper"},
+        format="json",
+    )
+    assert resp.status_code == 201, resp.json()
+    return resp.json()["id"]
+
+
+def test_ibkr_runtime_config_exposes_login_url(auth_client, settings):
+    """The wizard reads the gateway login URL from runtime-config rather
+    than baking deployment topology into the frontend (ADR 0011 §1)."""
+    settings.IBKR_GATEWAY_LOGIN_URL = "https://localhost:5000"
+    resp = auth_client.get("/api/broker-accounts/ibkr/runtime-config/")
+    assert resp.status_code == 200
+    assert resp.json() == {"gateway_login_url": "https://localhost:5000"}
+
+
+def test_gateway_probe_reachable_when_tickle_succeeds(
+    auth_client, _patch_ibkr_session,
+):
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/probe/", {}, format="json",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["reachable"] is True
+    assert "payload" in body
+
+
+def test_gateway_probe_reports_unreachable_on_transient(
+    auth_client, _patch_ibkr_session,
+):
+    from apps.brokers.interfaces import BrokerTransientError
+    _patch_ibkr_session._tickle_raises = BrokerTransientError("gateway down")
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/probe/", {}, format="json",
+    )
+    # The endpoint always returns 200 so the wizard has a clean contract.
+    assert resp.status_code == 200
+    assert resp.json()["reachable"] is False
+    assert "gateway down" in resp.json()["detail"]
+
+
+def test_gateway_auth_status_reports_authenticated(
+    auth_client, _patch_ibkr_session,
+):
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/auth-status/", {}, format="json",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["authenticated"] is True
+    assert body["connected"] is True
+    assert body["ready"] is True
+
+
+def test_gateway_auth_status_not_ready_when_only_authenticated(
+    auth_client, _patch_ibkr_session,
+):
+    _patch_ibkr_session._auth_status_payload = {
+        "authenticated": True, "connected": False, "competing": False,
+    }
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/auth-status/", {}, format="json",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["authenticated"] is True
+    assert body["connected"] is False
+    assert body["ready"] is False
+
+
+def test_gateway_discover_accounts_returns_paper_flag(
+    auth_client, _patch_ibkr_session,
+):
+    _patch_ibkr_session._accounts_payload = {
+        "accounts": ["DU1234567", "U7654321"],
+        "selectedAccount": "DU1234567",
+    }
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/discover-accounts/", {}, format="json",
+    )
+    assert resp.status_code == 200
+    accounts = resp.json()["accounts"]
+    assert {"account_id": "DU1234567", "is_paper": True} in accounts
+    assert {"account_id": "U7654321", "is_paper": False} in accounts
+
+
+def test_gateway_activate_paper_du_account(
+    auth_client, _patch_ibkr_session,
+):
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/activate/",
+        {"account_id": "DU1234567"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["account_id"] == "DU1234567"
+    assert body["connection_status"] == "active"
+    # BrokerCredential row exists with gateway_session auth_kind, no secret.
+    from apps.brokers.models import BrokerCredential as _BC
+    cred = _BC.objects.get(account_id=acc_id)
+    assert cred.auth_kind == "gateway_session"
+    assert not cred.has_any_secret()
+
+
+def test_gateway_activate_rejects_non_du_id_in_paper_mode(
+    auth_client, _patch_ibkr_session,
+):
+    """ADR 0011 §6: paper mode requires a DU-prefixed id."""
+    _patch_ibkr_session._accounts_payload = {"accounts": ["U7654321"]}
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/activate/",
+        {"account_id": "U7654321"},
+        format="json",
+    )
+    assert resp.status_code == 400
+    assert "paper account" in resp.json().get("detail", "")
+    # The placeholder account stays as it was — no half-activated state.
+    from apps.brokers.models import BrokerAccount as _BA
+    acc = _BA.objects.get(pk=acc_id)
+    assert acc.account_id.startswith("pending-")
+    assert acc.connection_status == "connecting"
+
+
+def test_gateway_activate_refuses_unknown_account_id(
+    auth_client, _patch_ibkr_session,
+):
+    """The picked id must be visible to the current gateway session — a
+    typo / stale wizard state shouldn't write a phantom account_id."""
+    _patch_ibkr_session._accounts_payload = {"accounts": ["DU1234567"]}
+    acc_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{acc_id}/gateway/activate/",
+        {"account_id": "DU9999999"},
+        format="json",
+    )
+    assert resp.status_code == 400
+    assert "not in the current gateway session" in resp.json().get("detail", "")
+
+
+def test_gateway_activate_rejects_double_connect(
+    auth_client, user, _patch_ibkr_session,
+):
+    """If the user has already connected this IBKR account on a different
+    row, activate fails before mutating either row."""
+    # First create + activate.
+    first_id = _create_ibkr_draft(auth_client)
+    auth_client.post(
+        f"/api/broker-accounts/{first_id}/gateway/activate/",
+        {"account_id": "DU1234567"},
+        format="json",
+    )
+    # Second draft — try to activate against the same IBKR id.
+    second_id = _create_ibkr_draft(auth_client)
+    resp = auth_client.post(
+        f"/api/broker-accounts/{second_id}/gateway/activate/",
+        {"account_id": "DU1234567"},
+        format="json",
+    )
+    assert resp.status_code == 400
+    assert "already have IBKR account" in resp.json().get("detail", "")
+
+
+def test_gateway_endpoints_reject_non_ibkr_account(
+    auth_client, user, _patch_ibkr_session,
+):
+    """The /gateway/* routes are IBKR-specific — a Demo / Alpaca account
+    can't accidentally drive the gateway flow."""
+    demo = _new_account(user)  # broker="mock"
+    resp = auth_client.post(
+        f"/api/broker-accounts/{demo.id}/gateway/probe/", {}, format="json",
+    )
+    assert resp.status_code == 400
+    assert "not IBKR" in resp.json().get("detail", "")
+
+
+# ---------------------------------------------------------------------------
+# P3a-2: keep_ibkr_gateway_warm Celery task
+# ---------------------------------------------------------------------------
+
+
+def _make_ibkr_account(user, *, account_id: str, status: str, label: str = "ibkr") -> BrokerAccount:
+    """An IBKR BrokerAccount with a known account_id and status. Used by
+    the keep_ibkr_gateway_warm tests to avoid the wizard flow."""
+    portfolio = Portfolio.objects.create(
+        user=user, name=f"Broker · {label}", kind=Portfolio.KIND_BROKER,
+        cash_balance=Decimal("0"),
+    )
+    return BrokerAccount.objects.create(
+        user=user, broker="ibkr", mode="paper",
+        account_id=account_id, label=label,
+        portfolio=portfolio,
+        connection_status=status,
+    )
+
+
+@pytest.fixture
+def _patch_task_session(monkeypatch):
+    """Install _FakeIBKRSession in tasks.py for keep_ibkr_gateway_warm
+    tests. Same canned-responses shape as the views fixture."""
+    from apps.brokers import tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "IBKRGatewaySession", _FakeIBKRSession)
+    _FakeIBKRSession._tickle_payload = {"iserver": {"authStatus": "x"}}
+    _FakeIBKRSession._tickle_raises = None
+    _FakeIBKRSession._auth_status_payload = {
+        "authenticated": True, "connected": True, "competing": False,
+    }
+    _FakeIBKRSession._auth_status_raises = None
+    return _FakeIBKRSession
+
+
+def test_keep_warm_noop_when_no_ibkr_accounts(_patch_task_session, db):
+    """The task is benign on a deployment with no IBKR accounts — it
+    doesn't even touch the gateway."""
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["monitored_accounts"] == 0
+    assert summary["checked"] is False
+    assert summary["transitions"] == 0
+
+
+def test_keep_warm_keeps_active_account_active(user, _patch_task_session):
+    """Happy path: gateway authenticated → ACTIVE accounts stay ACTIVE."""
+    acc = _make_ibkr_account(
+        user, account_id="DU1234567", status=BrokerAccount.STATUS_ACTIVE,
+    )
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["monitored_accounts"] == 1
+    assert summary["checked"] is True
+    assert summary["authenticated"] is True
+    assert summary["now_active"] == 1
+    assert summary["now_needs_reauth"] == 0
+    # No transition — already active.
+    assert summary["transitions"] == 0
+    acc.refresh_from_db()
+    assert acc.connection_status == BrokerAccount.STATUS_ACTIVE
+
+
+def test_keep_warm_recovers_needs_reauth_to_active(user, _patch_task_session):
+    """ADR 0011 §4 recovery: the user logs back in via the gateway browser
+    page → next tick flips needs_reauth accounts back to ACTIVE without
+    requiring a re-run of the connect wizard."""
+    acc = _make_ibkr_account(
+        user, account_id="DU1234567",
+        status=BrokerAccount.STATUS_NEEDS_REAUTH,
+    )
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["authenticated"] is True
+    assert summary["transitions"] == 1
+    acc.refresh_from_db()
+    assert acc.connection_status == BrokerAccount.STATUS_ACTIVE
+
+
+def test_keep_warm_flips_active_to_needs_reauth_on_dead_session(
+    user, _patch_task_session,
+):
+    """Gateway is reachable but session is dead (daily reset / idle
+    timeout) → ACTIVE accounts flip to needs_reauth."""
+    _patch_task_session._auth_status_payload = {
+        "authenticated": False, "connected": False, "competing": False,
+    }
+    acc = _make_ibkr_account(
+        user, account_id="DU1234567", status=BrokerAccount.STATUS_ACTIVE,
+    )
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["authenticated"] is False
+    assert summary["transitions"] == 1
+    assert summary["now_needs_reauth"] == 1
+    acc.refresh_from_db()
+    assert acc.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+
+
+def test_keep_warm_flips_active_to_needs_reauth_on_unreachable_gateway(
+    user, _patch_task_session,
+):
+    """Gateway is fully unreachable (container down, network split) →
+    ACTIVE accounts flip to needs_reauth and the error is captured."""
+    from apps.brokers.interfaces import BrokerTransientError
+    _patch_task_session._auth_status_raises = BrokerTransientError("gateway down")
+    acc = _make_ibkr_account(
+        user, account_id="DU1234567", status=BrokerAccount.STATUS_ACTIVE,
+    )
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["authenticated"] is False
+    assert "auth_status failed" in (summary["error"] or "")
+    acc.refresh_from_db()
+    assert acc.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+
+
+def test_keep_warm_ignores_connecting_and_disabled_accounts(
+    user, _patch_task_session,
+):
+    """Accounts in STATUS_CONNECTING (mid-wizard) and STATUS_DISABLED
+    (explicitly disconnected) are NOT touched — only ACTIVE and
+    NEEDS_REAUTH rows are monitored."""
+    connecting = _make_ibkr_account(
+        user, account_id="pending-abc",
+        status=BrokerAccount.STATUS_CONNECTING, label="mid-wizard",
+    )
+    disabled = _make_ibkr_account(
+        user, account_id="DU0000001",
+        status=BrokerAccount.STATUS_DISABLED, label="disconnected",
+    )
+    # Gateway says authenticated — but that shouldn't touch these.
+    from apps.brokers.tasks import keep_ibkr_gateway_warm
+    summary = keep_ibkr_gateway_warm()
+    assert summary["monitored_accounts"] == 0
+    connecting.refresh_from_db()
+    disabled.refresh_from_db()
+    assert connecting.connection_status == BrokerAccount.STATUS_CONNECTING
+    assert disabled.connection_status == BrokerAccount.STATUS_DISABLED

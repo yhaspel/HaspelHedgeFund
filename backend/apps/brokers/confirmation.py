@@ -106,6 +106,21 @@ def gate(order: BrokerOrder, ctx: GateContext) -> GateResult:
             code="not_draft", status_code=409,
         )
 
+    # P3a-2 amendment (ADR 0011 §4): refuse confirmation when the broker
+    # account isn't active. A draft created while active, sitting until the
+    # account flips to needs_reauth / disabled / error, would otherwise pass
+    # through the gate and submit into a dead session. Placed before the
+    # scheduled_job × live block so the message surfaces even with no
+    # gates-input from the caller. Cross-cutting — benefits every
+    # credentialed adapter (IBKR, TradeStation, future).
+    if account.connection_status != BrokerAccount.STATUS_ACTIVE:
+        raise ConfirmationError(
+            f"broker account is {account.connection_status}; "
+            "re-authenticate before submitting orders",
+            code="account_inactive",
+            status_code=409,
+        )
+
     # Live auto-submission hard block (must come BEFORE any other check so
     # tests asserting the block don't need to supply ticker/risk inputs).
     if (

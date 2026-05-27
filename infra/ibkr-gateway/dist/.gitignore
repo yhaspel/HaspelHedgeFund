@@ -1,0 +1,5 @@
+# IBKR's `clientportal.gw.zip` is downloaded by the user (see
+# guides/ibkr-gateway.md) and dropped here. It MUST NOT be committed —
+# IBKR's redistribution terms forbid it, and the file is many MB anyway.
+*
+!.gitignore

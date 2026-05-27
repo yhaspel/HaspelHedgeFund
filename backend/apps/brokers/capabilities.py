@@ -120,21 +120,11 @@ def get_adapter_factory(code: str):
 
 
 def _placeholder_capabilities() -> list[BrokerCapabilities]:
-    """Real-broker tiles that 3a-2/3/4 will replace with live adapters."""
+    """Real-broker tiles that 3a-3/4 will replace with live adapters. The
+    IBKR placeholder was removed in P3a-2 when the real adapter shipped —
+    `apps.brokers.adapters.ibkr` now registers IBKR with `supports_live=False`
+    (ADR 0011 §1)."""
     return [
-        BrokerCapabilities(
-            code="ibkr",
-            display_name="Interactive Brokers (paper / live)",
-            auth_kind=AUTH_GATEWAY,
-            supports_paper=True,
-            supports_live=True,
-            supports_fractional=True,
-            quantity_increment=Decimal("0.0001"),
-            supported_order_types=("market", "limit"),
-            supported_time_in_force=("day", "gtc"),
-            description="Headless Client Portal Gateway. Ships in phase 3a-2.",
-            available=False,
-        ),
         BrokerCapabilities(
             code="tradestation",
             display_name="TradeStation (paper / live)",

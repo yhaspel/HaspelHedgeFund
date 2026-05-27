@@ -1,0 +1,24 @@
+# IBKR Client Portal Gateway configuration.
+#
+# Overrides the conf.yaml bundled in the clientportal.gw `.zip`. We pin
+# only the values that matter for our compose setup; the rest fall back
+# to IBKR's defaults (proxyRemoteHost, IB session-keepalive intervals,
+# etc). IBKR's full schema reference is in their published docs.
+#
+# Recorded in ADR 0011 §1 and Risks #3 of phase-03a-2-paper-trading-ibkr.md.
+
+# Port the gateway listens on inside the container. Matches the
+# docker-compose `ports: ["127.0.0.1:5000:5000"]` mapping and the default
+# value of `IBKR_GATEWAY_BASE_URL` / `IBKR_GATEWAY_LOGIN_URL` in
+# `backend/hedgefund/settings/base.py`.
+listenPort: 5000
+
+# HTTPS is non-optional — IBKR's gateway only speaks SSL.
+listenSsl: true
+
+# Use the self-signed cert bundled with IBKR's distribution. Our Django
+# adapter trusts this cert *only* at the URL in
+# `settings.IBKR_GATEWAY_BASE_URL` (compose-network hostname or
+# `https://localhost:5000`), never elsewhere.
+sslCert: vertx.jks
+sslPwd: mywebapi

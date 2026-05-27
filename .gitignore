@@ -16,8 +16,14 @@ uv.lock
 
 # Node / Angular
 node_modules/
-dist/
+frontend/dist/
 .angular/
+
+# IBKR Client Portal Gateway distribution (user-supplied, not redistributed).
+# The directory itself is tracked via infra/ibkr-gateway/dist/.gitignore so
+# the Dockerfile has a target for COPY; the .zip inside is ignored.
+infra/ibkr-gateway/dist/*
+!infra/ibkr-gateway/dist/.gitignore
 *.log
 npm-debug.log*
 yarn-debug.log*

@@ -391,12 +391,34 @@ def reconcile_account(
     # ingestion ran. We need the latest persisted state to compute drift.
     account = BrokerAccount.objects.select_related("portfolio").get(pk=account.pk)
 
+    cap = get_capabilities(account.broker)
+
+    # P3a-2 amendment (ADR 0011): skip a credentialed account whose
+    # connection_status is not active (needs_reauth, disabled, error,
+    # connecting). The demo broker has no remote session to fail, so it
+    # is always considered available regardless of its row state.
+    # Without this check, a view-triggered sync on a needs_reauth IBKR
+    # account would call the dead gateway and surface a confusing 502.
+    is_demo = cap is not None and cap.auth_kind == AUTH_NONE
+    if not is_demo and account.connection_status != BrokerAccount.STATUS_ACTIVE:
+        event = BrokerSyncEvent.objects.create(
+            broker_account=account,
+            triggered_by=triggered_by,
+            started_at=timezone.now(),
+        )
+        event.finished_at = timezone.now()
+        event.notes = (
+            f"skipped — account is {account.connection_status}; "
+            "re-authenticate to resume reconciliation"
+        )
+        event.save(update_fields=["finished_at", "notes"])
+        return event
+
     # The demo broker has no external venue to reconcile against — the
     # database *is* its book of record. A "sync" therefore re-checks
     # resting limit/stop orders so a manual "Sync now" (or the periodic
     # job) fills anything the market has since crossed.
-    cap = get_capabilities(account.broker)
-    if cap is not None and cap.auth_kind == AUTH_NONE:
+    if is_demo:
         from .demo_fills import evaluate_resting_demo_orders  # local: avoid cycle
 
         event = BrokerSyncEvent.objects.create(

@@ -35,6 +35,15 @@ app.conf.beat_schedule = {
         "task": "apps.brokers.tasks.reconcile_all_accounts",
         "schedule": 300.0,
     },
+    # P3a-2: tickle the IBKR Client Portal Gateway + reconcile every IBKR
+    # account's connection_status against /iserver/auth/status. No-op
+    # when no IBKR accounts exist; benign on a deployment without the
+    # gateway sidecar (the task flips accounts to needs_reauth and
+    # waits for recovery).
+    "brokers-ibkr-keep-warm": {
+        "task": "apps.brokers.tasks.keep_ibkr_gateway_warm",
+        "schedule": 120.0,
+    },
     # P3-D: persona evolution. Daily 05:30 UTC tick; cadence (daily/weekly/
     # monthly) is decided inside the task by `is_cycle_due`, so one static
     # schedule serves all three.

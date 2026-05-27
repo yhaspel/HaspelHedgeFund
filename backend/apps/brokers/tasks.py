@@ -1,10 +1,14 @@
 """Celery tasks for the brokers app.
 
-Two task families:
+Three task families:
   - `poll_open_orders` runs every 30s (Celery beat schedule) and pulls
     fills for every active account's open orders.
   - `reconcile_account` runs every 5 minutes and after every submitted
     order (called by the view layer post-confirm).
+  - `keep_ibkr_gateway_warm` runs every 2 minutes (P3a-2) — tickles the
+    IBKR Client Portal Gateway and reconciles every IBKR account's
+    `connection_status` against `/iserver/auth/status`. Recovers from
+    `needs_reauth` once the user logs in to the gateway again.
 """
 from __future__ import annotations
 
@@ -12,8 +16,10 @@ import logging
 
 from celery import shared_task
 
+from .adapters.ibkr_gateway import IBKRGatewaySession
 from .capabilities import AUTH_NONE, get_capabilities
 from .demo_fills import evaluate_resting_demo_orders
+from .interfaces import BrokerError, BrokerTransientError
 from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
 from .reconcile import poll_open_orders_for_account, reconcile_account
 
@@ -84,3 +90,93 @@ def reconcile_account_task(
         return 0
     event = reconcile_account(account, triggered_by=triggered_by)
     return event.id
+
+
+# P3a-2: keep the IBKR Client Portal Gateway session warm. ADR 0011 §4.
+#
+# There is exactly one gateway sidecar per deployment, so the
+# tickle+auth-status pair captures the state of every IBKR account
+# simultaneously. The task:
+#   - probes the gateway once (tickle keeps the session alive; auth-status
+#     is the authoritative health signal)
+#   - flips every monitored IBKR account to the matching status:
+#       authenticated + connected → STATUS_ACTIVE (recovers from needs_reauth
+#                                   once the user logs back in)
+#       otherwise / unreachable   → STATUS_NEEDS_REAUTH
+#   - touches only IBKR accounts in ACTIVE or NEEDS_REAUTH state. Accounts
+#     mid-wizard (STATUS_CONNECTING) and explicitly disconnected ones
+#     (STATUS_DISABLED) are left alone.
+
+
+@shared_task(name="apps.brokers.tasks.keep_ibkr_gateway_warm")
+def keep_ibkr_gateway_warm() -> dict:
+    summary: dict = {
+        "monitored_accounts": 0,
+        "checked": False,
+        "authenticated": False,
+        "now_active": 0,
+        "now_needs_reauth": 0,
+        "transitions": 0,
+        "error": None,
+    }
+
+    monitored = list(
+        BrokerAccount.objects.filter(
+            broker="ibkr",
+            is_active=True,
+            connection_status__in=(
+                BrokerAccount.STATUS_ACTIVE,
+                BrokerAccount.STATUS_NEEDS_REAUTH,
+            ),
+        ),
+    )
+    summary["monitored_accounts"] = len(monitored)
+    if not monitored:
+        return summary
+
+    authenticated = False
+    try:
+        with IBKRGatewaySession() as session:
+            try:
+                session.tickle()
+            except (BrokerError, BrokerTransientError):
+                # Tickle alone isn't conclusive — auth-status is the
+                # authoritative signal. Swallow and fall through.
+                pass
+            try:
+                status_payload = session.auth_status()
+            except (BrokerError, BrokerTransientError) as exc:
+                summary["error"] = f"auth_status failed: {exc}"
+                status_payload = {}
+            authenticated = bool(status_payload.get("authenticated")) and bool(
+                status_payload.get("connected"),
+            )
+            summary["checked"] = True
+    except Exception as exc:  # pragma: no cover - safety net
+        log.exception("keep_ibkr_gateway_warm: unexpected error")
+        summary["error"] = f"unexpected: {exc}"
+        # Treat as transient: flip everything to needs_reauth so submissions
+        # bail out at the gate until the next tick confirms the state.
+        authenticated = False
+
+    summary["authenticated"] = authenticated
+    target_status = (
+        BrokerAccount.STATUS_ACTIVE if authenticated
+        else BrokerAccount.STATUS_NEEDS_REAUTH
+    )
+
+    # Batch-update only the rows whose status would change. UPDATEs are
+    # cheap but a single WHERE with a NOT-equal predicate is cheaper than
+    # touching every row.
+    pks_to_update = [a.pk for a in monitored if a.connection_status != target_status]
+    if pks_to_update:
+        BrokerAccount.objects.filter(pk__in=pks_to_update).update(
+            connection_status=target_status,
+        )
+        summary["transitions"] = len(pks_to_update)
+
+    if target_status == BrokerAccount.STATUS_ACTIVE:
+        summary["now_active"] = len(monitored)
+    else:
+        summary["now_needs_reauth"] = len(monitored)
+    return summary

@@ -93,5 +93,24 @@ services:
     depends_on:
       - web
 
+  # P3a-2: IBKR Client Portal Gateway sidecar. Only needed by users who
+  # connect an IBKR account; Demo / TradeStation / Alpaca users never run
+  # this. See `guides/ibkr-gateway.md` for the one-time `.zip` download
+  # the user must drop into `infra/ibkr-gateway/dist/` before this image
+  # can build. ADR 0011 §1.
+  #
+  # The host port mapping is `127.0.0.1:5000:5000` deliberately — the
+  # user's browser needs `https://localhost:5000` for the one-time
+  # interactive 2FA login, but binding to loopback keeps the gateway
+  # off any externally-routable interface. The Django app reaches it
+  # over the compose network at `https://ibkr-gateway:5000`.
+  ibkr-gateway:
+    build:
+      context: ./ibkr-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+
 volumes:
   pgdata:

@@ -4,17 +4,24 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BrokerStore } from '../../abstraction/broker.store';
-import { BrokerCapability } from '../../core/models/broker.model';
+import { BrokerAccount, BrokerCapability } from '../../core/models/broker.model';
+import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
 
 /**
- * Connect-wizard SHELL. The Demo broker tile is fully wired here. Real
- * brokers (IBKR / TradeStation / Alpaca) render placeholder tiles with
- * "ships in a later release" until their phase lands (P3a-2/3/4).
+ * Connect-wizard SHELL. Demo and IBKR are fully wired here. TradeStation
+ * and Alpaca render placeholder tiles with "ships in a later release"
+ * until their phases land (P3a-3/4).
+ *
+ * For IBKR (P3a-2), the wizard's `create()` does NOT navigate after
+ * `createAccount` succeeds — instead it stashes the new `pending-{uuid}`
+ * draft and renders `<hf-ibkr-connect-flow>`, which drives the
+ * /gateway/* probe → auth-status → discover → activate sequence and
+ * emits `completed` once activation succeeds.
  */
 @Component({
   selector: 'hf-broker-connect-wizard-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, IBKRConnectFlowComponent],
   template: `
     <hf-app-shell [crumbs]="[
       {label:'Broker accounts', link:'/broker-accounts'},
@@ -80,7 +87,12 @@ import { BrokerCapability } from '../../core/models/broker.model';
           }
         </section>
 
-        @if (selected(); as cap) {
+        @if (ibkrDraft(); as draft) {
+          <hf-ibkr-connect-flow
+            [account]="draft"
+            (completed)="onIBKRActivated($event)"
+            (cancel)="onIBKRCancel()" />
+        } @else if (selected(); as cap) {
           <section class="card mt-4 p-4" data-test="connect-form">
             <div class="card-hd">
               <span class="title">Step 2 — {{ cap.display_name }}</span>
@@ -130,6 +142,10 @@ export class BrokerConnectWizardPage implements OnInit {
   protected readonly loading = signal(true);
   protected readonly selected = signal<BrokerCapability | null>(null);
   protected readonly error = signal<string | null>(null);
+  // P3a-2: when the user creates an IBKR draft, we stash it here and
+  // render <hf-ibkr-connect-flow> instead of navigating away. The draft
+  // carries the `pending-{uuid}` account_id that activate will rewrite.
+  protected readonly ibkrDraft = signal<BrokerAccount | null>(null);
   protected label = '';
   protected mode: 'paper' | 'live' = 'paper';
 
@@ -152,6 +168,7 @@ export class BrokerConnectWizardPage implements OnInit {
 
   cancel(): void {
     this.selected.set(null);
+    this.ibkrDraft.set(null);
     this.error.set(null);
   }
 
@@ -161,7 +178,16 @@ export class BrokerConnectWizardPage implements OnInit {
     this.store
       .createAccount({ broker: cap.code, mode: this.mode, label: this.label })
       .subscribe({
-        next: (acc) => this.router.navigate(['/broker-accounts', acc.id]),
+        next: (acc) => {
+          if (cap.code === 'ibkr') {
+            // Stash + render the IBKR multi-step flow. The draft account
+            // already exists with `account_id="pending-{uuid}"`; activate
+            // rewrites it once the user picks a real DU id.
+            this.ibkrDraft.set(acc);
+          } else {
+            this.router.navigate(['/broker-accounts', acc.id]);
+          }
+        },
         error: (err) =>
           this.error.set(
             err?.error?.detail ??
@@ -170,5 +196,20 @@ export class BrokerConnectWizardPage implements OnInit {
               'Failed to create account.',
           ),
       });
+  }
+
+  onIBKRActivated(account: BrokerAccount): void {
+    // Activation succeeded — navigate to the overview page for the now-
+    // real account id.
+    this.ibkrDraft.set(null);
+    this.router.navigate(['/broker-accounts', account.id]);
+  }
+
+  onIBKRCancel(): void {
+    // User bailed mid-wizard. The `pending-{uuid}` row stays in the DB
+    // for the user to delete from the Accounts page (no automatic GC in
+    // v1 — see Risks #8 of the phase plan). Send the user back there.
+    this.ibkrDraft.set(null);
+    this.router.navigate(['/broker-accounts']);
   }
 }
