@@ -50,7 +50,7 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
                   <div class="font-medium">{{ cap.display_name }}</div>
                   <div class="text-[11.5px] text-text-3 mono mt-0.5">code: {{ cap.code }}</div>
                 </div>
-                @if (!cap.available) {
+                @if (!cap.available || cap.code === 'ibkr') {
                   <span class="pill"><span class="dot"></span>later release</span>
                 } @else if (cap.community_unverified) {
                   <span class="pill warn"><span class="dot"></span>unverified</span>
@@ -72,7 +72,7 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
                 }
               </ul>
               <div class="mt-2.5 text-right">
-                @if (cap.available) {
+                @if (cap.available && cap.code !== 'ibkr') {
                   <button class="btn primary btn-sm" (click)="select(cap)"
                           [attr.data-test]="'select-broker-' + cap.code">
                     Continue
