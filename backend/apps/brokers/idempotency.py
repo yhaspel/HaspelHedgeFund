@@ -19,6 +19,7 @@ from .interfaces import (
     Broker,
     BrokerError,
     BrokerTransientError,
+    OrderMeta,
     OrderSnapshot,
     OrderTicket,
 )
@@ -118,7 +119,15 @@ def resolve_unknown(order: BrokerOrder, broker: Broker) -> str | None:
     """
     if order.idempotency_state != BrokerOrder.IDEM_UNKNOWN:
         return None
-    snapshot = broker.find_order_by_client_id(str(order.client_order_id))
+    snapshot = broker.find_order_by_client_id(
+        str(order.client_order_id),
+        order_meta=OrderMeta(
+            ticker=order.ticker,
+            side=order.side,
+            quantity=order.quantity,
+            created_at=order.created_at,
+        ),
+    )
     if snapshot is not None:
         with transaction.atomic():
             BrokerOrder.objects.filter(pk=order.pk).update(

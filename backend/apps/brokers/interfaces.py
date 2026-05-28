@@ -90,5 +90,22 @@ class Broker(Protocol):
     def cancel_order(self, broker_order_id: str) -> None: ...
     def get_order(self, broker_order_id: str) -> OrderSnapshot: ...
     def find_order_by_client_id(
-        self, client_order_id: str,
+        self,
+        client_order_id: str,
+        *,
+        order_meta: "OrderMeta | None" = None,
     ) -> OrderSnapshot | None: ...
+
+
+@dataclass(frozen=True)
+class OrderMeta:
+    """Metadata passed to `find_order_by_client_id` to support adapters
+    (TradeStation) that have no broker-side client id and must heuristic-
+    scan recent orders by ticker/side/quantity/created_at. Adapters with a
+    real broker-side client id (IBKR, Alpaca) ignore this — see ADR 0012.
+    """
+
+    ticker: str
+    side: str            # "buy" | "sell"
+    quantity: Decimal
+    created_at: datetime

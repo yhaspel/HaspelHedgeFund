@@ -311,6 +311,41 @@ class BrokerSyncEvent(models.Model):
         )
 
 
+class UserBrokerOAuthApp(models.Model):
+    """Per-user OAuth developer-app credentials.
+
+    A user supplies their own `client_id` / `client_secret` for the broker
+    OAuth apps they register. The platform never ships shared creds; the
+    BYOK precedence is: user row first, else Django setting fallback.
+    P4a will migrate the encrypted fields into the per-tenant envelope
+    vault alongside `BrokerCredential` and `ProviderKey`.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="broker_oauth_apps",
+        on_delete=models.CASCADE,
+    )
+    broker = models.CharField(max_length=32, db_index=True)
+    encrypted_client_id = models.TextField(blank=True, default="")
+    encrypted_client_secret = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "broker"], name="uniq_user_broker_oauth_app",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"oauth-app u={self.user_id} b={self.broker}"
+
+    def has_secret(self) -> bool:
+        return bool(self.encrypted_client_id and self.encrypted_client_secret)
+
+
 class LiveTradingDisclaimer(models.Model):
     version = models.CharField(max_length=16, unique=True)
     body = models.TextField()

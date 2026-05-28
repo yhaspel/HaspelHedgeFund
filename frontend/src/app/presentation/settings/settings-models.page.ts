@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { TradeStationAppCardComponent } from './tradestation-app-card.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { NewsStore } from '../../abstraction/news.store';
 import { PersonaEvolutionStore } from '../../abstraction/persona-evolution.store';
@@ -23,7 +24,10 @@ import {
 @Component({
   selector: 'hf-settings-models',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
+  imports: [
+    CommonModule, FormsModule, RouterLink, AppShellComponent,
+    TradeStationAppCardComponent,
+  ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Settings'}, {label:'Models'}]">
       <div class="page-head">
@@ -97,6 +101,9 @@ import {
             }
           </div>
         </section>
+
+        <!-- A2: TradeStation developer app (BYO) — P3a-3 -->
+        <hf-tradestation-app-card />
 
         <!-- B: Default model + preset + ceiling -->
         <section class="card">

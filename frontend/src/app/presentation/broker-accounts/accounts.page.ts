@@ -86,12 +86,23 @@ import { BrokerAccount } from '../../core/models/broker.model';
                     @if (a.last_synced_at) { {{ a.last_synced_at | date:'short' }} } @else { — }
                   </td>
                   <td class="text-right">
-                    <a [routerLink]="['/broker-accounts', a.id]" class="btn ghost btn-sm"
-                       [attr.data-test]="'open-account-' + a.id">Open</a>
-                    @if (a.is_active) {
+                    @if (a.connection_status === 'active') {
+                      <a [routerLink]="['/broker-accounts', a.id]" class="btn ghost btn-sm"
+                         [attr.data-test]="'open-account-' + a.id">Open</a>
+                    } @else {
+                      <a routerLink="/broker-accounts/connect"
+                         [queryParams]="{ resume: a.id }"
+                         class="btn ghost btn-sm"
+                         [attr.data-test]="'resume-account-' + a.id">
+                        Resume setup
+                      </a>
+                    }
+                    @if (a.is_active && a.connection_status === 'active') {
                       <button class="btn ghost btn-sm ml-1.5" (click)="onDisconnect(a)"
                               [attr.data-test]="'disconnect-' + a.id">Disconnect</button>
                     }
+                    <button class="btn ghost btn-sm ml-1.5" (click)="onDelete(a)"
+                            [attr.data-test]="'delete-' + a.id">Delete</button>
                   </td>
                 </tr>
               }
@@ -126,6 +137,18 @@ export class BrokerAccountsPage implements OnInit {
     this.store.disconnectAccount(a.id).subscribe({
       next: () => this.store.loadAccounts().subscribe(),
       error: (err) => this.error.set(err?.error?.detail ?? 'Disconnect failed.'),
+    });
+  }
+
+  onDelete(a: BrokerAccount): void {
+    if (!confirm(
+      `Permanently delete ${a.label}? This removes the broker account row, `
+      + `its credential, and any local orders/fills. The account at the broker `
+      + `is not affected.`,
+    )) return;
+    this.store.deleteAccount(a.id).subscribe({
+      next: () => this.store.loadAccounts().subscribe(),
+      error: (err) => this.error.set(err?.error?.detail ?? 'Delete failed.'),
     });
   }
 }

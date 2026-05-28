@@ -198,3 +198,33 @@ export interface IBKRGatewayDiscoverResult {
   accounts: IBKRDiscoveredAccount[];
   selected: string | null;
 }
+
+// --- P3a-3: TradeStation OAuth + connect endpoints -------------------------
+
+export interface TradeStationRuntimeConfig {
+  configured: boolean;
+  source: 'user' | 'env' | '';
+  redirect_uri: string;
+}
+
+export interface TradeStationAppCredentials {
+  has_user_credentials: boolean;
+  client_id_masked: string;
+  source: 'user' | 'env' | '';
+}
+
+export interface TradeStationOAuthStartResult {
+  authorization_url: string;
+  state: string;
+}
+
+export interface TradeStationDiscoveredAccount {
+  account_id: string;
+  type: string;
+  currency: string;
+  status: string;
+}
+
+export interface TradeStationDiscoverResult {
+  accounts: TradeStationDiscoveredAccount[];
+}

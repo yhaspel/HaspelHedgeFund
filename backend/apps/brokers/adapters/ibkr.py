@@ -517,7 +517,7 @@ class IBKRBroker:
     # -- find_order_by_client_id -----------------------------------------
 
     def find_order_by_client_id(
-        self, client_order_id: str,
+        self, client_order_id: str, *, order_meta=None,
     ) -> OrderSnapshot | None:
         """ADR 0008 unknown-response adoption contract. `cOID` is reliably
         echoed only on `/iserver/account/orders` (Risks #7a)."""

@@ -64,6 +64,18 @@ export const INFO_GUIDES: InfoGuide[] = [
     ],
   },
   {
+    slug: 'tradestation-setup',
+    title: 'TradeStation Setup',
+    summary:
+      'Register a TradeStation developer app so you can connect a paper (SIM) or live account.',
+    group: 'getting-started',
+    icon: 'i-key',
+    keywords: [
+      'tradestation', 'broker', 'oauth', 'paper', 'sim', 'simulated',
+      'live', 'client id', 'client secret', 'redirect uri', 'developer app',
+    ],
+  },
+  {
     slug: 'models-and-cost',
     title: 'Models & Cost Disclaimer',
     summary:

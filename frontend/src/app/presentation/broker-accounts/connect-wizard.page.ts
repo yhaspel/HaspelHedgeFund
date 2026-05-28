@@ -1,11 +1,12 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount, BrokerCapability } from '../../core/models/broker.model';
 import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
+import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.component';
 
 /**
  * Connect-wizard SHELL. Demo and IBKR are fully wired here. TradeStation
@@ -21,7 +22,10 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
 @Component({
   selector: 'hf-broker-connect-wizard-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, IBKRConnectFlowComponent],
+  imports: [
+    CommonModule, FormsModule, AppShellComponent,
+    IBKRConnectFlowComponent, TradeStationConnectFlowComponent,
+  ],
   template: `
     <hf-app-shell [crumbs]="[
       {label:'Broker accounts', link:'/broker-accounts'},
@@ -52,6 +56,8 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
                 </div>
                 @if (!cap.available || cap.code === 'ibkr') {
                   <span class="pill"><span class="dot"></span>later release</span>
+                } @else if (cap.code === 'tradestation') {
+                  <span class="pill"><span class="dot"></span>guided setup</span>
                 } @else if (cap.community_unverified) {
                   <span class="pill warn"><span class="dot"></span>unverified</span>
                 } @else {
@@ -92,6 +98,11 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
             [account]="draft"
             (completed)="onIBKRActivated($event)"
             (cancel)="onIBKRCancel()" />
+        } @else if (tsDraft(); as draft) {
+          <hf-tradestation-connect-flow
+            [account]="draft"
+            (completed)="onTSActivated($event)"
+            (cancel)="onTSCancel()" />
         } @else if (selected(); as cap) {
           <section class="card mt-4 p-4" data-test="connect-form">
             <div class="card-hd">
@@ -136,6 +147,7 @@ import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
 export class BrokerConnectWizardPage implements OnInit {
   private readonly store = inject(BrokerStore);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   protected readonly registry = this.store.registry;
   protected readonly busy = this.store.busy;
@@ -146,16 +158,56 @@ export class BrokerConnectWizardPage implements OnInit {
   // render <hf-ibkr-connect-flow> instead of navigating away. The draft
   // carries the `pending-{uuid}` account_id that activate will rewrite.
   protected readonly ibkrDraft = signal<BrokerAccount | null>(null);
+  // P3a-3: same pattern for TradeStation. Draft account is created here
+  // (`connection_status="connecting"`) and the OAuth-start endpoint stamps
+  // the chosen api_base_url + PKCE verifier onto it.
+  protected readonly tsDraft = signal<BrokerAccount | null>(null);
   protected label = '';
   protected mode: 'paper' | 'live' = 'paper';
 
   ngOnInit(): void {
     this.store.loadRegistry().subscribe({
-      next: () => this.loading.set(false),
+      next: () => {
+        this.loading.set(false);
+        this.maybeResume();
+      },
       error: (err) => {
         this.error.set(err?.error?.detail ?? 'Failed to load registry.');
         this.loading.set(false);
       },
+    });
+  }
+
+  /**
+   * If `?resume=<id>` is present, re-enter the per-broker connect flow
+   * for that draft account. Used when the user clicks "Resume setup" on
+   * a half-configured account from the list page.
+   */
+  private maybeResume(): void {
+    const raw = this.route.snapshot.queryParamMap.get('resume');
+    const id = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(id)) return;
+    this.store.loadAccounts().subscribe({
+      next: (rows) => {
+        const acc = rows.find((r) => r.id === id);
+        if (!acc) {
+          this.error.set('Account not found — it may have been deleted.');
+          return;
+        }
+        if (acc.connection_status === 'active') {
+          this.router.navigate(['/broker-accounts', acc.id]);
+          return;
+        }
+        if (acc.broker === 'ibkr') {
+          this.ibkrDraft.set(acc);
+        } else if (acc.broker === 'tradestation') {
+          this.tsDraft.set(acc);
+        } else {
+          this.router.navigate(['/broker-accounts', acc.id]);
+        }
+      },
+      error: (err) =>
+        this.error.set(err?.error?.detail ?? 'Failed to load account.'),
     });
   }
 
@@ -169,6 +221,7 @@ export class BrokerConnectWizardPage implements OnInit {
   cancel(): void {
     this.selected.set(null);
     this.ibkrDraft.set(null);
+    this.tsDraft.set(null);
     this.error.set(null);
   }
 
@@ -184,6 +237,9 @@ export class BrokerConnectWizardPage implements OnInit {
             // already exists with `account_id="pending-{uuid}"`; activate
             // rewrites it once the user picks a real DU id.
             this.ibkrDraft.set(acc);
+          } else if (cap.code === 'tradestation') {
+            // Same pattern for TradeStation OAuth.
+            this.tsDraft.set(acc);
           } else {
             this.router.navigate(['/broker-accounts', acc.id]);
           }
@@ -210,6 +266,18 @@ export class BrokerConnectWizardPage implements OnInit {
     // for the user to delete from the Accounts page (no automatic GC in
     // v1 — see Risks #8 of the phase plan). Send the user back there.
     this.ibkrDraft.set(null);
+    this.router.navigate(['/broker-accounts']);
+  }
+
+  onTSActivated(account: BrokerAccount): void {
+    this.tsDraft.set(null);
+    this.router.navigate(['/broker-accounts', account.id]);
+  }
+
+  onTSCancel(): void {
+    // Draft row stays in the DB for the user to delete from the
+    // Accounts page — same policy as IBKR.
+    this.tsDraft.set(null);
     this.router.navigate(['/broker-accounts']);
   }
 }

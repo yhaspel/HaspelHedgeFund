@@ -218,7 +218,9 @@ class MockBroker(Broker):
             self._advance_fill(order)
         return self._to_snapshot(order)
 
-    def find_order_by_client_id(self, client_order_id: str) -> OrderSnapshot | None:
+    def find_order_by_client_id(
+        self, client_order_id: str, *, order_meta=None,
+    ) -> OrderSnapshot | None:
         broker_id = self._state.client_id_index.get(client_order_id)
         if broker_id is None:
             return None

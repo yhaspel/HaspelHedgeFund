@@ -280,34 +280,312 @@ class BrokerAccountCredentialsView(APIView):
 
 
 class BrokerAccountOAuthStartView(APIView):
+    """POST /api/broker-accounts/<id>/oauth/start/
+
+    Returns the TradeStation authorize URL and stashes the PKCE
+    verifier on the BrokerAccount.config so the callback can complete
+    the exchange. ADR 0012.
+    """
+
     def post(self, request, account_id: int) -> Response:
-        # Stub for the OAuth brokers. P3a-2 removed gateway_session from
-        # this branch (IBKR uses its own /api/broker-accounts/<id>/gateway/*
-        # endpoints — see ADR 0011 §1); P3a-3 implements oauth2 for
-        # TradeStation. Until then, every OAuth/gateway broker returns 501.
         account = BrokerAccountOverviewView._get(request.user, account_id)
         cap = get_capabilities(account.broker)
         if cap is None or cap.auth_kind not in ("oauth2", "oauth1"):
             raise ValidationError({"detail": "this broker does not use OAuth"})
+        if account.broker != "tradestation":
+            return Response({
+                "detail": f"OAuth handshake for {account.broker!r} is not implemented",
+            }, status=status.HTTP_501_NOT_IMPLEMENTED)
+        from .adapters.tradestation_oauth import build_authorize_url
+        try:
+            authz = build_authorize_url(account=account)
+        except BrokerError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        # Stash the PKCE verifier + the chosen api base url on the draft
+        # account. The verifier is short-lived (STATE_MAX_AGE_SECONDS) and
+        # only useful with the matching one-time auth code; storing
+        # plaintext in config is acceptable for the brief callback window.
+        cfg = dict(account.config or {})
+        cfg["pkce_verifier"] = authz.code_verifier
+        cfg["oauth_state"] = authz.state
+        from .adapters.tradestation import api_base_for_mode
+        cfg["api_base_url"] = api_base_for_mode(account.mode)
+        account.config = cfg
+        account.save(update_fields=["config"])
         return Response({
-            "authorization_url": "",
-            "status": "stub",
-            "detail": (
-                "OAuth handshake is implemented in the broker-specific "
-                "phase (3a-3 — TradeStation)."
-            ),
-        }, status=status.HTTP_501_NOT_IMPLEMENTED)
+            "authorization_url": authz.url,
+            "state": authz.state,
+        })
 
 
 class BrokerAccountOAuthCallbackView(APIView):
+    """GET /api/broker-accounts/oauth/callback/?code=…&state=…
+
+    Public endpoint — TradeStation redirects the browser here. The signed
+    `state` carries the BrokerAccount + user binding so we can route the
+    exchange without a session cookie.
+    """
+
     permission_classes = [permissions.AllowAny]
 
     def get(self, request) -> Response:
-        # Reserved redirect target. 3a-2 / 3a-3 implement.
+        from .adapters.tradestation_oauth import (
+            exchange_code_for_tokens,
+            verify_state,
+        )
+        from datetime import timedelta
+        code = (request.query_params.get("code") or "").strip()
+        state = (request.query_params.get("state") or "").strip()
+        error = (request.query_params.get("error") or "").strip()
+        if error:
+            return Response(
+                {"status": "error", "detail": f"TradeStation returned: {error}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not code or not state:
+            raise ValidationError({"detail": "missing code or state"})
+        try:
+            account_id_signed, _user_id = verify_state(state)
+        except BrokerError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        try:
+            account = BrokerAccount.objects.get(pk=account_id_signed)
+        except BrokerAccount.DoesNotExist as exc:
+            raise ValidationError({"detail": "account not found"}) from exc
+        if (account.config or {}).get("oauth_state") != state:
+            raise ValidationError({"detail": "OAuth state does not match draft"})
+        verifier = (account.config or {}).get("pkce_verifier") or ""
+        if not verifier:
+            raise ValidationError(
+                {"detail": "PKCE verifier missing — restart the connect flow"},
+            )
+        try:
+            bundle = exchange_code_for_tokens(
+                code=code, code_verifier=verifier, user=account.user,
+            )
+        except (BrokerError, BrokerTransientError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        from .credentials import set_oauth_tokens
+        expires_at = timezone.now() + timedelta(seconds=bundle.expires_in or 1200)
+        set_oauth_tokens(
+            account,
+            access_token=bundle.access_token,
+            refresh_token=bundle.refresh_token,
+            expires_at=expires_at,
+            scopes=bundle.scopes,
+            flavor=BrokerCredential.AUTH_OAUTH2,
+        )
+        # Clear the one-time verifier; state stays for replay-detection
+        # tracing during the activation step.
+        cfg = dict(account.config or {})
+        cfg.pop("pkce_verifier", None)
+        account.config = cfg
+        account.save(update_fields=["config"])
         return Response({
-            "status": "stub",
-            "detail": "OAuth callback is implemented in the broker-specific phase.",
-        }, status=status.HTTP_501_NOT_IMPLEMENTED)
+            "status": "ok",
+            "account_id": account.pk,
+            "next": "discover",
+        })
+
+
+# --- TradeStation post-callback endpoints (P3a-3, ADR 0012) ----------------
+
+
+def _require_tradestation_account(user, account_id: int) -> BrokerAccount:
+    account = BrokerAccountOverviewView._get(user, account_id)
+    if account.broker != "tradestation":
+        raise ValidationError({"detail": "this account is not TradeStation"})
+    return account
+
+
+class TradeStationDiscoverAccountsView(APIView):
+    """POST /api/broker-accounts/<id>/tradestation/discover-accounts/
+
+    Hits the API base host stamped at OAuth start (so a paper draft can
+    only see SIM accounts) and returns the list for the picker.
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        account = _require_tradestation_account(request.user, account_id)
+        from .adapters.tradestation_oauth import refresh_if_needed
+        try:
+            token = refresh_if_needed(account)
+        except BrokerError as exc:
+            return Response({"detail": str(exc)}, status=409)
+        base = (account.config or {}).get("api_base_url") or ""
+        if not base:
+            raise ValidationError(
+                {"detail": "no api_base_url on draft — restart OAuth"},
+            )
+        import requests as _requests
+        try:
+            r = _requests.get(
+                f"{base.rstrip('/')}/brokerage/accounts",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+        except _requests.RequestException as exc:
+            return Response({"detail": f"TradeStation unreachable: {exc}"}, status=502)
+        if r.status_code >= 400:
+            return Response(
+                {"detail": f"TradeStation refused: {r.status_code} {r.text[:200]}"},
+                status=502 if r.status_code >= 500 else 409,
+            )
+        payload = r.json() if r.content else {}
+        rows = payload.get("Accounts") if isinstance(payload, dict) else []
+        accounts = []
+        for row in rows or []:
+            acct_id = str(row.get("AccountID") or row.get("Key") or "")
+            if not acct_id:
+                continue
+            accounts.append({
+                "account_id": acct_id,
+                "type": row.get("AccountType") or "",
+                "currency": row.get("Currency") or "USD",
+                "status": row.get("Status") or "",
+            })
+        return Response({"accounts": accounts})
+
+
+class TradeStationActivateView(APIView):
+    """POST /api/broker-accounts/<id>/tradestation/activate/ {account_id}
+
+    Validates the picked account exists in the discovered list, enforces
+    paper-vs-live host alignment (defensive — the host was chosen at
+    start), records the picked id, flips status to active. For live
+    accounts: the LiveTradingDisclaimer must be accepted first.
+    """
+
+    def post(self, request, account_id: int) -> Response:
+        account = _require_tradestation_account(request.user, account_id)
+        if account.connection_status == BrokerAccount.STATUS_ACTIVE:
+            raise ValidationError({"detail": "account is already active"})
+        picked = (request.data.get("account_id") or "").strip()
+        if not picked:
+            raise ValidationError({"account_id": "required"})
+        if account.mode == BrokerAccount.MODE_LIVE:
+            current = LiveTradingDisclaimer.objects.filter(is_current=True).first()
+            if current is None:
+                raise ValidationError({
+                    "detail": "no live-trading disclaimer is configured",
+                })
+            if not DisclaimerAcceptance.objects.filter(
+                user=request.user, disclaimer=current,
+            ).exists():
+                raise ValidationError({
+                    "detail": (
+                        "accept the current live-trading disclaimer before "
+                        "connecting a live account"
+                    ),
+                })
+
+        # Re-fetch the discovery list to ensure the picked id is real and
+        # that the host is correctly stamped. Mode-vs-host already enforced
+        # at OAuth start; this is defence in depth.
+        from .adapters.tradestation import api_base_for_mode
+        expected_base = api_base_for_mode(account.mode)
+        actual_base = (account.config or {}).get("api_base_url") or ""
+        if actual_base != expected_base:
+            raise ValidationError({
+                "detail": (
+                    f"draft api_base_url {actual_base!r} does not match "
+                    f"the mode {account.mode!r} — restart OAuth"
+                ),
+            })
+
+        collision = BrokerAccount.objects.filter(
+            user=request.user, broker="tradestation", account_id=picked,
+        ).exclude(pk=account.pk).first()
+        if collision is not None:
+            raise ValidationError({
+                "detail": (
+                    f"you already have TradeStation account {picked!r} "
+                    f"connected (label: {collision.label!r})"
+                ),
+            })
+
+        with transaction.atomic():
+            account.account_id = picked
+            account.connection_status = BrokerAccount.STATUS_ACTIVE
+            # Drop the one-time state now that activation is complete.
+            cfg = dict(account.config or {})
+            cfg.pop("oauth_state", None)
+            account.config = cfg
+            account.save(update_fields=["account_id", "connection_status", "config"])
+        return Response(BrokerAccountSerializer(account).data)
+
+
+class TradeStationRuntimeConfigView(APIView):
+    """GET /api/broker-accounts/tradestation/runtime-config/
+
+    Reports whether *this user* can start an OAuth handshake — they can
+    if either a per-user `UserBrokerOAuthApp` row or a Django settings
+    fallback supplies a `client_id` + `client_secret`. Never leaks the
+    secret itself.
+    """
+
+    def get(self, request) -> Response:
+        from django.conf import settings as _settings
+        from .adapters.tradestation_oauth import resolve_app_credentials
+        cid, csec, source = resolve_app_credentials(request.user)
+        return Response({
+            "configured": bool(cid and csec),
+            "source": source,  # "user" | "env" | ""
+            "redirect_uri": _settings.TRADESTATION_REDIRECT_URI,
+        })
+
+
+class TradeStationAppCredentialsView(APIView):
+    """GET / PUT /api/broker-accounts/tradestation/app-credentials/
+
+    Per-user developer-app credentials. GET reports presence + the
+    masked client_id (so the user can confirm what's stored without
+    leaking the secret). PUT upserts; empty strings clear the row so
+    the resolver falls back to the env fallback.
+    """
+
+    def get(self, request) -> Response:
+        from .adapters.tradestation_oauth import resolve_app_credentials
+        from .models import UserBrokerOAuthApp
+        row = UserBrokerOAuthApp.objects.filter(
+            user=request.user, broker="tradestation",
+        ).first()
+        cid_user = ""
+        if row and row.encrypted_client_id:
+            from apps.models_catalog.crypto import decrypt
+            try:
+                cid_user = decrypt(row.encrypted_client_id)
+            except Exception:  # noqa: BLE001
+                cid_user = ""
+        _cid, _csec, source = resolve_app_credentials(request.user)
+        return Response({
+            "has_user_credentials": bool(row and row.has_secret()),
+            "client_id_masked": _mask(cid_user),
+            "source": source,
+        })
+
+    def put(self, request) -> Response:
+        from .adapters.tradestation_oauth import set_user_app_credentials
+        client_id = (request.data.get("client_id") or "").strip()
+        client_secret = (request.data.get("client_secret") or "").strip()
+        # Both must be present together. To clear, pass both empty.
+        if bool(client_id) != bool(client_secret):
+            raise ValidationError({
+                "detail": "client_id and client_secret must be set together",
+            })
+        set_user_app_credentials(
+            request.user,
+            client_id=client_id, client_secret=client_secret,
+        )
+        return self.get(request)
+
+
+def _mask(value: str) -> str:
+    """Show last 4 chars only — enough to recognise, not enough to leak."""
+    v = (value or "").strip()
+    if len(v) <= 4:
+        return "•" * len(v)
+    return "•" * (len(v) - 4) + v[-4:]
 
 
 # --- IBKR gateway_session connect endpoints (P3a-2, ADR 0011) ---------------
@@ -533,6 +811,42 @@ class BrokerGatewayActivateView(APIView):
             )
 
         return Response(BrokerAccountSerializer(account).data)
+
+
+class BrokerAccountDeleteView(APIView):
+    """DELETE /api/broker-accounts/<id>/ — remove a broker account and its
+    orphan portfolio.
+
+    Refuses to delete when the account has any in-flight orders
+    (`idempotency_state` in `submit_pending` / `unknown`) — those
+    represent broker-side commitments the user must resolve first
+    (cancel or reconcile). Cleanly drafted / disconnected / errored
+    accounts delete in one transaction along with their portfolio.
+    """
+
+    def delete(self, request, account_id: int) -> Response:
+        account = BrokerAccountOverviewView._get(request.user, account_id)
+        in_flight = account.orders.filter(
+            idempotency_state__in=(
+                BrokerOrder.IDEM_SUBMIT_PENDING,
+                BrokerOrder.IDEM_UNKNOWN,
+            ),
+        ).exists()
+        if in_flight:
+            raise ValidationError({
+                "detail": (
+                    "this account has in-flight orders (submit_pending or "
+                    "unknown). Cancel or reconcile them before deleting."
+                ),
+            })
+        portfolio = account.portfolio
+        with transaction.atomic():
+            account.delete()
+            # Portfolio is PROTECT'd from the now-deleted account; safe to
+            # drop the orphan portfolio so the user doesn't see a stale
+            # broker-kind portfolio in their list.
+            portfolio.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BrokerAccountDisconnectView(APIView):

@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     BrokerAccountAckDriftView,
     BrokerAccountCredentialsView,
+    BrokerAccountDeleteView,
     BrokerAccountDisconnectView,
     BrokerAccountListCreateView,
     BrokerAccountOAuthCallbackView,
@@ -21,6 +22,10 @@ from .views import (
     DisclaimerAcceptView,
     IBKRRuntimeConfigView,
     MarketCalendarView,
+    TradeStationActivateView,
+    TradeStationAppCredentialsView,
+    TradeStationDiscoverAccountsView,
+    TradeStationRuntimeConfigView,
 )
 
 urlpatterns = [
@@ -36,6 +41,20 @@ urlpatterns = [
     # match "ibkr".
     path("broker-accounts/ibkr/runtime-config/",
          IBKRRuntimeConfigView.as_view(), name="ibkr-runtime-config"),
+    # P3a-3: TradeStation post-OAuth wizard. The /tradestation/ literal
+    # goes before the <int:account_id> patterns just like /ibkr/ does.
+    path("broker-accounts/tradestation/runtime-config/",
+         TradeStationRuntimeConfigView.as_view(),
+         name="tradestation-runtime-config"),
+    path("broker-accounts/tradestation/app-credentials/",
+         TradeStationAppCredentialsView.as_view(),
+         name="tradestation-app-credentials"),
+    path("broker-accounts/<int:account_id>/tradestation/discover-accounts/",
+         TradeStationDiscoverAccountsView.as_view(),
+         name="broker-account-tradestation-discover"),
+    path("broker-accounts/<int:account_id>/tradestation/activate/",
+         TradeStationActivateView.as_view(),
+         name="broker-account-tradestation-activate"),
     path("broker-accounts/<int:account_id>/gateway/probe/",
          BrokerGatewayProbeView.as_view(),
          name="broker-account-gateway-probe"),
@@ -56,6 +75,9 @@ urlpatterns = [
     path("broker-accounts/<int:account_id>/oauth/start/",
          BrokerAccountOAuthStartView.as_view(),
          name="broker-account-oauth-start"),
+    path("broker-accounts/<int:account_id>/",
+         BrokerAccountDeleteView.as_view(),
+         name="broker-account-delete"),
     path("broker-accounts/<int:account_id>/disconnect/",
          BrokerAccountDisconnectView.as_view(),
          name="broker-account-disconnect"),

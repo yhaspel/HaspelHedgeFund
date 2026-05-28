@@ -182,6 +182,32 @@ IBKR_GATEWAY_LOGIN_URL = os.environ.get(
     "IBKR_GATEWAY_LOGIN_URL", "https://localhost:5000",
 )
 
+# P3a-3: TradeStation Web API (/v3) + OAuth 2.0 authorization-code. BYO
+# developer-app credentials per ADR 0012 — the deployer registers their own
+# TradeStation app and supplies these env vars. Empty defaults make the
+# adapter import safely; the connect wizard surfaces the "no creds" state
+# with a setup guide. Hosts are environment-routed by mode (paper → SIM,
+# live → production).
+TRADESTATION_CLIENT_ID = os.environ.get("TRADESTATION_CLIENT_ID", "")
+TRADESTATION_CLIENT_SECRET = os.environ.get("TRADESTATION_CLIENT_SECRET", "")
+TRADESTATION_REDIRECT_URI = os.environ.get(
+    "TRADESTATION_REDIRECT_URI",
+    "http://localhost:8811/api/broker-accounts/oauth/callback/",
+)
+TRADESTATION_AUTHORIZE_URL = os.environ.get(
+    "TRADESTATION_AUTHORIZE_URL", "https://signin.tradestation.com/authorize",
+)
+TRADESTATION_TOKEN_URL = os.environ.get(
+    "TRADESTATION_TOKEN_URL", "https://signin.tradestation.com/oauth/token",
+)
+TRADESTATION_API_BASE_SIM = os.environ.get(
+    "TRADESTATION_API_BASE_SIM", "https://sim-api.tradestation.com/v3",
+)
+TRADESTATION_API_BASE_LIVE = os.environ.get(
+    "TRADESTATION_API_BASE_LIVE", "https://api.tradestation.com/v3",
+)
+TRADESTATION_SCOPES = "openid offline_access ReadAccount Trade"
+
 # P2n: BYOK gate for paid data providers (FMP, Tiingo). When False, the
 # resolver in apps.data.providers.factory refuses to fall back to the env var
 # and raises with an actionable error pointing the user at /settings/models.

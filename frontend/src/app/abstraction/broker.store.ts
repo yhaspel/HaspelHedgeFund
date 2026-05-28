@@ -21,6 +21,10 @@ import {
   IBKRGatewayProbeResult,
   IBKRRuntimeConfig,
   LiveDisclaimer,
+  TradeStationAppCredentials,
+  TradeStationDiscoverResult,
+  TradeStationOAuthStartResult,
+  TradeStationRuntimeConfig,
 } from '../core/models/broker.model';
 
 @Injectable({ providedIn: 'root' })
@@ -120,6 +124,21 @@ export class BrokerStore {
         tap({
           next: (acc) => {
             this._accounts.update((rows) => [acc, ...rows]);
+            this._busy.set(false);
+          },
+          error: () => this._busy.set(false),
+        }),
+      );
+  }
+
+  deleteAccount(accountId: number): Observable<void> {
+    this._busy.set(true);
+    return this.api
+      .delete<void>(`/broker-accounts/${accountId}/`)
+      .pipe(
+        tap({
+          next: () => {
+            this._accounts.update((rows) => rows.filter((r) => r.id !== accountId));
             this._busy.set(false);
           },
           error: () => this._busy.set(false),
@@ -258,6 +277,66 @@ export class BrokerStore {
       .post<BrokerAccount>(
         `/broker-accounts/${accountId}/gateway/activate/`,
         { account_id: ibkrAccountId },
+      )
+      .pipe(
+        tap({
+          next: (acc) => {
+            this._accounts.update((rows) =>
+              rows.map((r) => (r.id === acc.id ? acc : r)),
+            );
+            this._busy.set(false);
+          },
+          error: () => this._busy.set(false),
+        }),
+      );
+  }
+
+  // --- P3a-3: TradeStation OAuth + connect actions ------------------------
+
+  getTradeStationRuntimeConfig(): Observable<TradeStationRuntimeConfig> {
+    return this.api.get<TradeStationRuntimeConfig>(
+      '/broker-accounts/tradestation/runtime-config/',
+    );
+  }
+
+  getTradeStationAppCredentials(): Observable<TradeStationAppCredentials> {
+    return this.api.get<TradeStationAppCredentials>(
+      '/broker-accounts/tradestation/app-credentials/',
+    );
+  }
+
+  saveTradeStationAppCredentials(
+    body: { client_id: string; client_secret: string },
+  ): Observable<TradeStationAppCredentials> {
+    return this.api.put<TradeStationAppCredentials>(
+      '/broker-accounts/tradestation/app-credentials/',
+      body,
+    );
+  }
+
+  startTradeStationOAuth(accountId: number): Observable<TradeStationOAuthStartResult> {
+    return this.api.post<TradeStationOAuthStartResult>(
+      `/broker-accounts/${accountId}/oauth/start/`,
+      {},
+    );
+  }
+
+  discoverTradeStationAccounts(accountId: number): Observable<TradeStationDiscoverResult> {
+    return this.api.post<TradeStationDiscoverResult>(
+      `/broker-accounts/${accountId}/tradestation/discover-accounts/`,
+      {},
+    );
+  }
+
+  activateTradeStationAccount(
+    accountId: number,
+    tsAccountId: string,
+  ): Observable<BrokerAccount> {
+    this._busy.set(true);
+    return this.api
+      .post<BrokerAccount>(
+        `/broker-accounts/${accountId}/tradestation/activate/`,
+        { account_id: tsAccountId },
       )
       .pipe(
         tap({
