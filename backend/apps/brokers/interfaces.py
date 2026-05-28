@@ -93,7 +93,7 @@ class Broker(Protocol):
         self,
         client_order_id: str,
         *,
-        order_meta: "OrderMeta | None" = None,
+        order_meta: OrderMeta | None = None,
     ) -> OrderSnapshot | None: ...
 
 

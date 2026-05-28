@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -10,11 +9,9 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.brokers.adapters import tradestation as ts_module
 from apps.brokers.adapters import tradestation_oauth as oauth
 from apps.brokers.credentials import set_oauth_tokens
 from apps.brokers.models import BrokerAccount, BrokerCredential
-from apps.portfolios.models import Portfolio
 
 User = get_user_model()
 

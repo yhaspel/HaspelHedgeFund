@@ -329,11 +329,12 @@ class BrokerAccountOAuthCallbackView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request) -> Response:
+        from datetime import timedelta
+
         from .adapters.tradestation_oauth import (
             exchange_code_for_tokens,
             verify_state,
         )
-        from datetime import timedelta
         code = (request.query_params.get("code") or "").strip()
         state = (request.query_params.get("state") or "").strip()
         error = (request.query_params.get("error") or "").strip()
@@ -526,6 +527,7 @@ class TradeStationRuntimeConfigView(APIView):
 
     def get(self, request) -> Response:
         from django.conf import settings as _settings
+
         from .adapters.tradestation_oauth import resolve_app_credentials
         cid, csec, source = resolve_app_credentials(request.user)
         return Response({
