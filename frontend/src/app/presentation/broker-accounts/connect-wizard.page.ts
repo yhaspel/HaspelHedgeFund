@@ -54,10 +54,8 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
                   <div class="font-medium">{{ cap.display_name }}</div>
                   <div class="text-[11.5px] text-text-3 mono mt-0.5">code: {{ cap.code }}</div>
                 </div>
-                @if (!cap.available || cap.code === 'ibkr') {
+                @if (!cap.available || cap.code === 'ibkr' || cap.code === 'tradestation') {
                   <span class="pill"><span class="dot"></span>later release</span>
-                } @else if (cap.code === 'tradestation') {
-                  <span class="pill"><span class="dot"></span>guided setup</span>
                 } @else if (cap.community_unverified) {
                   <span class="pill warn"><span class="dot"></span>unverified</span>
                 } @else {
@@ -78,7 +76,7 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
                 }
               </ul>
               <div class="mt-2.5 text-right">
-                @if (cap.available && cap.code !== 'ibkr') {
+                @if (cap.available && cap.code !== 'ibkr' && cap.code !== 'tradestation') {
                   <button class="btn primary btn-sm" (click)="select(cap)"
                           [attr.data-test]="'select-broker-' + cap.code">
                     Continue
