@@ -3,8 +3,14 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { RunsStore } from '../../abstraction/runs.store';
-import { AgentMessage, ALL_PERSONAS, PERSONA_IDS } from '../../core/models/run.model';
+import { AgentMessage, ALL_PERSONAS, DecisionRow, PERSONA_IDS } from '../../core/models/run.model';
 import { BrokerStore } from '../../abstraction/broker.store';
+import { BrokerAccount, BrokerOrderRow } from '../../core/models/broker.model';
+import {
+  BrokerOrderTicketDecision,
+  BrokerOrderTicketModalComponent,
+} from '../broker-accounts/broker-order-ticket.modal';
+import { OrderConfirmModalComponent } from '../broker-accounts/order-confirm.modal';
 import { ConfidenceMeterComponent } from '../shared/confidence-meter.component';
 import { EnterPositionModalComponent } from '../portfolio/enter-position.modal';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
@@ -33,7 +39,7 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, GlossaryTermComponent, InfoTooltipComponent, PopoverComponent, RangeRailComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, BrokerOrderTicketModalComponent, OrderConfirmModalComponent, GlossaryTermComponent, InfoTooltipComponent, PopoverComponent, RangeRailComponent, TickerComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
@@ -659,6 +665,22 @@ interface PersonaCard {
           [prefill]="entryPrefill()"
           (closed)="onEntryClosed($event)" />
 
+        <!-- Submit-as-broker-order flow: ticket → gated confirm → broker. -->
+        @if (brokerTicket(); as t) {
+          <hf-broker-order-ticket-modal
+            [decision]="t.decision"
+            [accounts]="t.accounts"
+            (closed)="brokerTicket.set(null)"
+            (review)="onTicketReview($event)" />
+        }
+        @if (confirmingOrder(); as ord) {
+          <hf-order-confirm-modal
+            [order]="ord"
+            [account]="confirmingAccount()"
+            (closed)="onBrokerConfirmClosed()"
+            (confirmed)="onBrokerConfirmed($event)" />
+        }
+
         <div role="status" aria-live="polite" class="visually-hidden">
           @if (toastMsg(); as t) { {{ t }} }
         </div>
@@ -1026,6 +1048,11 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   toastMsg = signal<string | null>(null);
   private toastHandle: ReturnType<typeof setTimeout> | null = null;
 
+  // Submit-as-broker-order flow: ticket modal → gated confirm modal → broker.
+  brokerTicket = signal<{ decision: BrokerOrderTicketDecision; accounts: BrokerAccount[] } | null>(null);
+  confirmingOrder = signal<BrokerOrderRow | null>(null);
+  confirmingAccount = signal<BrokerAccount | null>(null);
+
   canAddToPortfolio(d: { side?: string; action: string }): boolean {
     if (this.run()?.status !== 'done') return false;
     if (d.side === 'pair') return false;
@@ -1047,65 +1074,64 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     this.entryOpen.set(true);
   }
 
-  // P3a-1: send a Decision off to the broker pipeline as a draft order.
+  // P3a-1: send a Decision to the broker. Opens the ticket modal (pick
+  // account + quantity), which creates a draft and hands off to the gated
+  // confirm modal that actually transmits to the broker.
   private readonly brokerStore = inject(BrokerStore);
 
-  submitAsBrokerOrder(d: { id: number; ticker: string; side?: string; action: string }): void {
+  submitAsBrokerOrder(d: DecisionRow): void {
     const run = this.run();
     if (!run) return;
-    const accounts = this.brokerStore.accounts();
-    const finish = (list: typeof accounts) => {
+    const side: 'buy' | 'sell' =
+      d.action === 'sell' || d.side === 'short' ? 'sell' : 'buy';
+    const open = (list: BrokerAccount[]) => {
       const active = list.filter(
         (a) => a.is_active && a.connection_status === 'active',
       );
       if (active.length === 0) {
-        this.toastMsg.set(
+        this.flashToast(
           'No active broker accounts — connect one in Broker accounts first.',
         );
-        if (this.toastHandle) clearTimeout(this.toastHandle);
-        this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
         return;
       }
-      // For v1, route to the first active account. The Pending Orders page
-      // is the canonical batch-review surface; users can pick a different
-      // account from there if needed.
-      const account = active[0];
-      const inferredSide: 'buy' | 'sell' =
-        d.side === 'short' || d.action === 'open_short' ? 'sell' : 'buy';
-      this.brokerStore
-        .createDraftOrder({
-          broker_account: account.id,
-          ticker: d.ticker,
-          side: inferredSide,
-          quantity: '1',
-          order_type: 'market',
-          decision: d.id,
-        })
-        .subscribe({
-          next: () => {
-            this.toastMsg.set(
-              `Draft ${d.ticker} ${inferredSide} added to ${account.label}.`,
-            );
-            if (this.toastHandle) clearTimeout(this.toastHandle);
-            this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
-          },
-          error: (err) => {
-            this.toastMsg.set(
-              err?.error?.detail ?? 'Could not create broker order draft.',
-            );
-            if (this.toastHandle) clearTimeout(this.toastHandle);
-            this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
-          },
-        });
+      this.brokerTicket.set({
+        decision: { id: d.id, ticker: d.ticker, side, targetQuantity: d.target_quantity },
+        accounts: active,
+      });
     };
+    const accounts = this.brokerStore.accounts();
     if (accounts.length === 0) {
       this.brokerStore.loadAccounts().subscribe({
-        next: (list) => finish(list as unknown as typeof accounts),
-        error: () => finish([]),
+        next: (list) => open(list as unknown as BrokerAccount[]),
+        error: () => open([]),
       });
     } else {
-      finish(accounts);
+      open(accounts);
     }
+  }
+
+  // Draft created in the ticket modal → open the gated confirm modal.
+  onTicketReview(e: { order: BrokerOrderRow; account: BrokerAccount }): void {
+    this.brokerTicket.set(null);
+    this.confirmingAccount.set(e.account);
+    this.confirmingOrder.set(e.order);
+  }
+
+  onBrokerConfirmClosed(): void {
+    this.confirmingOrder.set(null);
+    this.confirmingAccount.set(null);
+  }
+
+  onBrokerConfirmed(row: BrokerOrderRow): void {
+    const label = this.confirmingAccount()?.label ?? 'broker';
+    this.onBrokerConfirmClosed();
+    this.flashToast(`Submitted ${row.ticker} ${row.side} → ${label}.`);
+  }
+
+  private flashToast(msg: string): void {
+    this.toastMsg.set(msg);
+    if (this.toastHandle) clearTimeout(this.toastHandle);
+    this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
   }
 
   onEntryClosed(e: { saved: boolean }): void {
