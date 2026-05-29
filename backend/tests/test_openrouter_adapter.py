@@ -9,19 +9,42 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
+import pytest
+
 from hedgefund_agents.llm.adapters.openrouter import OpenRouterClient
 from hedgefund_agents.llm.client import Message
 
 
-def _fake_http(payload: dict, status_code: int = 200) -> MagicMock:
+def _resp(payload: dict, status_code: int = 200, text: str = "") -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = payload
-    resp.text = ""
+    resp.text = text
     resp.request = MagicMock()
+    return resp
+
+
+def _fake_http(payload: dict, status_code: int = 200) -> MagicMock:
     http = MagicMock()
-    http.post.return_value = resp
+    http.post.return_value = _resp(payload, status_code)
     return http
+
+
+def _seq_http(*responses: MagicMock) -> MagicMock:
+    """HTTP whose successive .post() calls return the given responses in order."""
+    http = MagicMock()
+    http.post.side_effect = list(responses)
+    return http
+
+
+# Real DeepInfra rejection body for nvidia/nemotron-3-nano-30b-a3b, as surfaced
+# through OpenRouter's error wrapper.
+_RF_REJECTION_TEXT = (
+    '{"error":{"message":"json_object response format is not supported for '
+    'model: nvidia/Nemotron-3-Nano-30B-A3B","type":"invalid_request_error",'
+    '"param":"response_format","code":null}}'
+)
 
 
 def _build_client(http) -> OpenRouterClient:
@@ -165,3 +188,89 @@ def test_tool_calls_with_content_present_does_not_overwrite():
     )
     assert resp.text == '{"signal":"sell"}'
     assert resp.finish_reason == "tool_calls"  # unchanged; content takes precedence
+
+
+def test_retries_without_response_format_when_route_rejects_json_object():
+    """Regression for the nvidia/nemotron-3-nano DeepInfra 405: the route rejects
+    response_format=json_object outright. call_structured's schema-hint already
+    forces JSON-only output, so the adapter must drop the request hint and retry
+    once rather than surfacing the 405 as a fatal HTTPStatusError."""
+    rejection = _resp({}, status_code=405, text=_RF_REJECTION_TEXT)
+    success = _resp({
+        "choices": [{
+            "message": {"content": '{"signal":"buy"}'},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 80, "completion_tokens": 12},
+    })
+    http = _seq_http(rejection, success)
+    resp = _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[Message("user", "hi")],
+        json_mode=True,
+    )
+    assert resp.text == '{"signal":"buy"}'
+    assert resp.finish_reason == "stop"
+    assert http.post.call_count == 2
+    # First attempt carried response_format; the retry dropped it.
+    assert http.post.call_args_list[0].kwargs["json"]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in http.post.call_args_list[1].kwargs["json"]
+
+
+def test_memoizes_unsupported_model_and_skips_response_format_next_call():
+    """After a route is learned to reject response_format, subsequent calls to the
+    same model on the same (lru_cache'd) client must skip it proactively — no
+    repeated 405 + retry per call."""
+    rejection = _resp({}, status_code=405, text=_RF_REJECTION_TEXT)
+    success = _resp({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+    })
+    success2 = _resp({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+    })
+    http = _seq_http(rejection, success, success2)
+    client = _build_client(http)
+    # A priced slug (the rejection is detected from the response body, not the
+    # model id — nvidia/nemotron-3-nano is the real-world trigger but is priced
+    # via the catalog DB, absent in unit tests).
+    kwargs = {
+        "model": "meta-llama/llama-3.3-70b-instruct",
+        "messages": [Message("user", "hi")],
+        "json_mode": True,
+    }
+    client.complete(**kwargs)  # learns: rejection (405) then retry (success)
+    client.complete(**kwargs)  # memoized: single request, no response_format
+    assert http.post.call_count == 3
+    # The third request (the second call's only one) never sent response_format.
+    assert "response_format" not in http.post.call_args_list[2].kwargs["json"]
+
+
+def test_unrelated_4xx_still_raises_and_does_not_retry():
+    """A 4xx that is NOT about response_format (here a generic 405) must keep its
+    current behavior: surface as HTTPStatusError, no silent retry-without-hint."""
+    http = _seq_http(_resp({}, status_code=405, text="Method Not Allowed"))
+    with pytest.raises(httpx.HTTPStatusError):
+        _build_client(http).complete(
+            model="meta-llama/llama-3.3-70b-instruct",
+            messages=[Message("user", "hi")],
+            json_mode=True,
+        )
+    assert http.post.call_count == 1
+
+
+def test_fallback_retry_second_failure_surfaces_and_does_not_loop():
+    """If dropping response_format and retrying STILL fails with a non-retriable
+    4xx, the error surfaces as HTTPStatusError and the fallback fires exactly
+    once — it's a single `if`, not a loop, so there's no retry-of-retry storm."""
+    rejection = _resp({}, status_code=405, text=_RF_REJECTION_TEXT)
+    second_failure = _resp({}, status_code=400, text="bad request")
+    http = _seq_http(rejection, second_failure)
+    with pytest.raises(httpx.HTTPStatusError):
+        _build_client(http).complete(
+            model="meta-llama/llama-3.3-70b-instruct",
+            messages=[Message("user", "hi")],
+            json_mode=True,
+        )
+    assert http.post.call_count == 2  # original + one fallback retry, no loop

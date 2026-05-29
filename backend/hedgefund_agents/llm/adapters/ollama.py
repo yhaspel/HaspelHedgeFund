@@ -19,6 +19,7 @@ import httpx
 from django.conf import settings
 
 from ..client import LLMResponse, Message
+from ._openai_compat import is_response_format_unsupported
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,11 @@ class OllamaClient:
         # qwen2.5:7b fundamentals=193s, valuation=257s). Hosted APIs are fast
         # enough that 30s would do; the bigger cap is the local-model concession.
         self._http = http or httpx.Client(timeout=900.0)
+        # See OpenRouterClient: an OpenAI-compatible backend reached via
+        # ollama_host can reject response_format=json_object. Memoize per model
+        # so we eat the doomed first attempt at most once. ollama clients are
+        # lru_cache'd in registry._make_client, so the memo persists across a run.
+        self._no_response_format: set[str] = set()
 
     def complete(
         self,
@@ -43,21 +49,26 @@ class OllamaClient:
         temperature: float = 0.2,
         json_mode: bool = False,
     ) -> LLMResponse:
-        body: dict[str, object] = {
-            "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False,
-        }
-        if json_mode:
-            body["response_format"] = {"type": "json_object"}
-        url = f"{self.host}/v1/chat/completions"
+        want_json_object = json_mode and model not in self._no_response_format
+        body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
         t0 = time.perf_counter()
-        try:
-            resp = self._http.post(url, json=body)
-        except httpx.RequestError as e:
-            raise RuntimeError(f"Ollama at {self.host} is unreachable: {e}") from e
+        resp = self._post(body)
+        # An OpenAI-compatible backend (vLLM, llama.cpp, LM Studio) reached via
+        # ollama_host may reject response_format=json_object outright.
+        # call_structured's schema-hint system message already forces JSON-only
+        # output, so drop the hint and retry once; memoize so subsequent calls
+        # skip the doomed attempt. (Stock Ollama supports json_object, so this
+        # only fires for third-party OpenAI-compatible endpoints.)
+        rejected_rf = resp.status_code >= 400 and is_response_format_unsupported(resp.text)
+        if want_json_object and rejected_rf:
+            log.warning(
+                "ollama %s rejected response_format=json_object; "
+                "retrying without it (model=%s)",
+                resp.status_code,
+                model,
+            )
+            self._no_response_format.add(model)
+            resp = self._post(self._build_body(model, messages, max_tokens, temperature, False))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         if resp.status_code >= 400:
             raise httpx.HTTPStatusError(
@@ -83,3 +94,29 @@ class OllamaClient:
             finish_reason=finish_reason,
             raw=payload,
         )
+
+    def _build_body(
+        self,
+        model: str,
+        messages: list[Message],
+        max_tokens: int,
+        temperature: float,
+        json_object: bool,
+    ) -> dict[str, object]:
+        body: dict[str, object] = {
+            "model": model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+        }
+        if json_object:
+            body["response_format"] = {"type": "json_object"}
+        return body
+
+    def _post(self, body: dict) -> httpx.Response:
+        url = f"{self.host}/v1/chat/completions"
+        try:
+            return self._http.post(url, json=body)
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Ollama at {self.host} is unreachable: {e}") from e

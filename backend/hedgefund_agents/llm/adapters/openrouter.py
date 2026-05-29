@@ -10,6 +10,7 @@ from django.conf import settings
 
 from ..client import LLMResponse, Message
 from ..pricing import estimate_cost
+from ._openai_compat import is_response_format_unsupported
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
@@ -33,6 +34,11 @@ class OpenRouterClient:
         if not self.api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
         self._http = http or httpx.Client(timeout=120.0)
+        # Models whose route rejected response_format=json_object outright. The
+        # client is lru_cache'd (registry._make_client) and reused across every
+        # agent call in a run, so memoizing here lets the rest of the run skip
+        # the doomed first attempt instead of eating a 4xx + retry per call.
+        self._no_response_format: set[str] = set()
 
     def complete(
         self,
@@ -43,24 +49,8 @@ class OpenRouterClient:
         temperature: float = 0.2,
         json_mode: bool = False,
     ) -> LLMResponse:
-        body: dict[str, object] = {
-            "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        # `json_mode=True` emits `response_format={"type": "json_object"}` so
-        # OpenAI-compatible upstreams that respect it produce parseable JSON.
-        # Certain OpenRouter routes (notably Llama 3.3 70B via some providers)
-        # mis-interpret this as "emit a tool call" and return
-        # finish_reason='tool_calls' with empty content + empty tool_calls;
-        # the adapter's response-side `tool_calls → content` fallback below
-        # extracts the JSON from `tool_calls[0].function.arguments` when that
-        # happens. Keeping `response_format` on the request preserves the
-        # contract with cassette-replayed integration tests, which recorded
-        # request bodies with this field present.
-        if json_mode:
-            body["response_format"] = {"type": "json_object"}
+        want_json_object = json_mode and model not in self._no_response_format
+        body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "HTTP-Referer": "https://github.com/yhaspel/HaspelHedgeFund",
@@ -69,6 +59,22 @@ class OpenRouterClient:
         }
         t0 = time.perf_counter()
         resp = self._post_with_retry(body, headers)
+        # Some OpenRouter routes (e.g. nvidia/nemotron-3-nano via DeepInfra)
+        # reject response_format=json_object with a non-retriable 4xx instead of
+        # honoring or mis-reading it. call_structured's schema-hint system message
+        # already forces JSON-only output, so we drop the request hint and retry
+        # once. Memoize so subsequent calls to this model skip the doomed attempt.
+        rejected_rf = resp.status_code >= 400 and is_response_format_unsupported(resp.text)
+        if want_json_object and rejected_rf:
+            log.warning(
+                "openrouter %s rejected response_format=json_object; "
+                "retrying without it (model=%s)",
+                resp.status_code,
+                model,
+            )
+            self._no_response_format.add(model)
+            body = self._build_body(model, messages, max_tokens, temperature, False)
+            resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
             from apps.backtests.exceptions import ModelUnavailable
@@ -120,6 +126,31 @@ class OpenRouterClient:
             finish_reason=finish_reason,
             raw=payload,
         )
+
+    def _build_body(
+        self,
+        model: str,
+        messages: list[Message],
+        max_tokens: int,
+        temperature: float,
+        json_object: bool,
+    ) -> dict[str, object]:
+        body: dict[str, object] = {
+            "model": model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        # `json_object=True` emits `response_format={"type": "json_object"}` so
+        # OpenAI-compatible upstreams that respect it produce parseable JSON, and
+        # so cassette-replay integration tests (which recorded request bodies with
+        # this field) keep matching. Routes that mis-read it as "emit a tool call"
+        # are handled by the response-side tool_calls→content fallback in
+        # complete(); routes that reject it outright are handled by the caller's
+        # retry-without-it fallback.
+        if json_object:
+            body["response_format"] = {"type": "json_object"}
+        return body
 
     def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:
         """Exponential backoff on 408/429/5xx, mirroring AnthropicClient.
