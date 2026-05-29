@@ -111,7 +111,7 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
         } @else if (selected(); as cap) {
           <section class="card mt-4 p-4" data-test="connect-form">
             <div class="card-hd">
-              <span class="title">Step 2 — {{ cap.display_name }}</span>
+              <h2 class="title">Step 2 — {{ cap.display_name }}</h2>
             </div>
             <div class="space-y-2.5 mt-2">
               <label class="lbl block">

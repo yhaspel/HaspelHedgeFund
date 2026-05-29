@@ -53,7 +53,7 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
         </section>
 
         <section class="card p-0 overflow-hidden">
-          <div class="card-hd"><span class="title">Your books</span></div>
+          <div class="card-hd"><h2 class="title">Your books</h2></div>
           @if (hub.books.length === 0) {
             <hf-empty-state message="No portfolios yet"
               detail="Your Manual book will appear here automatically." />
@@ -77,6 +77,12 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
                     <td>
                       <div class="font-medium">{{ book.name }}</div>
                       <div class="text-[11px] text-text-3">{{ book.subtitle }}</div>
+                      @if (book.kind === 'strategy' && book.positions_count === 0) {
+                        <div class="text-[11px] text-[var(--acc-info-fg)]"
+                             data-test="enrol-hint">
+                          No positions yet — enter the strategy from a done cycle.
+                        </div>
+                      }
                     </td>
                     <td>
                       <span class="pill" [class.info]="book.kind === 'manual'"

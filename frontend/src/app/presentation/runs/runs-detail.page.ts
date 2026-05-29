@@ -59,6 +59,12 @@ interface PersonaCard {
               {{ cancelling() ? 'Cancelling…' : 'Stop analysis' }}
             </button>
           }
+          @if (canRerun()) {
+            <button type="button" class="btn" (click)="rerun()" [disabled]="rerunning()"
+                    data-test="rerun-run">
+              {{ rerunning() ? 'Rerunning…' : '↻ Rerun' }}
+            </button>
+          }
           <a class="btn" routerLink="/runs/new">New run</a>
         </div>
       </div>
@@ -98,7 +104,7 @@ interface PersonaCard {
                     (mouseenter)="popPersonalized.show()" (mouseleave)="popPersonalized.maybeHide()"
                     (focus)="popPersonalized.show()" (blur)="popPersonalized.maybeHide()">
                 <span class="dot"></span>Personalized
-                <hf-popover #popPersonalized placement="bottom" align="start" size="default" role="tooltip">
+                <hf-popover #popPersonalized placement="bottom" align="start" size="default">
                   <strong class="block mb-1">Investor profile applied</strong>
                   <span class="block text-text-3 text-[11px]">{{ p }}</span>
                 </hf-popover>
@@ -123,7 +129,7 @@ interface PersonaCard {
                     (mouseenter)="popEvolved.show()" (mouseleave)="popEvolved.maybeHide()"
                     (focus)="popEvolved.show()" (blur)="popEvolved.maybeHide()">
                 <span class="dot"></span>Evolved
-                <hf-popover #popEvolved placement="bottom" align="start" size="default" role="tooltip">
+                <hf-popover #popEvolved placement="bottom" align="start" size="default">
                   <strong class="block mb-1">Persona evolution applied</strong>
                   <span class="block text-text-3 text-[11px]">
                     @for (entry of evolutionEntries(); track entry.persona) {
@@ -207,7 +213,7 @@ interface PersonaCard {
               <!-- Trade levels (WS-5.4.2 range-rails) -->
               @if (statGridVisible()) {
                 <section class="card mb-3.5" data-test="trade-levels">
-                  <div class="card-hd"><span class="title">Trade levels</span></div>
+                  <div class="card-hd"><h2 class="title">Trade levels</h2></div>
                   <div class="card-bd">
                     <div class="stat-grid">
                       @if (targetZoneCell(); as tz) {
@@ -269,7 +275,7 @@ interface PersonaCard {
               <!-- Macro -->
               @if (macroOutput(); as m) {
                 <section class="card mb-3.5">
-                  <div class="card-hd"><span class="title">Macro context</span></div>
+                  <div class="card-hd"><h2 class="title">Macro context</h2></div>
                   <div class="card-bd">
                     <div class="flex flex-wrap gap-1.5 mb-2.5">
                       <span class="pill"><span class="dot"></span>growth · {{ m['growth_quadrant'] }}</span>
@@ -285,7 +291,7 @@ interface PersonaCard {
               <!-- News & filings -->
               @if (newsOutput(); as n) {
                 <section class="card mb-3.5">
-                  <div class="card-hd"><span class="title">News &amp; filings</span></div>
+                  <div class="card-hd"><h2 class="title">News &amp; filings</h2></div>
                   <div class="card-bd">
                     <p class="text-xs text-text-2 m-0 mb-3">{{ n['digest'] }}</p>
                     @if (asArray(n['risk_factor_highlights']).length) {
@@ -461,7 +467,7 @@ interface PersonaCard {
             @if (riskOutput(); as risk) {
               <section class="card mb-3.5">
                 <div class="card-hd">
-                  <span class="title"><hf-term key="rm">Risk Manager</hf-term></span>
+                  <h2 class="title"><hf-term key="rm">Risk Manager</hf-term></h2>
                   @if (risk['veto']) {
                     <span class="pill err"><span class="dot"></span><hf-term key="veto">VETO</hf-term></span>
                   }
@@ -492,7 +498,7 @@ interface PersonaCard {
             @if (riskContext(); as rc) {
               <section class="card mb-3.5" data-test="risk-context">
                 <div class="card-hd">
-                  <span class="title">Risk context</span>
+                  <h2 class="title">Risk context</h2>
                   <span class="pill"
                     [class.warn]="rc.mode === 'stub'"
                     [class.ok]="rc.mode === 'real'">
@@ -518,7 +524,7 @@ interface PersonaCard {
             <!-- Valuation -->
             @if (valuationOutput(); as v) {
               <section class="card mb-3.5">
-                <div class="card-hd"><span class="title">Valuation</span></div>
+                <div class="card-hd"><h2 class="title">Valuation</h2></div>
                 <div class="card-bd">
                   <div class="grid grid-cols-4 gap-3.5 text-xs">
                     <div><div class="eyebrow"><hf-term key="dcf">DCF</hf-term></div><div class="mono mt-1">{{ num(v['dcf_fair_value']) }}</div></div>
@@ -591,7 +597,7 @@ interface PersonaCard {
             <!-- Evidence trail (P01 review) -->
             @if (evidenceItems().length || providerStateEntries().length) {
               <section class="card mb-3.5" data-test="evidence-trail">
-                <div class="card-hd"><span class="title">Evidence &amp; sources</span></div>
+                <div class="card-hd"><h2 class="title">Evidence &amp; sources</h2></div>
                 <div class="card-bd">
                   @if (providerStateEntries().length) {
                     <div class="eyebrow mb-1.5">Provider status</div>
@@ -629,7 +635,7 @@ interface PersonaCard {
             <!-- LLM calls -->
             @if (run()!.llm_calls.length) {
               <section class="card">
-                <div class="card-hd"><span class="title">LLM calls</span></div>
+                <div class="card-hd"><h2 class="title">LLM calls</h2></div>
                 <table class="tbl">
                   <thead><tr>
                     <th>Agent</th><th>Provider</th><th>Model</th>
@@ -771,6 +777,13 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     return s === 'queued' || s === 'running';
   });
 
+  // P4 WS-A: rerun is available once the run is terminal (failed/cancelled).
+  readonly canRerun = computed(() => {
+    const s = this.run()?.status;
+    return s === 'failed' || s === 'cancelled';
+  });
+  readonly rerunning = signal(false);
+
   /** P3-prereq-5 WS-C/WS-D: agent_brief that was injected for this run,
    *  empty string when no personalization was applied. */
   readonly personalized = computed<string | null>(() => {
@@ -818,6 +831,22 @@ export class RunsDetailPage implements OnInit, OnDestroy {
         this.store.pollRun(id);
       },
       error: () => this.cancelling.set(false),
+    });
+  }
+
+  // P4 WS-A: create a fresh run from this one's payload and navigate to it.
+  // The new run re-resolves providers against the user's current keys.
+  rerun(): void {
+    const id = this.run()?.id;
+    if (!id || this.rerunning()) return;
+    this.rerunning.set(true);
+    this.store.rerunRun(id).subscribe({
+      next: (res) => {
+        this.rerunning.set(false);
+        this.flashToast('Rerun started — it uses your current API keys.');
+        this.router.navigate(['/runs', res.id]);
+      },
+      error: () => this.rerunning.set(false),
     });
   }
 

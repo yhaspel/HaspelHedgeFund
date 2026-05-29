@@ -24,7 +24,7 @@ let _modalIdSeq = 0;
  *
  * Usage:
  *   <hf-modal *ngIf="open" titleText="Edit position" (closed)="onCancel()">
- *     <div class="card-hd"><span class="title">…</span></div>
+ *     <div class="card-hd"><h2 class="title">…</h2></div>
  *     …
  *   </hf-modal>
  */

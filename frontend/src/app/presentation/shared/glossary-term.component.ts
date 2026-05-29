@@ -37,7 +37,6 @@ import { PopoverComponent } from './popover.component';
         #pop
         placement="bottom"
         align="start"
-        role="tooltip"
         [hoverCloseDelay]="220"
         [dismissOnOutsideClick]="true"
       >

@@ -277,6 +277,30 @@ textarea {
   border-radius: var(--r-4);
 }
 
+/* P4 WS-DA-5: Windows High-Contrast / forced-colors support. The default
+   focus indicator is a box-shadow, which forced-colors strips — so restore a
+   real system-color outline. Status pills/segmented controls fill via
+   background (also flattened), so lean on a border + system text colors so
+   their meaning survives. No effect outside forced-colors mode. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .pill,
+  .seg,
+  .seg-btn,
+  .tab,
+  .btn {
+    forced-color-adjust: auto;
+    border: 1px solid ButtonText;
+  }
+  .pill .dot {
+    forced-color-adjust: auto;
+    border: 1px solid CanvasText;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

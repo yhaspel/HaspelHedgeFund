@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
@@ -31,6 +31,7 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
             <a class="btn primary" routerLink="/strategies/new">Create a strategy</a>
           </hf-empty-state>
         } @else {
+          <div class="tbl-scroll">
           <table class="tbl">
             <thead><tr>
               <th>Name</th>
@@ -52,13 +53,22 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
                   <td class="mono text-[11.5px] text-text-3">
                     {{ s.last_run_at ? (s.last_run_at | date: 'short') : '—' }}
                   </td>
-                  <td class="right">
+                  <td class="right whitespace-nowrap">
                     <a [routerLink]="['/strategies', s.id]" class="text-[var(--acc-info-fg)] text-2xs">Open</a>
+                    @if ((s.targets_count_active ?? 0) === 0) {
+                      <button type="button" class="btn danger sm ml-2"
+                              (click)="confirmDelete(s.id, s.name)"
+                              [disabled]="deletingId() === s.id"
+                              [attr.data-test]="'delete-strategy-' + s.id">
+                        Delete
+                      </button>
+                    }
                   </td>
                 </tr>
               }
             </tbody>
           </table>
+          </div>
         }
       </section>
     </hf-app-shell>
@@ -66,5 +76,22 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
 })
 export class StrategiesListPage implements OnInit {
   readonly store = inject(StrategiesStore);
+  readonly deletingId = signal<number | null>(null);
   ngOnInit(): void { this.store.list().subscribe(); }
+
+  // P4 WS-C: delete a strategy with no non-cancelled cycles. Confirm first —
+  // this also removes the freshly-seeded strategy book.
+  confirmDelete(id: number, name: string): void {
+    if (this.deletingId() !== null) return;
+    const ok = confirm(
+      `Delete strategy "${name}"? This also removes its (empty) strategy book. `
+      + 'This cannot be undone.',
+    );
+    if (!ok) return;
+    this.deletingId.set(id);
+    this.store.deleteStrategy(id).subscribe({
+      next: () => { this.deletingId.set(null); this.store.list().subscribe(); },
+      error: () => { this.deletingId.set(null); alert('Could not delete this strategy.'); },
+    });
+  }
 }

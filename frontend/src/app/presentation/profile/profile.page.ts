@@ -59,7 +59,7 @@ import { TuneBandsChange, TuneBandsComponent } from './tune-bands.component';
         <div class="grid-2">
           <section class="card identity">
             <div class="card-hd">
-              <span class="title">Account</span>
+              <h2 class="title">Account</h2>
             </div>
             <div class="card-bd">
               <dl class="dl">
@@ -85,7 +85,7 @@ import { TuneBandsChange, TuneBandsComponent } from './tune-bands.component';
           @if (active(); as active) {
             <section class="card profile-card">
               <div class="card-hd">
-                <span class="title">Investor profile</span>
+                <h2 class="title">Investor profile</h2>
                 <span class="muted text-text-3 text-[11px]">
                   updated {{ active.analyzed_at ? (active.analyzed_at | date: 'mediumDate') : '—' }}
                 </span>
@@ -153,7 +153,7 @@ import { TuneBandsChange, TuneBandsComponent } from './tune-bands.component';
             @if (recommended().length) {
               <section class="card recos">
                 <div class="card-hd">
-                  <span class="title">Recommended strategies</span>
+                  <h2 class="title">Recommended strategies</h2>
                 </div>
                 <div class="card-bd">
                   <ul class="reco-list">
@@ -186,7 +186,7 @@ import { TuneBandsChange, TuneBandsComponent } from './tune-bands.component';
             }
           } @else {
             <section class="card">
-              <div class="card-hd"><span class="title">Investor profile</span></div>
+              <div class="card-hd"><h2 class="title">Investor profile</h2></div>
               <div class="card-bd">
                 @if (latest()?.status === 'failed') {
                   <p class="alert">

@@ -27,7 +27,7 @@ import { PopoverComponent } from '../shared/popover.component';
   template: `
     <section class="card regime-widget">
       <div class="card-hd">
-        <span class="title">Regime context</span>
+        <h2 class="title">Regime context</h2>
         <span class="hint" tabindex="0"
               [attr.aria-describedby]="popMarkov.open() ? popMarkov.popoverId : null"
               (mouseenter)="popMarkov.show()" (mouseleave)="popMarkov.maybeHide()"
@@ -95,6 +95,7 @@ import { PopoverComponent } from '../shared/popover.component';
 
         @if (sparklinePath(); as p) {
           <svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"
+               role="img"
                [attr.aria-label]="benchmarkTicker() + ' bull−bear 60d'">
             <path [attr.d]="p" />
             <line x1="0" y1="15" x2="100" y2="15" />

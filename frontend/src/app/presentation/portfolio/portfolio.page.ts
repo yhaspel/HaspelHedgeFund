@@ -112,7 +112,7 @@ import { PopoverComponent } from '../shared/popover.component';
 
         <section class="card mb-[18px]">
           <div class="card-hd">
-            <span class="title">Positions</span>
+            <h2 class="title">Positions</h2>
             <div class="actions">
               @if (+o.reserved_short_proceeds > 0) {
                 <span class="mono text-[11.5px] text-text-3">
@@ -137,7 +137,7 @@ import { PopoverComponent } from '../shared/popover.component';
           }
         </section>
         <section class="card mb-[18px]">
-          <div class="card-hd"><span class="title">Positions</span></div>
+          <div class="card-hd"><h2 class="title">Positions</h2></div>
           <div class="p-4 flex flex-col gap-2" aria-hidden="true">
             @for (_ of [1,2,3]; track $index) {
               <div class="skel h-[18px] w-full"></div>
@@ -148,7 +148,7 @@ import { PopoverComponent } from '../shared/popover.component';
 
       <section class="card">
         <div class="card-hd">
-          <span class="title">Transaction ledger</span>
+          <h2 class="title">Transaction ledger</h2>
           <div class="actions">
             <span class="mono text-[11.5px] text-text-3">
               showing latest 50
@@ -217,7 +217,7 @@ import { PopoverComponent } from '../shared/popover.component';
         <hf-modal titleId="edit-position-title" (closed)="cancelEdit()">
           <div class="card edit-modal" (click)="$event.stopPropagation()">
             <div class="card-hd">
-              <span class="title" id="edit-position-title">Edit position · {{ pos.ticker }}</span>
+              <h2 class="title" id="edit-position-title">Edit position · {{ pos.ticker }}</h2>
               <div class="actions">
                 <button class="icon-btn" (click)="cancelEdit()" aria-label="Close">
                   <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
@@ -261,7 +261,7 @@ import { PopoverComponent } from '../shared/popover.component';
         <hf-modal titleId="confirm-close-title" (closed)="onCancelClose()">
           <div class="card max-w-[440px] w-full">
             <div class="card-hd">
-              <span class="title" id="confirm-close-title">Close {{ pc.ticker }}?</span>
+              <h2 class="title" id="confirm-close-title">Close {{ pc.ticker }}?</h2>
             </div>
             <div class="p-4 flex flex-col gap-2">
               <p class="m-0 text-xs text-text">

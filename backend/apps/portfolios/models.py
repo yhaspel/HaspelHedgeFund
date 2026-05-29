@@ -187,6 +187,11 @@ class LedgerEntry(models.Model):
     # P3a-1: broker-fill ledger entries for kind="broker" portfolios.
     KIND_BROKER_FILL = "broker_fill"
     KIND_RECONCILE = "reconciliation_adjustment"
+    # P4 WS-E: strategy-cycle enrollment legs (open/increase vs reduce vs close)
+    # written into a kind="strategy" portfolio when a done cycle is enrolled.
+    KIND_STRATEGY_ENROLL = "strategy_enroll"
+    KIND_STRATEGY_ENROLL_REDUCE = "strategy_enroll_reduce"
+    KIND_STRATEGY_ENROLL_CLOSE = "strategy_enroll_close"
     KIND_CHOICES = [
         (KIND_DEPOSIT, "Cash deposit"),
         (KIND_WITHDRAWAL, "Cash withdrawal"),
@@ -197,6 +202,9 @@ class LedgerEntry(models.Model):
         (KIND_EDIT, "Manual edit adjustment"),
         (KIND_BROKER_FILL, "Broker fill"),
         (KIND_RECONCILE, "Reconciliation adjustment"),
+        (KIND_STRATEGY_ENROLL, "Strategy enrollment (open/increase)"),
+        (KIND_STRATEGY_ENROLL_REDUCE, "Strategy enrollment (reduce)"),
+        (KIND_STRATEGY_ENROLL_CLOSE, "Strategy enrollment (close)"),
     ]
 
     portfolio = models.ForeignKey(
@@ -304,6 +312,10 @@ class PortfolioStrategy(models.Model):
     min_trade_notional_usd = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("250")
     )
+    # P4 WS-E: when True, the cycle done-handler auto-materializes target_weights
+    # into the strategy portfolio (skips the manual confirm modal). Off by
+    # default so existing strategies are unchanged.
+    auto_enroll_on_done = models.BooleanField(default=False)
     max_turnover_pct = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.30"))
 
     # Screener weights (sliders). Higher = more weight in ranking.
@@ -644,19 +656,35 @@ class PortfolioTarget(models.Model):
     total_cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     error_message = models.TextField(blank=True, default="")
     celery_task_id = models.CharField(max_length=64, blank=True, default="")
+    # P4 WS-B: rerun provenance. When a failed/cancelled cycle is rerun, the
+    # OLD row points here at the fresh row so the cycles list can render a
+    # "↻ superseded" pill instead of duplicating both into the user's view.
+    superseded_by = models.ForeignKey(
+        "self", null=True, blank=True,
+        related_name="supersedes", on_delete=models.SET_NULL,
+    )
+    # P4 WS-E: set when the user materializes this cycle's target_weights into
+    # the strategy portfolio. NULL until enrolled — the cycle-detail card uses
+    # this to switch between "Enter strategy" and "Enrolled — view positions".
+    enrolled_at = models.DateTimeField(null=True, blank=True)
+    # P4 WS-E: frozen snapshot of {ticker: {action, quantity_delta, notional,
+    # mark_price}} at enrollment time, so the audit trail survives later closes.
+    enrollment_diff = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["strategy", "-as_of_date"])]
-        # P2l: partial unique constraint. Cancelled cycles are terminal
-        # history and must not block a same-day rerun. Race-safety on the
-        # active branch is preserved by the partial unique + update_or_create.
+        # P2l/P4 WS-B: partial unique constraint. Cancelled AND failed cycles
+        # are terminal history and must not block a same-day rerun (a rerun
+        # creates a fresh row and supersedes the old terminal one). Race-safety
+        # on the active branch is preserved by the partial unique + the
+        # non-superseded row resolution in tasks._resolve_cycle_target.
         constraints = [
             models.UniqueConstraint(
                 fields=["strategy", "as_of_date"],
-                condition=~models.Q(status="cancelled"),
+                condition=~models.Q(status__in=["cancelled", "failed"]),
                 name="uniq_active_strategy_target_per_day",
             ),
         ]

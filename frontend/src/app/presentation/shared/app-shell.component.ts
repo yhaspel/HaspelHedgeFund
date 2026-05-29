@@ -39,7 +39,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
            (focus)="popHome.show()" (blur)="popHome.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
-          <hf-popover #popHome placement="right" align="center" size="compact" role="tooltip">Dashboard</hf-popover>
+          <hf-popover #popHome placement="right" align="center" size="compact">Dashboard</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
            [attr.aria-current]="navPort.isActive ? 'page' : null"
@@ -47,7 +47,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
            (focus)="popPort.show()" (blur)="popPort.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
-          <hf-popover #popPort placement="right" align="center" size="compact" role="tooltip">Portfolios</hf-popover>
+          <hf-popover #popPort placement="right" align="center" size="compact">Portfolios</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
            [attr.aria-current]="navWatch.isActive ? 'page' : null"
@@ -55,7 +55,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
            (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
-          <hf-popover #popWatch placement="right" align="center" size="compact" role="tooltip">Watchlist</hf-popover>
+          <hf-popover #popWatch placement="right" align="center" size="compact">Watchlist</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
            [attr.aria-current]="navBrk.isActive ? 'page' : null"
@@ -63,7 +63,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
            (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
-          <hf-popover #popBrk placement="right" align="center" size="compact" role="tooltip">Broker accounts</hf-popover>
+          <hf-popover #popBrk placement="right" align="center" size="compact">Broker accounts</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navRuns="routerLinkActive"
@@ -72,7 +72,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
            (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
-          <hf-popover #popRuns placement="right" align="center" size="compact" role="tooltip">Runs</hf-popover>
+          <hf-popover #popRuns placement="right" align="center" size="compact">Runs</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" #navNewRun="routerLinkActive"
            [attr.aria-current]="navNewRun.isActive ? 'page' : null"
@@ -80,7 +80,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popNewRun.show()" (mouseleave)="popNewRun.maybeHide()"
            (focus)="popNewRun.show()" (blur)="popNewRun.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
-          <hf-popover #popNewRun placement="right" align="center" size="compact" role="tooltip">New run</hf-popover>
+          <hf-popover #popNewRun placement="right" align="center" size="compact">New run</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
            [attr.aria-current]="navScreener.isActive ? 'page' : null"
@@ -88,7 +88,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
            (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
-          <hf-popover #popScreener placement="right" align="center" size="compact" role="tooltip">Screener</hf-popover>
+          <hf-popover #popScreener placement="right" align="center" size="compact">Screener</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
            [attr.aria-current]="navBt.isActive ? 'page' : null"
@@ -96,7 +96,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
            (focus)="popBt.show()" (blur)="popBt.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
-          <hf-popover #popBt placement="right" align="center" size="compact" role="tooltip">Backtests</hf-popover>
+          <hf-popover #popBt placement="right" align="center" size="compact">Backtests</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
            [attr.aria-current]="navSt.isActive ? 'page' : null"
@@ -104,7 +104,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
            (focus)="popSt.show()" (blur)="popSt.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
-          <hf-popover #popSt placement="right" align="center" size="compact" role="tooltip">Strategies</hf-popover>
+          <hf-popover #popSt placement="right" align="center" size="compact">Strategies</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
            [attr.aria-current]="navNews.isActive ? 'page' : null"
@@ -112,7 +112,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
            (focus)="popNews.show()" (blur)="popNews.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
-          <hf-popover #popNews placement="right" align="center" size="compact" role="tooltip">News</hf-popover>
+          <hf-popover #popNews placement="right" align="center" size="compact">News</hf-popover>
         </a>
         <div class="spacer"></div>
         <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
@@ -121,7 +121,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
            (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
-          <hf-popover #popProfile placement="right" align="center" size="compact" role="tooltip">Profile</hf-popover>
+          <hf-popover #popProfile placement="right" align="center" size="compact">Profile</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
            [attr.aria-current]="navInfo.isActive ? 'page' : null"
@@ -129,7 +129,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
            (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
-          <hf-popover #popInfo placement="right" align="center" size="compact" role="tooltip">Guides</hf-popover>
+          <hf-popover #popInfo placement="right" align="center" size="compact">Guides</hf-popover>
         </a>
         <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
            [attr.aria-current]="navSet.isActive ? 'page' : null"
@@ -137,7 +137,7 @@ const THEME_KEY = 'hf.theme';
            (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
            (focus)="popSet.show()" (blur)="popSet.maybeHide()">
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
-          <hf-popover #popSet placement="right" align="center" size="compact" role="tooltip">Settings</hf-popover>
+          <hf-popover #popSet placement="right" align="center" size="compact">Settings</hf-popover>
         </a>
       </nav>
       <main>
@@ -161,7 +161,9 @@ const THEME_KEY = 'hf.theme';
             <span class="kbd">{{ paletteShortcutHint() }}</span>
           </button>
           <div class="flex items-center gap-3">
-            <button class="icon-btn" (click)="toggleTheme()" [attr.aria-label]="themeToggleLabel()">
+            <button class="icon-btn" (click)="toggleTheme()"
+                    [attr.aria-label]="themeToggleLabel()"
+                    [attr.aria-pressed]="theme() === 'dark'">
               <svg width="16" height="16" aria-hidden="true">
                 <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
               </svg>
@@ -174,7 +176,7 @@ const THEME_KEY = 'hf.theme';
                  (focus)="popEmail.show()" (blur)="popEmail.maybeHide()">
                 {{ u.email }}
               </a>
-              <hf-popover #popEmail placement="bottom" align="end" size="compact" role="tooltip">
+              <hf-popover #popEmail placement="bottom" align="end" size="compact">
                 @if (profile.hasProfile()) {
                   <strong>{{ profileType() }}</strong>
                   <span class="block text-text-3 text-[11px]">View profile</span>
@@ -209,6 +211,7 @@ const THEME_KEY = 'hf.theme';
           <hf-news-chyron
             [items]="news.chyronItems()"
             (open)="onChyronOpen($event)"
+            (hide)="onChyronHide()"
           ></hf-news-chyron>
         }
         <div class="page" id="main-content" tabindex="-1">
@@ -341,6 +344,13 @@ export class AppShellComponent implements OnInit {
   /** Click a chyron headline → deep-link to /news with the article modal open. */
   onChyronOpen(item: MarketNewsItem): void {
     this.router.navigate(['/news'], { queryParams: { article: item.id } });
+  }
+
+  // P4 WS-DX-2: persist the per-user "hide ticker" preference. savePreferences
+  // optimistically flips chyron_enabled so the bar disappears immediately, and
+  // the setting sticks across sessions (re-enable via Settings → News).
+  onChyronHide(): void {
+    this.news.savePreferences({ chyron_enabled: false }).subscribe();
   }
 
   dismissNudge(): void {

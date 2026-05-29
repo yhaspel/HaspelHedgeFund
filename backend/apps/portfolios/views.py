@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date as date_cls
 from datetime import datetime
 from decimal import Decimal
@@ -30,6 +31,8 @@ from .serializers import (
     UniverseSerializer,
 )
 from .tasks import daily_long_short_cycle, dispatch_approved_cycle, estimate_cycle
+
+logger = logging.getLogger(__name__)
 
 
 class UniverseListView(generics.ListAPIView):
@@ -169,11 +172,23 @@ class PositionsView(generics.ListAPIView):
         ).order_by("ticker")
 
 
+def _strategies_with_active_count(user):
+    """Strategies annotated with their non-cancelled cycle count so the
+    serializer's targets_count_active field (P4 WS-C delete gate) avoids N+1."""
+    from django.db.models import Count, Q
+
+    return PortfolioStrategy.objects.filter(user=user).annotate(
+        targets_count_active_annotated=Count(
+            "targets", filter=~Q(targets__status="cancelled"),
+        ),
+    )
+
+
 class StrategyListCreateView(generics.ListCreateAPIView):
     serializer_class = StrategySerializer
 
     def get_queryset(self):
-        return PortfolioStrategy.objects.filter(user=self.request.user).order_by("-created_at")
+        return _strategies_with_active_count(self.request.user).order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -183,7 +198,46 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = StrategySerializer
 
     def get_queryset(self):
-        return PortfolioStrategy.objects.filter(user=self.request.user)
+        return _strategies_with_active_count(self.request.user)
+
+    def destroy(self, request: Request, *args, **kwargs):
+        """P4 WS-C: delete a strategy only if it has no non-cancelled cycles
+        and its strategy-portfolio book is empty (a freshly-seeded book with
+        zero positions and zero ledger entries is detached + deleted; a book
+        with history is refused with 409 so it is never silently destroyed)."""
+        strategy = self.get_object()
+        if strategy.targets.exclude(status=PortfolioTarget.CANCELLED).exists():
+            logger.warning(
+                "strategy_delete_refused kind=has_active_cycles id=%s user_id=%s",
+                strategy.pk, request.user.id,
+            )
+            return Response(
+                {"detail": "strategy has non-cancelled cycles; cancel/deactivate "
+                           "instead of deleting so history is preserved"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        portfolio = strategy.portfolio
+        has_positions = Position.objects.filter(portfolio=portfolio).exists()
+        has_ledger = portfolio.ledger.exists()
+        if has_positions or has_ledger:
+            logger.warning(
+                "strategy_delete_refused kind=nonempty_portfolio id=%s "
+                "portfolio_id=%s user_id=%s",
+                strategy.pk, portfolio.pk, request.user.id,
+            )
+            return Response(
+                {"detail": "the strategy's portfolio has positions or ledger "
+                           "history; reassign or delete that portfolio first"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        with transaction.atomic():
+            strategy.delete()  # cascades cancelled targets + rankings + pairs
+            portfolio.delete()  # freshly-seeded, untouched book
+        logger.info(
+            "strategy_deleted id=%s portfolio_id=%s user_id=%s",
+            strategy.pk, portfolio.pk, request.user.id,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class StrategyEstimateView(APIView):
@@ -284,6 +338,145 @@ class StrategyCycleRefreshMarkView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         snapshot = ensure_cycle_snapshot(target, force=True)
         return Response(snapshot)
+
+
+class StrategyCycleRerunView(APIView):
+    """P4 WS-B: rerun a terminal (failed/cancelled) strategy cycle.
+
+    Dispatches a fresh cycle for the SAME as_of_date. The old terminal row is
+    left in place and gets ``superseded_by`` stamped at it once the new row is
+    created inside the task, so the cycles list shows a "↻ superseded" pill.
+    Done cycles are refused (use Run now with force to re-evaluate a success).
+    The rerun re-runs the screener for the as_of date (reproducible) rather
+    than splicing the old ranking; for manual-gate strategies it lands back in
+    awaiting_review for re-approval.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request, pk: int, target_id: int) -> Response:
+        try:
+            target = PortfolioTarget.objects.select_related("strategy").get(
+                pk=target_id, strategy_id=pk, strategy__user=request.user,
+            )
+        except PortfolioTarget.DoesNotExist:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if target.status in PortfolioTarget.ACTIVE_STATUSES:
+            return Response(
+                {"detail": f"cycle is still {target.status}; cancel or wait first"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if target.status == PortfolioTarget.DONE:
+            return Response(
+                {"detail": "cannot rerun a done cycle; use Run now with force=true "
+                           "to re-evaluate a successful cycle"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        # Eligible: failed or cancelled.
+        result = daily_long_short_cycle.delay(
+            target.strategy_id,
+            target.as_of_date.isoformat(),
+            force=True,
+            supersedes_target_id=target.pk,
+        )
+        logger.info(
+            "cycle_rerun original_id=%s strategy_id=%s user_id=%s as_of=%s",
+            target.pk, target.strategy_id, request.user.id, target.as_of_date,
+        )
+        return Response(
+            {
+                "task_id": str(result.id),
+                "new_target_pending": True,
+                "superseded_target_id": target.pk,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+def _enrollment_to_dict(result) -> dict:
+    """JSON-safe serialization of an EnrollmentResult (Decimals → str)."""
+    def row_dict(r) -> dict:
+        return {
+            "ticker": r.ticker,
+            "side": r.side,
+            "target_weight_pct": r.target_weight_pct,
+            "target_notional_usd": str(r.target_notional_usd),
+            "suggested_quantity": str(r.suggested_quantity),
+            "mark_price": str(r.mark_price) if r.mark_price is not None else None,
+            "mark_source": r.mark_source,
+            "current_quantity": str(r.current_quantity),
+            "current_avg_cost": str(r.current_avg_cost) if r.current_avg_cost is not None else None,
+            "action": r.action,
+            "quantity_delta": str(r.quantity_delta),
+            "rebalance_order_id": r.rebalance_order_id,
+            "source_run_id": r.source_run_id,
+            "source_decision_id": r.source_decision_id,
+            "warnings": r.warnings,
+        }
+
+    return {
+        "target_id": result.target_id,
+        "as_of_date": result.as_of_date,
+        "portfolio": result.portfolio,
+        "rows": [row_dict(r) for r in result.rows],
+        "totals": result.totals,
+        "enrolled": result.enrolled,
+    }
+
+
+class StrategyEnrollView(APIView):
+    """P4 WS-E: preview (GET) and apply (POST) a done cycle's target_weights
+    into the strategy portfolio as real Position rows + ledger entries."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _load_target(self, request: Request, pk: int, target_id: int):
+        return (
+            PortfolioTarget.objects.select_related("strategy", "strategy__portfolio")
+            .filter(pk=target_id, strategy_id=pk, strategy__user=request.user)
+            .first()
+        )
+
+    def get(self, request: Request, pk: int, target_id: int) -> Response:
+        from . import runs_bridge
+
+        target = self._load_target(request, pk, target_id)
+        if target is None:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if target.status != PortfolioTarget.DONE:
+            return Response(
+                {"detail": f"cycle is {target.status}, not done; nothing to enroll"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            result = runs_bridge.preview_enrollment(target, user=request.user)
+        except runs_bridge.EnrollmentError as exc:
+            return Response({"detail": str(exc)}, status=exc.status_code)
+        return Response(_enrollment_to_dict(result))
+
+    def post(self, request: Request, pk: int, target_id: int) -> Response:
+        from . import runs_bridge
+
+        target = self._load_target(request, pk, target_id)
+        if target is None:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        mode = (request.data.get("mode") or "").lower()
+        if mode == "manual" and request.data.get("approved_tickers") is None:
+            return Response(
+                {"detail": "approved_tickers is required in manual mode"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            result = runs_bridge.enroll_target_into_portfolio(
+                target,
+                mode=mode,
+                approved_tickers=request.data.get("approved_tickers"),
+                override_quantities=request.data.get("override_quantities"),
+                note=request.data.get("note", "") or "",
+            )
+        except runs_bridge.EnrollmentError as exc:
+            return Response({"detail": str(exc)}, status=exc.status_code)
+        return Response(_enrollment_to_dict(result), status=status.HTTP_201_CREATED)
 
 
 class BorrowLookupView(APIView):

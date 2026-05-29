@@ -70,6 +70,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
     llm_calls = LLMCallSerializer(many=True, read_only=True)
     portfolio_target = serializers.IntegerField(source="portfolio_target_id", read_only=True)
     strategy_backlink = serializers.SerializerMethodField()
+    rerun_of = serializers.IntegerField(source="rerun_of_id", read_only=True)
+    reruns = serializers.SerializerMethodField()
 
     class Meta:
         model = Run
@@ -78,6 +80,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
             "personas", "agent_versions",
             "created_at", "finished_at", "total_cost_usd", "error_message",
             "source", "portfolio_target", "strategy_backlink",
+            # P4 WS-A: rerun provenance (this run's parent + its child reruns).
+            "rerun_of", "reruns",
             "messages", "decisions", "llm_calls",
             # P01/P02a review: surface evidence and risk-context to the UI.
             "evidence", "risk_context",
@@ -90,11 +94,16 @@ class RunDetailSerializer(serializers.ModelSerializer):
     def get_strategy_backlink(self, run: Run) -> dict | None:
         return _strategy_backlink(run)
 
+    def get_reruns(self, run: Run) -> list[int]:
+        # Child reruns of this run, oldest first. Uses the reverse FK accessor.
+        return list(run.reruns.order_by("created_at").values_list("id", flat=True))
+
 
 class RunListSerializer(serializers.ModelSerializer):
     portfolio_target = serializers.IntegerField(source="portfolio_target_id", read_only=True)
     strategy_backlink = serializers.SerializerMethodField()
     decisions = DecisionSummarySerializer(many=True, read_only=True)
+    rerun_of = serializers.IntegerField(source="rerun_of_id", read_only=True)
 
     class Meta:
         model = Run
@@ -103,6 +112,7 @@ class RunListSerializer(serializers.ModelSerializer):
             "created_at", "finished_at", "total_cost_usd",
             "source", "portfolio_target", "strategy_backlink",
             "personas",  # P3 prereq 2 / WS-1: Runs list shows persona count.
+            "rerun_of",  # P4 WS-A: "Rerun of #N" provenance pill.
             "decisions",
         )
 

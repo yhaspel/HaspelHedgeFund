@@ -20,8 +20,10 @@ from .views import (
     PositionsView,
     StrategyCycleDetailView,
     StrategyCycleRefreshMarkView,
+    StrategyCycleRerunView,
     StrategyCyclesView,
     StrategyDetailView,
+    StrategyEnrollView,
     StrategyEstimateView,
     StrategyListCreateView,
     StrategyRunNowView,
@@ -62,6 +64,18 @@ urlpatterns = [
         "strategies/<int:pk>/cycles/<int:target_id>/refresh-mark/",
         StrategyCycleRefreshMarkView.as_view(),
         name="strategy-cycle-refresh-mark",
+    ),
+    # P4 WS-B: rerun a terminal (failed/cancelled) cycle.
+    path(
+        "strategies/<int:pk>/cycles/<int:target_id>/rerun/",
+        StrategyCycleRerunView.as_view(),
+        name="strategy-cycle-rerun",
+    ),
+    # P4 WS-E: preview (GET) / apply (POST) cycle enrollment into the book.
+    path(
+        "strategies/<int:pk>/enroll/<int:target_id>/",
+        StrategyEnrollView.as_view(),
+        name="strategy-enroll",
     ),
 
     path("borrow/<str:ticker>/", BorrowLookupView.as_view(), name="borrow-lookup"),

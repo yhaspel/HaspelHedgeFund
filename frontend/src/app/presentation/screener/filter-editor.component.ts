@@ -31,7 +31,7 @@ const GROUP_ORDER = [
   template: `
     <section class="card">
       <div class="card-hd">
-        <span class="title">Filters</span>
+        <h2 class="title">Filters</h2>
         <div class="actions">
           <button
             type="button"
@@ -91,7 +91,7 @@ const GROUP_ORDER = [
                             (focus)="pop.show()"
                             (blur)="pop.maybeHide()"
                           >?</button>
-                          <hf-popover #pop placement="top" align="start" role="tooltip">
+                          <hf-popover #pop placement="top" align="start">
                             <span class="help-body">{{ f.description }}</span>
                           </hf-popover>
                         </span>

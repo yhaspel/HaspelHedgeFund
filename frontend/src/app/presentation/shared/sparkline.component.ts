@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <svg [attr.width]="width" [attr.height]="height" [attr.viewBox]="'0 0 ' + width + ' ' + height" class="sl" [attr.aria-label]="'Sparkline ' + (points?.length || 0) + ' points'">
+    <svg [attr.width]="width" [attr.height]="height" [attr.viewBox]="'0 0 ' + width + ' ' + height" class="sl" aria-hidden="true">
       @if (loading) {
         <line [attr.x1]="0" [attr.x2]="width" [attr.y1]="height/2" [attr.y2]="height/2"
           stroke="var(--text-3)" stroke-dasharray="2 2" stroke-width="1" />

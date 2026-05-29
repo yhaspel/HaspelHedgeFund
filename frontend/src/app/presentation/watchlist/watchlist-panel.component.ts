@@ -22,7 +22,7 @@ import { TickerComponent } from '../shared/ticker.component';
   template: `
     <section class="card">
       <div class="card-hd">
-        <span class="title">Watchlist</span>
+        <h2 class="title">Watchlist</h2>
         <div class="actions">
           <input
             class="input mono"

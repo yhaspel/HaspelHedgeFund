@@ -125,6 +125,10 @@ export interface Strategy {
    * `awaiting_review` until the user approves a budget-valid subset.
    */
   auto_run_council: boolean;
+  /** P4 WS-E: auto-materialize a done cycle's weights into the book. */
+  auto_enroll_on_done?: boolean;
+  /** P4 WS-C: count of non-cancelled cycles; gates the Delete affordance. */
+  targets_count_active?: number;
   is_active: boolean;
   last_run_at: string | null;
   created_at: string;
@@ -194,6 +198,48 @@ export interface CycleSummary {
   total_cost_usd: string;
   created_at: string;
   finished_at: string | null;
+  /** P4 WS-B: id of the fresh cycle that superseded this terminal one. */
+  superseded_by?: number | null;
+  /** P4 WS-E: set when this cycle's weights were materialized into the book. */
+  enrolled_at?: string | null;
+}
+
+/** P4 WS-E: one row of the enrollment preview/apply. */
+export interface EnrollmentRow {
+  ticker: string;
+  side: 'long' | 'short';
+  target_weight_pct: number;       // signed fraction
+  target_notional_usd: string;
+  suggested_quantity: string;      // signed
+  mark_price: string | null;
+  mark_source: 'mark' | 'mark_stale' | 'limit_price' | 'none';
+  current_quantity: string;
+  current_avg_cost: string | null;
+  action: 'open' | 'increase' | 'reduce' | 'close' | 'hold' | 'skip';
+  quantity_delta: string;
+  rebalance_order_id: number | null;
+  source_run_id: number | null;
+  source_decision_id: number | null;
+  warnings: string[];
+}
+
+export interface EnrollmentResult {
+  target_id: number;
+  as_of_date: string;
+  portfolio: { id: number; name: string; kind: string; cash: string; positions_count: number };
+  rows: EnrollmentRow[];
+  totals: {
+    gross_pct: number; net_pct: number;
+    n_open: number; n_increase: number; n_reduce: number; n_close: number; n_skip: number;
+  };
+  enrolled: boolean;
+}
+
+export interface EnrollmentApplyRequest {
+  mode: 'auto' | 'manual';
+  approved_tickers?: string[];
+  override_quantities?: Record<string, string>;
+  note?: string;
 }
 
 export interface CandidateRunSummary {

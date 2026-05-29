@@ -20,7 +20,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date as date_cls
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -28,7 +28,16 @@ from django.utils import timezone
 from apps.runs.models import AgentMessage, Decision, Run
 
 from .borrow import StubBorrowProvider
-from .models import PortfolioStrategy, PortfolioTarget, PortfolioTargetRun, ScreenerRanking
+from .models import (
+    LedgerEntry,
+    Portfolio,
+    PortfolioStrategy,
+    PortfolioTarget,
+    PortfolioTargetRun,
+    Position,
+    ScreenerRanking,
+)
+from .quantity_policy import QuantityPolicy, round_quantity_for_open
 
 log = logging.getLogger(__name__)
 
@@ -394,3 +403,438 @@ def mark_run(run: Run, status: str, *, error_message: str = "") -> None:
     for k, v in fields.items():
         setattr(run, k, v)
     run.save(update_fields=list(fields.keys()))
+
+
+# -----------------------------------------------------------------------------
+# P4 WS-E: Enter strategy — materialize a done cycle's target_weights into the
+# strategy's portfolio book as real Position rows (delta-to-target), journaling
+# one LedgerEntry per mutation. Mirrors the manual_book accounting but targets
+# the *strategy* portfolio (manual_book is hardwired to the user's manual book).
+# -----------------------------------------------------------------------------
+
+
+class EnrollmentError(ValueError):
+    """User-facing enrollment error carrying an HTTP status_code (default 409)."""
+
+    def __init__(self, message: str, *, status_code: int = 409) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@dataclass
+class EnrollmentRow:
+    ticker: str
+    side: str                       # "long" | "short"
+    target_weight_pct: float        # signed fraction from target_weights
+    target_notional_usd: Decimal
+    suggested_quantity: Decimal     # signed, post-rounding
+    mark_price: Decimal | None
+    mark_source: str                # "mark" | "limit_price" | "none"
+    current_quantity: Decimal       # signed, existing book position (0 if none)
+    current_avg_cost: Decimal | None
+    action: str                     # open|increase|reduce|close|hold|skip
+    quantity_delta: Decimal         # signed change applied on enroll
+    rebalance_order_id: int | None
+    source_run_id: int | None
+    source_decision_id: int | None
+    warnings: list[str]
+
+
+@dataclass
+class EnrollmentResult:
+    target_id: int
+    as_of_date: str
+    portfolio: dict
+    rows: list[EnrollmentRow]
+    totals: dict
+    enrolled: bool
+
+
+def _q4(x: Decimal) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _money(x: Decimal) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _resolve_mark(ticker: str, *, user, limit_price: Decimal | None):
+    """(price, source) for sizing + avg_cost. get_mark first, then the cycle's
+    RebalanceOrder limit_price, else (None, 'none')."""
+    from .valuation import get_mark
+
+    try:
+        mark = get_mark(ticker, user=user)
+    except Exception:  # missing FMP key / provider error — fall back, never block
+        mark = None
+    if mark is not None and mark.price and mark.price > 0:
+        return Decimal(str(mark.price)), ("mark_stale" if mark.stale else "mark")
+    if limit_price and Decimal(str(limit_price)) > 0:
+        return Decimal(str(limit_price)), "limit_price"
+    return None, "none"
+
+
+def _portfolio_dict(portfolio: Portfolio) -> dict:
+    return {
+        "id": portfolio.id,
+        "name": portfolio.name,
+        "kind": portfolio.kind,
+        "cash": str(_money(portfolio.cash_balance)),
+        "positions_count": portfolio.positions.count(),
+    }
+
+
+def _build_enrollment_rows(
+    target: PortfolioTarget,
+    portfolio: Portfolio,
+    *,
+    user,
+    override_quantities: dict | None = None,
+) -> list[EnrollmentRow]:
+    """Pure computation of the enroll preview rows (no mutation).
+
+    Sizes each target weight against the book NAV (cash + marked positions),
+    rounds via quantity_policy (whole shares), flags rows below the strategy's
+    min_trade_notional as skip, and diffs against existing positions to assign
+    open / increase / reduce / hold / close actions. Positions held in the book
+    but absent from target_weights become close rows.
+    """
+    strategy = target.strategy
+    overrides = {k.upper(): v for k, v in (override_quantities or {}).items()}
+    policy = QuantityPolicy.from_mode("whole")
+    min_trade = Decimal(str(strategy.min_trade_notional_usd or 0))
+
+    weights: dict[str, float] = dict(target.target_weights or {})
+    order_by_ticker = {
+        o.ticker.upper(): o for o in target.orders.all()
+    }
+    positions_by_ticker = {
+        p.ticker.upper(): p for p in portfolio.positions.all()
+    }
+
+    # NAV = cash + Σ signed_qty × mark (mark falls back to avg_cost).
+    nav = Decimal(str(portfolio.cash_balance))
+    for pos in positions_by_ticker.values():
+        price, _ = _resolve_mark(pos.ticker, user=user, limit_price=None)
+        mark_px = price if price is not None else pos.avg_cost
+        nav += pos.quantity * mark_px
+    nav = _money(nav)
+
+    rows: list[EnrollmentRow] = []
+
+    for ticker in sorted(weights.keys()):
+        ticker = ticker.upper()
+        weight = float(weights[ticker])
+        side = "long" if weight >= 0 else "short"
+        order = order_by_ticker.get(ticker)
+        limit_price = order.limit_price if order else None
+        price, mark_source = _resolve_mark(ticker, user=user, limit_price=limit_price)
+        warnings: list[str] = []
+
+        ptr = (
+            PortfolioTargetRun.objects.filter(target=target, primary_ticker=ticker)
+            .select_related("run").first()
+        )
+        source_run_id = ptr.run_id if ptr else None
+        source_decision = None
+        if ptr is not None:
+            source_decision = (
+                Decision.objects.filter(run_id=ptr.run_id, ticker=ticker).first()
+            )
+
+        current = positions_by_ticker.get(ticker)
+        current_qty = current.quantity if current else Decimal("0")
+        current_avg = current.avg_cost if current else None
+
+        target_notional = _money(abs(Decimal(str(weight))) * nav)
+
+        if price is None:
+            warnings.append("no_mark")
+            rows.append(EnrollmentRow(
+                ticker=ticker, side=side, target_weight_pct=weight,
+                target_notional_usd=target_notional, suggested_quantity=Decimal("0"),
+                mark_price=None, mark_source=mark_source,
+                current_quantity=current_qty, current_avg_cost=current_avg,
+                action="skip", quantity_delta=Decimal("0"),
+                rebalance_order_id=order.id if order else None,
+                source_run_id=source_run_id,
+                source_decision_id=source_decision.id if source_decision else None,
+                warnings=warnings,
+            ))
+            continue
+
+        # Target magnitude: override (manual mode) wins over weight×NAV sizing.
+        if ticker in overrides:
+            try:
+                target_abs = Decimal(str(overrides[ticker])).copy_abs()
+                target_abs = round_quantity_for_open(target_abs, price, policy).quantity
+            except Exception:
+                target_abs = Decimal("0")
+                warnings.append("bad_override")
+        else:
+            raw_qty = target_notional / price
+            rq = round_quantity_for_open(raw_qty, price, policy)
+            target_abs = rq.quantity
+            if rq.warning:
+                warnings.append("below_one_share")
+
+        rounded_notional = _money(target_abs * price)
+        if target_abs <= 0 or rounded_notional < min_trade:
+            if "below_one_share" not in warnings:
+                warnings.append("below_min_trade_notional")
+            rows.append(EnrollmentRow(
+                ticker=ticker, side=side, target_weight_pct=weight,
+                target_notional_usd=target_notional, suggested_quantity=Decimal("0"),
+                mark_price=_q4(price), mark_source=mark_source,
+                current_quantity=current_qty, current_avg_cost=current_avg,
+                action="skip", quantity_delta=Decimal("0"),
+                rebalance_order_id=order.id if order else None,
+                source_run_id=source_run_id,
+                source_decision_id=source_decision.id if source_decision else None,
+                warnings=warnings,
+            ))
+            continue
+
+        target_signed = target_abs if side == "long" else -target_abs
+        delta = target_signed - current_qty
+
+        if current_qty == 0:
+            action = "open"
+        elif (current_qty > 0) != (target_signed > 0):
+            action = "skip"  # side flip — defensive; close the existing first
+            warnings.append("side_conflict")
+            delta = Decimal("0")
+        elif target_abs > current_qty.copy_abs():
+            action = "increase"
+        elif target_abs < current_qty.copy_abs():
+            action = "reduce"
+        else:
+            action = "hold"
+            delta = Decimal("0")
+
+        rows.append(EnrollmentRow(
+            ticker=ticker, side=side, target_weight_pct=weight,
+            target_notional_usd=target_notional, suggested_quantity=target_signed,
+            mark_price=_q4(price), mark_source=mark_source,
+            current_quantity=current_qty, current_avg_cost=current_avg,
+            action=action, quantity_delta=delta,
+            rebalance_order_id=order.id if order else None,
+            source_run_id=source_run_id,
+            source_decision_id=source_decision.id if source_decision else None,
+            warnings=warnings,
+        ))
+
+    # Book positions absent from target_weights → close to match the target.
+    target_tickers = {t.upper() for t in weights}
+    for ticker, pos in sorted(positions_by_ticker.items()):
+        if ticker in target_tickers:
+            continue
+        order = order_by_ticker.get(ticker)
+        limit_price = order.limit_price if order else None
+        price, mark_source = _resolve_mark(ticker, user=user, limit_price=limit_price)
+        warnings = []
+        if price is None:
+            # Last resort so a close can still settle: exit at avg_cost (0 pnl).
+            price = pos.avg_cost
+            warnings.append("no_mark")
+        rows.append(EnrollmentRow(
+            ticker=ticker,
+            side="short" if pos.quantity < 0 else "long",
+            target_weight_pct=0.0, target_notional_usd=Decimal("0"),
+            suggested_quantity=Decimal("0"),
+            mark_price=_q4(price),
+            mark_source=mark_source,
+            current_quantity=pos.quantity, current_avg_cost=pos.avg_cost,
+            action="close", quantity_delta=-pos.quantity,
+            rebalance_order_id=order.id if order else None,
+            source_run_id=None, source_decision_id=None,
+            warnings=warnings,
+        ))
+
+    return rows
+
+
+def _totals(rows: list[EnrollmentRow]) -> dict:
+    gross = sum(abs(r.target_weight_pct) for r in rows if r.action != "close")
+    net = sum(r.target_weight_pct for r in rows if r.action != "close")
+    return {
+        "gross_pct": round(gross, 4),
+        "net_pct": round(net, 4),
+        "n_open": sum(1 for r in rows if r.action == "open"),
+        "n_increase": sum(1 for r in rows if r.action == "increase"),
+        "n_reduce": sum(1 for r in rows if r.action == "reduce"),
+        "n_close": sum(1 for r in rows if r.action == "close"),
+        "n_skip": sum(1 for r in rows if r.action in ("skip", "hold")),
+    }
+
+
+def preview_enrollment(target: PortfolioTarget, *, user) -> EnrollmentResult:
+    """GET preview: rows + totals + portfolio snapshot. No mutation."""
+    portfolio = target.strategy.portfolio
+    if portfolio.kind == Portfolio.KIND_MANUAL:
+        raise EnrollmentError("the Manual Book cannot receive strategy enrollment")
+    rows = _build_enrollment_rows(target, portfolio, user=user)
+    return EnrollmentResult(
+        target_id=target.id,
+        as_of_date=target.as_of_date.isoformat(),
+        portfolio=_portfolio_dict(portfolio),
+        rows=rows,
+        totals=_totals(rows),
+        enrolled=target.enrolled_at is not None,
+    )
+
+
+def enroll_target_into_portfolio(
+    target: PortfolioTarget,
+    *,
+    mode: str,
+    approved_tickers: list[str] | None = None,
+    override_quantities: dict | None = None,
+    note: str = "",
+) -> EnrollmentResult:
+    """POST apply: materialize the (approved) rows into the strategy portfolio.
+
+    mode="auto"   → enroll every actionable row.
+    mode="manual" → enroll only rows whose ticker is in approved_tickers.
+
+    One LedgerEntry per mutation (strategy_enroll / _reduce / _close);
+    opened_via="strategy_cycle"; source_run/source_decision stamped per ticker.
+    Stamps target.enrolled_at + a frozen enrollment_diff snapshot.
+    """
+    if mode not in ("auto", "manual"):
+        raise EnrollmentError("mode must be 'auto' or 'manual'", status_code=400)
+    if target.status != PortfolioTarget.DONE:
+        raise EnrollmentError(
+            f"cycle is {target.status}, not done; only done cycles can be enrolled"
+        )
+    strategy = target.strategy
+    user = strategy.user
+    portfolio = strategy.portfolio
+    if portfolio.kind == Portfolio.KIND_MANUAL:
+        raise EnrollmentError("enrollment must never write into the Manual Book")
+
+    approved = (
+        None if mode == "auto"
+        else {t.strip().upper() for t in (approved_tickers or [])}
+    )
+
+    with transaction.atomic():
+        portfolio = (
+            Portfolio.objects.select_for_update().get(pk=portfolio.pk)
+        )
+        rows = _build_enrollment_rows(
+            target, portfolio, user=user, override_quantities=override_quantities,
+        )
+        diff: dict = {}
+        applied_rows: list[EnrollmentRow] = []
+        for row in rows:
+            if row.action in ("skip", "hold"):
+                continue
+            if approved is not None and row.ticker not in approved:
+                continue
+            _apply_enrollment_row(portfolio, row, user=user, note=note)
+            diff[row.ticker] = {
+                "action": row.action,
+                "quantity_delta": str(row.quantity_delta),
+                "notional": str(row.target_notional_usd),
+                "mark_price": str(row.mark_price) if row.mark_price is not None else None,
+            }
+            applied_rows.append(row)
+
+        target.enrolled_at = timezone.now()
+        target.enrollment_diff = diff
+        target.save(update_fields=["enrolled_at", "enrollment_diff"])
+
+    log.info(
+        "strategy_enroll strategy_id=%s target_id=%s n_rows=%s mode=%s",
+        strategy.id, target.id, len(applied_rows), mode,
+    )
+    portfolio.refresh_from_db()
+    return EnrollmentResult(
+        target_id=target.id,
+        as_of_date=target.as_of_date.isoformat(),
+        portfolio=_portfolio_dict(portfolio),
+        rows=applied_rows,
+        totals=_totals(applied_rows),
+        enrolled=True,
+    )
+
+
+def _apply_enrollment_row(
+    portfolio: Portfolio, row: EnrollmentRow, *, user, note: str,
+) -> None:
+    """Mutate one Position + write one LedgerEntry. Mirrors manual_book math."""
+    price = row.mark_price
+    ticker = row.ticker
+    position = (
+        Position.objects.select_for_update()
+        .filter(portfolio=portfolio, ticker=ticker).first()
+    )
+
+    if row.action in ("open", "increase"):
+        delta_abs = row.quantity_delta.copy_abs()
+        long = row.side == "long"
+        cash_delta = (-(delta_abs * price)) if long else (delta_abs * price)
+        if position is None:
+            position = Position.objects.create(
+                portfolio=portfolio, ticker=ticker,
+                quantity=row.quantity_delta, avg_cost=_q4(price), sector="",
+                opened_via=Position.OPENED_VIA_STRATEGY_CYCLE,
+                source_run_id=row.source_run_id,
+                source_decision_id=row.source_decision_id,
+                note=note,
+            )
+        else:
+            old_abs = position.quantity.copy_abs()
+            new_abs = old_abs + delta_abs
+            position.avg_cost = _q4(
+                (position.avg_cost * old_abs + price * delta_abs) / new_abs
+            )
+            position.quantity = position.quantity + row.quantity_delta
+            position.save(update_fields=["quantity", "avg_cost"])
+        kind = LedgerEntry.KIND_STRATEGY_ENROLL
+        realized = Decimal("0")
+    else:  # reduce | close
+        reduce_abs = row.quantity_delta.copy_abs()
+        is_short = (position.quantity < 0) if position else False
+        if is_short:
+            realized = (position.avg_cost - price) * reduce_abs
+            cash_delta = -(reduce_abs * price)
+        else:
+            realized = (price - position.avg_cost) * reduce_abs
+            cash_delta = reduce_abs * price
+        realized = _money(realized)
+        if row.action == "close":
+            kind = LedgerEntry.KIND_STRATEGY_ENROLL_CLOSE
+            position.realized_pnl = _money(position.realized_pnl + realized)
+            position.save(update_fields=["realized_pnl"])
+            position_for_source = position
+            position.delete()
+            position = None
+        else:
+            kind = LedgerEntry.KIND_STRATEGY_ENROLL_REDUCE
+            position.quantity = position.quantity + row.quantity_delta
+            position.realized_pnl = _money(position.realized_pnl + realized)
+            position.save(update_fields=["quantity", "realized_pnl"])
+            position_for_source = position
+
+    cash_delta = _money(cash_delta)
+    portfolio.cash_balance = _money(portfolio.cash_balance + cash_delta)
+    portfolio.save(update_fields=["cash_balance"])
+
+    src_run = row.source_run_id
+    src_dec = row.source_decision_id
+    if row.action in ("reduce", "close") and position_for_source is not None:
+        src_run = src_run or position_for_source.source_run_id
+        src_dec = src_dec or position_for_source.source_decision_id
+
+    LedgerEntry.objects.create(
+        portfolio=portfolio, kind=kind, ticker=ticker,
+        quantity_delta=row.quantity_delta, price=price,
+        cash_delta=cash_delta, realized_pnl=realized,
+        quantity_after=(position.quantity if position is not None else Decimal("0")),
+        cash_balance_after=portfolio.cash_balance,
+        position=position,
+        source_run_id=src_run, source_decision_id=src_dec,
+        note=note, created_by=user,
+    )

@@ -89,7 +89,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
         </section>
 
         <section class="card">
-          <div class="card-hd"><span class="title">Construction targets</span></div>
+          <div class="card-hd"><h2 class="title">Construction targets</h2></div>
           <div class="card-bd grid grid-cols-2 gap-3.5">
             <div class="field">
               <label class="lbl" for="strat-g">
@@ -427,7 +427,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
 
         <section class="card">
           <div class="card-hd">
-            <span class="title">Personas</span>
+            <h2 class="title">Personas</h2>
             <span class="pill"><span class="dot"></span>{{ selectedPersonas.length }} of {{ ALL_PERSONAS.length }}</span>
           </div>
           <div class="card-bd">
@@ -449,7 +449,7 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
         </section>
 
         <section class="card">
-          <div class="card-hd"><span class="title">Screener weights</span></div>
+          <div class="card-hd"><h2 class="title">Screener weights</h2></div>
           <div class="card-bd">
             <p class="text-[11.5px] text-text-3 m-0 mb-2.5">
               How much each feature contributes to the ranking. Higher = more weight. Hover the (!) icon on each row for what it does.

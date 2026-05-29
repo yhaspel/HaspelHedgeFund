@@ -35,7 +35,7 @@ type StatusFilter = 'all' | RunStatus;
 
       <section class="card">
         <div class="card-hd gap-3 flex-wrap">
-          <span class="title">All runs ({{ filtered().length }})</span>
+          <h2 class="title">All runs ({{ filtered().length }})</h2>
           <div role="group" aria-label="Filter by source" class="seg ml-auto">
             @for (opt of sourceOptions; track opt.id) {
               <button type="button" class="seg-btn"
@@ -73,6 +73,7 @@ type StatusFilter = 'all' | RunStatus;
             </hf-empty-state>
           }
         } @else {
+          <div class="tbl-scroll">
           <table class="tbl runs-tbl">
             <thead>
               <tr>
@@ -84,6 +85,7 @@ type StatusFilter = 'all' | RunStatus;
                 <th scope="col" class="right w-24">Personas</th>
                 <th scope="col" class="right w-[108px]">Cost</th>
                 <th scope="col" class="w-32">Date</th>
+                <th scope="col" class="w-[92px]"><span class="visually-hidden">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -104,6 +106,11 @@ type StatusFilter = 'all' | RunStatus;
                       </span>
                     } @else {
                       <span class="pill pill-source">manual</span>
+                    }
+                    @if (r.rerun_of) {
+                      <span class="pill pill-source" title="This run was created by rerunning #{{ r.rerun_of }}">
+                        ↻ rerun of #{{ r.rerun_of }}
+                      </span>
                     }
                   </td>
                   <td>
@@ -132,10 +139,22 @@ type StatusFilter = 'all' | RunStatus;
                   <td class="mono text-text-3 text-[11.5px]">
                     {{ r.as_of_date }}
                   </td>
+                  <td class="actions-cell">
+                    @if (r.status === 'failed' || r.status === 'cancelled') {
+                      <button type="button" class="btn ghost sm"
+                              (click)="rerun(r, $event)"
+                              [disabled]="rerunningId() === r.id"
+                              [attr.data-test]="'rerun-' + r.id"
+                              [attr.aria-label]="'Rerun run #' + r.id">
+                        ↻ Rerun
+                      </button>
+                    }
+                  </td>
                 </tr>
               }
             </tbody>
           </table>
+          </div>
         }
       </section>
     </hf-app-shell>
@@ -151,6 +170,7 @@ type StatusFilter = 'all' | RunStatus;
         padding: 2px 8px;
         font-size: 11px;
       }
+      .actions-cell { text-align: right; white-space: nowrap; }
       .decision-pill {
         text-transform: uppercase;
         font-weight: 600;
@@ -158,15 +178,15 @@ type StatusFilter = 'all' | RunStatus;
       }
       .decision-pill.tone-long {
         background: color-mix(in oklab, var(--acc-long) 18%, transparent);
-        color: var(--acc-long);
+        color: var(--acc-long-fg);
       }
       .decision-pill.tone-short {
         background: color-mix(in oklab, var(--acc-short) 18%, transparent);
-        color: var(--acc-short);
+        color: var(--acc-short-fg);
       }
       .decision-pill.tone-hold {
         background: color-mix(in oklab, var(--acc-hold) 18%, transparent);
-        color: var(--acc-hold);
+        color: var(--acc-hold-fg);
       }
       .decision-pill.tone-skip {
         background: var(--surface-2);
@@ -206,6 +226,7 @@ export class RunsListPage implements OnInit {
   private readonly profileStore = inject(TickerProfileStore);
 
   readonly loading = signal(true);
+  readonly rerunningId = signal<number | null>(null);
   readonly sourceFilter = signal<SourceFilter>('all');
   readonly statusFilter = signal<StatusFilter>('all');
 
@@ -274,4 +295,19 @@ export class RunsListPage implements OnInit {
   resetFilters(): void { this.sourceFilter.set('all'); this.statusFilter.set('all'); }
 
   open(r: RunSummary): void { this.router.navigate(['/runs', r.id]); }
+
+  // P4 WS-A: rerun a failed/cancelled run. Stops row-click navigation, creates
+  // a new run from the original's payload, and navigates to the new run.
+  rerun(r: RunSummary, ev: Event): void {
+    ev.stopPropagation();
+    if (this.rerunningId() !== null) return;
+    this.rerunningId.set(r.id);
+    this.runs.rerunRun(r.id).subscribe({
+      next: (res) => {
+        this.rerunningId.set(null);
+        this.router.navigate(['/runs', res.id]);
+      },
+      error: () => this.rerunningId.set(null),
+    });
+  }
 }

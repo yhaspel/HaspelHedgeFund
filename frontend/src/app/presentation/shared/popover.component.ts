@@ -227,6 +227,19 @@ export class PopoverComponent implements OnDestroy {
   private hideTimer: number | null = null;
   private popHovered = false;
 
+  constructor() {
+    // P4 WS-DA-1: the ARIA role belongs only on the floating `.hf-pop` surface
+    // (bound in the template). Consumers historically passed role="tooltip" on
+    // the host, which Angular renders as a static attribute on the always-
+    // present, empty host element — an unnamed `role="tooltip"` node that axe
+    // flags (aria-tooltip-name). Strip it so it can never leak, regardless of
+    // what call-sites pass.
+    afterNextRender(
+      () => this.hostEl.nativeElement.removeAttribute('role'),
+      { injector: this.injector },
+    );
+  }
+
   show(): void {
     this.clearHideTimer();
     if (this.open()) return;

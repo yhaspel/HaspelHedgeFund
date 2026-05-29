@@ -51,7 +51,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
-          <div class="card-hd"><span class="title">Walk-forward</span></div>
+          <div class="card-hd"><h2 class="title">Walk-forward</h2></div>
           <div class="card-bd grid grid-cols-3 gap-3.5">
             <div class="field"><label class="lbl" for="bt-is-window">IS window (days)</label>
               <input id="bt-is-window" class="input" type="number" name="is_w" [(ngModel)]="isWindow" min="126" /></div>
@@ -107,7 +107,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 
         <section class="card">
           <div class="card-hd">
-            <span class="title">Council shape</span>
+            <h2 class="title">Council shape</h2>
             <span class="pill"><span class="dot"></span>{{ selectedPersonas.size }} of {{ allPersonas.length }}</span>
           </div>
           <div class="card-bd flex flex-col gap-3.5">

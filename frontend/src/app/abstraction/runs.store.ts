@@ -46,6 +46,15 @@ export class RunsStore {
     return this.api.post<RunSummary>('/runs/', body);
   }
 
+  // P4 WS-A: rerun a terminal run. The backend copies the original's payload
+  // and returns the new run's id + rerun_of link.
+  rerunRun(runId: number): Observable<{ id: number; status: string; rerun_of: number }> {
+    return this.api.post<{ id: number; status: string; rerun_of: number }>(
+      `/runs/${runId}/rerun/`,
+      {},
+    );
+  }
+
   cancelRun(runId: number): Observable<{ id: number; status: string }> {
     return this.api.post<{ id: number; status: string }>(`/runs/${runId}/cancel/`, {});
   }

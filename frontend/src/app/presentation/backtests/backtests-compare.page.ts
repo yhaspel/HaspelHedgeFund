@@ -66,7 +66,8 @@ interface ComparePayload {
       @if (data(); as d) {
         <div class="bg-white p-4 rounded shadow mb-6">
           <h3 class="text-sm font-semibold mb-2">Stitched OOS equity curves</h3>
-          <div class="relative h-[320px]"><canvas #curve></canvas></div>
+          <div class="relative h-[320px]"><canvas #curve role="img"
+            aria-label="Stitched out-of-sample equity curves for the two backtests being compared, overlaid over the same period."></canvas></div>
         </div>
 
         <div class="bg-white p-4 rounded shadow">

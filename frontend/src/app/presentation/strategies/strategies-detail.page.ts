@@ -1,11 +1,11 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
-import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, ScreenerCandidate } from '../../core/models/strategy.model';
+import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, EnrollmentResult, EnrollmentRow, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
@@ -41,7 +41,7 @@ import { ModalComponent } from '../shared/modal.component';
           <div class="card est-modal" (click)="$event.stopPropagation()">
 
             <div class="est-modal__head">
-              <div class="card-hd"><span class="title" id="estimate-modal-title">Confirm cycle dispatch</span></div>
+              <div class="card-hd"><h2 class="title" id="estimate-modal-title">Confirm cycle dispatch</h2></div>
               <div class="est-modal__head-bd">
                 <p class="text-[11.5px] text-text-3 m-0">
                   Preset <span class="mono text-text">{{ est.preset }}</span> ·
@@ -114,6 +114,89 @@ import { ModalComponent } from '../shared/modal.component';
         </hf-modal>
       }
 
+      @if (enrollPreview(); as enr) {
+        <hf-modal titleId="enroll-modal-title" (closed)="closeEnroll()">
+          <div class="card est-modal" (click)="$event.stopPropagation()">
+            <div class="est-modal__head">
+              <div class="card-hd">
+                <h2 class="title" id="enroll-modal-title">Enter strategy — cycle {{ enr.as_of_date }}</h2>
+              </div>
+              <div class="est-modal__head-bd">
+                <p class="text-[11.5px] text-text-3 m-0">
+                  Book <span class="mono text-text">{{ enr.portfolio.name }}</span> ·
+                  cash <span class="mono">$ {{ enr.portfolio.cash }}</span> ·
+                  {{ enr.portfolio.positions_count }} positions held
+                </p>
+                <p class="text-[11.5px] text-text-3 m-0">
+                  {{ enr.totals.n_open }} open · {{ enr.totals.n_increase }} increase ·
+                  {{ enr.totals.n_reduce }} reduce · {{ enr.totals.n_close }} close ·
+                  {{ enr.totals.n_skip }} skipped
+                </p>
+              </div>
+            </div>
+            <div class="est-modal__scroll scroll-area">
+              <table class="tbl">
+                <thead><tr>
+                  <th class="w-8"><span class="visually-hidden">Approve</span></th>
+                  <th>Ticker</th><th>Side</th><th>Action</th>
+                  <th class="right">Quantity</th><th class="right">Notional</th>
+                  <th class="right">Mark</th><th>Notes</th>
+                </tr></thead>
+                <tbody>
+                  @for (row of enr.rows; track row.ticker) {
+                    <tr [class.opacity-50]="!isActionable(row)">
+                      <td>
+                        <input type="checkbox"
+                               [checked]="isApproved(row.ticker)"
+                               [disabled]="!isActionable(row)"
+                               (change)="toggleApprove(row.ticker, $event)"
+                               [attr.aria-label]="'Approve ' + row.ticker" />
+                      </td>
+                      <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
+                      <td [class.text-[var(--acc-long-fg)]]="row.side==='long'"
+                          [class.text-[var(--acc-short-fg)]]="row.side==='short'">{{ row.side }}</td>
+                      <td class="mono text-[11.5px]">{{ row.action }}</td>
+                      <td class="num">
+                        @if (isActionable(row) && row.action !== 'close') {
+                          <input type="number" class="qty-input"
+                                 [value]="overrideValue(row)"
+                                 (input)="setOverride(row.ticker, $event)"
+                                 [attr.aria-label]="'Quantity for ' + row.ticker" />
+                        } @else {
+                          {{ row.suggested_quantity }}
+                        }
+                      </td>
+                      <td class="num">$ {{ row.target_notional_usd }}</td>
+                      <td class="num">
+                        {{ row.mark_price ?? '—' }}
+                        <span class="text-text-3 text-[10px]">{{ row.mark_source }}</span>
+                      </td>
+                      <td class="text-[11px] text-[var(--acc-hold-fg)]">{{ row.warnings.join(', ') }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <div class="est-modal__foot">
+              <p class="text-[11.5px] text-text-3 m-0">
+                Materializes positions into this strategy's book only — the Manual Book is untouched.
+              </p>
+              <div class="est-modal__actions">
+                <button class="btn" (click)="closeEnroll()">Skip</button>
+                <button class="btn ghost" (click)="confirmEnroll('auto')"
+                        [disabled]="enrolling()" data-test="enroll-auto">
+                  {{ enrolling() ? 'Entering…' : 'Enter all' }}
+                </button>
+                <button class="btn primary" (click)="confirmEnroll('manual')"
+                        [disabled]="enrolling() || approvedCount() === 0" data-test="enroll-manual">
+                  Enter selected ({{ approvedCount() }})
+                </button>
+              </div>
+            </div>
+          </div>
+        </hf-modal>
+      }
+
       @if (notice()) {
         <div role="status" aria-live="polite" class="pill info mb-3.5 h-auto py-2 px-3">
           <span class="dot"></span>{{ notice() }}
@@ -122,7 +205,7 @@ import { ModalComponent } from '../shared/modal.component';
 
       <div class="grid grid-cols-[280px_1fr] gap-[18px]">
         <section class="card">
-          <div class="card-hd"><span class="title">Cycles</span></div>
+          <div class="card-hd"><h2 class="title">Cycles</h2></div>
           <div class="card-bd">
             @if (store.cycles().length === 0 && !cyclesLoaded()) {
               <div class="flex flex-col gap-2" aria-busy="true" aria-label="Loading cycles">
@@ -144,6 +227,13 @@ import { ModalComponent } from '../shared/modal.component';
                       class="bg-transparent border-0 p-0 text-[var(--acc-info-fg)] cursor-pointer text-left">
                       <span class="mono">{{ c.as_of_date }}</span> · {{ c.status }} · g {{ c.gross_pct }}
                     </button>
+                    @if (c.superseded_by) {
+                      <span class="pill" title="Rerun as cycle #{{ c.superseded_by }}"
+                            [style.margin-left.px]="6">↻ superseded</span>
+                    } @else if (c.enrolled_at) {
+                      <span class="pill ok" title="Positions materialized into the book"
+                            [style.margin-left.px]="6">enrolled</span>
+                    }
                   </li>
                 }
               </ul>
@@ -158,7 +248,7 @@ import { ModalComponent } from '../shared/modal.component';
         @if (cycle(); as c) {
           <section class="card">
             <div class="card-hd">
-              <span class="title">Cycle {{ c.as_of_date }}</span>
+              <h2 class="title">Cycle {{ c.as_of_date }}</h2>
               <span class="pill"
                 [class.ok]="c.status==='done'"
                 [class.warn]="c.status==='running' || c.status==='queued' || c.status==='screening' || c.status==='running_council' || c.status==='constructing'"
@@ -173,6 +263,31 @@ import { ModalComponent } from '../shared/modal.component';
                 <span class="mono text-[11.5px] text-text-3">
                   · gross {{ c.gross_pct | number: '1.4-4' }} · net {{ c.net_pct | number: '1.4-4' }}
                 </span>
+                @if ((c.status === 'failed' || c.status === 'cancelled') && !c.superseded_by) {
+                  <button type="button" class="btn ghost sm" (click)="rerunCycle(c.id)"
+                          [disabled]="rerunningCycleId() === c.id"
+                          data-test="rerun-cycle">
+                    {{ rerunningCycleId() === c.id ? 'Rerunning…' : '↻ Rerun cycle' }}
+                  </button>
+                }
+                @if (c.superseded_by) {
+                  <button type="button" class="btn ghost sm" (click)="openCycle(c.superseded_by!)"
+                          data-test="view-superseding">
+                    ↻ superseded — view rerun
+                  </button>
+                }
+                @if (c.status === 'done' && !c.enrolled_at) {
+                  <button type="button" class="btn primary sm" (click)="openEnroll(c.id)"
+                          [disabled]="enrollLoading()" data-test="enter-strategy">
+                    {{ enrollLoading() ? 'Loading…' : 'Enter strategy' }}
+                  </button>
+                }
+                @if (c.enrolled_at) {
+                  <a class="btn ghost sm" [routerLink]="['/portfolios']"
+                     data-test="enrolled-link">
+                    ✓ Enrolled — view book
+                  </a>
+                }
               </div>
             </div>
 
@@ -756,7 +871,7 @@ import { ModalComponent } from '../shared/modal.component';
           </section>
         } @else if (store.cycles().length > 0) {
           <section class="card" aria-busy="true" aria-label="Loading cycle">
-            <div class="card-hd"><span class="title">Cycle</span></div>
+            <div class="card-hd"><h2 class="title">Cycle</h2></div>
             <div class="card-bd flex flex-col gap-2.5">
               <div class="skel h-3.5 w-2/5"></div>
               <div class="grid grid-cols-4 gap-3.5">
@@ -771,10 +886,65 @@ import { ModalComponent } from '../shared/modal.component';
         }
         </div>
       </div>
+
+      @if (store.currentStrategy(); as strat) {
+        <section class="card mt-[18px]">
+          <div class="card-hd"><h2 class="title">Strategy settings</h2></div>
+          <div class="card-bd flex flex-col gap-4">
+            <label class="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" class="mt-0.5"
+                     [checked]="strat.auto_enroll_on_done"
+                     [disabled]="savingAutoEnroll()"
+                     (change)="onAutoEnrollToggle($event)"
+                     data-test="auto-enroll-toggle" />
+              <span>
+                <span class="text-text font-medium text-xs">Auto-enter on cycle done</span>
+                <span class="block text-[11.5px] text-text-3">
+                  When a cycle completes, materialize its target weights into this
+                  strategy's book automatically — skipping the manual confirm step.
+                </span>
+              </span>
+            </label>
+
+            <div class="border-t border-solid border-border pt-3.5">
+              <div class="eyebrow text-[var(--acc-short-fg)] mb-1.5">Danger zone</div>
+              @if ((strat.targets_count_active ?? 0) === 0) {
+                <div class="flex items-center gap-3 flex-wrap">
+                  <button type="button" class="btn danger sm"
+                          (click)="confirmDelete(strat.id, strat.name)"
+                          [disabled]="deleting()" data-test="delete-strategy">
+                    {{ deleting() ? 'Deleting…' : 'Delete strategy' }}
+                  </button>
+                  <span class="text-[11.5px] text-text-3">
+                    Removes this strategy and its (empty) book. Cannot be undone.
+                  </span>
+                </div>
+              } @else {
+                <p class="text-[11.5px] text-text-3 m-0">
+                  This strategy has {{ strat.targets_count_active }} non-cancelled
+                  {{ strat.targets_count_active === 1 ? 'cycle' : 'cycles' }} and cannot be
+                  deleted — its history is preserved. Cancel its cycles or deactivate it instead.
+                </p>
+              }
+            </div>
+          </div>
+        </section>
+      }
     </hf-app-shell>
   `,
   styles: [
     `
+      .qty-input {
+        width: 72px;
+        text-align: right;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-4);
+        padding: 2px 6px;
+        font-family: var(--font-mono, monospace);
+        font-size: 12px;
+        color: var(--text);
+      }
       /* Confirm-cycle modal — fixed header + footer, only the agent list scrolls. */
       .est-modal {
         max-width: 640px;
@@ -861,6 +1031,7 @@ import { ModalComponent } from '../shared/modal.component';
 export class StrategiesDetailPage implements OnInit, OnDestroy {
   readonly store = inject(StrategiesStore);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly profiles = inject(TickerProfileStore);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -1128,6 +1299,91 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   }
   ngOnDestroy(): void { if (this.pollHandle) clearInterval(this.pollHandle); }
 
+  // ---- P4 WS-E: enter strategy (enrollment) ------------------------------
+  enrollPreview = signal<EnrollmentResult | null>(null);
+  enrollLoading = signal(false);
+  enrolling = signal(false);
+  private _approved = signal<Set<string>>(new Set());
+  private _overrides = signal<Map<string, string>>(new Map());
+
+  private _actionable(row: EnrollmentRow): boolean {
+    return ['open', 'increase', 'reduce', 'close'].includes(row.action);
+  }
+  isActionable(row: EnrollmentRow): boolean { return this._actionable(row); }
+  isApproved(ticker: string): boolean { return this._approved().has(ticker); }
+  approvedCount(): number { return this._approved().size; }
+
+  openEnroll(targetId: number): void {
+    if (this.enrollLoading()) return;
+    this.enrollLoading.set(true);
+    this.notice.set(null);
+    this.store.previewEnrollment(this.strategyId, targetId).subscribe({
+      next: (res) => {
+        this.enrollLoading.set(false);
+        // Default-approve every actionable row.
+        this._approved.set(new Set(res.rows.filter((r) => this._actionable(r)).map((r) => r.ticker)));
+        this._overrides.set(new Map());
+        this.enrollPreview.set(res);
+      },
+      error: (e) => {
+        this.enrollLoading.set(false);
+        this.notice.set(e?.error?.detail || 'Could not load the enrollment preview.');
+      },
+    });
+  }
+
+  toggleApprove(ticker: string, ev: Event): void {
+    const next = new Set(this._approved());
+    if ((ev.target as HTMLInputElement).checked) next.add(ticker);
+    else next.delete(ticker);
+    this._approved.set(next);
+  }
+
+  overrideValue(row: EnrollmentRow): string {
+    const ov = this._overrides().get(row.ticker);
+    if (ov !== undefined) return ov;
+    // Show the unsigned magnitude of the suggested quantity.
+    return String(Math.abs(Number(row.suggested_quantity)));
+  }
+
+  setOverride(ticker: string, ev: Event): void {
+    const next = new Map(this._overrides());
+    next.set(ticker, (ev.target as HTMLInputElement).value);
+    this._overrides.set(next);
+  }
+
+  closeEnroll(): void {
+    this.enrollPreview.set(null);
+    this._approved.set(new Set());
+    this._overrides.set(new Map());
+  }
+
+  confirmEnroll(mode: 'auto' | 'manual'): void {
+    const enr = this.enrollPreview();
+    if (!enr || this.enrolling()) return;
+    this.enrolling.set(true);
+    const body: { mode: 'auto' | 'manual'; approved_tickers?: string[]; override_quantities?: Record<string, string> } =
+      mode === 'auto'
+        ? { mode: 'auto' }
+        : {
+            mode: 'manual',
+            approved_tickers: [...this._approved()],
+            override_quantities: Object.fromEntries(this._overrides()),
+          };
+    this.store.applyEnrollment(this.strategyId, enr.target_id, body).subscribe({
+      next: (res) => {
+        this.enrolling.set(false);
+        this.closeEnroll();
+        this.notice.set(`Enrolled ${res.rows.length} position(s) into the strategy book.`);
+        this.refreshCycles();
+      },
+      error: (e) => {
+        this.enrolling.set(false);
+        this.notice.set(e?.error?.detail || 'Enrollment failed.');
+      },
+    });
+  }
+
   refreshCycles(): void {
     this.store.listCycles(this.strategyId).subscribe({
       next: (cs) => {
@@ -1192,6 +1448,62 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
         this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
       },
       error: () => { this.running.set(false); this.notice.set('Failed to dispatch cycle.'); },
+    });
+  }
+
+  // P4 WS-C: delete this strategy (gated server-side on no non-cancelled
+  // cycles + an empty book). Confirm first; navigate away on success.
+  deleting = signal(false);
+  confirmDelete(id: number, name: string): void {
+    if (this.deleting()) return;
+    const ok = confirm(
+      `Delete strategy "${name}"? This also removes its (empty) strategy book. `
+      + 'This cannot be undone.',
+    );
+    if (!ok) return;
+    this.deleting.set(true);
+    this.store.deleteStrategy(id).subscribe({
+      next: () => { this.deleting.set(false); this.router.navigate(['/strategies']); },
+      error: (e) => {
+        this.deleting.set(false);
+        this.notice.set(e?.error?.detail || 'Could not delete this strategy.');
+      },
+    });
+  }
+
+  // P4 WS-E: persist the auto-enter-on-cycle-done preference.
+  savingAutoEnroll = signal(false);
+  onAutoEnrollToggle(ev: Event): void {
+    const value = (ev.target as HTMLInputElement).checked;
+    this.savingAutoEnroll.set(true);
+    this.store.setAutoEnroll(this.strategyId, value).subscribe({
+      next: () => this.savingAutoEnroll.set(false),
+      error: () => {
+        this.savingAutoEnroll.set(false);
+        this.notice.set('Could not update auto-enter preference.');
+      },
+    });
+  }
+
+  // P4 WS-B: rerun a terminal cycle. Dispatches a fresh cycle for the same
+  // as_of; the old row is stamped superseded. Repolls the cycles list so the
+  // new row (assigned by the chord callback) surfaces.
+  rerunningCycleId = signal<number | null>(null);
+  rerunCycle(targetId: number): void {
+    if (this.rerunningCycleId() !== null) return;
+    this.rerunningCycleId.set(targetId);
+    this.notice.set(null);
+    this.store.rerunCycle(this.strategyId, targetId).subscribe({
+      next: (r) => {
+        this.rerunningCycleId.set(null);
+        this.notice.set(`Cycle rerun dispatched (task ${r.task_id}). Refreshing every 5s.`);
+        if (this.pollHandle) clearInterval(this.pollHandle);
+        this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
+      },
+      error: () => {
+        this.rerunningCycleId.set(null);
+        this.notice.set('Failed to rerun cycle.');
+      },
     });
   }
 

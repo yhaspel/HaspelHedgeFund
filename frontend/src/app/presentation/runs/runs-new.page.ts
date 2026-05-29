@@ -61,7 +61,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 
         <section class="card">
           <div class="card-hd">
-            <span class="title"><hf-term key="council">Council</hf-term> personas</span>
+            <h2 class="title"><hf-term key="council">Council</hf-term> personas</h2>
             <span class="pill"><span class="dot"></span>{{ selected().size }} of {{ allPersonas.length }}</span>
           </div>
           <div class="card-bd persona-grid">
