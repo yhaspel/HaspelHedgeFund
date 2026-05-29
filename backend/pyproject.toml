@@ -21,6 +21,7 @@ dependencies = [
     "numpy>=1.26",
     "python-dotenv>=1.0",
     "cryptography>=42.0",
+    "alpaca-py>=0.30",
 ]
 
 [dependency-groups]

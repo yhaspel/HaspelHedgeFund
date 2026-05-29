@@ -5,6 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount, BrokerCapability } from '../../core/models/broker.model';
+import { AlpacaConnectFlowComponent } from './alpaca-connect-flow.component';
 import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
 import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.component';
 
@@ -25,6 +26,7 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
   imports: [
     CommonModule, FormsModule, AppShellComponent,
     IBKRConnectFlowComponent, TradeStationConnectFlowComponent,
+    AlpacaConnectFlowComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[
@@ -101,6 +103,11 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
             [account]="draft"
             (completed)="onTSActivated($event)"
             (cancel)="onTSCancel()" />
+        } @else if (alpacaDraft(); as draft) {
+          <hf-alpaca-connect-flow
+            [account]="draft"
+            (completed)="onAlpacaActivated($event)"
+            (cancel)="onAlpacaCancel()" />
         } @else if (selected(); as cap) {
           <section class="card mt-4 p-4" data-test="connect-form">
             <div class="card-hd">
@@ -160,6 +167,8 @@ export class BrokerConnectWizardPage implements OnInit {
   // (`connection_status="connecting"`) and the OAuth-start endpoint stamps
   // the chosen api_base_url + PKCE verifier onto it.
   protected readonly tsDraft = signal<BrokerAccount | null>(null);
+  // P3a-4: Alpaca draft. Single-step credentials form follows.
+  protected readonly alpacaDraft = signal<BrokerAccount | null>(null);
   protected label = '';
   protected mode: 'paper' | 'live' = 'paper';
 
@@ -200,6 +209,8 @@ export class BrokerConnectWizardPage implements OnInit {
           this.ibkrDraft.set(acc);
         } else if (acc.broker === 'tradestation') {
           this.tsDraft.set(acc);
+        } else if (acc.broker === 'alpaca_paper') {
+          this.alpacaDraft.set(acc);
         } else {
           this.router.navigate(['/broker-accounts', acc.id]);
         }
@@ -220,6 +231,7 @@ export class BrokerConnectWizardPage implements OnInit {
     this.selected.set(null);
     this.ibkrDraft.set(null);
     this.tsDraft.set(null);
+    this.alpacaDraft.set(null);
     this.error.set(null);
   }
 
@@ -238,6 +250,9 @@ export class BrokerConnectWizardPage implements OnInit {
           } else if (cap.code === 'tradestation') {
             // Same pattern for TradeStation OAuth.
             this.tsDraft.set(acc);
+          } else if (cap.code === 'alpaca_paper') {
+            // P3a-4: Alpaca single-step credentials form.
+            this.alpacaDraft.set(acc);
           } else {
             this.router.navigate(['/broker-accounts', acc.id]);
           }
@@ -276,6 +291,16 @@ export class BrokerConnectWizardPage implements OnInit {
     // Draft row stays in the DB for the user to delete from the
     // Accounts page — same policy as IBKR.
     this.tsDraft.set(null);
+    this.router.navigate(['/broker-accounts']);
+  }
+
+  onAlpacaActivated(account: BrokerAccount): void {
+    this.alpacaDraft.set(null);
+    this.router.navigate(['/broker-accounts', account.id]);
+  }
+
+  onAlpacaCancel(): void {
+    this.alpacaDraft.set(null);
     this.router.navigate(['/broker-accounts']);
   }
 }

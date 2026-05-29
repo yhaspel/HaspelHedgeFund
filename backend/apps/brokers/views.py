@@ -273,9 +273,37 @@ class BrokerAccountCredentialsView(APIView):
         api_secret = (request.data.get("api_secret") or "").strip()
         if not api_key:
             raise ValidationError({"api_key": "required"})
+
+        # Alpaca paper: validate the pair against GET /v2/account on the
+        # paper host and discover the account number before persisting.
+        # A bad key set is rejected here with a clear message rather than
+        # failing later on the order path. (P3a-4 phase plan / ADR 0013.)
+        discovered_account_id = ""
+        if account.broker == "alpaca_paper":
+            if not api_secret:
+                raise ValidationError({"api_secret": "required for Alpaca"})
+            from .adapters.alpaca_paper import _make_client
+            try:
+                client = _make_client(api_key=api_key, api_secret=api_secret)
+                acct = client.get_account()
+            except Exception as exc:  # noqa: BLE001
+                raise ValidationError({
+                    "detail": (
+                        "Alpaca rejected those credentials. Double-check "
+                        f"you pasted the paper-trading key pair. ({exc})"
+                    ),
+                }) from exc
+            discovered_account_id = str(
+                getattr(acct, "account_number", None) or getattr(acct, "id", "") or "",
+            )
+
         set_api_key_secret(account, api_key=api_key, api_secret=api_secret)
+        update_fields = ["connection_status"]
+        if discovered_account_id and account.account_id != discovered_account_id:
+            account.account_id = discovered_account_id
+            update_fields.append("account_id")
         account.connection_status = BrokerAccount.STATUS_ACTIVE
-        account.save(update_fields=["connection_status"])
+        account.save(update_fields=update_fields)
         return Response(BrokerAccountSerializer(account).data)
 
 

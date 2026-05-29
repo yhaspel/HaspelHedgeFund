@@ -328,6 +328,35 @@ export class BrokerStore {
     );
   }
 
+  /**
+   * P3a-4: submit the Alpaca paper API key id + secret for a draft
+   * account. The backend validates the credentials against
+   * `GET /v2/account` on the paper host, encrypts + stores them, and
+   * flips `connection_status` to `active`.
+   */
+  submitAlpacaCredentials(
+    accountId: number,
+    body: { api_key: string; api_secret: string },
+  ): Observable<BrokerAccount> {
+    this._busy.set(true);
+    return this.api
+      .post<BrokerAccount>(
+        `/broker-accounts/${accountId}/credentials/`,
+        body,
+      )
+      .pipe(
+        tap({
+          next: (acc) => {
+            this._accounts.update((rows) =>
+              rows.map((r) => (r.id === acc.id ? acc : r)),
+            );
+            this._busy.set(false);
+          },
+          error: () => this._busy.set(false),
+        }),
+      );
+  }
+
   activateTradeStationAccount(
     accountId: number,
     tsAccountId: string,

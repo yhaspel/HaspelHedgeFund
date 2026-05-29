@@ -120,23 +120,8 @@ def get_adapter_factory(code: str):
 
 
 def _placeholder_capabilities() -> list[BrokerCapabilities]:
-    """Real-broker tiles that 3a-4 will replace with live adapters. The
-    IBKR placeholder was removed in P3a-2 when the real adapter shipped;
-    the TradeStation placeholder was removed in P3a-3 likewise (ADR 0012).
-    """
-    return [
-        BrokerCapabilities(
-            code="alpaca_paper",
-            display_name="Alpaca (paper only)",
-            auth_kind=AUTH_API_KEY,
-            supports_paper=True,
-            supports_live=False,
-            supports_fractional=True,
-            quantity_increment=Decimal("0.000001"),
-            supported_order_types=("market", "limit"),
-            supported_time_in_force=("day", "gtc"),
-            description="API-key + secret. Ships in phase 3a-4.",
-            available=False,
-            community_unverified=True,
-        ),
-    ]
+    """Real-broker tiles that future phases will replace with live
+    adapters. The IBKR placeholder was removed in P3a-2 when the real
+    adapter shipped; TradeStation in P3a-3 (ADR 0012); Alpaca in P3a-4
+    (ADR 0013). No placeholders remain."""
+    return []
