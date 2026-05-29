@@ -32,6 +32,7 @@ services:
       dockerfile: infra/backend.Dockerfile
       target: dev
     env_file: ../.env
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: db
     volumes:
@@ -51,6 +52,7 @@ services:
       dockerfile: infra/backend.Dockerfile
       target: dev
     env_file: ../.env
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: db
     volumes:
@@ -66,6 +68,7 @@ services:
       dockerfile: infra/backend.Dockerfile
       target: dev
     env_file: ../.env
+    restart: unless-stopped
     environment:
       POSTGRES_HOST: db
     volumes:
