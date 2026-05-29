@@ -688,8 +688,10 @@ interface PersonaCard {
           <div class="pill ok fixed bottom-[18px] right-[18px] h-auto py-2 px-3 z-[var(--z-modal)]"
                data-test="position-saved-toast">
             <span class="dot"></span>{{ t }}
-            <a routerLink="/portfolio"
-               class="ml-1.5 text-[var(--acc-info-fg)] underline">View portfolio →</a>
+            @if (toastLink(); as lnk) {
+              <a [routerLink]="lnk.route"
+                 class="ml-1.5 text-[var(--acc-info-fg)] underline">{{ lnk.label }}</a>
+            }
           </div>
         }
       }
@@ -1046,6 +1048,7 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   entryOpen = signal(false);
   entryPrefill = signal<{ runId?: number; decisionId?: number; ticker?: string; side?: PositionSide } | null>(null);
   toastMsg = signal<string | null>(null);
+  toastLink = signal<{ label: string; route: string } | null>(null);
   private toastHandle: ReturnType<typeof setTimeout> | null = null;
 
   // Submit-as-broker-order flow: ticket modal → gated confirm modal → broker.
@@ -1091,6 +1094,7 @@ export class RunsDetailPage implements OnInit, OnDestroy {
       if (active.length === 0) {
         this.flashToast(
           'No active broker accounts — connect one in Broker accounts first.',
+          { label: 'Broker accounts →', route: '/broker-accounts' },
         );
         return;
       }
@@ -1123,15 +1127,22 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   }
 
   onBrokerConfirmed(row: BrokerOrderRow): void {
-    const label = this.confirmingAccount()?.label ?? 'broker';
+    const acc = this.confirmingAccount();
     this.onBrokerConfirmClosed();
-    this.flashToast(`Submitted ${row.ticker} ${row.side} → ${label}.`);
+    this.flashToast(
+      `Submitted ${row.ticker} ${row.side} → ${acc?.label ?? 'broker'}.`,
+      acc ? { label: 'View broker account →', route: `/broker-accounts/${acc.id}` } : null,
+    );
   }
 
-  private flashToast(msg: string): void {
+  private flashToast(msg: string, link: { label: string; route: string } | null = null): void {
     this.toastMsg.set(msg);
+    this.toastLink.set(link);
     if (this.toastHandle) clearTimeout(this.toastHandle);
-    this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+    this.toastHandle = setTimeout(() => {
+      this.toastMsg.set(null);
+      this.toastLink.set(null);
+    }, 6000);
   }
 
   onEntryClosed(e: { saved: boolean }): void {
@@ -1139,9 +1150,10 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     const ticker = this.entryPrefill()?.ticker;
     this.entryPrefill.set(null);
     if (e.saved) {
-      this.toastMsg.set(`${ticker ?? 'Position'} saved to portfolio.`);
-      if (this.toastHandle) clearTimeout(this.toastHandle);
-      this.toastHandle = setTimeout(() => this.toastMsg.set(null), 6000);
+      this.flashToast(
+        `${ticker ?? 'Position'} saved to portfolio.`,
+        { label: 'View portfolio →', route: '/portfolio' },
+      );
     }
   }
 }
