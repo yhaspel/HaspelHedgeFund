@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { SettingsTabsComponent } from './settings-tabs.component';
 import { TradeStationAppCardComponent } from './tradestation-app-card.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { NewsStore } from '../../abstraction/news.store';
@@ -26,7 +27,7 @@ import {
   standalone: true,
   imports: [
     CommonModule, FormsModule, RouterLink, AppShellComponent,
-    TradeStationAppCardComponent,
+    TradeStationAppCardComponent, SettingsTabsComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Settings'}, {label:'Models'}]">
@@ -36,6 +37,8 @@ import {
           <h1 class="mt-1.5">Models</h1>
         </div>
       </div>
+
+      <hf-settings-tabs />
 
       <div class="grid grid-cols-2 gap-[18px] max-w-[1100px]">
         <!-- A: Provider keys (BYO) -->

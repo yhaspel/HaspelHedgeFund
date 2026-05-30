@@ -11,6 +11,7 @@ import { RouterLink } from '@angular/router';
 
 import { ApiClient } from '../../core/api/api-client';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { SettingsTabsComponent } from './settings-tabs.component';
 
 interface Channel {
   id: number;
@@ -23,7 +24,7 @@ interface Channel {
 @Component({
   selector: 'hf-settings-notifications-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, SettingsTabsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Settings', link: '/settings/models' }, { label: 'Notifications' }]">
@@ -38,6 +39,8 @@ interface Channel {
           </p>
         </div>
       </div>
+
+      <hf-settings-tabs />
 
       @if (msg()) { <p class="note" role="status">{{ msg() }}</p> }
       @if (error()) { <p class="alert" role="alert">{{ error() }}</p> }
