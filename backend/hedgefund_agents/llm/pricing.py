@@ -49,9 +49,11 @@ PRICING: dict[str, ModelPrice] = {
     "qwen/qwen3.6-27b": ModelPrice(0.32, 3.20),
     "meta-llama/llama-3.3-70b-instruct": ModelPrice(0.40, 0.40),
     # Free OpenRouter routes ($0/Mtok). Used as the no-cost default
-    # (gpt-oss-120b:free) and its same-tier empty-content fallback.
+    # (gpt-oss-120b:free), its same-tier empty-content fallback, and the
+    # exhausted-rate-limit fallback (hermes-3-405b:free).
     "openai/gpt-oss-120b:free": ModelPrice(0.0, 0.0),
     "meta-llama/llama-3.3-70b-instruct:free": ModelPrice(0.0, 0.0),
+    "nousresearch/hermes-3-llama-3.1-405b:free": ModelPrice(0.0, 0.0),
 }
 
 

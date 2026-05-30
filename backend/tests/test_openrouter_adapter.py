@@ -310,7 +310,7 @@ def test_empty_content_falls_back_to_same_tier_model():
 
 def test_empty_content_fallback_does_not_loop_when_fallback_also_empty():
     """If the fallback model is ALSO empty, surface the empty response — the
-    fallback fires exactly once (guarded by _fallback_from), no recursion."""
+    fallback fires exactly once (guarded by _tried), no recursion."""
     empty = _resp({
         "choices": [{"message": {"content": None}, "finish_reason": ""}],
         "usage": {"completion_tokens": 91},
@@ -324,6 +324,111 @@ def test_empty_content_fallback_does_not_loop_when_fallback_also_empty():
     )
     assert resp.text == ""
     assert http.post.call_count == 2  # original + one fallback, no loop
+
+
+def test_rate_limit_fallback_on_exhausted_429(monkeypatch):
+    """A :free route that stays 429 past the retry budget falls back once to a
+    same-tier free model on a different provider (run 152 regression)."""
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    # 6 × 429 (initial + MAX_RETRIES) exhausts _post_with_retry, then the
+    # fallback model answers cleanly.
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(6)]
+    ok = _resp({"choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}]})
+    http = _seq_http(*rate_limited, ok)
+    resp = _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"ok":true}'
+    assert resp.model == "nousresearch/hermes-3-llama-3.1-405b:free"
+    assert http.post.call_args_list[-1].kwargs["json"]["model"] == (
+        "nousresearch/hermes-3-llama-3.1-405b:free"
+    )
+
+
+def test_rate_limit_fallback_does_not_loop_when_fallback_also_429(monkeypatch):
+    """If the fallback target ALSO stays 429, surface the error — the hop fires
+    once (guarded by _tried), no recursion."""
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(12)]
+    http = _seq_http(*rate_limited)
+    with pytest.raises(httpx.HTTPStatusError):
+        _build_client(http).complete(
+            model="meta-llama/llama-3.3-70b-instruct:free", messages=[Message("user", "hi")]
+        )
+    # 6 attempts on the original + 6 on the single fallback = 12, no third hop.
+    assert http.post.call_count == 12
+
+
+def test_empty_content_then_rate_limit_chains_to_third_model(monkeypatch):
+    """The real run-152 chain: gpt-oss empty → llama:free 429 → hermes. Each
+    model is tried at most once; the two fallback reasons compose via _tried."""
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    empty = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": ""}],
+        "usage": {"completion_tokens": 91},
+    })
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(6)]
+    ok = _resp({"choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}]})
+    http = _seq_http(empty, *rate_limited, ok)
+    resp = _build_client(http).complete(
+        model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"ok":true}'
+    assert resp.model == "nousresearch/hermes-3-llama-3.1-405b:free"
+    models = [c.kwargs["json"]["model"] for c in http.post.call_args_list]
+    assert models[0] == "openai/gpt-oss-120b:free"
+    assert models[1] == "meta-llama/llama-3.3-70b-instruct:free"
+    assert models[-1] == "nousresearch/hermes-3-llama-3.1-405b:free"
+
+
+def test_empty_content_with_response_format_retries_without_it():
+    """Parasail-style bug (run 155): a 200 with finish_reason='tool_calls',
+    content=None and NO tool_calls drops the output entirely. The adapter drops
+    response_format and retries once; the retry omits the field and recovers."""
+    degenerate = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": "tool_calls"}],
+        "usage": {"completion_tokens": 174},
+        "provider": "Parasail",
+    })
+    ok = _resp({
+        "choices": [{"message": {"content": '{"signal":"hold"}'}, "finish_reason": "stop"}],
+    })
+    http = _seq_http(degenerate, ok)
+    client = _build_client(http)
+    resp = client.complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[Message("user", "hi")],
+        json_mode=True,
+    )
+    assert resp.text == '{"signal":"hold"}'
+    assert http.post.call_count == 2
+    # First attempt carried response_format; the retry dropped it.
+    assert "response_format" in http.post.call_args_list[0].kwargs["json"]
+    assert "response_format" not in http.post.call_args_list[1].kwargs["json"]
+    # Memoized so the rest of the run skips the doomed format.
+    assert "meta-llama/llama-3.3-70b-instruct" in client._no_response_format
+
+
+def test_empty_content_drop_response_format_does_not_loop():
+    """If the route stays empty even WITHOUT response_format, the drop-rf retry
+    fires exactly once (guarded by _no_response_format) — no recursion storm."""
+    degenerate = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": "tool_calls"}],
+        "usage": {"completion_tokens": 174},
+        "provider": "Parasail",
+    })
+    still_empty = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": "stop"}],
+        "usage": {"completion_tokens": 0},
+    })
+    http = _seq_http(degenerate, still_empty)
+    resp = _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[Message("user", "hi")],
+        json_mode=True,
+    )
+    assert resp.text == ""
+    assert http.post.call_count == 2  # original + one drop-rf retry, no loop
 
 
 def test_fallback_retry_second_failure_surfaces_and_does_not_loop():

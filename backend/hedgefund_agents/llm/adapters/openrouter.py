@@ -37,6 +37,19 @@ _EMPTY_CONTENT_FALLBACK = {
     "openai/gpt-oss-120b:free": "meta-llama/llama-3.3-70b-instruct:free",
 }
 
+# Same-tier fallback when a route's transient-failure RETRIES ARE EXHAUSTED —
+# typically a persistently rate-limited :free upstream (run 152: llama-3.3-70b
+# :free via Venice returned 429 past the ~62s retry budget). Targets a non-
+# reasoning free slug on a DIFFERENT upstream provider so we ride out one
+# provider's rate limit without escalating cost. Hermes-3-405B is non-reasoning
+# (avoids the gpt-oss empty-content trap) and routed off Venice. The visited-set
+# guard (_tried) lets this compose with the empty-content hop above without ever
+# looping: gpt-oss(empty)→llama(429)→hermes, each model tried at most once.
+_RATE_LIMIT_FALLBACK = {
+    "meta-llama/llama-3.3-70b-instruct:free": "nousresearch/hermes-3-llama-3.1-405b:free",
+    "openai/gpt-oss-120b:free": "nousresearch/hermes-3-llama-3.1-405b:free",
+}
+
 log = logging.getLogger(__name__)
 
 
@@ -62,7 +75,7 @@ class OpenRouterClient:
         max_tokens: int = 2048,
         temperature: float = 0.2,
         json_mode: bool = False,
-        _fallback_from: str | None = None,
+        _tried: tuple[str, ...] = (),
     ) -> LLMResponse:
         want_json_object = json_mode and model not in self._no_response_format
         body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
@@ -91,6 +104,27 @@ class OpenRouterClient:
             body = self._build_body(model, messages, max_tokens, temperature, False)
             resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        # Retries inside _post_with_retry are exhausted and the route is still
+        # failing transiently (typically a rate-limited :free upstream). Hop once
+        # to a same-tier free model on a different provider rather than failing
+        # the whole run. Guarded by _tried so the chain can't loop.
+        if resp.status_code in RETRY_STATUSES:
+            fb = _RATE_LIMIT_FALLBACK.get(model)
+            if fb and fb not in _tried:
+                log.warning(
+                    "openrouter %s exhausted retries for %s; falling back to %s",
+                    resp.status_code,
+                    model,
+                    fb,
+                )
+                return self.complete(
+                    model=fb,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    json_mode=json_mode,
+                    _tried=_tried + (model,),
+                )
         if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
             from apps.backtests.exceptions import ModelUnavailable
 
@@ -127,12 +161,37 @@ class OpenRouterClient:
                     # Re-stamp finish_reason so structured.py treats this as a
                     # normal "stop" — otherwise its empty-content branch fires.
                     finish_reason = "stop"
+        # Some providers (observed: Parasail for meta-llama/llama-3.3-70b-instruct)
+        # answer response_format=json_object with a phantom finish_reason='tool_calls'
+        # and NO content AND NO tool_calls — the generated tokens are silently
+        # dropped (run 155). The SAME providers return clean JSON when
+        # response_format is omitted, and call_structured's schema-hint system
+        # message already forces JSON-only output. Drop the hint and retry once;
+        # memoize so the rest of the run skips the doomed format. want_json_object
+        # is only True on the first pass, so this fires at most once per model.
+        if not text and want_json_object and model not in self._no_response_format:
+            log.warning(
+                "openrouter empty content from %s with response_format "
+                "(finish_reason=%r, provider=%r); retrying without it",
+                model,
+                finish_reason,
+                payload.get("provider"),
+            )
+            self._no_response_format.add(model)
+            return self.complete(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+                _tried=_tried,
+            )
         # Reasoning models can return empty content even after the caller's
         # token-budget escalation (the budget goes to hidden thinking). Fall
         # back once to a same-price-tier model rather than failing the run.
-        if not text and _fallback_from is None:
+        if not text:
             fb = _EMPTY_CONTENT_FALLBACK.get(model)
-            if fb:
+            if fb and fb not in _tried:
                 log.warning(
                     "openrouter empty content from %s (finish_reason=%r); "
                     "falling back to same-tier %s",
@@ -146,7 +205,7 @@ class OpenRouterClient:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     json_mode=json_mode,
-                    _fallback_from=model,
+                    _tried=_tried + (model,),
                 )
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("prompt_tokens", 0))
