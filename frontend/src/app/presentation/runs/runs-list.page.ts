@@ -53,7 +53,7 @@ type StatusFilter = 'all' | RunStatus;
             }
           </div>
           <div class="run-search">
-            <input #searchInput type="search" placeholder="Search transcripts…"
+            <input #searchInput type="search" class="input sans" placeholder="Search transcripts…"
               aria-label="Search run transcripts"
               [value]="searchTerm()"
               (keyup.enter)="doSearch(searchInput.value)" />

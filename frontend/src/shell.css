@@ -621,6 +621,14 @@ input[type='checkbox']:focus-visible {
   border-color: var(--acc-info);
   box-shadow: 0 0 0 3px var(--acc-info-soft);
 }
+.run-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.run-search .input {
+  width: 200px;
+}
 .field {
   display: flex;
   flex-direction: column;
