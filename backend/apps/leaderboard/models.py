@@ -115,8 +115,18 @@ class StrategyScorecard(models.Model):
     avg_cost_per_cycle_usd = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True
     )
-    # Deferred to a P3b follow-up — always null in v1; UI shows "—" + tooltip.
+    # Council-alpha: annualised (realised − council-free baseline) in bps.
+    # Null until ≥ MIN_COUNCIL_ALPHA_CYCLES paired cycles exist (UI shows "—"
+    # + "needs 30 days of baseline" tooltip). ``council_cost_usd`` is the
+    # cumulative council LLM spend over the window; ``council_net_value_usd`` =
+    # (realised − baseline) × NAV − council cost = the dollars the council
+    # produced (or destroyed). ``baseline_version`` stamps the baseline def.
     council_alpha_bps = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    council_cost_usd = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    council_net_value_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True
+    )
+    baseline_version = models.CharField(max_length=16, blank=True, default="")
     provisional = models.BooleanField(default=True)
     last_updated = models.DateTimeField(auto_now=True)
 

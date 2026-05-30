@@ -650,6 +650,16 @@ class PortfolioTarget(models.Model):
     #         mark_price, return_pct, contribution_pp, warnings}},
     #         warnings: [str]}.
     marked_snapshot = models.JSONField(default=dict, blank=True)
+    # P3b council-alpha: the council-free deterministic book for this cycle
+    # (same constructor, screener score in place of council confidence, no
+    # veto). Captured at finalize time so the nightly leaderboard can mark it
+    # with the same machinery and measure realised − baseline. See
+    # ``apps/leaderboard/council_alpha.py``. ``baseline_marked_snapshot`` mirrors
+    # ``marked_snapshot``'s shape; ``baseline_version`` stamps the baseline
+    # definition so incompatible series aren't mixed (plan risk #7).
+    baseline_weights = models.JSONField(default=dict, blank=True)
+    baseline_marked_snapshot = models.JSONField(default=dict, blank=True)
+    baseline_version = models.CharField(max_length=16, blank=True, default="")
     screener_ranking = models.ForeignKey(
         ScreenerRanking, null=True, blank=True, on_delete=models.SET_NULL
     )

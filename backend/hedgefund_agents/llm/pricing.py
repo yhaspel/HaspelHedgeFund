@@ -48,6 +48,10 @@ PRICING: dict[str, ModelPrice] = {
     # 2026-05-18 bench). Removed until we verify the live slug.
     "qwen/qwen3.6-27b": ModelPrice(0.32, 3.20),
     "meta-llama/llama-3.3-70b-instruct": ModelPrice(0.40, 0.40),
+    # Free OpenRouter routes ($0/Mtok). Used as the no-cost default
+    # (gpt-oss-120b:free) and its same-tier empty-content fallback.
+    "openai/gpt-oss-120b:free": ModelPrice(0.0, 0.0),
+    "meta-llama/llama-3.3-70b-instruct:free": ModelPrice(0.0, 0.0),
 }
 
 

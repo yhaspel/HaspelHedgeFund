@@ -23,6 +23,20 @@ MODEL_UNAVAILABLE_STATUSES = {401, 402, 403, 404}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
 
+# Reasoning models spend their token budget on hidden thinking and can return
+# empty content under the default budget (run 151: gpt-oss-120b:free returned
+# finish_reason='', completion_tokens=91, empty content). Capping reasoning
+# effort steers tokens toward the visible answer. Gated by slug so non-reasoning
+# routes (e.g. the prod Llama-3.3-70B analytical default) never get an extra
+# `reasoning` param that some providers reject with a 400.
+_REASONING_SLUGS = ("gpt-oss", "o1", "o3", "deepseek-r1", "qwen3")
+
+# Same-price-tier fallback when a model STILL returns empty content. Free slugs
+# fall back to another free slug so we never silently escalate cost.
+_EMPTY_CONTENT_FALLBACK = {
+    "openai/gpt-oss-120b:free": "meta-llama/llama-3.3-70b-instruct:free",
+}
+
 log = logging.getLogger(__name__)
 
 
@@ -48,6 +62,7 @@ class OpenRouterClient:
         max_tokens: int = 2048,
         temperature: float = 0.2,
         json_mode: bool = False,
+        _fallback_from: str | None = None,
     ) -> LLMResponse:
         want_json_object = json_mode and model not in self._no_response_format
         body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
@@ -112,6 +127,27 @@ class OpenRouterClient:
                     # Re-stamp finish_reason so structured.py treats this as a
                     # normal "stop" — otherwise its empty-content branch fires.
                     finish_reason = "stop"
+        # Reasoning models can return empty content even after the caller's
+        # token-budget escalation (the budget goes to hidden thinking). Fall
+        # back once to a same-price-tier model rather than failing the run.
+        if not text and _fallback_from is None:
+            fb = _EMPTY_CONTENT_FALLBACK.get(model)
+            if fb:
+                log.warning(
+                    "openrouter empty content from %s (finish_reason=%r); "
+                    "falling back to same-tier %s",
+                    model,
+                    finish_reason,
+                    fb,
+                )
+                return self.complete(
+                    model=fb,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    json_mode=json_mode,
+                    _fallback_from=model,
+                )
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))
@@ -150,6 +186,8 @@ class OpenRouterClient:
         # retry-without-it fallback.
         if json_object:
             body["response_format"] = {"type": "json_object"}
+        if any(tag in model.lower() for tag in _REASONING_SLUGS):
+            body["reasoning"] = {"effort": "low"}
         return body
 
     def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:

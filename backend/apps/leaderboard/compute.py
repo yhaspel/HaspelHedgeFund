@@ -21,10 +21,12 @@ from apps.backtests.metrics import drawdown_pct, sharpe_ratio, sortino_ratio
 from apps.backtests.metrics import hit_rate as hit_rate_fn
 from apps.backtests.models import BacktestMetrics
 from apps.models_catalog.presets import ANALYTICAL_AGENTS, PERSONA_AGENTS
+from apps.portfolios.cycle_mark import ensure_baseline_snapshot
 from apps.portfolios.models import PortfolioStrategy, PortfolioTarget
 from apps.runs.models import AgentMessage, Run
 from hedgefund_agents.models import LLMCall
 
+from .council_alpha import BASELINE_VERSION
 from .forward_returns import DEFAULT_FORWARD_DAYS, brier, forward_return, wilson_interval
 from .models import AgentScorecard, ModelScorecard, StrategyScorecard
 
@@ -32,6 +34,11 @@ WINDOWS_AGENT = {"30d": 30, "90d": 90, "lifetime": None}
 WINDOWS_STRATEGY = {"30d": 30, "90d": 90, "ytd": "ytd", "lifetime": None}
 MIN_DECISIONS = 30
 MIN_CYCLES = 20
+# Council-alpha needs more paired observations than the generic provisional
+# threshold before it's worth quoting (plan acceptance criterion: ≥30 days of
+# baseline). Below this, council_alpha_bps stays null and the UI shows "needs
+# 30 days of baseline".
+MIN_COUNCIL_ALPHA_CYCLES = 30
 # Per-cycle ratios annualize assuming ~daily cycles. Surfaced as a UI caveat.
 ANNUALIZE_CYCLES = 252
 
@@ -253,10 +260,55 @@ def _metrics_from_returns(rets: list[float]) -> dict | None:
     }
 
 
+def _paired_returns(targets) -> tuple[list[float], list[float]]:
+    """Realised vs council-free-baseline per-cycle returns, over the cycles
+    that captured a baseline (council-alpha is forward-only). Marks each
+    baseline book with the same forward-return machinery, then pairs by cycle.
+    """
+    realised: list[float] = []
+    baseline: list[float] = []
+    for t in targets:
+        if not (t.baseline_weights or {}):
+            continue
+        rv = (t.marked_snapshot or {}).get("since_as_of_pct")
+        bv = (ensure_baseline_snapshot(t) or {}).get("since_as_of_pct")
+        if rv in (None, "", "None") or bv in (None, "", "None"):
+            continue
+        try:
+            realised.append(float(rv) / 100.0)
+            baseline.append(float(bv) / 100.0)
+        except (TypeError, ValueError):
+            continue
+    return realised, baseline
+
+
+def _council_alpha(targets, nav: float, council_cost: float) -> dict:
+    """Council-alpha for a strategy/window: annualised (realised − baseline) in
+    bps, plus the council's net dollar value and cumulative cost.
+
+    Alpha/value stay null until ≥ MIN_COUNCIL_ALPHA_CYCLES paired cycles exist
+    (short windows are too noisy — plan risk #6). ``cost_usd`` is always
+    surfaced so the UI can show "cost $Y" even before alpha is meaningful.
+    """
+    out = {"alpha_bps": None, "net_value_usd": None, "cost_usd": council_cost}
+    realised, baseline = _paired_returns(targets)
+    if len(realised) < MIN_COUNCIL_ALPHA_CYCLES:
+        return out
+    mr = _metrics_from_returns(realised)
+    mb = _metrics_from_returns(baseline)
+    if not mr or not mb:
+        return out
+    out["alpha_bps"] = (mr["ann"] - mb["ann"]) * 10000.0
+    # Dollar value the council produced (or destroyed): gross alpha on the
+    # window × NAV, net of the council's LLM spend. (plan §"cost-vs-benefit")
+    out["net_value_usd"] = (mr["total"] - mb["total"]) * nav - council_cost
+    return out
+
+
 def recompute_strategies(today: dt.date) -> None:
     StrategyScorecard.objects.filter(as_of=today).delete()
     by_flavor: dict[tuple, list] = {}
-    for s in PortfolioStrategy.objects.all().iterator():
+    for s in PortfolioStrategy.objects.select_related("portfolio").iterator():
         for window, days in WINDOWS_STRATEGY.items():
             cutoff = _cutoff(days, today)
             tq = PortfolioTarget.objects.filter(
@@ -273,6 +325,8 @@ def recompute_strategies(today: dt.date) -> None:
                 cost_total = cost_total.filter(created_at__date__gte=cutoff)
             cost_sum = float(cost_total.aggregate(s=Sum("cost_usd"))["s"] or 0)
             avg_cost = cost_sum / n if n else None
+            nav = float(getattr(s.portfolio, "cash_balance", 0) or 0)
+            ca = _council_alpha(targets, nav, cost_sum)
             StrategyScorecard.objects.create(
                 strategy=s, flavor=s.kind, window=window, as_of=today, n_cycles=n,
                 total_return_pct=_dec2(m["total"] * 100) if m else None,
@@ -285,7 +339,10 @@ def recompute_strategies(today: dt.date) -> None:
                     _dec2(turnover * ANNUALIZE_CYCLES * 100) if turnover is not None else None
                 ),
                 avg_cost_per_cycle_usd=_dec2(avg_cost),
-                council_alpha_bps=None,  # deferred to a P3b follow-up
+                council_alpha_bps=_dec2(ca["alpha_bps"]),
+                council_cost_usd=_dec2(ca["cost_usd"]),
+                council_net_value_usd=_dec2(ca["net_value_usd"]),
+                baseline_version=BASELINE_VERSION,
                 provisional=n < MIN_CYCLES,
             )
             by_flavor.setdefault((s.kind, window), []).append(m)

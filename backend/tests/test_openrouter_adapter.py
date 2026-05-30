@@ -260,6 +260,72 @@ def test_unrelated_4xx_still_raises_and_does_not_retry():
     assert http.post.call_count == 1
 
 
+def test_reasoning_effort_set_for_reasoning_slugs_only():
+    """gpt-oss (and other reasoning slugs) get `reasoning={"effort":"low"}` so
+    the token budget goes to the visible answer instead of hidden thinking
+    (run 151 returned empty content, completion_tokens=91). Non-reasoning
+    routes like the prod Llama-3.3-70B analytical default must NOT get the
+    param — some providers reject unknown fields with a 400."""
+    http = _fake_http({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+    })
+    client = _build_client(http)
+    client.complete(model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")])
+    assert http.post.call_args.kwargs["json"]["reasoning"] == {"effort": "low"}
+
+    http2 = _fake_http({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+    })
+    _build_client(http2).complete(
+        model="meta-llama/llama-3.3-70b-instruct", messages=[Message("user", "hi")]
+    )
+    assert "reasoning" not in http2.post.call_args.kwargs["json"]
+
+
+def test_empty_content_falls_back_to_same_tier_model():
+    """When a free reasoning slug returns empty content even after the caller's
+    budget escalation, fall back ONCE to a same-price-tier (also free) model
+    rather than failing the run."""
+    empty = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": ""}],
+        "usage": {"completion_tokens": 91},
+    })
+    good = _resp({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+    })
+    http = _seq_http(empty, good)
+    resp = _build_client(http).complete(
+        model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"ok":true}'
+    assert resp.model == "meta-llama/llama-3.3-70b-instruct:free"
+    assert http.post.call_count == 2
+    assert http.post.call_args_list[1].kwargs["json"]["model"] == (
+        "meta-llama/llama-3.3-70b-instruct:free"
+    )
+
+
+def test_empty_content_fallback_does_not_loop_when_fallback_also_empty():
+    """If the fallback model is ALSO empty, surface the empty response — the
+    fallback fires exactly once (guarded by _fallback_from), no recursion."""
+    empty = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": ""}],
+        "usage": {"completion_tokens": 91},
+    })
+    http = _seq_http(empty, _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": ""}],
+        "usage": {"completion_tokens": 0},
+    }))
+    resp = _build_client(http).complete(
+        model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == ""
+    assert http.post.call_count == 2  # original + one fallback, no loop
+
+
 def test_fallback_retry_second_failure_surfaces_and_does_not_loop():
     """If dropping response_format and retrying STILL fails with a non-retriable
     4xx, the error surfaces as HTTPStatusError and the fallback fires exactly
