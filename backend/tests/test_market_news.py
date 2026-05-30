@@ -42,6 +42,25 @@ from apps.data.providers.market_news_tiingo import MarketNewsTiingoProvider
 User = get_user_model()
 
 
+# Provider fixtures must use timestamps inside the rolling retention window
+# (now - RETENTION_DAYS); hardcoded dates were a time bomb that passed on
+# 2026-05-29 and broke once the wall-clock rolled to 2026-05-30. These helpers
+# keep fixtures a fixed, in-window age regardless of when the suite runs.
+def _recent_iso(days_ago: int = 1, hour: int = 9) -> str:
+    d = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days_ago)).replace(
+        hour=hour, minute=0, second=0, microsecond=0,
+    )
+    return d.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _recent_space(days_ago: int = 1, hour: int = 8) -> str:
+    """`_recent_iso` in the space-separated format some feeds emit."""
+    d = (dt.datetime.now(dt.UTC) - dt.timedelta(days=days_ago)).replace(
+        hour=hour, minute=0, second=0, microsecond=0,
+    )
+    return d.strftime("%Y-%m-%d %H:%M:%S")
+
+
 @pytest.fixture(autouse=True)
 def _reset_market_news_refresh_rate_limit():
     # The /api/news/feed/?refresh=1 endpoint uses a class-level dict keyed by
@@ -149,7 +168,7 @@ def test_market_news_fmp_provider_maps_both_feeds() -> None:
             {
                 "title": "Fed signals rate path",
                 "text": "snippet",
-                "publishedDate": "2026-05-23T09:00:00Z",
+                "publishedDate": _recent_iso(1, 9),
                 "image": "https://img.example/g.png",
                 "site": "Reuters",
                 "url": "https://reuters.example/fed",
@@ -157,14 +176,14 @@ def test_market_news_fmp_provider_maps_both_feeds() -> None:
             {
                 # Skipped: missing url.
                 "title": "noop",
-                "publishedDate": "2026-05-23T09:00:00Z",
+                "publishedDate": _recent_iso(1, 9),
             },
         ],
         "stock-latest": [
             {
                 "title": "Apple beats",
                 "text": "earnings snippet",
-                "publishedDate": "2026-05-23 08:00:00",  # space format
+                "publishedDate": _recent_space(1, 8),  # space format
                 "image": "",
                 "publisher": "CNBC",
                 "url": "https://cnbc.example/aapl",
@@ -190,7 +209,7 @@ def test_market_news_tiingo_provider_no_ticker_filter() -> None:
                 "title": "Macro headline",
                 "description": "blurb",
                 "url": "https://tiingo.example/macro",
-                "publishedDate": "2026-05-23T09:00:00Z",
+                "publishedDate": _recent_iso(1, 9),
                 "source": "Tiingo",
                 "tags": ["fed", "rates"],
                 "tickers": ["spy"],
@@ -201,7 +220,7 @@ def test_market_news_tiingo_provider_no_ticker_filter() -> None:
                 "description": "",
                 "url": "https://tiingo.example/old",
                 "publishedDate": "",
-                "crawlDate": "2026-05-22T22:00:00Z",
+                "crawlDate": _recent_iso(2, 22),
                 "source": "Tiingo",
             },
         ],
