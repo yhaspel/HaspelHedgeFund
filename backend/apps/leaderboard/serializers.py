@@ -12,7 +12,9 @@ class AgentScorecardSerializer(serializers.ModelSerializer):
             "id", "agent_name", "agent_version", "model_id", "window", "as_of",
             "n_decisions", "n_directional", "hit_rate", "hit_rate_ci_low",
             "hit_rate_ci_high", "brier_score", "avg_forward_return_bps",
-            "pnl_contribution_bps", "provisional", "last_updated",
+            "pnl_contribution_bps", "n_contrarian_decisions", "contrarian_hit_rate",
+            "contrarian_hit_rate_ci_low", "contrarian_hit_rate_ci_high",
+            "provisional", "last_updated",
         )
 
 

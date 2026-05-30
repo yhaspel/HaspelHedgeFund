@@ -1,14 +1,36 @@
 import {
+  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
+  OnDestroy,
   OnInit,
+  ViewChild,
+  computed,
+  effect,
   inject,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import {
+  CategoryScale,
+  Chart,
+  ChartConfiguration,
+  Legend,
+  LinearScale,
+  LineController,
+  LineElement,
+  PointElement,
+  Tooltip,
+} from 'chart.js';
 
 import { ApiClient } from '../../core/api/api-client';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ENTRY_ANIMATION, baseLegend, readChartTheme } from '../shared/chart-defaults';
+
+Chart.register(
+  LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend,
+);
 
 interface AgentRow {
   agent_name: string;
@@ -21,6 +43,10 @@ interface AgentRow {
   brier_score: string | null;
   avg_forward_return_bps: string | null;
   pnl_contribution_bps: string | null;
+  n_contrarian_decisions: number;
+  contrarian_hit_rate: string | null;
+  contrarian_hit_rate_ci_low: string | null;
+  contrarian_hit_rate_ci_high: string | null;
   provisional: boolean;
 }
 interface ModelRow {
@@ -48,6 +74,13 @@ interface StrategyRow {
   council_net_value_usd: string | null;
   baseline_version: string;
   provisional: boolean;
+}
+interface CouncilAlphaRow {
+  as_of_date: string;
+  realised_pct: number;
+  baseline_pct: number;
+  cum_realised_pct: number;
+  cum_baseline_pct: number;
 }
 interface DecisionRow {
   run_id: number;
@@ -190,6 +223,57 @@ interface DecisionRow {
           }
         </section>
 
+        <section class="card">
+          <div class="card-hd"><h2 class="title">Useful contrarians</h2></div>
+          <p class="sub" style="margin: -4px 0 10px">
+            Personas ranked by how often they were right <em>when they went
+            against the run's majority signal</em> — the contrarians worth
+            weighting up. Hit rate over disagreement cases only.
+          </p>
+          @if (contrarians().length === 0) {
+            <p class="empty">
+              No contrarian decisions scored yet for this window — needs runs
+              where a persona dissented from the consensus and a forward-return
+              window has elapsed.
+            </p>
+          } @else {
+            <div class="tbl-scroll">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th>Persona</th>
+                    <th>Model</th>
+                    <th class="r">Disagreements</th>
+                    <th class="r">Contrarian hit rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (a of contrarians(); track a.agent_name + a.model_id) {
+                    <tr class="clk" (click)="drill(a.agent_name)">
+                      <td>
+                        {{ a.agent_name }}
+                        @if (a.n_contrarian_decisions < 10) {
+                          <span class="badge" title="Fewer than 10 disagreements — provisional">prov.</span>
+                        }
+                      </td>
+                      <td class="muted">{{ a.model_id || '—' }}</td>
+                      <td class="r">{{ a.n_contrarian_decisions }}</td>
+                      <td class="r">
+                        <span
+                          [class.pos]="num0(a.contrarian_hit_rate) >= 0.5"
+                          [class.neg]="num0(a.contrarian_hit_rate) < 0.5"
+                          [title]="contrarianTip(a)"
+                          >{{ pct(a.contrarian_hit_rate) }}</span
+                        >
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+
         @if (drillAgent()) {
           <section class="card">
             <div class="card-hd">
@@ -264,7 +348,7 @@ interface DecisionRow {
                 </thead>
                 <tbody>
                   @for (s of strategies(); track s.strategy) {
-                    <tr>
+                    <tr class="clk" (click)="openStrategyDrill(s)">
                       <td>
                         {{ s.strategy_name }}
                         @if (s.provisional) {
@@ -305,6 +389,27 @@ interface DecisionRow {
             </div>
           }
         </section>
+
+        @if (drillStrategy()) {
+          <section class="card">
+            <div class="card-hd">
+              <h2 class="title">Council α over time — {{ drillStrategy()!.strategy_name }}</h2>
+              <button class="btn sm ghost" (click)="closeStrategyDrill()">Close</button>
+            </div>
+            @if (councilSeries().length === 0) {
+              <p class="empty">
+                No paired baseline cycles in this window yet. Council-alpha is
+                captured forward-only, so the chart fills in as new cycles run.
+              </p>
+            } @else {
+              <p class="sub" style="margin: -4px 0 10px">
+                Cumulative return of the live (council) book vs the council-free
+                deterministic baseline. The gap is what the council added.
+              </p>
+              <div class="chart-wrap"><canvas #councilAlphaChart></canvas></div>
+            }
+          </section>
+        }
 
         <section class="card">
           <div class="card-hd"><h2 class="title">Flavor benchmarks</h2></div>
@@ -364,11 +469,26 @@ interface DecisionRow {
       .tbl .muted { color: var(--text-3); }
       .tbl .clk { cursor: pointer; }
       .tbl .clk:hover { background: var(--surface-2); }
+      .chart-wrap { height: 260px; position: relative; }
     `,
   ],
 })
-export class LeaderboardPage implements OnInit {
+export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
   private readonly api = inject(ApiClient);
+
+  @ViewChild('councilAlphaChart', { static: false })
+  councilCanvas?: ElementRef<HTMLCanvasElement>;
+  private councilChart: Chart | null = null;
+  private viewReady = false;
+
+  constructor() {
+    // Re-render the council-alpha chart whenever its series changes (after the
+    // canvas exists). setTimeout defers to the next tick so the @if has rendered.
+    effect(() => {
+      this.councilSeries();
+      if (this.viewReady) setTimeout(() => this.renderCouncilAlpha(), 0);
+    });
+  }
 
   readonly tab = signal<'agents' | 'strategies'>('agents');
   readonly window = signal<'30d' | '90d' | 'lifetime'>('90d');
@@ -378,9 +498,30 @@ export class LeaderboardPage implements OnInit {
   readonly agents = signal<AgentRow[]>([]);
   readonly models = signal<ModelRow[]>([]);
   readonly strategies = signal<StrategyRow[]>([]);
+  // "Useful contrarians": personas that have any contrarian decisions, ranked by
+  // how often they were right when dissenting from the run consensus.
+  readonly contrarians = computed(() =>
+    this.agents()
+      .filter((a) => a.n_contrarian_decisions > 0)
+      .sort(
+        (a, b) =>
+          Number(b.contrarian_hit_rate ?? -1) - Number(a.contrarian_hit_rate ?? -1) ||
+          b.n_contrarian_decisions - a.n_contrarian_decisions,
+      ),
+  );
   readonly flavors = signal<StrategyRow[]>([]);
   readonly drillAgent = signal<string | null>(null);
   readonly decisions = signal<DecisionRow[]>([]);
+  readonly drillStrategy = signal<StrategyRow | null>(null);
+  readonly councilSeries = signal<CouncilAlphaRow[]>([]);
+
+  ngAfterViewInit(): void {
+    this.viewReady = true;
+  }
+
+  ngOnDestroy(): void {
+    this.councilChart?.destroy();
+  }
 
   ngOnInit(): void {
     this.load();
@@ -389,6 +530,8 @@ export class LeaderboardPage implements OnInit {
   onWindow(w: string): void {
     this.window.set(w as '30d' | '90d' | 'lifetime');
     this.load();
+    const s = this.drillStrategy();
+    if (s) this.fetchCouncilSeries(s); // keep an open chart in sync with the window
   }
 
   onStratSort(sort: string): void {
@@ -427,6 +570,73 @@ export class LeaderboardPage implements OnInit {
       .subscribe((r) => this.decisions.set(r.decisions ?? []));
   }
 
+  openStrategyDrill(s: StrategyRow): void {
+    if (s.strategy === null) return; // flavor-aggregate rows aren't drillable
+    this.drillStrategy.set(s);
+    this.fetchCouncilSeries(s);
+  }
+
+  closeStrategyDrill(): void {
+    this.drillStrategy.set(null);
+    this.councilSeries.set([]);
+    this.councilChart?.destroy();
+    this.councilChart = null;
+  }
+
+  private fetchCouncilSeries(s: StrategyRow): void {
+    this.api
+      .get<{ rows: CouncilAlphaRow[] }>(
+        `/leaderboard/strategies/${s.strategy}/council-alpha/?window=${this.window()}`,
+      )
+      .subscribe((r) => this.councilSeries.set(r.rows ?? []));
+  }
+
+  private renderCouncilAlpha(): void {
+    const rows = this.councilSeries();
+    const canvas = this.councilCanvas?.nativeElement;
+    if (!canvas || rows.length === 0) return;
+    this.councilChart?.destroy();
+    const t = readChartTheme();
+    const cfg: ChartConfiguration = {
+      type: 'line',
+      data: {
+        labels: rows.map((p) => p.as_of_date),
+        datasets: [
+          {
+            label: 'Realised (council)',
+            data: rows.map((p) => p.cum_realised_pct),
+            borderColor: t.info,
+            backgroundColor: t.info + '14',
+            tension: 0.1, pointRadius: 0, borderWidth: 1.6, fill: false,
+          },
+          {
+            label: 'Council-free baseline',
+            data: rows.map((p) => p.cum_baseline_pct),
+            borderColor: t.axis, borderDash: [5, 5],
+            tension: 0.1, pointRadius: 0, borderWidth: 1.2, fill: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: ENTRY_ANIMATION,
+        plugins: { legend: baseLegend(t) },
+        scales: {
+          x: { display: false, grid: { color: t.grid } },
+          y: {
+            grid: { color: t.grid },
+            ticks: {
+              color: t.axis,
+              font: { family: 'JetBrains Mono', size: 10 },
+              callback: (v) => `${v}%`,
+            },
+          },
+        },
+      },
+    };
+    this.councilChart = new Chart(canvas, cfg);
+  }
+
   openRun(id: number): void {
     window.location.assign(`/runs/${id}`);
   }
@@ -456,6 +666,15 @@ export class LeaderboardPage implements OnInit {
   }
   num0(v: string | null): number {
     return v === null ? 0 : Number(v);
+  }
+  contrarianTip(a: AgentRow): string {
+    const lo = a.contrarian_hit_rate_ci_low;
+    const hi = a.contrarian_hit_rate_ci_high;
+    const ci = lo !== null && hi !== null ? ` (95% CI ${this.pct(lo)}–${this.pct(hi)})` : '';
+    return (
+      `Right ${this.pct(a.contrarian_hit_rate)} of the time across ` +
+      `${a.n_contrarian_decisions} calls that dissented from the run consensus${ci}.`
+    );
   }
   bps(v: string | null): string {
     if (v === null) return '—';

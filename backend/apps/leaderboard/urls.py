@@ -6,6 +6,7 @@ from .views import (
     FlavorBenchmarkView,
     ModelLeaderboardView,
     RecomputeView,
+    StrategyCouncilAlphaView,
     StrategyLeaderboardView,
 )
 
@@ -26,6 +27,11 @@ urlpatterns = [
         "leaderboard/strategies/by-flavor/",
         FlavorBenchmarkView.as_view(),
         name="leaderboard-flavor",
+    ),
+    path(
+        "leaderboard/strategies/<int:strategy_id>/council-alpha/",
+        StrategyCouncilAlphaView.as_view(),
+        name="leaderboard-strategy-council-alpha",
     ),
     path("leaderboard/recompute/", RecomputeView.as_view(), name="leaderboard-recompute"),
 ]
