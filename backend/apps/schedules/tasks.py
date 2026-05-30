@@ -232,6 +232,10 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
                 if ev.delivery_status == ev.SENT:
                     notified += 1
 
+    # ---- paper auto-submit (opt-in, paper-only) ----
+    from apps.schedules.autosubmit import auto_submit_orders
+    submit_decision = auto_submit_orders(sr, hist, run_ids)
+
     hist.materiality_decision = {
         "runs": summary,
         "degraded_from": degraded_from,
@@ -239,14 +243,18 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         "overage": overage,
         "digest": digest,
     }
+    hist.submit_decision = submit_decision
     hist.notified_count = notified
     hist.actual_cost_usd = actual_cost
     hist.status = ScheduledRunHistory.DONE
     hist.finished_at = timezone.now()
     hist.save(
         update_fields=[
-            "materiality_decision", "notified_count", "actual_cost_usd",
-            "status", "finished_at",
+            "materiality_decision", "submit_decision", "notified_count",
+            "actual_cost_usd", "status", "finished_at",
         ]
     )
-    return {"status": "done", "tickers": len(run_ids), "notified": notified}
+    return {
+        "status": "done", "tickers": len(run_ids), "notified": notified,
+        "submitted": submit_decision.get("submitted", 0),
+    }

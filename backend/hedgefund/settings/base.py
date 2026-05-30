@@ -246,6 +246,12 @@ NOTIFICATIONS_MAX_PER_TICKER_PER_DAY = int(
 )
 NOTIFICATIONS_DIGEST_THRESHOLD = int(os.environ.get("NOTIFICATIONS_DIGEST_THRESHOLD", "5"))
 
+# P3b: global kill switch for scheduled-run paper auto-submit. Even with a
+# schedule's auto_paper_submit=True, no orders are created when this is off.
+# Live auto-submit is *permanently* impossible (the confirmation gate hard-blocks
+# scheduled_job × live) — this only gates the paper path.
+PAPER_AUTO_SUBMIT_ENABLED = os.environ.get("PAPER_AUTO_SUBMIT_ENABLED", "1") == "1"
+
 # P3b: Telegram Bot API base. Overridable so tests can point delivery at a
 # respx-mocked host. The user supplies a per-channel bot_token + chat_id; see
 # guides/telegram-setup.md.

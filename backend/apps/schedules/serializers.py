@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rest_framework import serializers
 
+from apps.brokers.models import BrokerAccount
 from apps.models_catalog.presets import PRESETS
 from apps.notifications.models import NotificationChannel
 from apps.watchlists.models import Watchlist
@@ -18,6 +19,10 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
     notification_channel = serializers.PrimaryKeyRelatedField(
         queryset=NotificationChannel.objects.all(), required=False, allow_null=True
     )
+    auto_submit_broker_account = serializers.PrimaryKeyRelatedField(
+        queryset=BrokerAccount.objects.all(), required=False, allow_null=True
+    )
+    auto_submit_account_label = serializers.SerializerMethodField()
     # Human-readable rendering of cron_expression, e.g. "At 09:25 AM, Monday
     # through Friday" — so the UI never has to show a raw cron string.
     cron_description = serializers.SerializerMethodField()
@@ -29,10 +34,18 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
             "model_preset", "model_overrides", "cron_expression",
             "cron_description", "timezone",
             "is_market_aware", "cost_ceiling_usd", "on_breach",
-            "notification_channel", "is_active", "last_run_at", "next_run_at",
+            "notification_channel",
+            "auto_paper_submit", "auto_submit_broker_account",
+            "auto_submit_account_label", "auto_submit_draft_only",
+            "max_orders_per_day", "max_notional_per_day_usd",
+            "is_active", "last_run_at", "next_run_at",
             "created_at", "updated_at",
         )
         read_only_fields = ("last_run_at", "next_run_at", "created_at", "updated_at")
+
+    def get_auto_submit_account_label(self, obj: ScheduledRun) -> str:
+        acc = obj.auto_submit_broker_account
+        return f"{acc.broker} ({acc.mode})" if acc else ""
 
     def get_cron_description(self, obj: ScheduledRun) -> str:
         return describe_cron(obj.cron_expression)
@@ -75,6 +88,32 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
         if user is not None and ch.user_id != user.id:
             raise serializers.ValidationError("Notification channel not found.")
         return ch
+
+    def validate_auto_submit_broker_account(self, acc):
+        if acc is None:
+            return acc
+        user = self._request_user()
+        if user is not None and acc.user_id != user.id:
+            raise serializers.ValidationError("Broker account not found.")
+        if acc.mode != BrokerAccount.MODE_PAPER:
+            raise serializers.ValidationError("Auto-submit requires a paper account.")
+        return acc
+
+    def validate(self, attrs):
+        # Paper auto-submit needs a paper account. Fall back to the instance's
+        # current values so partial updates (PATCH) still validate the pair.
+        auto = attrs.get(
+            "auto_paper_submit", getattr(self.instance, "auto_paper_submit", False)
+        )
+        acc = attrs.get(
+            "auto_submit_broker_account",
+            getattr(self.instance, "auto_submit_broker_account", None),
+        )
+        if auto and acc is None:
+            raise serializers.ValidationError(
+                {"auto_submit_broker_account": "Required when paper auto-submit is on."}
+            )
+        return attrs
 
 
 class ScheduledRunHistorySerializer(serializers.ModelSerializer):
