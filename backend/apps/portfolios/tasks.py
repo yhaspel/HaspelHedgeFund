@@ -512,6 +512,12 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     beta_diagnostics: dict = {"regime_scaler": regime_scaler_audit.to_dict()}
     cycle_outcome = "target_created"
     per_position_thesis: dict[str, dict] = {}
+    # P3b council-alpha: maps the council-free baseline constructor needs,
+    # captured from the live flavor branch below so the baseline's inputs
+    # match the live constructor's exactly.
+    baseline_betas: dict[str, float] = {}
+    baseline_asset_class_of: dict[str, str] = {}
+    baseline_inverse_of: dict[str, str] = {}
     if strategy.kind == PortfolioStrategy.KIND_GLOBAL_MACRO:
         from apps.data.models import MacroSnapshot
 
@@ -519,6 +525,8 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         etf_rows = {e.ticker: e for e in MacroETF.objects.filter(is_active=True)}
         asset_class_of = {t: e.asset_class for t, e in etf_rows.items()}
         inverse_of = {t: e.inverse_of for t, e in etf_rows.items() if e.inverse_of}
+        baseline_asset_class_of = asset_class_of
+        baseline_inverse_of = inverse_of
         result = construct_global_macro(
             cands,
             target_gross_pct=float(strategy.target_gross_pct),
@@ -708,6 +716,7 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
             if t in held_tickers:
                 beta_held[t] = beta_map.get(t, 1.0)
 
+        baseline_betas = beta_map
         neutral = construct_market_neutral(
             cands, constraints, beta_map,
             tol_dollar=float(strategy.neutrality_tolerance_dollar_pct),
@@ -741,6 +750,28 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
         result = neutral
     else:
         result = construct(cands, constraints)
+
+    # P3b council-alpha: compute the council-free deterministic baseline book
+    # for this cycle (same constructor + scaled constraints, screener score in
+    # place of council confidence, no veto). A baseline failure must never
+    # break the live cycle, so it's best-effort.
+    baseline_weights: dict[str, float] = {}
+    baseline_version = ""
+    if target.screener_ranking_id:
+        try:
+            from apps.leaderboard.council_alpha import (
+                BASELINE_VERSION,
+                baseline_target_weights,
+            )
+            baseline_weights = baseline_target_weights(
+                strategy, target.screener_ranking, constraints,
+                betas=baseline_betas,
+                asset_class_of=baseline_asset_class_of,
+                inverse_of=baseline_inverse_of,
+            )
+            baseline_version = BASELINE_VERSION
+        except Exception:
+            log.exception("council-alpha baseline failed for target %s", target.pk)
 
     # Pull last close per ticker for the rebalancer.
     data_provider = get_fmp_provider(user=strategy.user)
@@ -801,6 +832,8 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     ])
 
     target.target_weights = {t: round(w, 6) for t, w in result.target_weights.items()}
+    target.baseline_weights = baseline_weights
+    target.baseline_version = baseline_version
     target.gross_pct = Decimal(str(round(result.gross_pct, 4)))
     target.net_pct = Decimal(str(round(result.net_pct, 4)))
     target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
@@ -1005,6 +1038,12 @@ def _run_risk_parity_cycle(
         "enable_council_veto": bool(strategy.enable_council_veto),
         "council_veto_log": council_veto_log,
     }
+    # P3b council-alpha: risk-parity is council-free, so the baseline IS the
+    # realised book ⇒ council-alpha is 0 (veto-alpha; nonzero only once
+    # council-veto mode lands).
+    from apps.leaderboard.council_alpha import BASELINE_VERSION
+    target.baseline_weights = target.target_weights
+    target.baseline_version = BASELINE_VERSION
     target.cycle_outcome = cycle_outcome
     target.decisions = []
     target.status = "done"
@@ -1609,6 +1648,11 @@ def _run_pairs_cycle(
             for p in all_active
         ],
     }
+    # P3b council-alpha: pairs runs deterministic cointegration (no council by
+    # default), so the baseline IS the realised book ⇒ council-alpha is 0.
+    from apps.leaderboard.council_alpha import BASELINE_VERSION
+    target.baseline_weights = target.target_weights
+    target.baseline_version = BASELINE_VERSION
     target.cycle_outcome = cycle_outcome
     target.status = "done"
     target.finished_at = timezone.now()

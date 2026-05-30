@@ -71,17 +71,20 @@ def compute_cycle_snapshot(
     target: PortfolioTarget,
     *,
     on: date_cls | None = None,
+    weights: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compute a marked snapshot for ``target`` without persisting.
 
     Returns the JSON-serializable dict that gets stored on
-    ``PortfolioTarget.marked_snapshot``.
+    ``PortfolioTarget.marked_snapshot``. ``weights`` defaults to the cycle's
+    ``target_weights``; pass an explicit book (e.g. ``baseline_weights``) to
+    mark the council-free baseline with the identical forward-return machinery.
     """
     user = target.strategy.user
     snapshot_at = timezone.now()
     mark_as_of = on or snapshot_at.date()
 
-    weights = target.target_weights or {}
+    weights = (target.target_weights if weights is None else weights) or {}
     tickers = sorted(weights.keys())
 
     per_ticker: dict[str, dict[str, Any]] = {}
@@ -212,4 +215,25 @@ def ensure_cycle_snapshot(
     snapshot = compute_cycle_snapshot(target)
     target.marked_snapshot = snapshot
     target.save(update_fields=["marked_snapshot"])
+    return snapshot
+
+
+def ensure_baseline_snapshot(
+    target: PortfolioTarget,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Marked snapshot for the cycle's council-free ``baseline_weights`` book,
+    computed/persisted on ``PortfolioTarget.baseline_marked_snapshot`` if
+    missing or stale. Returns ``{}`` when the cycle captured no baseline (e.g.
+    pre-council-alpha cycles — council-alpha is forward-only)."""
+    weights = target.baseline_weights or {}
+    if not weights:
+        return {}
+    existing = target.baseline_marked_snapshot or {}
+    if existing and not force and _snapshot_is_fresh(existing):
+        return existing
+    snapshot = compute_cycle_snapshot(target, weights=weights)
+    target.baseline_marked_snapshot = snapshot
+    target.save(update_fields=["baseline_marked_snapshot"])
     return snapshot

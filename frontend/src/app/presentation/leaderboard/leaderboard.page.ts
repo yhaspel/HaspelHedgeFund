@@ -44,6 +44,9 @@ interface StrategyRow {
   annualised_turnover_pct: string | null;
   avg_cost_per_cycle_usd: string | null;
   council_alpha_bps: string | null;
+  council_cost_usd: string | null;
+  council_net_value_usd: string | null;
+  baseline_version: string;
   provisional: boolean;
 }
 interface DecisionRow {
@@ -225,7 +228,19 @@ interface DecisionRow {
         }
       } @else {
         <section class="card">
-          <div class="card-hd"><h2 class="title">My strategies</h2></div>
+          <div class="card-hd">
+            <h2 class="title">My strategies</h2>
+            <select
+              class="sel sm"
+              [value]="stratSort()"
+              (change)="onStratSort($any($event.target).value)"
+              aria-label="Sort strategies"
+            >
+              <option value="sharpe">Sort: Sharpe</option>
+              <option value="council_alpha_bps">Sort: Council α</option>
+              <option value="total_return_pct">Sort: Return</option>
+            </select>
+          </div>
           @if (strategies().length === 0) {
             <p class="empty">
               No strategy cycles scored yet for this window. Rows appear once a
@@ -264,7 +279,24 @@ interface DecisionRow {
                       <td class="r">{{ pctRaw(s.annualised_turnover_pct) }}</td>
                       <td class="r">{{ usd(s.avg_cost_per_cycle_usd) }}</td>
                       <td class="r">
-                        <span title="Council-alpha shadow baseline ships in a P3b follow-up">—</span>
+                        @if (s.council_alpha_bps !== null) {
+                          <span
+                            [class.pos]="num0(s.council_alpha_bps) >= 0"
+                            [class.neg]="num0(s.council_alpha_bps) < 0"
+                            [title]="councilTip(s)"
+                            >{{ bps(s.council_alpha_bps) }}</span
+                          >
+                          <div class="micro">
+                            {{ usd0(s.council_net_value_usd) }} · cost
+                            {{ usd0(s.council_cost_usd) }}
+                          </div>
+                        } @else {
+                          <span
+                            class="muted"
+                            title="Needs 30 days of baseline cycles before council-alpha is meaningful"
+                            >—</span
+                          >
+                        }
                       </td>
                     </tr>
                   }
@@ -317,6 +349,11 @@ interface DecisionRow {
       .sub { color: var(--text-3); font-size: 12.5px; margin-top: 4px; max-width: 640px; }
       .head-right { display:flex; gap:8px; align-items:center; }
       .sel { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      .sel.sm { padding:4px 8px; font-size:12px; }
+      .card-hd { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+      .tbl .pos { color: var(--pos, #22c55e); }
+      .tbl .neg { color: var(--neg, #ef4444); }
+      .tbl .micro { font-size:10.5px; color: var(--text-3); margin-top:2px; white-space:nowrap; }
       .tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border); }
       .tab { padding:8px 14px; background:none; border:none; color: var(--text-3); cursor:pointer; border-bottom:2px solid transparent; }
       .tab.active { color: var(--text-1); border-bottom-color: var(--accent); }
@@ -335,6 +372,7 @@ export class LeaderboardPage implements OnInit {
 
   readonly tab = signal<'agents' | 'strategies'>('agents');
   readonly window = signal<'30d' | '90d' | 'lifetime'>('90d');
+  readonly stratSort = signal<'sharpe' | 'council_alpha_bps' | 'total_return_pct'>('sharpe');
   readonly busy = signal(false);
 
   readonly agents = signal<AgentRow[]>([]);
@@ -353,6 +391,11 @@ export class LeaderboardPage implements OnInit {
     this.load();
   }
 
+  onStratSort(sort: string): void {
+    this.stratSort.set(sort as 'sharpe' | 'council_alpha_bps' | 'total_return_pct');
+    this.loadStrategies();
+  }
+
   load(): void {
     const w = this.window();
     this.api
@@ -361,12 +404,18 @@ export class LeaderboardPage implements OnInit {
     this.api
       .get<{ rows: ModelRow[] }>(`/leaderboard/models/?window=${w}`)
       .subscribe((r) => this.models.set(r.rows ?? []));
-    this.api
-      .get<{ rows: StrategyRow[] }>(`/leaderboard/strategies/?window=${w}`)
-      .subscribe((r) => this.strategies.set(r.rows ?? []));
+    this.loadStrategies();
     this.api
       .get<{ rows: StrategyRow[] }>(`/leaderboard/strategies/by-flavor/?window=${w}`)
       .subscribe((r) => this.flavors.set(r.rows ?? []));
+  }
+
+  loadStrategies(): void {
+    this.api
+      .get<{ rows: StrategyRow[] }>(
+        `/leaderboard/strategies/?window=${this.window()}&sort=${this.stratSort()}`,
+      )
+      .subscribe((r) => this.strategies.set(r.rows ?? []));
   }
 
   drill(agent: string): void {
@@ -404,5 +453,26 @@ export class LeaderboardPage implements OnInit {
   }
   usd(v: string | null): string {
     return v === null ? '—' : '$' + Number(v).toFixed(4);
+  }
+  num0(v: string | null): number {
+    return v === null ? 0 : Number(v);
+  }
+  bps(v: string | null): string {
+    if (v === null) return '—';
+    const n = Number(v);
+    return (n >= 0 ? '+' : '') + Math.round(n).toLocaleString() + ' bps';
+  }
+  usd0(v: string | null): string {
+    if (v === null) return '—';
+    const n = Number(v);
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  councilTip(s: StrategyRow): string {
+    return (
+      `Annualised return vs the council-free baseline. ` +
+      `Council net value ${this.usd0(s.council_net_value_usd)} ` +
+      `(after ${this.usd0(s.council_cost_usd)} of LLM cost) · ` +
+      `baseline ${s.baseline_version || 'n/a'}`
+    );
   }
 }

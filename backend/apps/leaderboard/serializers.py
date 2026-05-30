@@ -37,7 +37,8 @@ class StrategyScorecardSerializer(serializers.ModelSerializer):
             "window", "as_of", "n_cycles", "total_return_pct",
             "annualised_return_pct", "sharpe", "sortino", "max_drawdown_pct",
             "hit_rate", "annualised_turnover_pct", "avg_cost_per_cycle_usd",
-            "council_alpha_bps", "provisional", "last_updated",
+            "council_alpha_bps", "council_cost_usd", "council_net_value_usd",
+            "baseline_version", "provisional", "last_updated",
         )
 
     def get_flavor_display(self, obj: StrategyScorecard) -> str:
