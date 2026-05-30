@@ -35,7 +35,7 @@ import {
   template: `
     <section class="card mt-4 p-4" data-test="tradestation-connect-flow">
       <div class="card-hd">
-        <span class="title">Connect TradeStation</span>
+        <h2 class="title">Connect TradeStation</h2>
         <span class="text-[11.5px] text-text-3 mono ml-2">
           mode: {{ account.mode }}
         </span>

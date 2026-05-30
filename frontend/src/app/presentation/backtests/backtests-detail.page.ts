@@ -2,7 +2,7 @@ import {
   AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild, effect, inject,
 } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   Chart, ChartConfiguration, LineController, LineElement, PointElement,
   CategoryScale, LinearScale, Tooltip, Legend, Title, ScatterController,
@@ -16,6 +16,10 @@ Chart.register(
   LineController, LineElement, PointElement, CategoryScale, LinearScale,
   Tooltip, Legend, Title, ScatterController, BarController, BarElement,
 );
+
+const DELETABLE_BACKTEST_STATUSES = new Set([
+  'cancelled', 'aborted_budget', 'aborted_partial', 'synthetic',
+]);
 
 @Component({
   selector: 'hf-backtests-detail',
@@ -39,6 +43,14 @@ Chart.register(
                 (click)="cancelRun(bt.id)"
                 data-test="cancel-backtest">
                 {{ cancelling ? 'Cancelling…' : 'Cancel run' }}
+              </button>
+            }
+            @if (canDelete(bt.status)) {
+              <button type="button" class="btn danger"
+                [disabled]="deleting"
+                (click)="confirmDelete(bt.id, bt.name)"
+                data-test="delete-backtest">
+                {{ deleting ? 'Deleting…' : 'Delete' }}
               </button>
             }
           }
@@ -116,23 +128,26 @@ Chart.register(
 
           <div class="grid grid-cols-2 gap-[18px] mb-[18px]">
             <section class="card">
-              <div class="card-hd"><span class="title">Stitched OOS equity vs baseline ({{ bt.baseline }})</span></div>
-              <div class="card-bd"><div class="relative h-[260px]"><canvas #equityChart></canvas></div></div>
+              <div class="card-hd"><h2 class="title">Stitched OOS equity vs baseline ({{ bt.baseline }})</h2></div>
+              <div class="card-bd"><div class="relative h-[260px]"><canvas #equityChart role="img"
+                [attr.aria-label]="'Stitched out-of-sample equity curve vs the ' + bt.baseline + ' baseline for ' + bt.name + '. Portfolio OOS return ' + (bt.total_return_pct ?? 0) + '%, OOS Sharpe ' + (bt.oos_sharpe ?? 0) + '. See the Folds table below for the per-fold figures.'"></canvas></div></div>
             </section>
             <section class="card">
-              <div class="card-hd"><span class="title">IS vs OOS Sharpe per fold</span></div>
-              <div class="card-bd"><div class="relative h-[260px]"><canvas #deflationChart></canvas></div></div>
+              <div class="card-hd"><h2 class="title">IS vs OOS Sharpe per fold</h2></div>
+              <div class="card-bd"><div class="relative h-[260px]"><canvas #deflationChart role="img"
+                aria-label="In-sample versus out-of-sample Sharpe ratio scatter, one point per walk-forward fold. Points near the diagonal indicate the in-sample edge held out of sample. Per-fold figures are in the Folds table below."></canvas></div></div>
             </section>
           </div>
 
           <section class="card mb-[18px]">
-            <div class="card-hd"><span class="title">Per-agent attribution (stitched OOS PnL delta)</span></div>
-            <div class="card-bd"><div class="relative h-[240px]"><canvas #attributionChart></canvas></div></div>
+            <div class="card-hd"><h2 class="title">Per-agent attribution (stitched OOS PnL delta)</h2></div>
+            <div class="card-bd"><div class="relative h-[240px]"><canvas #attributionChart role="img"
+              aria-label="Per-agent attribution bar chart: each bar is one council agent's contribution to the stitched out-of-sample PnL delta, positive bars added return and negative bars detracted."></canvas></div></div>
           </section>
         }
 
         <section class="card">
-          <div class="card-hd"><span class="title">Folds</span></div>
+          <div class="card-hd"><h2 class="title">Folds</h2></div>
           <table class="tbl">
             <thead><tr>
               <th>#</th><th>IS range</th><th>OOS range</th>
@@ -161,6 +176,7 @@ Chart.register(
 export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   readonly store = inject(BacktestsStore);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private equityChartInstance: Chart | null = null;
   private deflationChartInstance: Chart | null = null;
   private attributionChartInstance: Chart | null = null;
@@ -193,6 +209,22 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     this.store.cancel(id).subscribe({
       next: () => { this.cancelling = false; },
       error: () => { this.cancelling = false; },
+    });
+  }
+
+  // P4 WS-D: delete a cancelled / aborted / synthetic backtest, then return
+  // to the list. done + failed never show the button (protected history).
+  deleting = false;
+  canDelete(status: string): boolean {
+    return DELETABLE_BACKTEST_STATUSES.has(status);
+  }
+  confirmDelete(id: number, name: string): void {
+    if (this.deleting) return;
+    if (!window.confirm(`Delete backtest "${name}"? This cannot be undone.`)) return;
+    this.deleting = true;
+    this.store.deleteBacktest(id).subscribe({
+      next: () => { this.deleting = false; this.router.navigate(['/backtests']); },
+      error: () => { this.deleting = false; window.alert('Could not delete this backtest.'); },
     });
   }
 

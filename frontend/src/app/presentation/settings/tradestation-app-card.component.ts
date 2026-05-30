@@ -15,7 +15,7 @@ import { BrokerStore } from '../../abstraction/broker.store';
   imports: [CommonModule, FormsModule],
   template: `
     <section class="card" data-test="tradestation-app-card">
-      <div class="card-hd"><span class="title">TradeStation developer app (BYO)</span></div>
+      <div class="card-hd"><h2 class="title">TradeStation developer app (BYO)</h2></div>
       <div class="card-bd flex flex-col gap-3">
         <p class="text-[11.5px] text-text-3 m-0">
           Register an app on the

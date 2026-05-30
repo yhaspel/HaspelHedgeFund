@@ -94,7 +94,7 @@ type OrderType = 'market' | 'limit' | 'stop';
         </section>
 
         <section class="card p-0 overflow-hidden mb-4">
-          <div class="card-hd"><span class="title">Positions</span></div>
+          <div class="card-hd"><h2 class="title">Positions</h2></div>
           @if (o.portfolio.positions.length === 0) {
             <div class="p-4 text-xs text-text-3">No positions yet. Place an order to begin.</div>
           } @else {
@@ -135,7 +135,7 @@ type OrderType = 'market' | 'limit' | 'stop';
         </section>
 
         <section class="card p-0 overflow-hidden mb-4">
-          <div class="card-hd"><span class="title">Working orders</span>
+          <div class="card-hd"><h2 class="title">Working orders</h2>
             <span class="hint">live orders waiting to fill — cancel any time</span>
           </div>
           @if (working().length === 0) {
@@ -186,7 +186,7 @@ type OrderType = 'market' | 'limit' | 'stop';
         </section>
 
         <section class="card p-0 overflow-hidden">
-          <div class="card-hd"><span class="title">Recent fills</span>
+          <div class="card-hd"><h2 class="title">Recent fills</h2>
             <span class="hint">completed trades — last 25 events</span>
           </div>
           @if (o.recent_fills.length === 0) {
@@ -232,7 +232,7 @@ type OrderType = 'market' | 'limit' | 'stop';
       <div class="modal-overlay" (click)="newOrderOpen.set(false)">
         <div class="card order-modal" (click)="$event.stopPropagation()"
              role="dialog" aria-label="New order">
-          <div class="card-hd"><span class="title">New order</span></div>
+          <div class="card-hd"><h2 class="title">New order</h2></div>
           <div class="p-3.5 space-y-3">
             <label class="lbl block">Ticker
               <input class="input mono" type="text" [value]="ticker()"

@@ -107,6 +107,8 @@ export interface RunSummary {
   strategy_backlink?: StrategyBacklink | null;
   /** P3 prereq 2 / WS-1: persona ids requested for this run; used by Runs list. */
   personas?: string[];
+  /** P4 WS-A: id of the run this one was a rerun of; null for original runs. */
+  rerun_of?: number | null;
   /** Council decisions; empty until the run finishes. */
   decisions?: DecisionSummary[];
 }
@@ -171,6 +173,8 @@ export interface RunDetail extends RunSummary {
   investor_profile_applied?: InvestorProfileApplied | Record<string, never>;
   /** P3-D WS-D: persona-evolution audit snapshot, {} when unset. */
   persona_evolution_applied?: PersonaEvolutionApplied | Record<string, never>;
+  /** P4 WS-A: ids of runs that were reruns of this one (oldest first). */
+  reruns?: number[];
 }
 
 export interface CreateRunRequest {

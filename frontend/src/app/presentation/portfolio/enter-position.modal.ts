@@ -43,7 +43,7 @@ interface PrefillInput {
 
           <div class="entry-modal__head">
             <div class="card-hd">
-              <span class="title" id="enter-position-title">{{ titleText() }}</span>
+              <h2 class="title" id="enter-position-title">{{ titleText() }}</h2>
               <div class="actions">
                 <button class="icon-btn" (click)="onCancel()" aria-label="Close">
                   <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>

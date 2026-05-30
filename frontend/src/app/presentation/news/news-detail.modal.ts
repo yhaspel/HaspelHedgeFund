@@ -29,7 +29,7 @@ import { MarketNewsItem } from '../../core/models/news.model';
     <hf-modal (closed)="closed.emit()">
       <div class="card hf-news-detail">
         <div class="card-hd">
-          <span class="title" [id]="'news-modal-title'">News article</span>
+          <h2 class="title" [id]="'news-modal-title'">News article</h2>
           <button type="button" class="icon-btn close" (click)="closed.emit()"
                   aria-label="Close">
             <svg width="14" height="14" aria-hidden="true">

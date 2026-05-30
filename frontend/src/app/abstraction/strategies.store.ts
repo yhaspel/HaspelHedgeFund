@@ -5,6 +5,8 @@ import {
   CycleDetail,
   CycleMarkedSnapshot,
   CycleSummary,
+  EnrollmentApplyRequest,
+  EnrollmentResult,
   Portfolio,
   Position,
   Strategy,
@@ -110,6 +112,39 @@ export class StrategiesStore {
     return this.api.post(
       `/strategies/${strategyId}/cycles/${targetId}/reject/`,
       {},
+    );
+  }
+  /** P4 WS-B: rerun a terminal (failed/cancelled) cycle. Dispatches a fresh
+   *  cycle for the same as_of date; the old row is stamped superseded. */
+  rerunCycle(
+    strategyId: number,
+    targetId: number,
+  ): Observable<{ task_id: string; new_target_pending: boolean; superseded_target_id: number }> {
+    return this.api.post(
+      `/strategies/${strategyId}/cycles/${targetId}/rerun/`,
+      {},
+    );
+  }
+  /** P4 WS-C: delete a strategy with no non-cancelled cycles. */
+  deleteStrategy(id: number): Observable<void> {
+    return this.api.delete<void>(`/strategies/${id}/`);
+  }
+  /** P4 WS-E: toggle the per-strategy "auto-enter on cycle done" preference. */
+  setAutoEnroll(id: number, value: boolean): Observable<Strategy> {
+    return this.api.patch<Strategy>(`/strategies/${id}/`, { auto_enroll_on_done: value }).pipe(
+      tap((r) => this._currentStrategy.set(r)),
+    );
+  }
+  /** P4 WS-E: preview the materialization of a done cycle into the book. */
+  previewEnrollment(strategyId: number, targetId: number): Observable<EnrollmentResult> {
+    return this.api.get<EnrollmentResult>(`/strategies/${strategyId}/enroll/${targetId}/`);
+  }
+  /** P4 WS-E: apply the enrollment (auto = all rows, manual = approved subset). */
+  applyEnrollment(
+    strategyId: number, targetId: number, body: EnrollmentApplyRequest,
+  ): Observable<EnrollmentResult> {
+    return this.api.post<EnrollmentResult>(
+      `/strategies/${strategyId}/enroll/${targetId}/`, body,
     );
   }
   listCycles(id: number): Observable<CycleSummary[]> {

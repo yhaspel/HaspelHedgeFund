@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 
 from django.conf import settings
 from django.utils import timezone
@@ -17,6 +18,8 @@ from .serializers import (
     RunListSerializer,
 )
 from .tasks import execute_run
+
+logger = logging.getLogger(__name__)
 
 
 class RunListCreateView(generics.ListCreateAPIView):
@@ -83,6 +86,57 @@ class RunCancelView(APIView):
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error_message", "finished_at"])
         return Response({"id": run.pk, "status": run.status})
+
+
+class RunRerunView(APIView):
+    """P4 WS-A: rerun a terminal Analysis run.
+
+    Creates a NEW Run row copying the original's payload (tickers,
+    model_overrides, as_of_date, personas, source, portfolio_target) and
+    links it back via ``rerun_of`` so the original is never mutated — the
+    failed/cancelled row stays as evidence. A strategy-sourced rerun keeps
+    ``source="strategy"`` and its cycle back-link. The new run re-resolves
+    providers against the user's *current* keys.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            original = Run.objects.get(pk=pk, user=request.user)
+        except Run.DoesNotExist:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if original.status in Run.ACTIVE_STATUSES:
+            return Response(
+                {"detail": f"run is still {original.status}; cancel or wait for it to finish"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        # Copy the request payload verbatim. personas is preserved as-is
+        # (empty list = "all", a meaning execute_run relies on). portfolio_target
+        # may already be NULL if the original cycle was cancelled/deleted; that
+        # is fine — the run stays source="strategy" but loses the back-link.
+        new_run = Run.objects.create(
+            user=request.user,
+            tickers=list(original.tickers or []),
+            model_overrides=dict(original.model_overrides or {}),
+            as_of_date=original.as_of_date,
+            personas=list(original.personas or []),
+            source=original.source,
+            portfolio_target_id=original.portfolio_target_id,
+            rerun_of=original,
+        )
+        async_result = execute_run.delay(new_run.id)
+        Run.objects.filter(pk=new_run.pk).update(
+            celery_task_id=str(async_result.id or "")
+        )
+        logger.info(
+            "run_rerun original_id=%s new_id=%s user_id=%s",
+            original.pk, new_run.pk, request.user.id,
+        )
+        return Response(
+            {"id": new_run.pk, "status": new_run.status, "rerun_of": original.pk},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ModelCatalogView(APIView):

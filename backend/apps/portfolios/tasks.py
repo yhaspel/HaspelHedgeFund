@@ -80,6 +80,80 @@ def _resolve_as_of(s: str | None) -> date_cls:
     return datetime.fromisoformat(str(s)).date()
 
 
+def _resolve_cycle_target(
+    strategy: PortfolioStrategy,
+    as_of: date_cls,
+    *,
+    defaults: dict,
+    supersedes_target_id: int | None = None,
+) -> PortfolioTarget:
+    """Resolve the PortfolioTarget row a cycle run should write into.
+
+    Two modes:
+
+    * Normal (``supersedes_target_id is None``) — preserve the legacy
+      single-row-per-day semantics: reuse the most recent *non-superseded* row
+      for (strategy, as_of) if one exists, else create a fresh row. Scoping to
+      non-superseded rows is what keeps this unambiguous after a rerun has left
+      an older terminal row behind (P4 WS-B), so we never hit
+      ``MultipleObjectsReturned`` the way a bare ``update_or_create`` would.
+
+    * Rerun (``supersedes_target_id`` set) — leave the old terminal row in
+      place and create a brand-new row, stamping ``old.superseded_by = new`` so
+      the cycles list can render a "↻ superseded" pill. Idempotent across the
+      multiple creation sites a single cycle has (e.g. the pairs flavor creates
+      an early audit row then a final row): if the old row already points at a
+      fresh row, that row is reused instead of creating a second one.
+    """
+    if supersedes_target_id is not None:
+        old = PortfolioTarget.objects.filter(pk=supersedes_target_id).first()
+        if old is not None and old.superseded_by_id:
+            target = old.superseded_by
+            for key, value in defaults.items():
+                setattr(target, key, value)
+            target.save()
+            return target
+        target = PortfolioTarget.objects.create(
+            strategy=strategy, as_of_date=as_of, **defaults
+        )
+        if old is not None:
+            PortfolioTarget.objects.filter(pk=old.pk).exclude(pk=target.pk).update(
+                superseded_by=target
+            )
+        return target
+
+    target = (
+        PortfolioTarget.objects.filter(
+            strategy=strategy, as_of_date=as_of, superseded_by__isnull=True,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if target is not None:
+        for key, value in defaults.items():
+            setattr(target, key, value)
+        target.save()
+        return target
+    return PortfolioTarget.objects.create(
+        strategy=strategy, as_of_date=as_of, **defaults
+    )
+
+
+def _maybe_auto_enroll(target: PortfolioTarget) -> None:
+    """P4 WS-E: if the strategy opted into auto-enroll, materialize the just-
+    completed cycle into its book. Broad try/except — a transient enrollment
+    failure (e.g. a stale mark) must never flip a successful cycle to failed."""
+    try:
+        strategy = target.strategy
+        if not getattr(strategy, "auto_enroll_on_done", False):
+            return
+        from . import runs_bridge
+
+        runs_bridge.enroll_target_into_portfolio(target, mode="auto")
+    except Exception:  # pragma: no cover — defensive; logged, never re-raised
+        log.exception("auto_enroll_failed target_id=%s", target.pk)
+
+
 def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
     """Order of precedence:
       1. User's per-agent defaults from Settings → Models (the "Default model"
@@ -753,13 +827,15 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.status = "done"
     target.finished_at = timezone.now()
     target.save()
+    _maybe_auto_enroll(target)
 
     PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 
 
 def _run_risk_parity_cycle(
-    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]]
+    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]],
+    *, supersedes_target_id: int | None = None,
 ) -> dict:
     """Deterministic inverse-vol cycle. No LLM, no screener."""
     data_provider = get_fmp_provider(user=strategy.user)
@@ -839,8 +915,9 @@ def _run_risk_parity_cycle(
                     )
 
     with transaction.atomic():
-        target, _ = PortfolioTarget.objects.update_or_create(
-            strategy=strategy, as_of_date=as_of,
+        target = _resolve_cycle_target(
+            strategy, as_of,
+            supersedes_target_id=supersedes_target_id,
             defaults={
                 "status": "running",
                 "target_weights": {},
@@ -933,12 +1010,14 @@ def _run_risk_parity_cycle(
     target.status = "done"
     target.finished_at = timezone.now()
     target.save()
+    _maybe_auto_enroll(target)
     PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 
 
 def _run_pairs_cycle(
-    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]]
+    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]],
+    *, supersedes_target_id: int | None = None,
 ) -> dict:
     """Deterministic pairs-trading cycle (no LLM, no council).
 
@@ -1076,11 +1155,13 @@ def _run_pairs_cycle(
         personas = list(strategy.personas or [])
         news_service = get_news_service(user=strategy.user)
         # Ensure a target row exists so we can link Runs to it. The cycle's
-        # target row is created later below via update_or_create — for pair
-        # councils we need it earlier so audit Runs have a parent.
+        # target row is created later below via _resolve_cycle_target — for pair
+        # councils we need it earlier so audit Runs have a parent. On a rerun
+        # this creates the fresh superseding row; the later call reuses it.
         with transaction.atomic():
-            audit_target, _ = PortfolioTarget.objects.update_or_create(
-                strategy=strategy, as_of_date=as_of,
+            audit_target = _resolve_cycle_target(
+                strategy, as_of,
+                supersedes_target_id=supersedes_target_id,
                 defaults={
                     "status": PortfolioTarget.RUNNING_COUNCIL,
                     "target_weights": {},
@@ -1345,10 +1426,12 @@ def _run_pairs_cycle(
         )
         z_history_by_pair[p.pk] = list(reversed([float(v) for v in recent]))
 
-    # 5) Persist PortfolioTarget + orders.
+    # 5) Persist PortfolioTarget + orders. On a rerun, the early audit_target
+    # call already created the fresh superseding row; this reuses it.
     with transaction.atomic():
-        target, _ = PortfolioTarget.objects.update_or_create(
-            strategy=strategy, as_of_date=as_of,
+        target = _resolve_cycle_target(
+            strategy, as_of,
+            supersedes_target_id=supersedes_target_id,
             defaults={
                 "status": "running",
                 "target_weights": {},
@@ -1530,6 +1613,7 @@ def _run_pairs_cycle(
     target.status = "done"
     target.finished_at = timezone.now()
     target.save()
+    _maybe_auto_enroll(target)
     PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 
@@ -1540,6 +1624,7 @@ def daily_long_short_cycle(
     as_of_date: str | None = None,
     *,
     force: bool = False,
+    supersedes_target_id: int | None = None,
 ) -> dict:
     strategy = PortfolioStrategy.objects.select_related("universe", "portfolio").get(
         pk=strategy_id
@@ -1577,10 +1662,14 @@ def daily_long_short_cycle(
     # council. Drops the entire LLM cost (matches plan default
     # enable_council_veto=False). The veto-mode wiring is a follow-up.
     if strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
-        return _run_risk_parity_cycle(strategy, as_of, members)
+        return _run_risk_parity_cycle(
+            strategy, as_of, members, supersedes_target_id=supersedes_target_id
+        )
 
     if strategy.kind == PortfolioStrategy.KIND_PAIRS:
-        return _run_pairs_cycle(strategy, as_of, members)
+        return _run_pairs_cycle(
+            strategy, as_of, members, supersedes_target_id=supersedes_target_id
+        )
 
     try:
         # P2n: every screener call routes through a user-keyed FMP provider.
@@ -1676,8 +1765,9 @@ def daily_long_short_cycle(
             short_candidates=screener_out["short_candidates"],
             universe_size_evaluated=screener_out["universe_size_evaluated"],
         )
-        target, _ = PortfolioTarget.objects.update_or_create(
-            strategy=strategy, as_of_date=as_of,
+        target = _resolve_cycle_target(
+            strategy, as_of,
+            supersedes_target_id=supersedes_target_id,
             defaults={
                 "status": PortfolioTarget.SCREENING,
                 "screener_ranking": ranking,

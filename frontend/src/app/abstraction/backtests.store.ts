@@ -53,6 +53,12 @@ export class BacktestsStore {
     return this.api.post<{ id: number; status: string }>(`/backtests/${id}/cancel/`, {});
   }
 
+  // P4 WS-D: delete a cancelled / aborted / synthetic backtest. done + failed
+  // are protected history (the backend returns 409).
+  deleteBacktest(id: number): Observable<void> {
+    return this.api.delete<void>(`/backtests/${id}/`);
+  }
+
   poll(id: number, intervalMs = 3000): void {
     this.stopPolling();
     const tick = () => {

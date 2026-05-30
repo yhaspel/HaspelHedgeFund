@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="meter" [attr.aria-label]="'Long ' + longPct + '%, Short ' + shortPct + '%'">
+    <div class="meter" role="img" [attr.aria-label]="'Long ' + longPct + '%, Short ' + shortPct + '%'">
       <span class="seg long" [style.flex]="longPct"></span>
       <span class="divider"></span>
       <span class="seg short" [style.flex]="shortPct"></span>

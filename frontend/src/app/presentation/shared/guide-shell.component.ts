@@ -5,6 +5,7 @@ import {
   computed,
   inject,
   input,
+  signal,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -60,8 +61,12 @@ import { AppShellComponent } from './app-shell.component';
             }
           </nav>
           <div class="public-actions">
-            <button class="icon-btn" (click)="toggleTheme()" aria-label="Toggle theme">
-              <svg width="16" height="16"><use href="/icons.svg#i-moon" /></svg>
+            <button class="icon-btn" (click)="toggleTheme()"
+                    [attr.aria-label]="themeToggleLabel()"
+                    [attr.aria-pressed]="theme() === 'dark'">
+              <svg width="16" height="16" aria-hidden="true">
+                <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
+              </svg>
             </button>
             <a class="btn ghost sm" routerLink="/login">Log in</a>
             <a class="btn primary sm" routerLink="/signup">Sign up</a>
@@ -125,8 +130,19 @@ export class GuideShellComponent {
     return !!this.tokens.getAccess();
   });
 
+  // P4 WS-DA-7: track theme reactively so the toggle exposes aria-pressed +
+  // a state-appropriate name (matching the main app-shell toggle).
+  readonly theme = signal<'light' | 'dark'>(
+    (document.documentElement.dataset['theme'] as 'light' | 'dark') || 'dark',
+  );
+  readonly themeToggleLabel = computed(() =>
+    this.theme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+  );
+
   toggleTheme() {
     const root = document.documentElement;
-    root.dataset['theme'] = root.dataset['theme'] === 'light' ? 'dark' : 'light';
+    const next = root.dataset['theme'] === 'light' ? 'dark' : 'light';
+    root.dataset['theme'] = next;
+    this.theme.set(next);
   }
 }

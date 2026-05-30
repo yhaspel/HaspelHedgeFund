@@ -36,7 +36,7 @@ import {
   template: `
     <section class="card mt-4 p-4" data-test="ibkr-connect-flow">
       <div class="card-hd">
-        <span class="title">Connect Interactive Brokers</span>
+        <h2 class="title">Connect Interactive Brokers</h2>
         <span class="text-[11.5px] text-text-3 mono ml-2">
           account: {{ account.account_id }}
         </span>

@@ -68,6 +68,15 @@ import { MarketNewsItem } from '../../core/models/news.model';
           <use href="/icons.svg#i-play" />
         </svg>
       </button>
+      <button
+        type="button"
+        class="pause-btn hide-btn"
+        (click)="hide.emit()"
+        aria-label="Hide the news ticker"
+        title="Hide the news ticker"
+      >
+        <svg width="13" height="13" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
+      </button>
       <div class="track-wrap" aria-hidden="true">
         <div
           #track
@@ -278,6 +287,8 @@ export class NewsChyronComponent implements AfterViewInit, OnDestroy {
   }
 
   @Output() open = new EventEmitter<MarketNewsItem>();
+  /** P4 WS-DX-2: user dismissed the ticker; the shell persists the preference. */
+  @Output() hide = new EventEmitter<void>();
 
   @ViewChild('track', { static: false }) trackRef?: ElementRef<HTMLDivElement>;
 

@@ -25,9 +25,9 @@ import { ModalComponent } from '../shared/modal.component';
       <hf-modal titleId="needs-prompt-title" (closed)="onDismiss()">
         <div class="card welcome" (click)="$event.stopPropagation()">
           <div class="card-hd">
-            <span class="title" id="needs-prompt-title">
+            <h2 class="title" id="needs-prompt-title">
               Personalize your analyses
-            </span>
+            </h2>
             <button class="icon-btn" type="button"
                     aria-label="Close"
                     (click)="onDismiss()">

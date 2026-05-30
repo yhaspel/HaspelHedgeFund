@@ -25,7 +25,7 @@ import { BrokerAccount } from '../../core/models/broker.model';
   template: `
     <section class="card mt-4 p-4" data-test="alpaca-connect-flow">
       <div class="card-hd">
-        <span class="title">Connect Alpaca (paper)</span>
+        <h2 class="title">Connect Alpaca (paper)</h2>
         <span class="pill warn ml-2"><span class="dot"></span>community-unverified</span>
       </div>
 

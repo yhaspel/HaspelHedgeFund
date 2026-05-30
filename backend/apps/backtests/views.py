@@ -1,3 +1,5 @@
+import logging
+
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.request import Request
@@ -16,6 +18,8 @@ from .serializers import (
     BacktestListSerializer,
 )
 from .tasks import run_backtest
+
+logger = logging.getLogger(__name__)
 
 
 class BacktestListCreateView(generics.ListCreateAPIView):
@@ -37,8 +41,18 @@ class BacktestListCreateView(generics.ListCreateAPIView):
         Backtest.objects.filter(pk=bt.pk).update(celery_task_id=str(async_result.id or ""))
 
 
-class BacktestDetailView(generics.RetrieveAPIView):
+class BacktestDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = BacktestDetailSerializer
+
+    # P4 WS-D: only cancelled / aborted / synthetic backtests may be deleted.
+    # done and failed are the audit trail of which configs were tried — never
+    # deletable; active ones must be cancelled first.
+    DELETABLE_STATUSES = frozenset({
+        Backtest.CANCELLED,
+        Backtest.ABORTED_BUDGET,
+        Backtest.ABORTED_PARTIAL,
+        Backtest.SYNTHETIC,
+    })
 
     def get_queryset(self):
         return (
@@ -46,6 +60,34 @@ class BacktestDetailView(generics.RetrieveAPIView):
             .select_related("metrics")
             .prefetch_related("folds")
         )
+
+    def destroy(self, request: Request, *args, **kwargs):
+        bt = self.get_object()
+        if bt.status in Backtest.ACTIVE_STATUSES:
+            logger.warning(
+                "backtest_delete_refused kind=active id=%s status=%s user_id=%s",
+                bt.pk, bt.status, request.user.id,
+            )
+            return Response(
+                {"detail": f"backtest is {bt.status}; cancel it before deleting"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if bt.status not in self.DELETABLE_STATUSES:
+            logger.warning(
+                "backtest_delete_refused kind=protected id=%s status=%s user_id=%s",
+                bt.pk, bt.status, request.user.id,
+            )
+            return Response(
+                {"detail": f"{bt.status} backtests are protected history and "
+                           "cannot be deleted"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        # Folds / days / metrics all cascade via on_delete=CASCADE.
+        bt_id, bt_status = bt.pk, bt.status
+        bt.delete()
+        logger.info("backtest_deleted id=%s status=%s user_id=%s",
+                    bt_id, bt_status, request.user.id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BacktestCancelView(APIView):

@@ -51,7 +51,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         <!-- Macro tile (wider) -->
         <section class="card macro">
           <div class="card-hd">
-            <span class="title">Macro regime</span>
+            <h2 class="title">Macro regime</h2>
             @if (macro.snapshot(); as s) {
               <span class="pill"><span class="dot"></span>as of {{ s.as_of_date }}</span>
             }
@@ -191,7 +191,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
       @if (book(); as b) {
         <section class="card mb-[18px]">
           <div class="card-hd">
-            <span class="title">Exposure</span>
+            <h2 class="title">Exposure</h2>
             <span class="pill"><span class="dot"></span>target gross {{ b.target_gross_pct }}% · net {{ b.target_net_pct }}%</span>
           </div>
           <div class="card-bd">
@@ -208,7 +208,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
       <div class="two-col">
         <section class="card">
           <div class="card-hd">
-            <span class="title">Active runs</span>
+            <h2 class="title">Active runs</h2>
             <span class="pill"
               [class.warn]="activeRuns().length > 0"
               [class.ok]="activeRuns().length === 0">
@@ -306,7 +306,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
 
         <section class="card">
           <div class="card-hd">
-            <span class="title">Strategies</span>
+            <h2 class="title">Strategies</h2>
             <a routerLink="/strategies" class="link mono">View all →</a>
           </div>
           @if (strategies.strategies().length === 0 && !strategiesLoaded()) {

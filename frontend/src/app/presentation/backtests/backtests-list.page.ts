@@ -1,9 +1,13 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+
+const DELETABLE_BACKTEST_STATUSES = new Set([
+  'cancelled', 'aborted_budget', 'aborted_partial', 'synthetic',
+]);
 
 @Component({
   selector: 'hf-backtests-list',
@@ -27,10 +31,12 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
             <a class="btn primary" routerLink="/backtests/new">Start your first walk-forward</a>
           </hf-empty-state>
         } @else {
+          <div class="tbl-scroll">
           <table class="tbl">
             <thead><tr>
               <th>Name</th><th>Status</th><th>Period</th>
               <th class="right">OOS return</th><th class="right">OOS Sharpe</th><th class="right">Deflation</th>
+              <th><span class="visually-hidden">Actions</span></th>
             </tr></thead>
             <tbody>
               @for(bt of store.list(); track bt.id){
@@ -50,10 +56,21 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
                     [style.color]="bt.deflation !== null && bt.deflation < 0.3 ? 'var(--acc-short-fg)' : bt.deflation !== null && bt.deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
                     {{ bt.deflation !== null ? (bt.deflation | number:'1.2-2') : '—' }}
                   </td>
+                  <td class="right whitespace-nowrap">
+                    @if (canDelete(bt.status)) {
+                      <button type="button" class="btn danger sm"
+                              (click)="confirmDelete(bt.id, bt.name)"
+                              [disabled]="deletingId() === bt.id"
+                              [attr.data-test]="'delete-backtest-' + bt.id">
+                        Delete
+                      </button>
+                    }
+                  </td>
                 </tr>
               }
             </tbody>
           </table>
+          </div>
         }
       </section>
     </hf-app-shell>
@@ -61,5 +78,22 @@ import { BacktestsStore } from '../../abstraction/backtests.store';
 })
 export class BacktestsListPage implements OnInit {
   readonly store = inject(BacktestsStore);
+  readonly deletingId = signal<number | null>(null);
   ngOnInit(): void { this.store.listBacktests().subscribe(); }
+
+  canDelete(status: string): boolean {
+    return DELETABLE_BACKTEST_STATUSES.has(status);
+  }
+
+  // P4 WS-D: delete a cancelled / aborted / synthetic backtest. done + failed
+  // never show the button (protected audit history).
+  confirmDelete(id: number, name: string): void {
+    if (this.deletingId() !== null) return;
+    if (!confirm(`Delete backtest "${name}"? This cannot be undone.`)) return;
+    this.deletingId.set(id);
+    this.store.deleteBacktest(id).subscribe({
+      next: () => { this.deletingId.set(null); this.store.listBacktests().subscribe(); },
+      error: () => { this.deletingId.set(null); alert('Could not delete this backtest.'); },
+    });
+  }
 }

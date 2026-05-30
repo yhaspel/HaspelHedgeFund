@@ -459,6 +459,9 @@ input[type='checkbox']:focus-visible {
   text-transform: uppercase;
   color: var(--text-3);
   font-weight: 500;
+  /* P4 WS-DA-6: card titles are now <h2>/<h3> headings (logical outline);
+     reset the default heading margin so they render exactly as the old spans. */
+  margin: 0;
 }
 .card-hd .actions {
   margin-left: auto;
@@ -472,6 +475,15 @@ input[type='checkbox']:focus-visible {
 /* Scrollable region — thin, restrained scrollbar matching the design system.
    Add this class to any element with overflow-y/x: auto. */
 .scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+/* P4 WS-DA-8: wrap wide .tbl tables so columns scroll within their own
+   region on narrow viewports instead of clipping under `.app > main`'s
+   overflow-x:hidden. Inherits the thin scrollbar styling. */
+.tbl-scroll {
+  overflow-x: auto;
+  max-width: 100%;
   scrollbar-width: thin;
   scrollbar-color: var(--border-2) transparent;
 }
@@ -1049,8 +1061,10 @@ input[type='checkbox']:focus-visible {
   font-size: 18px;
   margin-bottom: 8px;
 }
+/* P4 WS-DA-2: de-emphasize via the muted text token, not opacity — opacity on
+   already-muted text drops it below the 4.5:1 contrast minimum. */
 .stat-cell.dim {
-  opacity: 0.55;
+  color: var(--text-3);
 }
 @media (max-width: 900px) {
   .decision-grid { grid-template-columns: minmax(0, 1fr); }

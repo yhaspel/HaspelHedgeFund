@@ -38,7 +38,7 @@ export interface BrokerOrderTicketDecision {
     <hf-modal titleId="broker-ticket-title" (closed)="onCancel()">
       <div class="card max-w-[460px]" (click)="$event.stopPropagation()">
         <div class="card-hd">
-          <span class="title" id="broker-ticket-title">Submit as broker order</span>
+          <h2 class="title" id="broker-ticket-title">Submit as broker order</h2>
         </div>
         <div class="p-3.5">
           <div class="text-xs text-text-2">

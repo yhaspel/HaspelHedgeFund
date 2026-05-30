@@ -191,6 +191,16 @@ class PositionSuggestionSerializer(serializers.Serializer):
 class StrategySerializer(serializers.ModelSerializer):
     universe_name = serializers.CharField(source="universe.name", read_only=True)
     portfolio_name = serializers.CharField(source="portfolio.name", read_only=True)
+    # P4 WS-C: count of non-cancelled cycles. Gates the Delete affordance — a
+    # strategy is deletable only when this is 0. Reads a queryset annotation
+    # when present (list/detail views provide it) to avoid an N+1 count.
+    targets_count_active = serializers.SerializerMethodField()
+
+    def get_targets_count_active(self, strategy) -> int:
+        annotated = getattr(strategy, "targets_count_active_annotated", None)
+        if annotated is not None:
+            return annotated
+        return strategy.targets.exclude(status="cancelled").count()
 
     class Meta:
         model = PortfolioStrategy
@@ -216,7 +226,8 @@ class StrategySerializer(serializers.ModelSerializer):
             "pair_cointegration_p_max", "pair_lookback_days",
             "pair_correlation_min",
             "enable_pair_council", "pair_council_min_confidence",
-            "auto_run_council",
+            "auto_run_council", "auto_enroll_on_done",
+            "targets_count_active",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
@@ -273,11 +284,15 @@ class ScreenerRankingSerializer(serializers.ModelSerializer):
 
 
 class PortfolioTargetSummarySerializer(serializers.ModelSerializer):
+    superseded_by = serializers.IntegerField(source="superseded_by_id", read_only=True)
+
     class Meta:
         model = PortfolioTarget
         fields = ("id", "as_of_date", "status", "gross_pct", "net_pct",
                   "realised_net_pct", "realised_portfolio_beta",
-                  "total_cost_usd", "created_at", "finished_at")
+                  "total_cost_usd", "created_at", "finished_at",
+                  # P4 WS-B: rerun supersede link; P4 WS-E: enrollment marker.
+                  "superseded_by", "enrolled_at")
 
 
 class PortfolioTargetRunSummarySerializer(serializers.ModelSerializer):
@@ -302,6 +317,7 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
     orders = RebalanceOrderSerializer(many=True, read_only=True)
     screener_ranking = ScreenerRankingSerializer(read_only=True)
     candidate_runs = serializers.SerializerMethodField()
+    superseded_by = serializers.IntegerField(source="superseded_by_id", read_only=True)
 
     class Meta:
         model = PortfolioTarget
@@ -317,6 +333,8 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
             # P3 addendum: cycle-level mark-to-market snapshot.
             "marked_snapshot",
             "total_cost_usd", "error_message",
+            # P4 WS-B/WS-E: rerun supersede link + enrollment marker.
+            "superseded_by", "enrolled_at",
             "created_at", "finished_at",
         )
 

@@ -39,7 +39,7 @@ import { TickerPopoverComponent } from './ticker-popover.component';
         (focus)="onFocus()"
         (blur)="onBlur()"
       >{{ ticker }}</span>
-      <hf-popover #pop placement="bottom" align="start" role="tooltip" surface="bare">
+      <hf-popover #pop placement="bottom" align="start" surface="bare">
         @if (pop.open() && !disablePopover && fetchedOnce) {
           <hf-ticker-popover [ticker]="ticker"></hf-ticker-popover>
         }

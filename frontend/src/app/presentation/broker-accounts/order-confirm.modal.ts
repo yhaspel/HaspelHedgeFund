@@ -23,7 +23,7 @@ const NOTIONAL_THRESHOLD = 1000;
     <hf-modal titleId="order-confirm-title" (closed)="onCancel()">
       <div class="card" style="max-width:480px" (click)="$event.stopPropagation()">
         <div class="card-hd">
-          <span class="title" id="order-confirm-title">Confirm and submit order</span>
+          <h2 class="title" id="order-confirm-title">Confirm and submit order</h2>
         </div>
         <div class="p-3.5">
           @if (order) {

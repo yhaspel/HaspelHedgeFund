@@ -108,7 +108,7 @@ type ViewMode = 'results' | 'watchlist';
 
         <section class="card">
           <div class="card-hd run-bar">
-            <span class="title">Results</span>
+            <h2 class="title">Results</h2>
             @if (store.result(); as r) {
               <span class="muted">
                 {{ r.returned_count }} of {{ r.universe_size }} ·

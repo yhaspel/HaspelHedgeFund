@@ -40,7 +40,7 @@ import {
       <div class="grid grid-cols-2 gap-[18px] max-w-[1100px]">
         <!-- A: Provider keys (BYO) -->
         <section class="card">
-          <div class="card-hd"><span class="title">Provider keys (BYO)</span></div>
+          <div class="card-hd"><h2 class="title">Provider keys (BYO)</h2></div>
           <div class="card-bd flex flex-col gap-3">
             <p class="text-[11.5px] text-text-3 m-0">
               Keys are stored Fernet-encrypted on your user row. P4a will replace this with a multi-tenant vault.
@@ -107,7 +107,7 @@ import {
 
         <!-- B: Default model + preset + ceiling -->
         <section class="card">
-          <div class="card-hd"><span class="title">Defaults &amp; cost ceiling</span></div>
+          <div class="card-hd"><h2 class="title">Defaults &amp; cost ceiling</h2></div>
           <div class="card-bd flex flex-col gap-3">
             <div class="field">
               <label class="lbl" for="global-default">Default model (applies to every agent)</label>
@@ -157,7 +157,7 @@ import {
 
         <!-- C: per-agent defaults -->
         <section class="card col-span-2">
-          <div class="card-hd"><span class="title">Per-agent defaults</span></div>
+          <div class="card-hd"><h2 class="title">Per-agent defaults</h2></div>
           <div class="card-bd flex flex-col gap-3.5">
             <p class="text-[11.5px] text-text-3 m-0">
               "Current default" = what the active preset (<b>{{ preset }}</b>) resolves to. Pick an explicit model to override it for this agent.
@@ -207,7 +207,7 @@ import {
 
         <!-- D2 (P3.1): Portfolio settings -->
         <section class="card col-span-2" data-test="portfolio-settings-card">
-          <div class="card-hd"><span class="title">Portfolio</span></div>
+          <div class="card-hd"><h2 class="title">Portfolio</h2></div>
           <div class="card-bd flex flex-col gap-3.5">
             <p class="text-[11.5px] text-text-3 m-0">
               Controls how the Manual Book's positions are marked to market on
@@ -260,7 +260,7 @@ import {
 
         <!-- D3 (P3-prereq-4): News settings -->
         <section class="card col-span-2" data-test="news-settings-card">
-          <div class="card-hd"><span class="title">News</span></div>
+          <div class="card-hd"><h2 class="title">News</h2></div>
           <div class="card-bd flex flex-col gap-3.5">
             <p class="text-[11.5px] text-text-3 m-0">
               Controls the
@@ -348,7 +348,7 @@ import {
         <!-- D4 (P3-D): Persona Evolution -->
         <section class="card col-span-2" data-test="persona-evolution-card">
           <div class="card-hd flex items-center justify-between">
-            <span class="title">Persona Evolution</span>
+            <h2 class="title">Persona Evolution</h2>
             @if (evoSettings()?.cost_cap_reached_at) {
               <span class="pill" style="background: var(--acc-short-soft); color: var(--acc-short-fg);" data-test="evo-cap-reached">
                 <span class="dot"></span>monthly cost cap reached
@@ -477,7 +477,7 @@ import {
               <tbody>
                 @for (p of evoStore.profiles(); track p.persona_name) {
                   <tr [attr.data-test-evo-row]="p.persona_name"
-                      [style.opacity]="p.is_evolvable ? 1 : 0.55">
+                      [class.evo-frozen]="!p.is_evolvable">
                     <td>
                       <div>{{ p.display_name }}</div>
                       @if (p.firm_name) {
@@ -576,7 +576,7 @@ import {
         <!-- D: Available models -->
         <section class="card col-span-2">
           <div class="card-hd flex items-center justify-between">
-            <span class="title">Available models ({{ store.models().length }})</span>
+            <h2 class="title">Available models ({{ store.models().length }})</h2>
             <div class="flex gap-2">
               <button type="button" class="btn"
                 (click)="fetchOpenRouter()"
@@ -664,6 +664,10 @@ import {
   `,
   styles: [
     `
+      /* P4 WS-DA-2: de-emphasize frozen persona rows via a subtle background
+         tint instead of reduced opacity — so text never drops below 4.5:1.
+         The "Frozen — philosophy is canon" label carries the state. */
+      tr.evo-frozen { background: var(--surface-2); }
       .cadence-row {
         display: grid;
         grid-template-columns: 24px 1fr;

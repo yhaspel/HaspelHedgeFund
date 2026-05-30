@@ -31,7 +31,7 @@ import { TickerComponent } from '../shared/ticker.component';
   template: `
     <section class="card">
       <div class="card-hd">
-        <span class="title">Watchlist</span>
+        <h2 class="title">Watchlist</h2>
         <a routerLink="/watchlist" class="link sm" aria-label="Manage watchlist">
           Manage →
         </a>

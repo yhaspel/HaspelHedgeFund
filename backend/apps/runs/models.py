@@ -56,6 +56,17 @@ class Run(models.Model):
         on_delete=models.SET_NULL,
         db_index=True,
     )
+    # P4 WS-A: rerun provenance. A run created by "Rerun" copies the original's
+    # payload and points back here so the list/detail can show "Rerun of #N"
+    # and the original can list its reruns. SET_NULL so deleting the original
+    # never destroys the chain.
+    rerun_of = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        related_name="reruns",
+        on_delete=models.SET_NULL,
+    )
 
     # P01 review: first-class evidence/provenance for run outputs.
     # Structure: {"items": [{"agent": str, "provider": str, "source": str,

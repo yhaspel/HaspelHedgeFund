@@ -49,7 +49,7 @@ import { ModalComponent } from '../shared/modal.component';
       <hf-modal [titleId]="'save-screen-title'" (closed)="openSave.set(false)">
         <div class="card save-modal" (click)="$event.stopPropagation()">
           <div class="card-hd">
-            <span class="title" id="save-screen-title">Save screen</span>
+            <h2 class="title" id="save-screen-title">Save screen</h2>
             <div class="actions">
               <button class="icon-btn" (click)="openSave.set(false)" aria-label="Close">
                 <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>

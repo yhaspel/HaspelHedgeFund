@@ -19,9 +19,9 @@ import { LiveDisclaimer } from '../../core/models/broker.model';
     <hf-modal titleId="disclaimer-title" [dismissOnOverlay]="false" (closed)="closed.emit()">
       <div class="card" style="max-width:540px" (click)="$event.stopPropagation()">
         <div class="card-hd">
-          <span class="title" id="disclaimer-title">
+          <h2 class="title" id="disclaimer-title">
             Live-trading disclaimer · version {{ disclaimer?.version }}
-          </span>
+          </h2>
         </div>
         <div class="p-3.5">
           @if (disclaimer) {

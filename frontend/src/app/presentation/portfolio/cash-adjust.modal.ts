@@ -14,7 +14,7 @@ import { ModalComponent } from '../shared/modal.component';
       <hf-modal titleId="cash-adjust-title" (closed)="onCancel()">
         <div class="card cash-modal" (click)="$event.stopPropagation()">
           <div class="card-hd">
-            <span class="title" id="cash-adjust-title">Adjust manual cash</span>
+            <h2 class="title" id="cash-adjust-title">Adjust manual cash</h2>
             <div class="actions">
               <button class="icon-btn" (click)="onCancel()" aria-label="Close">
                 <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>

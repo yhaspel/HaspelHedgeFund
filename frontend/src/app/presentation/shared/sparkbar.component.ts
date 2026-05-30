@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="bars" [style.height.px]="height">
+    <div class="bars" [style.height.px]="height" aria-hidden="true">
       @for (b of bars; track $index) {
         <span class="bar" [class.up]="tone==='up'" [class.down]="tone==='down'" [style.height.%]="b"></span>
       }
