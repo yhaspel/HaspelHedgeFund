@@ -39,6 +39,8 @@ class StrategyScorecardSerializer(serializers.ModelSerializer):
             "window", "as_of", "n_cycles", "total_return_pct",
             "annualised_return_pct", "sharpe", "sortino", "max_drawdown_pct",
             "hit_rate", "annualised_turnover_pct", "avg_cost_per_cycle_usd",
+            "sharpe_p25", "sharpe_p75", "sortino_p25", "sortino_p75",
+            "max_drawdown_p25_pct", "max_drawdown_p75_pct",
             "council_alpha_bps", "council_cost_usd", "council_net_value_usd",
             "baseline_version", "provisional", "last_updated",
         )

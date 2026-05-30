@@ -385,10 +385,24 @@ def recompute_strategies(today: dt.date) -> None:
         if not valid:
             continue
 
-        def _med(key, _rows=valid):
-            vals = [x[key] for x in _rows if x.get(key) is not None]
+        def _vals(key, _rows=valid):
+            return [x[key] for x in _rows if x.get(key) is not None]
+
+        def _med(key):
+            vals = _vals(key)
             return statistics.median(vals) if vals else None
 
+        def _iqr(key):
+            """(p25, p75) across the flavor's strategies, or (None, None) if < 2."""
+            vals = _vals(key)
+            if len(vals) < 2:
+                return None, None
+            q = statistics.quantiles(vals, n=4)  # [p25, p50, p75]
+            return q[0], q[2]
+
+        dd25, dd75 = _iqr("dd")
+        sh25, sh75 = _iqr("sharpe")
+        so25, so75 = _iqr("sortino")
         StrategyScorecard.objects.create(
             strategy=None, flavor=flavor, window=window, as_of=today,
             n_cycles=len(valid),  # for flavor rows this is "n strategies"
@@ -397,6 +411,10 @@ def recompute_strategies(today: dt.date) -> None:
             sortino=_dec4(_med("sortino")),
             max_drawdown_pct=_dec2(_med("dd") * 100) if _med("dd") is not None else None,
             hit_rate=_dec4(_med("hit")),
+            sharpe_p25=_dec4(sh25), sharpe_p75=_dec4(sh75),
+            sortino_p25=_dec4(so25), sortino_p75=_dec4(so75),
+            max_drawdown_p25_pct=_dec2(dd25 * 100) if dd25 is not None else None,
+            max_drawdown_p75_pct=_dec2(dd75 * 100) if dd75 is not None else None,
             provisional=False,
         )
 

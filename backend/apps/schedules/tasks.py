@@ -177,14 +177,16 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     hist.runs.set(run_ids)
 
     # ---- materiality + notify ----
+    from django.conf import settings as dj_settings
+
     from apps.notifications import materiality
-    from apps.notifications.content import build_content
+    from apps.notifications.content import build_content, build_digest_content
     from apps.notifications.services import send_notification
 
     channel = sr.notification_channel
     summary = []
-    notified = 0
     actual_cost = Decimal("0")
+    material: list[tuple] = []  # (run, result) for runs that should notify
     for run_id in run_ids:
         run = Run.objects.filter(pk=run_id).first()
         if run is None:
@@ -202,32 +204,57 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
             result.setdefault("reasons", []).insert(0, "cost ceiling overage (notify_only)")
             result["notify"] = True
         summary.append(result)
-        if result["notify"] and channel is not None and channel.is_active:
-            content = build_content(run, result)
+        if result["notify"]:
+            material.append((run, result))
+
+    # One digest when a single fire surfaces many material events (plan refinement
+    # #4), else an individual message per ticker (per-ticker throttle applies).
+    notified = 0
+    digest = False
+    if channel is not None and channel.is_active and material:
+        threshold = int(getattr(dj_settings, "NOTIFICATIONS_DIGEST_THRESHOLD", 5))
+        if len(material) > threshold:
+            content = build_digest_content([r for _, r in material], sr)
             ev = send_notification(
-                channel,
-                content["subject"],
-                content["text"],
-                html_body=content["html"],
-                triggered_by=hist,
+                channel, content["subject"], content["text"],
+                html_body=content["html"], triggered_by=hist,
             )
-            if ev.delivery_status == ev.SENT:
-                notified += 1
+            digest = ev.delivery_status == ev.SENT
+            notified = len(material) if digest else 0
+        else:
+            for run, result in material:
+                content = build_content(run, result)
+                ev = send_notification(
+                    channel, content["subject"], content["text"],
+                    html_body=content["html"], triggered_by=hist,
+                    ticker=result["ticker"],
+                )
+                if ev.delivery_status == ev.SENT:
+                    notified += 1
+
+    # ---- paper auto-submit (opt-in, paper-only) ----
+    from apps.schedules.autosubmit import auto_submit_orders
+    submit_decision = auto_submit_orders(sr, hist, run_ids)
 
     hist.materiality_decision = {
         "runs": summary,
         "degraded_from": degraded_from,
         "active_preset": preset,
         "overage": overage,
+        "digest": digest,
     }
+    hist.submit_decision = submit_decision
     hist.notified_count = notified
     hist.actual_cost_usd = actual_cost
     hist.status = ScheduledRunHistory.DONE
     hist.finished_at = timezone.now()
     hist.save(
         update_fields=[
-            "materiality_decision", "notified_count", "actual_cost_usd",
-            "status", "finished_at",
+            "materiality_decision", "submit_decision", "notified_count",
+            "actual_cost_usd", "status", "finished_at",
         ]
     )
-    return {"status": "done", "tickers": len(run_ids), "notified": notified}
+    return {
+        "status": "done", "tickers": len(run_ids), "notified": notified,
+        "submitted": submit_decision.get("submitted", 0),
+    }

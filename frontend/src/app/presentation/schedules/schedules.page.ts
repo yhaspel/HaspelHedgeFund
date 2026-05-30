@@ -30,6 +30,14 @@ interface Schedule {
 }
 interface Watchlist { id: number; name: string; is_default: boolean; }
 interface Channel { id: number; kind: string; label?: string; name: string; }
+interface BrokerAccount {
+  id: number;
+  broker: string;
+  mode: string;
+  label: string;
+  connection_status: string;
+  is_active: boolean;
+}
 interface HistoryRow {
   id: number;
   fire_time_utc: string;
@@ -175,6 +183,36 @@ const DOW_NAMES: Record<number, string> = {
               <input type="checkbox" [(ngModel)]="f.is_market_aware" />
               Skip NYSE holidays / weekends (market-aware)
             </label>
+            <label class="chk span2">
+              <input type="checkbox" [(ngModel)]="f.auto_paper_submit" />
+              Auto-submit paper orders from each run's decision
+            </label>
+            @if (f.auto_paper_submit) {
+              <label>Paper account
+                <select [(ngModel)]="f.auto_submit_broker_account">
+                  <option [ngValue]="null">— select a paper account —</option>
+                  @for (a of brokerAccounts(); track a.id) {
+                    @if (a.mode === 'paper' && a.is_active) {
+                      <option [ngValue]="a.id">{{ a.label || a.broker }} ({{ a.broker }})</option>
+                    }
+                  }
+                </select>
+              </label>
+              <label>Max orders / day
+                <input type="number" min="1" [(ngModel)]="f.max_orders_per_day" />
+              </label>
+              <label>Max notional / day ($)
+                <input type="number" min="0" [(ngModel)]="f.max_notional_per_day_usd" />
+              </label>
+              <label class="chk span2">
+                <input type="checkbox" [(ngModel)]="f.auto_submit_draft_only" />
+                Draft only — create orders but don't fill (review + confirm in the UI)
+              </label>
+              <p class="hint span2">
+                Paper accounts only — live accounts are hard-blocked. Orders are
+                confirmed via the scheduled-job gate and filled unless “draft only”.
+              </p>
+            }
           </div>
           <div class="form-actions">
             <button class="btn primary" (click)="create()" [disabled]="busy()">Create schedule</button>
@@ -299,6 +337,7 @@ export class SchedulesPage implements OnInit {
   readonly schedules = signal<Schedule[]>([]);
   readonly watchlists = signal<Watchlist[]>([]);
   readonly channels = signal<Channel[]>([]);
+  readonly brokerAccounts = signal<BrokerAccount[]>([]);
   readonly showForm = signal(false);
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
@@ -320,6 +359,11 @@ export class SchedulesPage implements OnInit {
     on_breach: 'degrade',
     notification_channel: null as number | null,
     is_market_aware: true,
+    auto_paper_submit: false,
+    auto_submit_broker_account: null as number | null,
+    auto_submit_draft_only: false,
+    max_orders_per_day: 10,
+    max_notional_per_day_usd: '10000' as string,
   };
 
   ngOnInit(): void {
@@ -330,6 +374,9 @@ export class SchedulesPage implements OnInit {
       if (def) this.f.watchlist = def.id;
     });
     this.api.get<Channel[]>('/notification-channels/').subscribe((c) => this.channels.set(c));
+    this.api
+      .get<BrokerAccount[]>('/broker-accounts/')
+      .subscribe((a) => this.brokerAccounts.set(a ?? []));
     this.rebuildCron();
   }
 
@@ -404,8 +451,15 @@ export class SchedulesPage implements OnInit {
       on_breach: this.f.on_breach,
       is_market_aware: this.f.is_market_aware,
       notification_channel: this.f.notification_channel,
+      auto_paper_submit: this.f.auto_paper_submit,
     };
     if (this.f.cost_ceiling_usd) body['cost_ceiling_usd'] = this.f.cost_ceiling_usd;
+    if (this.f.auto_paper_submit) {
+      body['auto_submit_broker_account'] = this.f.auto_submit_broker_account;
+      body['auto_submit_draft_only'] = this.f.auto_submit_draft_only;
+      body['max_orders_per_day'] = this.f.max_orders_per_day;
+      body['max_notional_per_day_usd'] = this.f.max_notional_per_day_usd;
+    }
     this.api.post('/scheduled-runs/', body).subscribe({
       next: () => {
         this.busy.set(false);

@@ -129,6 +129,20 @@ class StrategyScorecard(models.Model):
     avg_cost_per_cycle_usd = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True
     )
+    # Interquartile range (p25/p75) of each metric across the flavor's strategies —
+    # set only on flavor-aggregate rows (strategy is null), so the benchmark view
+    # shows median + dispersion, not just a point estimate (plan acceptance: "median
+    # + IQR per flavor"). Null on per-strategy rows and when n < 2.
+    sharpe_p25 = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    sharpe_p75 = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    sortino_p25 = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    sortino_p75 = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    max_drawdown_p25_pct = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True
+    )
+    max_drawdown_p75_pct = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True
+    )
     # Council-alpha: annualised (realised − council-free baseline) in bps.
     # Null until ≥ MIN_COUNCIL_ALPHA_CYCLES paired cycles exist (UI shows "—"
     # + "needs 30 days of baseline" tooltip). ``council_cost_usd`` is the

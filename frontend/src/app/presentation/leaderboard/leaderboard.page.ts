@@ -69,6 +69,12 @@ interface StrategyRow {
   hit_rate: string | null;
   annualised_turnover_pct: string | null;
   avg_cost_per_cycle_usd: string | null;
+  sharpe_p25: string | null;
+  sharpe_p75: string | null;
+  sortino_p25: string | null;
+  sortino_p75: string | null;
+  max_drawdown_p25_pct: string | null;
+  max_drawdown_p75_pct: string | null;
   council_alpha_bps: string | null;
   council_cost_usd: string | null;
   council_net_value_usd: string | null;
@@ -435,9 +441,20 @@ interface DecisionRow {
                     <tr>
                       <td>{{ f.flavor_display }}</td>
                       <td class="r">{{ f.n_cycles }}</td>
-                      <td class="r">{{ num(f.sharpe) }}</td>
-                      <td class="r">{{ num(f.sortino) }}</td>
-                      <td class="r">{{ pctRaw(f.max_drawdown_pct) }}</td>
+                      <td class="r">
+                        {{ num(f.sharpe) }}
+                        <div class="micro">{{ iqr(f.sharpe_p25, f.sharpe_p75) }}</div>
+                      </td>
+                      <td class="r">
+                        {{ num(f.sortino) }}
+                        <div class="micro">{{ iqr(f.sortino_p25, f.sortino_p75) }}</div>
+                      </td>
+                      <td class="r">
+                        {{ pctRaw(f.max_drawdown_pct) }}
+                        <div class="micro">
+                          {{ iqr(f.max_drawdown_p25_pct, f.max_drawdown_p75_pct, '%') }}
+                        </div>
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -666,6 +683,10 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
   }
   num0(v: string | null): number {
     return v === null ? 0 : Number(v);
+  }
+  iqr(lo: string | null, hi: string | null, suffix = ''): string {
+    if (lo === null || hi === null) return '';
+    return `IQR ${Number(lo).toFixed(2)}${suffix}–${Number(hi).toFixed(2)}${suffix}`;
   }
   contrarianTip(a: AgentRow): string {
     const lo = a.contrarian_hit_rate_ci_low;

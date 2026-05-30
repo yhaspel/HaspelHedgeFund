@@ -64,6 +64,28 @@ class ScheduledRun(models.Model):
         related_name="schedules",
     )
 
+    # P3b paper auto-submit (opt-in, PAPER ONLY). When on, each ticker's Decision
+    # becomes a BrokerOrder on ``auto_submit_broker_account`` and is — by default —
+    # auto-confirmed via the ``scheduled_job`` gate (which hard-blocks live
+    # accounts) and filled; ``auto_submit_draft_only`` instead leaves orders in
+    # draft for manual review. ``max_orders_per_day`` / ``max_notional_per_day_usd``
+    # are per-schedule safety caps (counted over a trailing 24h); a breach skips
+    # the rest with an audit note. The toggle + ``PAPER_AUTO_SUBMIT_ENABLED`` are
+    # the kill switches.
+    auto_paper_submit = models.BooleanField(default=False)
+    auto_submit_broker_account = models.ForeignKey(
+        "brokers.BrokerAccount",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="auto_submit_schedules",
+    )
+    auto_submit_draft_only = models.BooleanField(default=False)
+    max_orders_per_day = models.PositiveIntegerField(default=10)
+    max_notional_per_day_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("10000")
+    )
+
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -119,6 +141,12 @@ class ScheduledRunHistory(models.Model):
     degraded_preset = models.CharField(max_length=32, blank=True, default="")
     materiality_decision = models.JSONField(default=dict, blank=True)
     notified_count = models.IntegerField(default=0)
+    # P3b paper auto-submit: the BrokerOrders this fire created (for audit + the
+    # trailing-24h cap count) and a summary of what was submitted / skipped / why.
+    broker_orders = models.ManyToManyField(
+        "brokers.BrokerOrder", related_name="scheduled_histories", blank=True
+    )
+    submit_decision = models.JSONField(default=dict, blank=True)
     error = models.TextField(blank=True, default="")
 
     class Meta:
