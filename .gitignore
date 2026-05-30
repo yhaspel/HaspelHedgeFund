@@ -57,5 +57,8 @@ MEMORY.md
 frontend/.pnpm-store/
 .tmp-screenshots/
 
+# Scratch verification screenshots / artifacts (not part of the repo)
+dev-artifacts/
+
 # Claude Code per-session scheduling lock
 .claude/scheduled_tasks.lock
