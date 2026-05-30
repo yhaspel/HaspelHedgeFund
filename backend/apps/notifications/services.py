@@ -33,6 +33,22 @@ def within_daily_cap(user) -> bool:
     return sent < cap
 
 
+def within_ticker_cap(user, ticker: str) -> bool:
+    """Per-ticker daily throttle: a single noisy name can't eat the whole cap.
+    Empty ticker (digests / test messages) is never throttled here."""
+    if not ticker:
+        return True
+    cap = int(getattr(settings, "NOTIFICATIONS_MAX_PER_TICKER_PER_DAY", 3))
+    cutoff = timezone.now() - dt.timedelta(hours=24)
+    sent = NotificationEvent.objects.filter(
+        channel__user=user,
+        ticker=ticker,
+        delivery_status=NotificationEvent.SENT,
+        created_at__gte=cutoff,
+    ).count()
+    return sent < cap
+
+
 def send_notification(
     channel: NotificationChannel,
     subject: str,
@@ -40,6 +56,7 @@ def send_notification(
     *,
     html_body: str | None = None,
     triggered_by=None,
+    ticker: str = "",
     enforce_cap: bool = True,
 ) -> NotificationEvent:
     ev = NotificationEvent.objects.create(
@@ -47,6 +64,7 @@ def send_notification(
         triggered_by=triggered_by,
         subject=subject[:255],
         body=body,
+        ticker=ticker[:16],
     )
 
     def _finish(status: str, error: str = "") -> NotificationEvent:
@@ -61,6 +79,8 @@ def send_notification(
         return _finish(NotificationEvent.FAILED, "channel inactive")
     if enforce_cap and not within_daily_cap(channel.user):
         return _finish(NotificationEvent.THROTTLED, "daily notification cap reached")
+    if enforce_cap and not within_ticker_cap(channel.user, ticker):
+        return _finish(NotificationEvent.THROTTLED, f"per-ticker cap reached for {ticker}")
     sender = _SENDERS.get(channel.kind)
     if sender is None:
         return _finish(NotificationEvent.FAILED, f"no sender for kind {channel.kind!r}")

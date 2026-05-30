@@ -238,6 +238,13 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 # P3b: per-user/day cap on scheduled-run notifications (anti-fatigue, plan
 # risk #1). Counts NotificationEvent rows created in the trailing 24h.
 NOTIFICATIONS_MAX_PER_DAY = int(os.environ.get("NOTIFICATIONS_MAX_PER_DAY", "10"))
+# Per-ticker/day cap so one noisy name can't dominate the daily budget, and the
+# digest threshold: when a single fire surfaces more than this many material
+# events, send one consolidated digest instead of N messages (plan refinement #4).
+NOTIFICATIONS_MAX_PER_TICKER_PER_DAY = int(
+    os.environ.get("NOTIFICATIONS_MAX_PER_TICKER_PER_DAY", "3")
+)
+NOTIFICATIONS_DIGEST_THRESHOLD = int(os.environ.get("NOTIFICATIONS_DIGEST_THRESHOLD", "5"))
 
 # P3b: Telegram Bot API base. Overridable so tests can point delivery at a
 # respx-mocked host. The user supplies a per-channel bot_token + chat_id; see

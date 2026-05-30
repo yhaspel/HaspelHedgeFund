@@ -91,3 +91,28 @@ def build_content(run, eval_result: dict) -> dict:
         + "</p>"
     )
     return {"subject": subject, "text": text, "html": html}
+
+
+def build_digest_content(results: list[dict], scheduled_run) -> dict:
+    """One consolidated message when a single scheduled fire surfaces many material
+    events (plan refinement #4 — digest mode). Each ``result`` is a materiality dict
+    carrying ``ticker``, ``run_id``, and ``reasons``."""
+    base = _frontend_base()
+    n = len(results)
+    name = getattr(scheduled_run, "name", "") or "watchlist"
+    subject = f"[Hedge Fund] {name}: {n} material updates"
+
+    lines = [f"{n} names on '{name}' had material updates this run:", ""]
+    for r in results:
+        reasons = "; ".join(r.get("reasons") or []) or "material change"
+        lines.append(f"  • {r.get('ticker', '?')}: {reasons} — {base}/runs/{r.get('run_id')}")
+    text = "\n".join(lines)
+
+    items = "".join(
+        f"<li><b>{r.get('ticker', '?')}</b>: "
+        f"{'; '.join(r.get('reasons') or []) or 'material change'} "
+        f"(<a href='{base}/runs/{r.get('run_id')}'>run</a>)</li>"
+        for r in results
+    )
+    html = f"<h2>{name}: {n} material updates</h2><ul>{items}</ul>"
+    return {"subject": subject, "text": text, "html": html}

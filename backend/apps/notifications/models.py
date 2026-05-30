@@ -73,6 +73,9 @@ class NotificationEvent(models.Model):
     )
     subject = models.CharField(max_length=255)
     body = models.TextField(blank=True, default="")
+    # The ticker this event is about (blank for digests / test messages). Drives
+    # the per-ticker daily throttle so a single noisy name can't dominate the cap.
+    ticker = models.CharField(max_length=16, blank=True, default="")
     delivery_status = models.CharField(
         max_length=16, choices=STATUS_CHOICES, default=PENDING
     )
