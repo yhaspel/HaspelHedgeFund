@@ -234,6 +234,9 @@ EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "0") == "1"
 DEFAULT_FROM_EMAIL = os.environ.get(
     "DEFAULT_FROM_EMAIL", "Hedge Fund <hedgefund@localhost>"
 )
+# Resend HTTP-API key, consumed by apps.notifications.backends.ResendEmailBackend
+# when EMAIL_BACKEND points at it. Empty in dev unless set in .env.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 # P3b: per-user/day cap on scheduled-run notifications (anti-fatigue, plan
 # risk #1). Counts NotificationEvent rows created in the trailing 24h.

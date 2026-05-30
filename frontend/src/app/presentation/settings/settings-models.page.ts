@@ -4,7 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { SettingsTabsComponent } from './settings-tabs.component';
-import { TradeStationAppCardComponent } from './tradestation-app-card.component';
+// Deferred until TradeStation ships — re-enable alongside the template usage below.
+// import { TradeStationAppCardComponent } from './tradestation-app-card.component';
 import { ModelsStore } from '../../abstraction/models.store';
 import { NewsStore } from '../../abstraction/news.store';
 import { PersonaEvolutionStore } from '../../abstraction/persona-evolution.store';
@@ -27,7 +28,7 @@ import {
   standalone: true,
   imports: [
     CommonModule, FormsModule, RouterLink, AppShellComponent,
-    TradeStationAppCardComponent, SettingsTabsComponent,
+    SettingsTabsComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Settings'}, {label:'Models'}]">
@@ -105,8 +106,10 @@ import {
           </div>
         </section>
 
-        <!-- A2: TradeStation developer app (BYO) — P3a-3 -->
-        <hf-tradestation-app-card />
+        <!-- A2: TradeStation developer app (BYO) — P3a-3. Hidden until TradeStation
+             ships (deferred). Re-enable: uncomment the import + imports-array entry
+             above and the <hf-tradestation-app-card /> line below. -->
+        <!-- <hf-tradestation-app-card /> -->
 
         <!-- B: Default model + preset + ceiling -->
         <section class="card">
