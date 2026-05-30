@@ -107,7 +107,15 @@ services:
   # interactive 2FA login, but binding to loopback keeps the gateway
   # off any externally-routable interface. The Django app reaches it
   # over the compose network at `https://ibkr-gateway:5000`.
+  #
+  # P3a-2 is DEFERRED, so this service sits behind the `ibkr` compose profile:
+  # a plain `docker compose up` skips it entirely (no build, nothing to fail).
+  # Opt in only once you've dropped the BYO `.zip` and want IBKR:
+  #     docker compose --profile ibkr up
+  # The Dockerfile is also tolerant of a missing `.zip` (logs + placeholder)
+  # so even an explicit `--profile ibkr` build never hard-fails.
   ibkr-gateway:
+    profiles: ["ibkr"]
     build:
       context: ./ibkr-gateway
       dockerfile: Dockerfile
