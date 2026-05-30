@@ -21,6 +21,11 @@ CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_BEAT_SCHEDULER = "celery.beat:PersistentScheduler"
 
+# P3b: assertable email delivery — mail.outbox captures sent messages.
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+# P3b: deterministic Telegram host for respx-mocked delivery tests.
+TELEGRAM_API_BASE = "https://api.telegram.test"
+
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 # Provider clients refuse to init without keys; tests replay HTTP via VCR

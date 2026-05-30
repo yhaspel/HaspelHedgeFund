@@ -17,7 +17,7 @@ from .fields import (
     field_missing_capabilities,
     field_required_capabilities,
 )
-from .models import SavedScreen, WatchlistItem
+from .models import SavedScreen
 from .pipeline import ScreenerValidationError, validate_filters
 
 
@@ -112,21 +112,6 @@ class SavedScreenSerializer(serializers.ModelSerializer):
         if request is None or not request.user or not request.user.is_authenticated:
             raise serializers.ValidationError("authentication required")
         return request.user
-
-
-class WatchlistItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = WatchlistItem
-        fields = ("id", "ticker", "note", "added_at")
-        read_only_fields = ("added_at",)
-
-    def validate_ticker(self, value: str) -> str:
-        v = (value or "").strip().upper()
-        if not v:
-            raise serializers.ValidationError("ticker is required")
-        if len(v) > 16:
-            raise serializers.ValidationError("ticker is too long")
-        return v
 
 
 def serialize_fields(available_capabilities: frozenset) -> list[dict[str, Any]]:

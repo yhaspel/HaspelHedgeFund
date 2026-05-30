@@ -19,22 +19,21 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.watchlists.services import watchlist_tickers
+
 from .datasource import get_screener_datasource
 from .fields import CAPABILITY_LABEL
-from .models import SavedScreen, WatchlistItem
+from .models import SavedScreen
 from .pipeline import (
     ScreenerValidationError,
-    enrich_watchlist,
     run_screen,
     validate_filters,
 )
 from .presets import PRESETS, preset_missing_capabilities
 from .serializers import (
     SavedScreenSerializer,
-    WatchlistItemSerializer,
     serialize_fields,
 )
-from .services import get_or_create_watchlist
 
 
 def _err(message: str, code: int = status.HTTP_400_BAD_REQUEST) -> Response:
@@ -142,13 +141,9 @@ class ScreenerRunView(APIView):
         except ScreenerValidationError as exc:
             return _err(str(exc), code=status.HTTP_400_BAD_REQUEST)
 
-        # Watchlist tickers for in_watchlist flag (one cheap query).
-        watchlist_set: set[str] = set()
-        wl = get_or_create_watchlist(request.user)
-        watchlist_set = set(
-            wl.items.values_list("ticker", flat=True)
-        )
-        watchlist_set = {t.upper() for t in watchlist_set}
+        # Tickers across all of the user's named lists, for the in_watchlist
+        # flag (one cheap query).
+        watchlist_set: set[str] = watchlist_tickers(request.user)
 
         try:
             result = run_screen(
@@ -198,76 +193,6 @@ class SavedScreenDetailView(generics.RetrieveUpdateDestroyAPIView):
         return SavedScreen.objects.filter(user=self.request.user)
 
 
-class WatchlistView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request: Request) -> Response:
-        wl = get_or_create_watchlist(request.user)
-        items = list(wl.items.order_by("-added_at"))
-        tickers = [i.ticker for i in items]
-
-        rows: list[dict[str, Any]] = []
-        if tickers:
-            try:
-                ds = get_screener_datasource(request.user)
-                enriched = enrich_watchlist(
-                    tickers, user=request.user, datasource=ds
-                )
-            except RuntimeError:
-                # No FMP key — return bare rows without enrichment.
-                enriched = []
-
-            enriched_by = {r.ticker: r for r in enriched}
-            for it in items:
-                tk = it.ticker.upper()
-                row = enriched_by.get(tk)
-                if row is None:
-                    rows.append(
-                        {
-                            "id": it.id,
-                            "ticker": tk,
-                            "note": it.note,
-                            "added_at": it.added_at.isoformat(),
-                            "price": None,
-                            "change_pct": None,
-                            "rvol": None,
-                            "volume": None,
-                            "market_cap": None,
-                        }
-                    )
-                    continue
-                d = _row_to_dict(row)
-                d["id"] = it.id
-                d["note"] = it.note
-                d["added_at"] = it.added_at.isoformat()
-                rows.append(d)
-        return Response({"items": rows, "name": wl.name})
-
-    def post(self, request: Request) -> Response:
-        wl = get_or_create_watchlist(request.user)
-        if wl.items.count() >= 100:
-            return _err(
-                "Watchlist limit reached (100 tickers). Remove some first.",
-            )
-        serializer = WatchlistItemSerializer(data=request.data or {})
-        serializer.is_valid(raise_exception=True)
-        ticker = serializer.validated_data["ticker"]
-        note = serializer.validated_data.get("note", "")
-        obj, _ = WatchlistItem.objects.get_or_create(
-            watchlist=wl, ticker=ticker, defaults={"note": note}
-        )
-        return Response(
-            WatchlistItemSerializer(obj).data,
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class WatchlistItemDeleteView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def delete(self, request: Request, ticker: str) -> Response:
-        wl = get_or_create_watchlist(request.user)
-        deleted, _ = wl.items.filter(ticker=ticker.upper()).delete()
-        if not deleted:
-            return _err("ticker not on watchlist", code=status.HTTP_404_NOT_FOUND)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+# Watchlist endpoints moved to ``apps.watchlists`` (P3b — named lists). The
+# screener now only reads the union of tickers via ``watchlist_tickers`` for
+# the ``in_watchlist`` flag above.

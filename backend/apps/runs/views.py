@@ -35,6 +35,21 @@ class RunListCreateView(generics.ListCreateAPIView):
                 qs = qs.filter(portfolio_target_id=int(target_id))
             except (TypeError, ValueError):
                 pass
+        # P3b: full-text transcript search. Postgres uses a tsvector query
+        # (backed by the GIN index in migration 0010); sqlite (tests) falls back
+        # to a substring match.
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            from django.db import connection
+
+            if connection.vendor == "postgresql":
+                from django.contrib.postgres.search import SearchQuery, SearchVector
+
+                qs = qs.annotate(
+                    _sv=SearchVector("search_text", config="english")
+                ).filter(_sv=SearchQuery(search, config="english"))
+            else:
+                qs = qs.filter(search_text__icontains=search)
         return (
             qs.select_related("portfolio_target__strategy")
             .prefetch_related("decisions")

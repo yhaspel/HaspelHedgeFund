@@ -62,7 +62,7 @@ def run_profile_analysis(response_id: int) -> dict:
     added = 0
     if favorites:
         try:
-            from apps.screener.services import add_tickers_to_watchlist
+            from apps.watchlists.services import add_tickers_to_watchlist
 
             added = add_tickers_to_watchlist(response.user, favorites)
         except Exception:  # noqa: BLE001 — watchlist failure must not fail analysis

@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.screener.capabilities import ScreenerCapability
 from apps.screener.datasource import FmpScreenerDataSource
-from apps.screener.models import SavedScreen, Watchlist
+from apps.screener.models import SavedScreen
 from apps.screener.views import ScreenerRunView
 
 User = get_user_model()
@@ -183,18 +183,8 @@ def test_saved_screen_user_isolation(user, other_user, stub_datasource):
     assert resp.status_code == 404
 
 
-def test_watchlist_add_idempotent_and_delete(auth_client, user, stub_datasource):
-    r1 = auth_client.post("/api/screener/watchlist/", {"ticker": "aapl"}, format="json")
-    assert r1.status_code == 201
-    assert r1.json()["ticker"] == "AAPL"
-    r2 = auth_client.post("/api/screener/watchlist/", {"ticker": "AAPL"}, format="json")
-    assert r2.status_code == 201
-    wl = Watchlist.objects.get(user=user)
-    assert wl.items.filter(ticker="AAPL").count() == 1
-
-    rm = auth_client.delete("/api/screener/watchlist/AAPL/")
-    assert rm.status_code == 204
-    assert wl.items.filter(ticker="AAPL").count() == 0
+# Watchlist add/delete coverage moved to tests/test_watchlists_api.py (P3b —
+# watchlists are now named lists owned by apps.watchlists).
 
 
 def test_fmp_screener_data_source_advertises_expected_capabilities():

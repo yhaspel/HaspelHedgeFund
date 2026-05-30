@@ -28,8 +28,8 @@ from apps.investor_profile.questionnaire import (
 )
 from apps.investor_profile.tasks import run_profile_analysis
 from apps.investor_profile.tune import rederive_for_tune
-from apps.screener.models import Watchlist, WatchlistItem
-from apps.screener.services import add_tickers_to_watchlist
+from apps.watchlists.models import Watchlist, WatchlistTicker
+from apps.watchlists.services import add_tickers_to_watchlist
 
 User = get_user_model()
 
@@ -237,9 +237,9 @@ def test_submit_happy_path_runs_analysis_and_seeds_watchlist(client, user):
     assert body["analysis_status"] == "done"
     assert body["analysis"]["investor_type"] == "Balanced Growth Investor"
     assert body["agent_brief"] == "Stub brief."
-    # auto-seed merged favorites into watchlist
+    # auto-seed merged favorites into the user's default watchlist
     wl = Watchlist.objects.get(user=user)
-    tickers = sorted(wl.items.values_list("ticker", flat=True))
+    tickers = sorted(wl.tickers.values_list("ticker", flat=True))
     assert tickers == ["AAPL", "GOOGL", "MSFT"]
 
 
@@ -403,7 +403,7 @@ def test_add_tickers_to_watchlist_idempotent(db, user):
     assert first == 2
     assert second == 1
     wl = Watchlist.objects.get(user=user)
-    assert sorted(wl.items.values_list("ticker", flat=True)) == [
+    assert sorted(wl.tickers.values_list("ticker", flat=True)) == [
         "AAPL",
         "MSFT",
         "TSLA",
@@ -411,9 +411,9 @@ def test_add_tickers_to_watchlist_idempotent(db, user):
 
 
 def test_add_tickers_respects_cap(db, user):
-    wl = Watchlist.objects.create(user=user)
-    WatchlistItem.objects.bulk_create(
-        [WatchlistItem(watchlist=wl, ticker=f"T{i:03d}") for i in range(100)]
+    wl = Watchlist.objects.create(user=user, is_default=True)
+    WatchlistTicker.objects.bulk_create(
+        [WatchlistTicker(watchlist=wl, ticker=f"T{i:03d}") for i in range(100)]
     )
     added = add_tickers_to_watchlist(user, ["NEW1", "NEW2"])
     assert added == 0
