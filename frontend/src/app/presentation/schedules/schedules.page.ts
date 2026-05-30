@@ -18,6 +18,7 @@ interface Schedule {
   watchlist_name: string;
   model_preset: string;
   cron_expression: string;
+  cron_description: string;
   timezone: string;
   is_market_aware: boolean;
   cost_ceiling_usd: string | null;
@@ -40,13 +41,21 @@ interface HistoryRow {
   run_ids: number[];
 }
 
-const CRON_PRESETS = [
-  { label: 'Every weekday at 9:25am ET (pre-open)', cron: '25 9 * * 1-5' },
-  { label: 'Every weekday at 4:05pm ET (post-close)', cron: '5 16 * * 1-5' },
-  { label: 'Every day at 7:00am', cron: '0 7 * * *' },
-  { label: 'Every Sunday at 5:00pm', cron: '0 17 * * 0' },
-  { label: 'Custom…', cron: '' },
+type Freq = 'weekdays' | 'daily' | 'weekly' | 'custom';
+
+const DOWS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
 ];
+const DOW_NAMES: Record<number, string> = {
+  0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday',
+  4: 'Thursday', 5: 'Friday', 6: 'Saturday',
+};
 
 @Component({
   selector: 'hf-schedules-page',
@@ -60,9 +69,9 @@ const CRON_PRESETS = [
           <div class="eyebrow">Automation</div>
           <h1 class="mt-1.5">Scheduled runs</h1>
           <p class="sub">
-            Run a watchlist on a cron schedule. You're notified only when
-            something material changes (signal flip, big confidence move, a
-            first-time risk veto, or unanimous bullishness).
+            Run a watchlist on a schedule. You're notified only when something
+            material changes (signal flip, big confidence move, a first-time risk
+            veto, or unanimous bullishness).
           </p>
         </div>
         <button class="btn primary" (click)="toggleForm()">
@@ -84,16 +93,57 @@ const CRON_PRESETS = [
                 }
               </select>
             </label>
-            <label>When
-              <select [ngModel]="cronChoice()" (ngModelChange)="onCronChoice($event)">
-                @for (p of cronPresets; track p.label) {
-                  <option [ngValue]="p.label">{{ p.label }}</option>
-                }
+
+            <label>Frequency
+              <select [(ngModel)]="freq" (ngModelChange)="rebuildCron()">
+                <option value="weekdays">Every weekday (Mon–Fri)</option>
+                <option value="daily">Every day</option>
+                <option value="weekly">Specific days of the week</option>
+                <option value="custom">Custom (advanced)</option>
               </select>
             </label>
-            <label>Cron expression
-              <input [(ngModel)]="f.cron_expression" placeholder="25 9 * * 1-5" />
-            </label>
+            @if (freq !== 'custom') {
+              <label>Time of day <span class="hint">(US Eastern)</span>
+                <input type="time" [(ngModel)]="timeOfDay" (ngModelChange)="rebuildCron()" />
+              </label>
+            }
+
+            @if (freq === 'weekly') {
+              <div class="span2 dow">
+                <span class="dow-label">On which days?</span>
+                <div class="dow-grid">
+                  @for (d of dows; track d.value) {
+                    <label class="dow-chk" [class.sel]="selectedDows().includes(d.value)">
+                      <input type="checkbox"
+                        [checked]="selectedDows().includes(d.value)"
+                        (change)="toggleDow(d.value)" />
+                      {{ d.label }}
+                    </label>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (freq === 'custom') {
+              <div class="span2 cron-fields">
+                <label>Minute <span class="hint">0–59</span>
+                  <input [(ngModel)]="cf.min" (ngModelChange)="rebuildCron()" placeholder="*" /></label>
+                <label>Hour <span class="hint">0–23</span>
+                  <input [(ngModel)]="cf.hour" (ngModelChange)="rebuildCron()" placeholder="*" /></label>
+                <label>Day of month <span class="hint">1–31</span>
+                  <input [(ngModel)]="cf.dom" (ngModelChange)="rebuildCron()" placeholder="*" /></label>
+                <label>Month <span class="hint">1–12</span>
+                  <input [(ngModel)]="cf.mon" (ngModelChange)="rebuildCron()" placeholder="*" /></label>
+                <label>Day of week <span class="hint">0=Sun … 6=Sat</span>
+                  <input [(ngModel)]="cf.dow" (ngModelChange)="rebuildCron()" placeholder="*" /></label>
+              </div>
+            }
+
+            <div class="span2 cron-preview">
+              <span class="cron-summary">{{ cronSummary() }}</span>
+              <code class="cron-raw" title="Resolved cron expression">{{ f.cron_expression }}</code>
+            </div>
+
             <label>Model preset
               <select [(ngModel)]="f.model_preset">
                 <option value="hybrid">hybrid</option>
@@ -121,7 +171,7 @@ const CRON_PRESETS = [
                 }
               </select>
             </label>
-            <label class="chk">
+            <label class="chk span2">
               <input type="checkbox" [(ngModel)]="f.is_market_aware" />
               Skip NYSE holidays / weekends (market-aware)
             </label>
@@ -141,24 +191,29 @@ const CRON_PRESETS = [
             <table class="tbl">
               <thead>
                 <tr>
-                  <th>Name</th><th>Watchlist</th><th>Cron</th><th>Preset</th>
-                  <th>Next run</th><th>Active</th><th></th>
+                  <th>Name</th><th>Watchlist</th><th>Schedule</th><th>Preset</th>
+                  <th>Next run</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 @for (s of schedules(); track s.id) {
-                  <tr>
+                  <tr [class.paused]="!s.is_active">
                     <td>{{ s.name }}</td>
                     <td class="muted">{{ s.watchlist_name }}</td>
-                    <td><code>{{ s.cron_expression }}</code></td>
-                    <td class="muted">{{ s.model_preset }}</td>
-                    <td class="muted">{{ s.next_run_at ? (s.next_run_at | date: 'short') : '—' }}</td>
                     <td>
-                      <button class="badge" [class.on]="s.is_active" (click)="toggleActive(s)">
-                        {{ s.is_active ? 'active' : 'paused' }}
-                      </button>
+                      <div class="cron-h">{{ s.cron_description || s.cron_expression }}</div>
+                      <code class="cron-raw" [title]="s.cron_expression">{{ s.cron_expression }}</code>
+                    </td>
+                    <td class="muted">{{ s.model_preset }}</td>
+                    <td class="muted">{{ s.is_active && s.next_run_at ? (s.next_run_at | date: 'short') : '—' }}</td>
+                    <td>
+                      <span class="pill" [class.on]="s.is_active">{{ s.is_active ? 'Active' : 'Paused' }}</span>
                     </td>
                     <td class="actions">
+                      <button class="btn sm" (click)="toggleActive(s)"
+                        [attr.aria-label]="(s.is_active ? 'Pause' : 'Resume') + ' ' + s.name">
+                        {{ s.is_active ? 'Pause' : 'Resume' }}
+                      </button>
                       <button class="btn sm" (click)="runNow(s)">Run now</button>
                       <button class="btn sm ghost" (click)="loadHistory(s)">History</button>
                       <button class="btn sm danger" (click)="remove(s)">Delete</button>
@@ -213,19 +268,33 @@ const CRON_PRESETS = [
       .form label { display:flex; flex-direction:column; gap:4px; font-size:12px; color: var(--text-3); }
       .form input, .form select { padding:7px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
       .form .chk { flex-direction:row; align-items:center; gap:8px; }
+      .form .span2 { grid-column: 1 / -1; }
+      .hint { color: var(--text-3); font-weight:400; opacity:.8; }
+      .dow { display:flex; flex-direction:column; gap:6px; }
+      .dow-label { font-size:12px; color: var(--text-3); }
+      .dow-grid { display:flex; flex-wrap:wrap; gap:6px; }
+      .dow-chk { flex-direction:row !important; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border); border-radius:14px; cursor:pointer; font-size:12px; color: var(--text-2); }
+      .dow-chk.sel { background: var(--accent-soft); color: var(--accent-fg); border-color: var(--accent); }
+      .cron-fields { display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:8px; }
+      .cron-preview { display:flex; align-items:center; gap:10px; padding:8px 12px; background: var(--surface-2); border-radius: var(--r-6); }
+      .cron-summary { font-size:13px; color: var(--text-1); font-weight:500; }
+      .cron-raw { font-size:11px; color: var(--text-3); background: var(--surface-3); padding:2px 6px; border-radius:4px; }
       .form-actions { margin-top:14px; }
       .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
       .alert { padding:10px 14px; background: var(--acc-short-soft); color: var(--acc-short-fg); border-radius: var(--r-6); margin:0 0 12px; }
       .tbl .r { text-align:right; } .tbl .muted { color: var(--text-3); }
-      .actions { display:flex; gap:6px; }
-      .badge { font-size:11px; padding:2px 8px; border-radius:8px; background: var(--surface-3); color: var(--text-3); border:none; cursor:pointer; }
-      .badge.on { background: var(--acc-long-soft); color: var(--acc-long-fg); }
+      .tbl tr.paused td { opacity:.6; }
+      .tbl .cron-h { font-size:12.5px; color: var(--text-1); }
+      .tbl .cron-raw { font-size:10.5px; color: var(--text-3); }
+      .actions { display:flex; gap:6px; flex-wrap:wrap; }
+      .pill { font-size:11px; padding:2px 9px; border-radius:10px; background: var(--surface-3); color: var(--text-3); }
+      .pill.on { background: var(--acc-long-soft); color: var(--acc-long-fg); }
     `,
   ],
 })
 export class SchedulesPage implements OnInit {
   private readonly api = inject(ApiClient);
-  readonly cronPresets = CRON_PRESETS;
+  readonly dows = DOWS;
 
   readonly schedules = signal<Schedule[]>([]);
   readonly watchlists = signal<Watchlist[]>([]);
@@ -233,15 +302,20 @@ export class SchedulesPage implements OnInit {
   readonly showForm = signal(false);
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
-  readonly cronChoice = signal(CRON_PRESETS[0].label);
   readonly historyFor = signal<Schedule | null>(null);
   readonly history = signal<HistoryRow[]>([]);
+
+  // schedule builder state
+  freq: Freq = 'weekdays';
+  timeOfDay = '09:25';
+  readonly selectedDows = signal<number[]>([1]);
+  cf = { min: '0', hour: '9', dom: '*', mon: '*', dow: '*' };
 
   f = {
     name: '',
     watchlist: null as number | null,
-    cron_expression: CRON_PRESETS[0].cron,
-    model_preset: 'hybrid',
+    cron_expression: '25 9 * * 1-5',
+    model_preset: 'frugal',
     cost_ceiling_usd: '' as string,
     on_breach: 'degrade',
     notification_channel: null as number | null,
@@ -256,6 +330,7 @@ export class SchedulesPage implements OnInit {
       if (def) this.f.watchlist = def.id;
     });
     this.api.get<Channel[]>('/notification-channels/').subscribe((c) => this.channels.set(c));
+    this.rebuildCron();
   }
 
   reload(): void {
@@ -266,11 +341,57 @@ export class SchedulesPage implements OnInit {
     this.showForm.update((v) => !v);
   }
 
-  onCronChoice(label: string): void {
-    this.cronChoice.set(label);
-    const p = CRON_PRESETS.find((x) => x.label === label);
-    if (p && p.cron) this.f.cron_expression = p.cron;
+  // ----- schedule builder -----
+
+  toggleDow(value: number): void {
+    this.selectedDows.update((days) =>
+      days.includes(value) ? days.filter((d) => d !== value) : [...days, value],
+    );
+    this.rebuildCron();
   }
+
+  private hm(): { min: string; hour: string } {
+    const [h, m] = (this.timeOfDay || '09:25').split(':');
+    return { min: String(parseInt(m, 10) || 0), hour: String(parseInt(h, 10) || 0) };
+  }
+
+  rebuildCron(): void {
+    const { min, hour } = this.hm();
+    if (this.freq === 'weekdays') {
+      this.f.cron_expression = `${min} ${hour} * * 1-5`;
+    } else if (this.freq === 'daily') {
+      this.f.cron_expression = `${min} ${hour} * * *`;
+    } else if (this.freq === 'weekly') {
+      const days = [...this.selectedDows()].sort((a, b) => a - b).join(',') || '*';
+      this.f.cron_expression = `${min} ${hour} * * ${days}`;
+    } else {
+      const c = this.cf;
+      this.f.cron_expression =
+        `${c.min || '*'} ${c.hour || '*'} ${c.dom || '*'} ${c.mon || '*'} ${c.dow || '*'}`;
+    }
+  }
+
+  private fmtTime(t: string): string {
+    const [h, m] = (t || '09:25').split(':').map((x) => parseInt(x, 10));
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  }
+
+  cronSummary(): string {
+    const t = this.fmtTime(this.timeOfDay);
+    if (this.freq === 'weekdays') return `At ${t}, Monday through Friday (US Eastern)`;
+    if (this.freq === 'daily') return `Every day at ${t} (US Eastern)`;
+    if (this.freq === 'weekly') {
+      const names = [...this.selectedDows()].sort((a, b) => a - b).map((d) => DOW_NAMES[d]);
+      return names.length
+        ? `At ${t}, on ${names.join(', ')} (US Eastern)`
+        : 'Pick at least one day of the week';
+    }
+    return `Custom cron — ${this.f.cron_expression}`;
+  }
+
+  // ----- actions -----
 
   create(): void {
     this.error.set(null);

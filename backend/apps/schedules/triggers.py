@@ -21,6 +21,18 @@ def is_valid_cron(expr: str) -> bool:
     return bool(expr) and croniter.is_valid(expr)
 
 
+def describe_cron(expr: str) -> str:
+    """Human-readable description of a cron expression, e.g.
+    ``"At 09:25 AM, Monday through Friday"``. Falls back to the raw expression
+    if it can't be parsed."""
+    try:
+        from cron_descriptor import get_description
+
+        return get_description(expr)
+    except Exception:  # noqa: BLE001 — never let description fail an API read
+        return expr
+
+
 def compute_next(cron_expr: str, tz_name: str, after: datetime | None = None) -> datetime:
     """Next fire time strictly after ``after`` (default: now), returned as
     timezone-aware UTC. Interprets ``cron_expr`` in ``tz_name``."""

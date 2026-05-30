@@ -9,7 +9,7 @@ from apps.notifications.models import NotificationChannel
 from apps.watchlists.models import Watchlist
 
 from .models import ScheduledRun, ScheduledRunHistory
-from .triggers import is_valid_cron
+from .triggers import describe_cron, is_valid_cron
 
 
 class ScheduledRunSerializer(serializers.ModelSerializer):
@@ -18,17 +18,24 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
     notification_channel = serializers.PrimaryKeyRelatedField(
         queryset=NotificationChannel.objects.all(), required=False, allow_null=True
     )
+    # Human-readable rendering of cron_expression, e.g. "At 09:25 AM, Monday
+    # through Friday" — so the UI never has to show a raw cron string.
+    cron_description = serializers.SerializerMethodField()
 
     class Meta:
         model = ScheduledRun
         fields = (
             "id", "name", "watchlist", "watchlist_name", "personas",
-            "model_preset", "model_overrides", "cron_expression", "timezone",
+            "model_preset", "model_overrides", "cron_expression",
+            "cron_description", "timezone",
             "is_market_aware", "cost_ceiling_usd", "on_breach",
             "notification_channel", "is_active", "last_run_at", "next_run_at",
             "created_at", "updated_at",
         )
         read_only_fields = ("last_run_at", "next_run_at", "created_at", "updated_at")
+
+    def get_cron_description(self, obj: ScheduledRun) -> str:
+        return describe_cron(obj.cron_expression)
 
     def _request_user(self):
         request = self.context.get("request")
