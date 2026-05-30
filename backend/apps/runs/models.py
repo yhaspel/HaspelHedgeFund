@@ -97,6 +97,13 @@ class Run(models.Model):
     # no persona had an applicable revision.
     persona_evolution_applied = models.JSONField(default=dict, blank=True)
 
+    # P3b: denormalized searchable transcript text (tickers + decision
+    # rationales + persona theses/risks/news), populated on run completion.
+    # `raw_response` is never written, so this is the FTS source. Indexed by a
+    # Postgres GIN index (migration 0011, Postgres-only); sqlite tests fall back
+    # to an icontains filter in the view.
+    search_text = models.TextField(blank=True, default="")
+
     def __str__(self) -> str:
         return f"Run {self.pk} ({self.status})"
 

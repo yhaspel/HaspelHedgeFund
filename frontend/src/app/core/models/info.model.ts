@@ -76,6 +76,18 @@ export const INFO_GUIDES: InfoGuide[] = [
     ],
   },
   {
+    slug: 'telegram-setup',
+    title: 'Telegram Notifications Setup',
+    summary:
+      'Create a Telegram bot and get a chat id so scheduled-run alerts can reach you on Telegram.',
+    group: 'getting-started',
+    icon: 'i-bell',
+    keywords: [
+      'telegram', 'bot', 'botfather', 'chat id', 'notifications', 'alerts',
+      'schedule', 'scheduled run', 'token', 'channel', 'webhook',
+    ],
+  },
+  {
     slug: 'models-and-cost',
     title: 'Models & Cost Disclaimer',
     summary:

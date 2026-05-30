@@ -1,11 +1,13 @@
 /**
  * Shared root-level watchlist store (P3-prereq-5 WS-E).
  *
- * The watchlist data model + API live in apps.screener (see the planning §12);
- * this store gives every UI surface (the Screener tab, the new /watchlist page,
- * the Dashboard card, the Profile card) a single source of truth without
+ * The watchlist data model + API live in apps.watchlists (P3b — named lists);
+ * this store targets the user's *default* list via the `/api/watchlists/default/`
+ * alias, giving every single-list UI surface (the Screener tab, the /watchlist
+ * page, the Dashboard card, the Profile card) a single source of truth without
  * scattering the API calls. ScreenerStore delegates to this so its existing
- * star-toggle keeps working unchanged.
+ * star-toggle keeps working unchanged. The multi-list manager (P3b M6) layers
+ * a list selector on top of these same endpoints.
  */
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
@@ -36,7 +38,7 @@ export class WatchlistStore {
 
   load(): Observable<WatchlistResponse> {
     this._busy.set(true);
-    return this.api.get<WatchlistResponse>('/screener/watchlist/').pipe(
+    return this.api.get<WatchlistResponse>('/watchlists/default/').pipe(
       tap({
         next: (r) => {
           this._items.set(r.items);
@@ -56,7 +58,7 @@ export class WatchlistStore {
   add(ticker: string, note = ''): Observable<WatchlistItem> {
     const upper = ticker.trim().toUpperCase();
     return this.api
-      .post<WatchlistItem>('/screener/watchlist/', { ticker: upper, note })
+      .post<WatchlistItem>('/watchlists/default/tickers/', { ticker: upper, note })
       .pipe(
         tap((item) => {
           if (!this._items().some((i) => i.ticker.toUpperCase() === upper)) {
@@ -68,7 +70,7 @@ export class WatchlistStore {
 
   remove(ticker: string): Observable<void> {
     const upper = ticker.trim().toUpperCase();
-    return this.api.delete<void>(`/screener/watchlist/${upper}/`).pipe(
+    return this.api.delete<void>(`/watchlists/default/tickers/${upper}/`).pipe(
       tap(() => {
         this._items.update((rows) =>
           rows.filter((r) => r.ticker.toUpperCase() !== upper),

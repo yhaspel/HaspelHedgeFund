@@ -135,6 +135,30 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'settings/notifications',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-notifications.page').then(
+        (m) => m.SettingsNotificationsPage,
+      ),
+  },
+  {
+    path: 'schedules',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/schedules/schedules.page').then(
+        (m) => m.SchedulesPage,
+      ),
+  },
+  {
+    path: 'leaderboard',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/leaderboard/leaderboard.page').then(
+        (m) => m.LeaderboardPage,
+      ),
+  },
+  {
     path: 'profile',
     canActivate: [authGuard],
     loadComponent: () =>
@@ -152,8 +176,8 @@ export const routes: Routes = [
     path: 'watchlist',
     canActivate: [authGuard],
     loadComponent: () =>
-      import('./presentation/watchlist/watchlist.page').then(
-        (m) => m.WatchlistPage,
+      import('./presentation/watchlist/watchlists-manager.page').then(
+        (m) => m.WatchlistsManagerPage,
       ),
   },
   {

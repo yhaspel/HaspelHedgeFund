@@ -51,4 +51,15 @@ app.conf.beat_schedule = {
         "task": "apps.persona_evolution.tasks.evolve_personas",
         "schedule": crontab(minute=30, hour=5),
     },
+    # P3b: scheduled-run dispatcher. Fires every minute; finds ScheduledRuns
+    # whose next_run_at has passed and hands each to execute_scheduled_run.
+    "dispatch-due-scheduled-runs": {
+        "task": "apps.schedules.tasks.dispatch_due_scheduled_runs",
+        "schedule": 60.0,
+    },
+    # P3b: nightly leaderboard recompute (agents + strategies). Pure Python.
+    "recompute-leaderboards": {
+        "task": "apps.leaderboard.tasks.recompute_leaderboards",
+        "schedule": crontab(minute=0, hour=7),  # 07:00 UTC daily
+    },
 }

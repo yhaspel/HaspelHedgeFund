@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",  # P3b: tsvector search lookups (Postgres FTS)
     "rest_framework",
     "corsheaders",
     "django_celery_beat",
@@ -30,6 +31,10 @@ INSTALLED_APPS = [
     "apps.models_catalog",
     "apps.portfolios",
     "apps.screener",
+    "apps.watchlists",
+    "apps.notifications",
+    "apps.schedules",
+    "apps.leaderboard",
     "apps.investor_profile",
     "apps.persona_evolution",
     "apps.brokers",
@@ -213,6 +218,31 @@ TRADESTATION_SCOPES = "openid offline_access ReadAccount Trade"
 # and raises with an actionable error pointing the user at /settings/models.
 # FRED is exempt — it's free public-data per data-licensing.md.
 ALLOW_PLATFORM_DATA_KEYS = os.environ.get("ALLOW_PLATFORM_DATA_KEYS", "0") == "1"
+
+# P3b: email + notification delivery. Dev defaults to the console backend so
+# scheduled-run notifications are visible in the worker logs without an SMTP
+# server; staging/prod override EMAIL_BACKEND + EMAIL_HOST via env. The test
+# settings module swaps to the locmem backend so delivery is assertable.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "0") == "1"
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL", "Hedge Fund <hedgefund@localhost>"
+)
+
+# P3b: per-user/day cap on scheduled-run notifications (anti-fatigue, plan
+# risk #1). Counts NotificationEvent rows created in the trailing 24h.
+NOTIFICATIONS_MAX_PER_DAY = int(os.environ.get("NOTIFICATIONS_MAX_PER_DAY", "10"))
+
+# P3b: Telegram Bot API base. Overridable so tests can point delivery at a
+# respx-mocked host. The user supplies a per-channel bot_token + chat_id; see
+# guides/telegram-setup.md.
+TELEGRAM_API_BASE = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
 
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"

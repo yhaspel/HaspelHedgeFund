@@ -1,0 +1,132 @@
+"""Scheduled runs + per-fire history (P3b).
+
+A ``ScheduledRun`` is a cron-triggered job that runs an analysis on every ticker
+in a watchlist, applies materiality gating, and notifies. The dispatcher (a beat
+task firing every 60s) advances ``next_run_at`` and fans out the work. Each fire
+produces one idempotent ``ScheduledRunHistory`` row keyed by ``fire_time_utc`` so
+a beat restart can't double-dispatch.
+"""
+from __future__ import annotations
+
+from decimal import Decimal
+
+from django.conf import settings
+from django.db import models
+
+from .triggers import compute_next, is_valid_cron
+
+
+class ScheduledRun(models.Model):
+    DEGRADE = "degrade"
+    SKIP = "skip"
+    NOTIFY_ONLY = "notify_only"
+    ON_BREACH_CHOICES = [
+        (DEGRADE, "Degrade to a cheaper preset"),
+        (SKIP, "Skip the run"),
+        (NOTIFY_ONLY, "Run anyway and notify about the overage"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scheduled_runs",
+    )
+    name = models.CharField(max_length=120)
+    watchlist = models.ForeignKey(
+        "watchlists.Watchlist",
+        on_delete=models.CASCADE,
+        related_name="scheduled_runs",
+    )
+    # Subset of personas to run; [] = all registered personas.
+    personas = models.JSONField(default=list, blank=True)
+    model_preset = models.CharField(max_length=32, default="hybrid")
+    model_overrides = models.JSONField(default=dict, blank=True)
+
+    cron_expression = models.CharField(max_length=64)  # e.g. "25 9 * * 1-5"
+    timezone = models.CharField(max_length=64, default="America/New_York")
+    # When True, skip NYSE non-trading days (weekends + holidays). v1 is NY-only.
+    is_market_aware = models.BooleanField(default=True)
+
+    cost_ceiling_usd = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True
+    )
+    on_breach = models.CharField(
+        max_length=16, choices=ON_BREACH_CHOICES, default=DEGRADE
+    )
+
+    notification_channel = models.ForeignKey(
+        "notifications.NotificationChannel",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="schedules",
+    )
+
+    is_active = models.BooleanField(default=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.cron_expression} {self.timezone})"
+
+    def reschedule(self, after=None) -> None:
+        """Recompute ``next_run_at`` from the cron expression. No-op (clears the
+        next fire) when inactive or the cron is invalid."""
+        if self.is_active and is_valid_cron(self.cron_expression):
+            self.next_run_at = compute_next(self.cron_expression, self.timezone, after=after)
+        else:
+            self.next_run_at = None
+
+
+class ScheduledRunHistory(models.Model):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (RUNNING, "Running"),
+        (DONE, "Done"),
+        (FAILED, "Failed"),
+        (SKIPPED, "Skipped"),
+    ]
+
+    scheduled_run = models.ForeignKey(
+        ScheduledRun, on_delete=models.CASCADE, related_name="history"
+    )
+    # The scheduled minute this row represents. Unique per schedule → the
+    # dispatcher's get_or_create on (scheduled_run, fire_time_utc) is the
+    # idempotency guard against double-dispatch on beat restart.
+    fire_time_utc = models.DateTimeField()
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    runs = models.ManyToManyField("runs.Run", related_name="schedule_history", blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    estimated_cost_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True
+    )
+    actual_cost_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0")
+    )
+    degraded_preset = models.CharField(max_length=32, blank=True, default="")
+    materiality_decision = models.JSONField(default=dict, blank=True)
+    notified_count = models.IntegerField(default=0)
+    error = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scheduled_run", "fire_time_utc"],
+                name="uniq_schedule_fire_time",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"history(sr={self.scheduled_run_id} @ {self.fire_time_utc})"

@@ -249,9 +249,16 @@ def execute_run(run_id: int) -> None:
                 run.evidence = build_evidence(primary_ticker, run.as_of_date)
         except Exception:  # never let evidence collection fail the run
             log.exception("evidence collection failed for run=%s", run_id)
+        # P3b: denormalized FTS text from the now-persisted decisions/messages.
+        try:
+            from .search import build_search_text
+
+            run.search_text = build_search_text(run)
+        except Exception:  # never let search indexing fail the run
+            log.exception("search_text build failed for run=%s", run_id)
         run.status = Run.DONE
         run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at", "evidence"])
+        run.save(update_fields=["status", "finished_at", "evidence", "search_text"])
     except Exception as exc:  # pragma: no cover
         log.exception("Run %s failed", run_id)
         # If the user already cancelled this run via the API, don't clobber

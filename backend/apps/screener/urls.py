@@ -6,8 +6,6 @@ from .views import (
     ScreenerFieldsView,
     ScreenerPresetsView,
     ScreenerRunView,
-    WatchlistItemDeleteView,
-    WatchlistView,
 )
 
 urlpatterns = [
@@ -20,10 +18,5 @@ urlpatterns = [
         SavedScreenDetailView.as_view(),
         name="screener-saved-detail",
     ),
-    path("watchlist/", WatchlistView.as_view(), name="screener-watchlist"),
-    path(
-        "watchlist/<str:ticker>/",
-        WatchlistItemDeleteView.as_view(),
-        name="screener-watchlist-item",
-    ),
+    # Watchlist routes moved to apps.watchlists (/api/watchlists/).
 ]

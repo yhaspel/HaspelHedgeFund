@@ -52,6 +52,16 @@ type StatusFilter = 'all' | RunStatus;
                 (click)="setStatusFilter(opt.id)">{{ opt.label }}</button>
             }
           </div>
+          <div class="run-search">
+            <input #searchInput type="search" placeholder="Search transcripts…"
+              aria-label="Search run transcripts"
+              [value]="searchTerm()"
+              (keyup.enter)="doSearch(searchInput.value)" />
+            <button type="button" class="btn sm" (click)="doSearch(searchInput.value)">Search</button>
+            @if (searchTerm()) {
+              <button type="button" class="btn sm ghost" (click)="clearSearch(searchInput)">Clear</button>
+            }
+          </div>
         </div>
 
         @if (loading()) {
@@ -229,6 +239,7 @@ export class RunsListPage implements OnInit {
   readonly rerunningId = signal<number | null>(null);
   readonly sourceFilter = signal<SourceFilter>('all');
   readonly statusFilter = signal<StatusFilter>('all');
+  readonly searchTerm = signal('');
 
   readonly sourceOptions: { id: SourceFilter; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -293,6 +304,21 @@ export class RunsListPage implements OnInit {
   setSourceFilter(s: SourceFilter): void { this.sourceFilter.set(s); }
   setStatusFilter(s: StatusFilter): void { this.statusFilter.set(s); }
   resetFilters(): void { this.sourceFilter.set('all'); this.statusFilter.set('all'); }
+
+  // P3b: server-side full-text transcript search (Postgres FTS on the backend).
+  doSearch(term: string): void {
+    const q = term.trim();
+    this.searchTerm.set(q);
+    this.loading.set(true);
+    this.runs.listRuns({ search: q || undefined }).subscribe({
+      next: () => this.loading.set(false),
+      error: () => this.loading.set(false),
+    });
+  }
+  clearSearch(input: HTMLInputElement): void {
+    input.value = '';
+    this.doSearch('');
+  }
 
   open(r: RunSummary): void { this.router.navigate(['/runs', r.id]); }
 

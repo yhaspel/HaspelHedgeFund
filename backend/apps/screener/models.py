@@ -1,10 +1,8 @@
 """Models for the market screener (P3 prereq 3).
 
-Three per-user models live here:
-
 * ``SavedScreen``  — a named custom filter set the user can reload.
-* ``Watchlist``    — one row per user (we ship v1 with a single watchlist).
-* ``WatchlistItem``— a starred ticker on the user's watchlist.
+
+(Watchlists moved to ``apps.watchlists`` in P3b — named, multiple per user.)
 
 The market screener is *today*-data only: it must never be imported from a
 backtest / point-in-time path. The PIT regression test in
@@ -61,40 +59,6 @@ class SavedScreen(models.Model):
         return f"{self.name} (user={self.user_id})"
 
 
-class Watchlist(models.Model):
-    """A user's single watchlist (v1 ships one-per-user).
-
-    Multiple named watchlists are a planned follow-up; switching the
-    ``OneToOneField`` to a ``ForeignKey`` is the only code change required.
-    """
-
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="watchlist",
-    )
-    name = models.CharField(max_length=120, default="My Watchlist")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self) -> str:
-        return f"Watchlist(user={self.user_id})"
-
-
-class WatchlistItem(models.Model):
-    watchlist = models.ForeignKey(
-        Watchlist, on_delete=models.CASCADE, related_name="items"
-    )
-    ticker = models.CharField(max_length=16, db_index=True)
-    note = models.CharField(max_length=240, blank=True, default="")
-    added_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["watchlist", "ticker"], name="uniq_watchlist_ticker"
-            ),
-        ]
-        ordering = ["-added_at"]
-
-    def __str__(self) -> str:
-        return f"{self.ticker} (wl={self.watchlist_id})"
+# Watchlists moved to ``apps.watchlists`` (P3b — named, multiple per user).
+# The old single-per-user ``Watchlist`` / ``WatchlistItem`` rows are
+# data-migrated into ``watchlists.Watchlist`` by ``migrations/0002``.

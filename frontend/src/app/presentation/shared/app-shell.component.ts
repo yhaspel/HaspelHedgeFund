@@ -114,6 +114,22 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
           <hf-popover #popNews placement="right" align="center" size="compact">News</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/schedules" routerLinkActive="active" #navSched="routerLinkActive"
+           [attr.aria-current]="navSched.isActive ? 'page' : null"
+           aria-label="Schedules"
+           (mouseenter)="popSched.show()" (mouseleave)="popSched.maybeHide()"
+           (focus)="popSched.show()" (blur)="popSched.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-bell" /></svg>
+          <hf-popover #popSched placement="right" align="center" size="compact">Schedules</hf-popover>
+        </a>
+        <a class="nav-btn" routerLink="/leaderboard" routerLinkActive="active" #navLb="routerLinkActive"
+           [attr.aria-current]="navLb.isActive ? 'page' : null"
+           aria-label="Leaderboard"
+           (mouseenter)="popLb.show()" (mouseleave)="popLb.maybeHide()"
+           (focus)="popLb.show()" (blur)="popLb.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-cpu" /></svg>
+          <hf-popover #popLb placement="right" align="center" size="compact">Leaderboard</hf-popover>
+        </a>
         <div class="spacer"></div>
         <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
            [attr.aria-current]="navProfile.isActive ? 'page' : null"
