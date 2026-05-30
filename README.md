@@ -34,6 +34,16 @@ Restart all services:
 ./infra/restart.sh
 ```
 
+**After a frontend dependency change** (anything touching `frontend/package.json` / `pnpm-lock.yaml`), re-seed the container's node_modules — the dev service keeps `node_modules` in an anonymous volume that `--build` alone does not refresh, so `ng serve` would otherwise fail to resolve the new/changed package:
+
+```bash
+docker compose -f infra/docker-compose.yml up --build --renew-anon-volumes
+```
+
+`--renew-anon-volumes` recreates only anonymous volumes (node_modules) from the fresh image; the named `pgdata` Postgres volume is preserved.
+
+The IBKR gateway sidecar is gated behind a compose profile (P3a-2 is deferred), so it is skipped by default. Once you have the BYO `clientportal.gw.zip` (see `guides/ibkr-gateway.md`), include it with `docker compose -f infra/docker-compose.yml --profile ibkr up`.
+
 To trigger the demo Celery task, log into `/admin/` → Periodic Tasks → run `apps.accounts.tasks.ping` and watch the `worker-1` container logs.
 
 ## Run backend without Docker (optional)
