@@ -129,6 +129,8 @@ def _collect_agent_decisions(cutoff, forward_days: int) -> list[dict]:
             hit = (sig == "bullish" and ret > 0) or (sig == "bearish" and ret < 0)
             signed = ret if sig == "bullish" else -ret
         out.append({
+            "run_id": run.id,
+            "signal": sig,
             "agent": m.agent_name,
             "version": (run.agent_versions or {}).get(m.agent_name, ""),
             "model": (run.model_overrides or {}).get(m.agent_name, ""),
@@ -140,11 +142,30 @@ def _collect_agent_decisions(cutoff, forward_days: int) -> list[dict]:
     return out
 
 
+def _annotate_contrarian(decisions: list[dict]) -> None:
+    """Tag each decision with ``contrarian`` = directional AND its signal differs
+    from the run's majority-persona consensus. Mutates in place. Consensus is the
+    plurality persona signal among that run's decisions (ties resolve to whichever
+    Counter surfaces first — a tie means no clear consensus to be contrarian to)."""
+    import collections
+
+    by_run: dict[int, list[dict]] = collections.defaultdict(list)
+    for d in decisions:
+        by_run[d["run_id"]].append(d)
+    consensus: dict[int, str] = {}
+    for run_id, rows in by_run.items():
+        counts = collections.Counter(r["signal"] for r in rows)
+        consensus[run_id] = counts.most_common(1)[0][0]
+    for d in decisions:
+        d["contrarian"] = bool(d["directional"]) and d["signal"] != consensus.get(d["run_id"])
+
+
 def recompute_agents(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -> None:
     AgentScorecard.objects.filter(as_of=today).delete()
     pnl_cache: dict[str, float | None] = {}
     for window, days in WINDOWS_AGENT.items():
         decisions = _collect_agent_decisions(_cutoff(days, today), forward_days)
+        _annotate_contrarian(decisions)
         groups: dict[tuple, list] = {}
         for d in decisions:
             groups.setdefault((d["agent"], d["version"], d["model"]), []).append(d)
@@ -161,6 +182,13 @@ def recompute_agents(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -
             avg_ret_bps = (
                 statistics.fmean([r["ret"] for r in directional]) * 10000 if directional else None
             )
+            # Disagreement value: of the directional calls that went against the
+            # run consensus, how many were right? (Wilson CI for honesty.)
+            contrarian = [r for r in directional if r["contrarian"]]
+            nc = len(contrarian)
+            c_hits = sum(1 for r in contrarian if r["hit"])
+            c_hit_rate = c_hits / nc if nc else None
+            c_ci_low, c_ci_high = wilson_interval(c_hits, nc) if nc else (None, None)
             AgentScorecard.objects.create(
                 agent_name=agent, agent_version=version, model_id=model,
                 window=window, as_of=today, n_decisions=len(rows), n_directional=nd,
@@ -168,6 +196,10 @@ def recompute_agents(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -
                 hit_rate_ci_high=_dec4(ci_high), brier_score=_dec4(brier_score),
                 avg_forward_return_bps=_dec2(avg_ret_bps),
                 pnl_contribution_bps=_dec2(pnl_cache[agent]),
+                n_contrarian_decisions=nc,
+                contrarian_hit_rate=_dec4(c_hit_rate),
+                contrarian_hit_rate_ci_low=_dec4(c_ci_low),
+                contrarian_hit_rate_ci_high=_dec4(c_ci_high),
                 provisional=nd < MIN_DECISIONS,
             )
 
@@ -367,6 +399,44 @@ def recompute_strategies(today: dt.date) -> None:
             hit_rate=_dec4(_med("hit")),
             provisional=False,
         )
+
+
+def council_alpha_series(strategy, cutoff: dt.date | None = None) -> list[dict]:
+    """Per-cycle realised vs council-free-baseline returns for one strategy, with
+    running cumulative compounding — the drill-down data behind the council-alpha
+    chart. Read-only: uses the persisted ``marked_snapshot`` (realised) and
+    ``baseline_marked_snapshot`` (baseline, populated by the nightly recompute).
+    Cycles without a captured baseline are skipped (council-alpha is forward-only).
+    """
+    tq = PortfolioTarget.objects.filter(
+        strategy=strategy, status=PortfolioTarget.DONE
+    ).order_by("as_of_date")
+    if cutoff:
+        tq = tq.filter(as_of_date__gte=cutoff)
+    rows: list[dict] = []
+    cum_r, cum_b = 1.0, 1.0
+    for t in tq.iterator():
+        if not (t.baseline_weights or {}):
+            continue
+        rv = (t.marked_snapshot or {}).get("since_as_of_pct")
+        bv = (t.baseline_marked_snapshot or {}).get("since_as_of_pct")
+        if rv in (None, "", "None") or bv in (None, "", "None"):
+            continue
+        try:
+            r = float(rv) / 100.0
+            b = float(bv) / 100.0
+        except (TypeError, ValueError):
+            continue
+        cum_r *= 1 + r
+        cum_b *= 1 + b
+        rows.append({
+            "as_of_date": t.as_of_date.isoformat(),
+            "realised_pct": round(r * 100, 4),
+            "baseline_pct": round(b * 100, 4),
+            "cum_realised_pct": round((cum_r - 1) * 100, 4),
+            "cum_baseline_pct": round((cum_b - 1) * 100, 4),
+        })
+    return rows
 
 
 def recompute_all(today: dt.date | None = None, forward_days: int = DEFAULT_FORWARD_DAYS) -> dict:

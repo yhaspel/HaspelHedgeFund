@@ -7,12 +7,13 @@ per-flavor view is honestly labeled "your N strategies of this flavor".
 from __future__ import annotations
 
 from django.db.models import F, Max
+from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .compute import agent_decision_detail
+from .compute import WINDOWS_STRATEGY, _cutoff, agent_decision_detail, council_alpha_series
 from .models import AgentScorecard, ModelScorecard, StrategyScorecard
 from .serializers import (
     AgentScorecardSerializer,
@@ -108,6 +109,31 @@ class FlavorBenchmarkView(APIView):
             "as_of": as_of,
             "note": "Single-tenant: each row aggregates your own strategies of that flavor.",
             "rows": StrategyScorecardSerializer(qs, many=True).data,
+        })
+
+
+class StrategyCouncilAlphaView(APIView):
+    """Drill-down: per-cycle realised vs council-free-baseline returns for one of
+    the user's strategies — the series behind the council-alpha chart."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, strategy_id: int) -> Response:
+        from apps.portfolios.models import PortfolioStrategy
+
+        strategy = (
+            PortfolioStrategy.objects.filter(pk=strategy_id, user=request.user).first()
+        )
+        if strategy is None:
+            return Response({"detail": "Strategy not found."}, status=404)
+        window = request.query_params.get("window", "90d")
+        cutoff = _cutoff(WINDOWS_STRATEGY.get(window), timezone.localdate())
+        return Response({
+            "strategy_id": strategy.id,
+            "strategy_name": strategy.name,
+            "flavor": strategy.kind,
+            "window": window,
+            "rows": council_alpha_series(strategy, cutoff),
         })
 
 

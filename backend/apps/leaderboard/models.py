@@ -34,6 +34,20 @@ class AgentScorecard(models.Model):
     pnl_contribution_bps = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True
     )
+    # Disagreement value ("useful contrarians"): of this agent's directional
+    # calls that went AGAINST the run's majority-persona consensus, how often
+    # was it right? A high contrarian hit-rate flags personas worth weighting
+    # more in the PM aggregation (plan §"disagreement value").
+    n_contrarian_decisions = models.IntegerField(default=0)
+    contrarian_hit_rate = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True
+    )
+    contrarian_hit_rate_ci_low = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True
+    )
+    contrarian_hit_rate_ci_high = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True
+    )
     provisional = models.BooleanField(default=True)
     last_updated = models.DateTimeField(auto_now=True)
 
