@@ -223,3 +223,28 @@ def test_cost_ceiling_degrade(user, monkeypatch):
     hist.refresh_from_db()
     assert hist.degraded_preset == "hybrid"  # degraded away from hybrid
     assert hist.runs.count() == 1
+
+
+# ---------- human-readable cron ----------
+
+
+def test_describe_cron_human_readable():
+    # cron-descriptor's exact phrasing varies by version (12h "09:25 AM" vs 24h
+    # "09:25"), so assert the stable, meaningful parts rather than the literal.
+    from apps.schedules.triggers import describe_cron
+
+    weekday = describe_cron("25 9 * * 1-5")
+    assert "09:25" in weekday and "Monday through Friday" in weekday
+    assert "Sunday" in describe_cron("0 17 * * 0")
+    assert describe_cron("nonsense-not-a-cron") == "nonsense-not-a-cron"  # falls back
+
+
+def test_serializer_exposes_cron_description(user):
+    from apps.schedules.serializers import ScheduledRunSerializer
+
+    wl = _watchlist(user, ["AAPL"])
+    sr = ScheduledRun.objects.create(
+        user=user, name="s", watchlist=wl, cron_expression="25 9 * * 1-5",
+    )
+    desc = ScheduledRunSerializer(sr).data["cron_description"]
+    assert "09:25" in desc and "Monday through Friday" in desc

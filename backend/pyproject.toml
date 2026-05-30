@@ -23,6 +23,7 @@ dependencies = [
     "cryptography>=42.0",
     "alpaca-py>=0.30",
     "croniter>=3.0",
+    "cron-descriptor>=1.4",
     "tzdata>=2024.1",
 ]
 

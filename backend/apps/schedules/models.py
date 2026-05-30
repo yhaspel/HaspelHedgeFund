@@ -39,7 +39,9 @@ class ScheduledRun(models.Model):
     )
     # Subset of personas to run; [] = all registered personas.
     personas = models.JSONField(default=list, blank=True)
-    model_preset = models.CharField(max_length=32, default="hybrid")
+    # Scheduled runs default to the cheap `frugal` preset (per-run cost matters
+    # more for recurring jobs than one-off ad-hoc runs).
+    model_preset = models.CharField(max_length=32, default="frugal")
     model_overrides = models.JSONField(default=dict, blank=True)
 
     cron_expression = models.CharField(max_length=64)  # e.g. "25 9 * * 1-5"
