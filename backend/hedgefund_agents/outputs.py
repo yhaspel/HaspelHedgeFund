@@ -49,6 +49,12 @@ class FundamentalsOutput(BaseModel):
     debt_to_equity: float
     quality_score: int = Field(ge=0, le=100)
     notes: str
+    # --- P4 13F enrichment (optional; defaults keep existing cassettes valid)
+    institutional_ownership_pct: float | None = None
+    institutional_ownership_trend: Literal[
+        "accumulating", "distributing", "stable", "unknown"
+    ] = "unknown"
+    smart_money_note: str = ""
 
 
 class TechnicalsOutput(BaseModel):

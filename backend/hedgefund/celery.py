@@ -62,4 +62,12 @@ app.conf.beat_schedule = {
         "task": "apps.leaderboard.tasks.recompute_leaderboards",
         "schedule": crontab(minute=0, hour=7),  # 07:00 UTC daily
     },
+    # P4: quarterly 13F bulk ingest, a few days after the 45-day deadline
+    # (SEC publishes the data sets following mid-Feb/May/Aug/Nov).
+    "ingest-13f-datasets": {
+        "task": "apps.data.tasks.ingest_13f_current_quarter",
+        "schedule": crontab(
+            minute=0, hour=8, day_of_month=20, month_of_year="2,5,8,11"
+        ),
+    },
 }

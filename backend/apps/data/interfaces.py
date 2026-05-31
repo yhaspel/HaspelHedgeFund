@@ -140,3 +140,74 @@ class FilingsProvider(Protocol):
         self, ticker: str, *, as_of: date, form_types: list[str], limit: int = 4
     ) -> list[Filing]:
         """Recent filings whose `filed_at <= as_of`."""
+
+
+@dataclass(frozen=True)
+class HolderStake:
+    """One institution's stake in an issuer (by-issuer view)."""
+
+    filer_cik: str
+    filer_name: str
+    shares: int
+    value_usd: int
+    pct_of_portfolio: float | None = None
+
+
+@dataclass(frozen=True)
+class IssuerOwnershipSummary:
+    """Aggregated ownership for one issuer at one period (by-issuer view)."""
+
+    ticker: str
+    period_end: date
+    as_of: date
+    num_holders: int
+    total_shares: int
+    total_value_usd: int
+    institutional_ownership_pct: float | None
+    ownership_pct: float | None
+    qoq_value_change_pct: float | None
+    top_holders: list[HolderStake]
+    new_positions: list[str]
+    closed_positions: list[str]
+    source: str
+
+
+@dataclass(frozen=True)
+class FilerHolding:
+    """One position in a filer's portfolio (by-filer view)."""
+
+    issuer_cusip: str
+    issuer_name: str
+    ticker: str
+    shares: int
+    value_usd: int
+    put_call: str
+    weight_pct: float | None = None
+
+
+@dataclass(frozen=True)
+class FilerPortfolio:
+    """A filer's full 13F portfolio at one period (by-filer view)."""
+
+    filer_cik: str
+    filer_name: str
+    period_end: date
+    as_of: date
+    total_value_usd: int
+    holdings: list[FilerHolding]
+    source: str
+
+
+@runtime_checkable
+class OwnershipProvider(Protocol):
+    """Institutional-ownership (13F) data access used by the agents."""
+
+    name: str
+
+    def get_issuer_ownership(
+        self, ticker: str, *, as_of: date
+    ) -> IssuerOwnershipSummary | None: ...
+
+    def get_filer_portfolio(
+        self, filer_cik: str, *, as_of: date
+    ) -> FilerPortfolio | None: ...

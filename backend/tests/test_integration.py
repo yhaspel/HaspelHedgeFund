@@ -26,6 +26,7 @@ def _run(model_overrides: dict[str, str]) -> dict:
         "as_of_date": dt.date(2024, 12, 31),
         "data_provider": get_fmp_provider(force_platform=True),
         "filings_provider": get_edgar_provider(),
+        "ownership_provider": None,
         "model_overrides": model_overrides,
     }
     return graph.invoke(state)

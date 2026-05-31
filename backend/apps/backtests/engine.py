@@ -226,7 +226,11 @@ def prime_agent_cache(
     from django.conf import settings
     from django.db import close_old_connections
 
-    from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
+    from apps.data.providers.factory import (
+        get_edgar_provider,
+        get_fmp_provider,
+        get_ownership_provider,
+    )
     from hedgefund_agents.graphs.council import (
         ANALYTICAL_NODES,
         build_council_graph,
@@ -250,6 +254,7 @@ def prime_agent_cache(
     # FMP / EDGAR providers wrap an httpx.Client; httpx Client is thread-safe.
     data_provider = get_fmp_provider(user=bt.user)
     filings_provider = get_edgar_provider()
+    ownership_provider = get_ownership_provider(user=bt.user)
 
     universe = list(bt.universe)
     days = trading_days(start, end, universe)
@@ -294,6 +299,7 @@ def prime_agent_cache(
             "model_overrides": bt.model_overrides or {},
             "data_provider": data_provider,
             "filings_provider": filings_provider,
+            "ownership_provider": ownership_provider,
             "use_llm_cache": True,
             "backtest_id": bt.id,
             "agent_versions": versions,

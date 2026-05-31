@@ -390,3 +390,77 @@ class UserNewsPreferences(models.Model):
 
     def __str__(self) -> str:
         return f"news_prefs u={self.user_id}"
+
+
+class InstitutionalHolding(models.Model):
+    """A single (filer, issuer, period) position parsed from a 13F filing.
+
+    Source is either SEC EDGAR (public domain) or FMP (licensed).
+    """
+
+    filer_cik = models.CharField(max_length=20, db_index=True)
+    filer_name = models.CharField(max_length=255, blank=True)
+    issuer_cusip = models.CharField(max_length=12, db_index=True)
+    issuer_name = models.CharField(max_length=255, blank=True)
+    ticker = models.CharField(max_length=20, blank=True, db_index=True)
+    period_end = models.DateField(db_index=True)
+    filed_at = models.DateField(null=True, blank=True)
+    shares = models.BigIntegerField(default=0)
+    value_usd = models.BigIntegerField(default=0)  # dollars, normalized
+    put_call = models.CharField(max_length=8, blank=True)
+    source = models.CharField(max_length=16, default="edgar")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [
+            ("filer_cik", "issuer_cusip", "period_end", "put_call", "source"),
+        ]
+        indexes = [
+            models.Index(fields=["ticker", "period_end"]),
+            models.Index(fields=["filer_cik", "period_end"]),
+            models.Index(fields=["issuer_cusip", "period_end"]),
+        ]
+
+
+class IssuerOwnershipSnapshot(models.Model):
+    """Aggregated institutional ownership for one issuer at one period.
+
+    Built by aggregating InstitutionalHolding rows (EDGAR) or fetched
+    directly from FMP.
+    """
+
+    ticker = models.CharField(max_length=20, db_index=True)
+    issuer_cusip = models.CharField(max_length=12, blank=True, db_index=True)
+    period_end = models.DateField(db_index=True)
+    as_of_date = models.DateField(db_index=True)
+    num_holders = models.IntegerField(default=0)
+    total_shares = models.BigIntegerField(default=0)
+    total_value_usd = models.BigIntegerField(default=0)
+    institutional_ownership_pct = models.FloatField(null=True, blank=True)
+    ownership_pct = models.FloatField(null=True, blank=True)
+    qoq_value_change_pct = models.FloatField(null=True, blank=True)
+    top_holders = models.JSONField(default=list)
+    new_positions = models.JSONField(default=list)
+    closed_positions = models.JSONField(default=list)
+    source = models.CharField(max_length=16, default="edgar")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("ticker", "period_end", "source")]
+        indexes = [
+            models.Index(fields=["ticker", "as_of_date"]),
+        ]
+
+
+class CusipTicker(models.Model):
+    """CUSIP <-> ticker mapping, populated opportunistically from filings."""
+
+    cusip = models.CharField(max_length=12, unique=True)
+    ticker = models.CharField(max_length=20, db_index=True)
+    issuer_name = models.CharField(max_length=255, blank=True)
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["ticker"]),
+        ]

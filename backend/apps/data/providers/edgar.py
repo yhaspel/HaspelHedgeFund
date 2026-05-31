@@ -14,7 +14,7 @@ import httpx
 from django.conf import settings
 from django.db import transaction
 
-from ..interfaces import Filing
+from ..interfaces import Filing, FilerHolding, FilerPortfolio
 from ..models import FilingRecord
 
 # Sections we index for 10-K / 10-Q. The keys are normalized; the values are
@@ -163,6 +163,169 @@ class EdgarProvider:
                     del section_index[name]
         return text[:4000], rel_path, section_index
 
+    # ---- 13F by-filer (P4 ownership) -------------------------------------
+
+    def _parse_info_table(self, xml_text: str) -> list[dict]:
+        """Parse a 13F INFORMATION TABLE XML into raw dict rows.
+
+        Handles the (optional) default namespace by matching on local-name.
+        """
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml_text)
+
+        def local(tag: str) -> str:
+            return tag.rsplit("}", 1)[-1]
+
+        rows: list[dict] = []
+        for el in root:
+            if local(el.tag) != "infoTable":
+                continue
+            row: dict = {
+                "name": "",
+                "cusip": "",
+                "value": 0,
+                "shares": 0,
+                "put_call": "",
+            }
+            ssh_type = ""
+            for child in el.iter():
+                lname = local(child.tag)
+                if lname == "nameOfIssuer":
+                    row["name"] = (child.text or "").strip()
+                elif lname == "cusip":
+                    row["cusip"] = (child.text or "").strip()
+                elif lname == "value":
+                    row["value"] = int(float((child.text or "0").strip() or 0))
+                elif lname == "sshPrnamt":
+                    row["shares"] = int(float((child.text or "0").strip() or 0))
+                elif lname == "sshPrnamtType":
+                    ssh_type = (child.text or "").strip()
+                elif lname == "putCall":
+                    row["put_call"] = (child.text or "").strip()
+            # 13F covers long US equity only. Skip PRN rows (principal amount of
+            # debt) so bond principal never inflates the share/value aggregate.
+            if ssh_type.upper() == "PRN":
+                continue
+            rows.append(row)
+        return rows
+
+    def _cached_filer_portfolio(self, cik, as_of):
+        """Serve a previously-persisted by-filer portfolio (PIT-safe)."""
+        from ..models import InstitutionalHolding
+
+        latest = (
+            InstitutionalHolding.objects.filter(
+                filer_cik=cik, source="edgar", filed_at__lte=as_of
+            )
+            .order_by("-period_end")
+            .values_list("period_end", flat=True)
+            .first()
+        )
+        if latest is None:
+            return None
+        rows = list(
+            InstitutionalHolding.objects.filter(
+                filer_cik=cik, source="edgar", period_end=latest,
+                filed_at__lte=as_of,
+            )
+        )
+        if not rows:
+            return None
+        return _filer_portfolio_from_rows(cik, rows[0].filer_name, latest, rows)
+
+    def get_filer_portfolio(self, filer_cik, *, as_of) -> FilerPortfolio | None:
+        """Newest 13F-HR(/A) with filingDate <= as_of; cached-first.
+
+        Fetches submissions JSON, locates the newest 13F-HR(/A), parses the
+        INFORMATION TABLE XML, normalizes value units (x1000 pre-2023-01-03),
+        persists InstitutionalHolding(source="edgar"), returns a FilerPortfolio.
+        """
+        from ..models import InstitutionalHolding
+        from .ownership import cusip_to_ticker
+
+        cik = str(filer_cik).lstrip("0")
+        cik10 = cik.zfill(10)
+        cached = self._cached_filer_portfolio(cik, as_of)
+        if cached is not None:
+            return cached
+
+        subs = self._http.get(
+            f"{DATA_BASE}/submissions/CIK{cik10}.json"
+        ).json()
+        recent = subs.get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        accns = recent.get("accessionNumber", [])
+        periods = recent.get("periodOfReport", [])
+        as_of_iso = as_of.isoformat()
+        idx = None
+        for i, form in enumerate(forms):
+            if form in ("13F-HR", "13F-HR/A") and dates[i] <= as_of_iso:
+                idx = i
+                break
+        if idx is None:
+            return None
+        accn = accns[idx].replace("-", "")
+        filed = dt.date.fromisoformat(dates[idx])
+        period_end = None
+        if idx < len(periods) and periods[idx]:
+            try:
+                period_end = dt.date.fromisoformat(periods[idx])
+            except ValueError:
+                period_end = None
+        # A 13F is filed up to ~45 days after quarter-end. If periodOfReport is
+        # missing/unparseable, snap to the most recent calendar quarter-end on
+        # or before the filing date rather than using filed_at verbatim (which
+        # would corrupt the period_end key and the cached-first lookup).
+        if period_end is None:
+            period_end = _quarter_end_on_or_before(filed)
+        filer_name = subs.get("name", "")
+        base = f"{ARCHIVES_BASE}/{cik}/{accn}"
+        index = self._http.get(f"{base}/index.json").json()
+        items = index.get("directory", {}).get("item", [])
+        xml_name = None
+        for item in items:
+            low = item.get("name", "").lower()
+            if low.endswith(".xml") and (
+                "info" in low or "table" in low or "form13f" in low
+            ):
+                xml_name = item["name"]
+                break
+        if xml_name is None:
+            for item in items:
+                low = item.get("name", "").lower()
+                if low.endswith(".xml") and "primary_doc" not in low:
+                    xml_name = item["name"]
+                    break
+        if xml_name is None:
+            return None
+        xml_text = self._http.get(f"{base}/{xml_name}").text
+        raw = self._parse_info_table(xml_text)
+        mult = 1000 if filed < dt.date(2023, 1, 3) else 1
+        objs = []
+        for r in raw:
+            objs.append(
+                InstitutionalHolding(
+                    filer_cik=cik,
+                    filer_name=filer_name,
+                    issuer_cusip=r["cusip"],
+                    issuer_name=r["name"],
+                    ticker=cusip_to_ticker(r["cusip"]) or "",
+                    period_end=period_end,
+                    filed_at=filed,
+                    shares=int(r["shares"]),
+                    value_usd=int(r["value"]) * mult,
+                    put_call=r["put_call"],
+                    source="edgar",
+                )
+            )
+        if objs:
+            InstitutionalHolding.objects.bulk_create(
+                objs, ignore_conflicts=True
+            )
+        return _filer_portfolio_from_rows(cik, filer_name, period_end, objs)
+
 
 # Minimum body length for a real section. TOC entries are short (the heading
 # line plus a page number / dotted leader), bodies are thousands of chars.
@@ -221,6 +384,46 @@ def _load_section(record: FilingRecord, section: str) -> str:
 
 
 EdgarProvider.load_section = staticmethod(_load_section)
+
+
+def _quarter_end_on_or_before(d: dt.date) -> dt.date:
+    """Most recent calendar quarter-end (Mar 31 / Jun 30 / Sep 30 / Dec 31) on
+    or before ``d``. Used to recover a 13F report period when the filing's
+    ``periodOfReport`` is absent."""
+    for month, day in ((12, 31), (9, 30), (6, 30), (3, 31)):
+        qe = dt.date(d.year, month, day)
+        if qe <= d:
+            return qe
+    return dt.date(d.year - 1, 12, 31)
+
+
+def _filer_portfolio_from_rows(cik, filer_name, period_end, rows):
+    """Build a FilerPortfolio dataclass from InstitutionalHolding rows."""
+    total = sum(int(r.value_usd) for r in rows) or 0
+    holdings = [
+        FilerHolding(
+            issuer_cusip=r.issuer_cusip,
+            issuer_name=r.issuer_name,
+            ticker=r.ticker,
+            shares=int(r.shares),
+            value_usd=int(r.value_usd),
+            put_call=r.put_call,
+            weight_pct=(
+                round(int(r.value_usd) / total * 100, 4) if total else None
+            ),
+        )
+        for r in rows
+    ]
+    filed = getattr(rows[0], "filed_at", None) or period_end if rows else period_end
+    return FilerPortfolio(
+        filer_cik=cik,
+        filer_name=filer_name,
+        period_end=period_end,
+        as_of=filed,
+        total_value_usd=total,
+        holdings=holdings,
+        source="edgar",
+    )
 
 
 _TAG_RE = re.compile(r"<[^>]+>")

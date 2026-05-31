@@ -201,6 +201,7 @@ def execute_run(run_id: int) -> None:
     graph = build_council_graph(personas=selected_personas)
     data_provider = get_fmp_provider(user=run.user)
     filings_provider = get_edgar_provider()
+    ownership_provider = get_ownership_provider(user=run.user)
 
     ensure_versions_synced()
     run.agent_versions = snapshot_versions(
@@ -236,6 +237,7 @@ def execute_run(run_id: int) -> None:
                 "model_overrides": run.model_overrides or {},
                 "data_provider": data_provider,
                 "filings_provider": filings_provider,
+                "ownership_provider": ownership_provider,
                 "investor_profile": profile_ctx,
                 "persona_evolution": persona_evolution_ctx,
             }

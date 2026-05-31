@@ -23,8 +23,18 @@ import httpx
 from django.conf import settings
 from django.db import transaction
 
-from ..interfaces import Bar, FundamentalRow, ProfileSnapshot, QuoteSnapshot, ScreenerRow
+from ..interfaces import (
+    Bar,
+    FilerHolding,
+    FilerPortfolio,
+    FundamentalRow,
+    IssuerOwnershipSummary,
+    ProfileSnapshot,
+    QuoteSnapshot,
+    ScreenerRow,
+)
 from ..models import DailyBar, Fundamental
+from .errors import OwnershipNotEntitled
 
 BASE_URL = "https://financialmodelingprep.com/stable"
 SOURCE = "fmp"
@@ -454,6 +464,199 @@ class FmpProvider:
                 )
         with transaction.atomic():
             Fundamental.objects.bulk_create(to_create, ignore_conflicts=True)
+
+    # ---- 13F ownership (P4; Ultimate-gated, entitlement-probed) ----------
+
+    def _ownership_get(self, path, params=None):
+        """GET an FMP ownership endpoint; raise OwnershipNotEntitled on paywall."""
+        params = dict(params or {})
+        params["apikey"] = self.api_key
+        resp = self._http.get(f"{BASE_URL}/{path}", params=params)
+        if resp.status_code in (401, 402, 403):
+            raise OwnershipNotEntitled(
+                "Your FMP plan does not include 13F / institutional ownership "
+                "(Ultimate tier required). Falling back to SEC EDGAR."
+            )
+        resp.raise_for_status()
+        return resp.json() or []
+
+    def get_issuer_ownership(self, ticker, *, as_of):
+        """By-issuer institutional ownership (Ultimate, behind the probe).
+
+        The exact slug lives in the institutional-ownership/* family; a wrong
+        guess raises/falls through to EDGAR, so the resolver stays correct.
+        """
+        from ..models import IssuerOwnershipSnapshot
+
+        data = self._ownership_get(
+            "institutional-ownership/symbol-positions-summary",
+            {"symbol": ticker},
+        )
+        rows = data if isinstance(data, list) else [data]
+        if not rows:
+            return None
+        # PIT gate: FMP returns periods relative to *today*, so keep only those
+        # whose filing date is knowable as of `as_of`, then take the latest.
+        # This is what stops look-ahead on an entitled (Ultimate) key.
+        candidates: list[tuple[dt.date, dt.date, dict]] = []
+        for r in rows:
+            period = r.get("date") or r.get("period")
+            try:
+                pe = dt.date.fromisoformat(str(period)[:10])
+            except (TypeError, ValueError):
+                continue
+            filed = _fmp_filing_date(r, pe)
+            if filed <= as_of:
+                candidates.append((pe, filed, r))
+        if not candidates:
+            return None
+        period_end, filed_at, row = max(candidates, key=lambda c: (c[0], c[1]))
+        num_holders = int(row.get("investorsHolding", 0) or 0)
+        total_value = int(float(row.get("totalInvested", 0) or 0))
+        total_shares = int(float(row.get("numberOf13Fshares", 0) or 0))
+        # ownership_pct (% of shares outstanding) is FMP-only per the plan;
+        # it now rides the same filing-date gate above, so it is reported only
+        # for a period that was knowable as of `as_of` (never a today-relative
+        # figure leaking into a backtest).
+        own_pct = row.get("ownershipPercent")
+        ownership_pct = float(own_pct) if own_pct is not None else None
+        qoq = row.get("totalInvestedChange")
+        qoq_pct = None
+        if qoq is not None and total_value:
+            try:
+                prior = total_value - float(qoq)
+                if prior:
+                    qoq_pct = float(qoq) / prior * 100
+            except (TypeError, ValueError):
+                qoq_pct = None
+        IssuerOwnershipSnapshot.objects.update_or_create(
+            ticker=ticker.upper(),
+            period_end=period_end,
+            source="fmp",
+            defaults={
+                "as_of_date": filed_at,
+                "num_holders": num_holders,
+                "total_shares": total_shares,
+                "total_value_usd": total_value,
+                "institutional_ownership_pct": ownership_pct,
+                "ownership_pct": ownership_pct,
+                "qoq_value_change_pct": qoq_pct,
+                "top_holders": [],
+            },
+        )
+        return IssuerOwnershipSummary(
+            ticker=ticker.upper(),
+            period_end=period_end,
+            as_of=filed_at,
+            num_holders=num_holders,
+            total_shares=total_shares,
+            total_value_usd=total_value,
+            institutional_ownership_pct=ownership_pct,
+            ownership_pct=ownership_pct,
+            qoq_value_change_pct=qoq_pct,
+            top_holders=[],
+            new_positions=[],
+            closed_positions=[],
+            source="fmp",
+        )
+
+    def get_filer_portfolio(self, filer_cik, *, as_of):
+        """By-filer 13F portfolio (Ultimate, behind the probe)."""
+        from ..models import InstitutionalHolding
+
+        data = self._ownership_get(
+            "institutional-ownership/portfolio-holdings",
+            {"cik": filer_cik},
+        )
+        rows = data if isinstance(data, list) else [data]
+        if not rows:
+            return None
+        # PIT gate: group rows by report period, keep only periods whose filing
+        # date is knowable as of `as_of`, and take the latest qualifying one.
+        # Persist filed_at = the real filing date, never the caller's as_of.
+        by_period: dict[dt.date, list[dict]] = {}
+        for r in rows:
+            try:
+                pe = dt.date.fromisoformat(str(r.get("date"))[:10])
+            except (TypeError, ValueError):
+                continue
+            by_period.setdefault(pe, []).append(r)
+        qualifying = []
+        for pe, prows in by_period.items():
+            filed = _fmp_filing_date(prows[0], pe)
+            if filed <= as_of:
+                qualifying.append((pe, filed, prows))
+        if not qualifying:
+            return None
+        period_end, filed_at, prows = max(qualifying, key=lambda c: (c[0], c[1]))
+        filer_name = prows[0].get("investorName", "")
+        objs = []
+        total_value = 0
+        for r in prows:
+            value_usd = int(float(r.get("marketValue", 0) or 0))
+            total_value += value_usd
+            objs.append(
+                InstitutionalHolding(
+                    filer_cik=str(filer_cik),
+                    filer_name=filer_name,
+                    issuer_cusip=r.get("cusip", ""),
+                    issuer_name=r.get("securityName", ""),
+                    ticker=(r.get("symbol", "") or "").upper(),
+                    period_end=period_end,
+                    filed_at=filed_at,
+                    shares=int(float(r.get("sharesNumber", 0) or 0)),
+                    value_usd=value_usd,
+                    put_call="",
+                    source="fmp",
+                )
+            )
+        if objs:
+            InstitutionalHolding.objects.bulk_create(objs, ignore_conflicts=True)
+        holdings = [
+            FilerHolding(
+                issuer_cusip=o.issuer_cusip,
+                issuer_name=o.issuer_name,
+                ticker=o.ticker,
+                shares=int(o.shares),
+                value_usd=int(o.value_usd),
+                put_call=o.put_call,
+                weight_pct=(
+                    round(int(o.value_usd) / total_value * 100, 4)
+                    if total_value
+                    else None
+                ),
+            )
+            for o in objs
+        ]
+        return FilerPortfolio(
+            filer_cik=str(filer_cik),
+            filer_name=filer_name,
+            period_end=period_end,
+            as_of=filed_at,
+            total_value_usd=total_value,
+            holdings=holdings,
+            source="fmp",
+        )
+
+
+def _fmp_filing_date(row: dict, period_end: dt.date) -> dt.date:
+    """Best-effort real SEC filing/accepted date for one FMP 13F row.
+
+    The point-in-time gate needs the date the data became *knowable*, not the
+    caller's query date. FMP's institutional-ownership family returns the
+    report period in ``date``; the actual filing date, when present, is under
+    one of the keys below. When FMP omits it we fall back to the statutory 13F
+    deadline (``period_end + 45 days``) so a quarter is never admitted before
+    it could have been filed — conservative, matching the EDGAR snapshot gate.
+    """
+    for k in ("filingDate", "acceptedDate", "reportedDate", "dateFiled"):
+        v = row.get(k)
+        if v:
+            try:
+                return dt.date.fromisoformat(str(v)[:10])
+            except ValueError:
+                continue
+    return period_end + dt.timedelta(days=45)
 
 
 def _parse_date(value: str) -> dt.date:

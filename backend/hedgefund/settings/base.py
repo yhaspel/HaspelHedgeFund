@@ -219,6 +219,9 @@ TRADESTATION_SCOPES = "openid offline_access ReadAccount Trade"
 # FRED is exempt — it's free public-data per data-licensing.md.
 ALLOW_PLATFORM_DATA_KEYS = os.environ.get("ALLOW_PLATFORM_DATA_KEYS", "0") == "1"
 
+# P4 13F: enrich the Fundamentals agent with institutional-ownership data.
+FUNDAMENTALS_USE_13F = os.environ.get("FUNDAMENTALS_USE_13F", "1") == "1"
+
 # P3b: email + notification delivery. Dev defaults to the console backend so
 # scheduled-run notifications are visible in the worker logs without an SMTP
 # server; staging/prod override EMAIL_BACKEND + EMAIL_HOST via env. The test

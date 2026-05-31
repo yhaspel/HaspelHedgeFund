@@ -28,3 +28,29 @@ def prewarm_macro_snapshot(as_of_iso: str | None = None) -> str:
         snap.yield_curve_state, snap.policy_stance,
     )
     return f"{as_of.isoformat()}:{snap.growth_quadrant}"
+
+
+def _most_recent_completed_quarter(today: dt.date | None = None) -> str:
+    """Return the most-recently-filed 13F quarter (e.g. ``2024Q4``).
+
+    13F is due ~45 days after quarter-end, so when the beat runs (Feb/May/
+    Aug/Nov) the quarter that just became fully available is the *prior*
+    calendar quarter.
+    """
+    today = today or dt.date.today()
+    q = (today.month - 1) // 3 - 1  # prior quarter index (0..3)
+    year = today.year
+    if q < 0:
+        q = 3
+        year -= 1
+    return f"{year}Q{q + 1}"
+
+
+@shared_task
+def ingest_13f_current_quarter() -> str:
+    """Ingest the most-recently-completed 13F quarter's SEC data set."""
+    from django.core.management import call_command
+
+    quarter = _most_recent_completed_quarter()
+    call_command("ingest_13f_datasets", "--quarter", quarter)
+    return quarter

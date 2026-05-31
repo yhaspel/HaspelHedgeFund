@@ -37,6 +37,16 @@ class _FakeFilingsProvider:
         return []
 
 
+class _FakeOwnershipProvider:
+    name = "fake"
+
+    def get_issuer_ownership(self, ticker, *, as_of):
+        return None
+
+    def get_filer_portfolio(self, filer_cik, *, as_of):
+        return None
+
+
 @pytest.mark.django_db
 @pytest.mark.parametrize("persona_name", list(PERSONA_NODES.keys()))
 def test_persona_produces_valid_output(persona_name: str) -> None:
@@ -44,6 +54,7 @@ def test_persona_produces_valid_output(persona_name: str) -> None:
         "ticker": "AAPL",
         "as_of_date": dt.date(2024, 12, 31),
         "filings_provider": _FakeFilingsProvider(),
+        "ownership_provider": _FakeOwnershipProvider(),
         "fundamentals": {"quality_score": 80},
         "technicals": {"signal": "bullish"},
         "valuation": {"current_price": 150.0},

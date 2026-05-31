@@ -1,0 +1,97 @@
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">		<infoTable>
+			<nameOfIssuer>AEROJET ROCKETDYNE HLDGS INC</nameOfIssuer>
+			<titleOfClass>COM</titleOfClass>
+			<cusip>007800105</cusip>
+			<value>5301</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>132561</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>132561</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+		<infoTable>
+			<nameOfIssuer>CHARTER COMMUNICATIONS INC N</nameOfIssuer>
+			<titleOfClass>CL A</titleOfClass>
+			<cusip>16119P108</cusip>
+			<value>3034</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>10000</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>10000</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+		<infoTable>
+			<nameOfIssuer>CORECIVIC INC</nameOfIssuer>
+			<titleOfClass>COM</titleOfClass>
+			<cusip>21871N101</cusip>
+			<value>6408</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>724895</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>724895</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+		<infoTable>
+			<nameOfIssuer>GEO GROUP INC NEW</nameOfIssuer>
+			<titleOfClass>COM</titleOfClass>
+			<cusip>36162J106</cusip>
+			<value>15547</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>2019150</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>2019150</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+		<infoTable>
+			<nameOfIssuer>LIBERTY LATIN AMERICA LTD</nameOfIssuer>
+			<titleOfClass>COM CL C</titleOfClass>
+			<cusip>G9001E128</cusip>
+			<value>958</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>155761</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>155761</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+		<infoTable>
+			<nameOfIssuer>QURATE RETAIL INC</nameOfIssuer>
+			<titleOfClass>COM SER A</titleOfClass>
+			<cusip>74915M100</cusip>
+			<value>10050</value>
+			<shrsOrPrnAmt>
+				<sshPrnamt>5000000</sshPrnamt>
+				<sshPrnamtType>SH</sshPrnamtType>
+			</shrsOrPrnAmt>
+			<investmentDiscretion>DFND</investmentDiscretion>
+			<votingAuthority>
+				<Sole>5000000</Sole>
+				<Shared>0</Shared>
+				<None>0</None>
+			</votingAuthority>
+		</infoTable>
+</informationTable>

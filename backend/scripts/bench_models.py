@@ -39,7 +39,11 @@ import logging  # noqa: E402
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 from apps.data.models import DailyBar  # noqa: E402
-from apps.data.providers.factory import get_edgar_provider, get_fmp_provider  # noqa: E402
+from apps.data.providers.factory import (  # noqa: E402
+    get_edgar_provider,
+    get_fmp_provider,
+    get_ownership_provider,
+)
 from hedgefund_agents.graphs.council import ANALYTICAL_NODES, build_council_graph  # noqa: E402
 from hedgefund_agents.models import LLMCall  # noqa: E402
 from hedgefund_agents.personas import ALL_PERSONAS  # noqa: E402
@@ -95,6 +99,7 @@ def run_one(provider: str, model: str, days: list[dt.date]) -> dict:
     graph = build_council_graph(personas=list(ALL_PERSONAS))
     dp = get_fmp_provider(force_platform=True)
     fp = get_edgar_provider()
+    op = get_ownership_provider(user=None)
     overrides = force_overrides(provider, model)
 
     t0_id = LLMCall.objects.order_by("-id").values_list("id", flat=True).first() or 0
@@ -116,6 +121,7 @@ def run_one(provider: str, model: str, days: list[dt.date]) -> dict:
                 "ticker": ticker, "as_of_date": day,
                 "model_overrides": overrides,
                 "data_provider": dp, "filings_provider": fp,
+                "ownership_provider": op,
                 "use_llm_cache": False,  # benchmark must hit the network
                 "disable_cio": True,
             }

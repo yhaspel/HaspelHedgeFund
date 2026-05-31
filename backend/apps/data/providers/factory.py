@@ -31,6 +31,7 @@ from .market_news_tiingo import MarketNewsTiingoProvider
 from .news import NewsService
 from .news_fmp import FmpNewsProvider
 from .news_tiingo import TiingoNewsProvider
+from .ownership import OwnershipResolver
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +116,12 @@ def _cached_fred(user_id: int | None, api_key: str) -> FredProvider:
 @lru_cache(maxsize=1)
 def _cached_edgar() -> EdgarProvider:
     return EdgarProvider()
+
+
+@lru_cache(maxsize=128)
+def _cached_ownership(user_id: int | None, api_key: str) -> OwnershipResolver:
+    fmp = FmpProvider(api_key=api_key or None) if api_key else None
+    return OwnershipResolver(fmp=fmp, edgar=_cached_edgar())
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +237,27 @@ def get_edgar_provider() -> EdgarProvider:
     return _cached_edgar()
 
 
+def get_ownership_provider(user: Any = None) -> OwnershipResolver:
+    """Build the 13F ownership resolver (FMP-if-entitled-else-EDGAR).
+
+    Resolves the FMP key like ``get_fmp_provider``; a missing key (the
+    ``RuntimeError`` from ``_resolve_data_key``) yields ``fmp=None`` so the
+    resolver runs EDGAR-only. EDGAR (User-Agent only) is always attached.
+    ``lru_cache``d on ``(user_id, api_key)`` exactly like ``_cached_fmp``.
+    """
+    key = ""
+    source = "platform"
+    try:
+        key, source = _resolve_data_key(user, "fmp", "FMP_API_KEY")
+    except RuntimeError:
+        key = ""
+    log.info(
+        "data_provider provider=ownership user_id=%s key_source=%s",
+        _uid(user), source if key else "none",
+    )
+    return _cached_ownership(_uid(user) if (key and source == "user") else None, key)
+
+
 def _reset_caches_for_tests() -> None:
     """Test helper: clear every lru_cache so a freshly-saved key takes effect."""
     _cached_fmp.cache_clear()
@@ -239,3 +267,4 @@ def _reset_caches_for_tests() -> None:
     _cached_market_news_tiingo.cache_clear()
     _cached_fred.cache_clear()
     _cached_edgar.cache_clear()
+    _cached_ownership.cache_clear()

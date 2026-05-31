@@ -142,6 +142,18 @@ class _FakeFilingsProvider:
         return []
 
 
+class _FakeOwnershipProvider:
+    # Returns None so the Fundamentals prompt is unchanged and the existing
+    # AAPL cassettes replay without re-recording (no new LLM call).
+    name = "fake"
+
+    def get_issuer_ownership(self, ticker, *, as_of):
+        return None
+
+    def get_filer_portfolio(self, filer_cik, *, as_of):
+        return None
+
+
 # ---- fake LLM -------------------------------------------------------------
 
 def _persona_payload(signal: str = "bullish", confidence: int = 80) -> str:
@@ -224,6 +236,7 @@ def _initial_state(**extra):
         "as_of_date": dt.date(2024, 12, 31),
         "data_provider": _FakeDataProvider(),
         "filings_provider": _FakeFilingsProvider(),
+        "ownership_provider": _FakeOwnershipProvider(),
         "news": NewsBatch.empty(),
         **extra,
     }

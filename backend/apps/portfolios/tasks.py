@@ -32,6 +32,7 @@ from apps.data.providers.factory import (
     get_edgar_provider,
     get_fmp_provider,
     get_news_service,
+    get_ownership_provider,
 )
 from apps.models_catalog.presets import PRESETS, expand_preset
 from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
@@ -380,6 +381,7 @@ def run_candidate_council(self, payload: dict) -> dict:
         "model_overrides": payload.get("model_overrides", {}),
         "data_provider": get_fmp_provider(user=council_user_id),
         "filings_provider": get_edgar_provider(),
+        "ownership_provider": get_ownership_provider(user=council_user_id),
         # Cost attribution: every LLMCall this council emits will be linked
         # to BOTH the parent PortfolioTarget AND this run, so two independent
         # rollups stay correct (Run.total_cost_usd for the transcript view,

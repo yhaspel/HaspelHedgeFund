@@ -23,6 +23,7 @@ class AgentState(TypedDict, total=False):
     # Wiring
     data_provider: Any
     filings_provider: Any
+    ownership_provider: Any
     llm_clients: dict[str, Any]  # provider name -> client instance
 
     # Optional inputs
