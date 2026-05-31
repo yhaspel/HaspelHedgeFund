@@ -269,7 +269,7 @@ def test_feed_translates_foreign_rep(monkeypatch) -> None:
     user = _make_user()
     _make_item(url="https://example.com/zh", language="zh-cn",
               headline="巴中关系迎来新篇章", summary="中文摘要")
-    prefs = UserNewsPreferences.objects.create(
+    UserNewsPreferences.objects.create(
         user=user, sentiment_enabled=False, translation_enabled=True
     )
     _patch_translate(monkeypatch)

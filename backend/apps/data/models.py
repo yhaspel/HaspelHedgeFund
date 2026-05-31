@@ -454,6 +454,9 @@ class IssuerOwnershipSnapshot(models.Model):
             models.Index(fields=["ticker", "as_of_date"]),
         ]
 
+    def __str__(self) -> str:
+        return f"{self.ticker} {self.period_end} ({self.num_holders} holders)"
+
 
 class CusipTicker(models.Model):
     """CUSIP <-> ticker mapping, populated opportunistically from filings."""
@@ -467,3 +470,6 @@ class CusipTicker(models.Model):
         indexes = [
             models.Index(fields=["ticker"]),
         ]
+
+    def __str__(self) -> str:
+        return f"{self.cusip} -> {self.ticker}"
