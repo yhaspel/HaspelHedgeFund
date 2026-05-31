@@ -421,6 +421,9 @@ class InstitutionalHolding(models.Model):
             models.Index(fields=["issuer_cusip", "period_end"]),
         ]
 
+    def __str__(self) -> str:
+        return f"{self.filer_cik} {self.issuer_cusip} {self.period_end}"
+
 
 class IssuerOwnershipSnapshot(models.Model):
     """Aggregated institutional ownership for one issuer at one period.

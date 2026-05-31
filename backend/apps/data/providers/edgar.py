@@ -14,7 +14,7 @@ import httpx
 from django.conf import settings
 from django.db import transaction
 
-from ..interfaces import Filing, FilerHolding, FilerPortfolio
+from ..interfaces import FilerHolding, FilerPortfolio, Filing
 from ..models import FilingRecord
 
 # Sections we index for 10-K / 10-Q. The keys are normalized; the values are
