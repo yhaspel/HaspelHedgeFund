@@ -223,6 +223,8 @@ class MyProviderKeysView(APIView):
             pk.set_key("tiingo", data["tiingo_api_key"])
         if "fred_api_key" in data:
             pk.set_key("fred", data["fred_api_key"])
+        if "resend_api_key" in data:
+            pk.set_key("resend", data["resend_api_key"])
         pk.save()
         # P2n: clear factory caches so a freshly saved key takes effect on the
         # next provider call (the cache key includes api_key, so this is mostly

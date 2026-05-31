@@ -12,6 +12,7 @@ import { CommonModule } from '@angular/common';
 
 import { ScreenResultRow } from '../../core/models/screener.model';
 import { TickerComponent } from '../shared/ticker.component';
+import { InfoTooltipComponent } from '../shared/info-tooltip.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 
 interface ColumnDef {
@@ -19,26 +20,69 @@ interface ColumnDef {
   label: string;
   align: 'left' | 'right';
   sortable: boolean;
+  tip?: string;
 }
 
 const COLUMNS: ColumnDef[] = [
   { id: 'ticker', label: 'Ticker', align: 'left', sortable: false },
   { id: 'name', label: 'Name', align: 'left', sortable: false },
   { id: 'price', label: 'Price', align: 'right', sortable: true },
-  { id: 'change_pct', label: 'Change %', align: 'right', sortable: true },
-  { id: 'gap_pct', label: 'Gap %', align: 'right', sortable: true },
-  { id: 'rvol', label: 'RVOL', align: 'right', sortable: true },
-  { id: 'volume', label: 'Volume', align: 'right', sortable: true },
-  { id: 'adv_14d', label: 'ADV (14d)', align: 'right', sortable: true },
-  { id: 'market_cap', label: 'Market Cap', align: 'right', sortable: true },
-  { id: 'momentum_3m', label: '3m %', align: 'right', sortable: true },
+  {
+    id: 'change_pct',
+    label: 'Change %',
+    align: 'right',
+    sortable: true,
+    tip: "Today's percent move versus yesterday's close — includes the overnight gap plus intraday drift. Green = up, red = down.",
+  },
+  {
+    id: 'gap_pct',
+    label: 'Gap %',
+    align: 'right',
+    sortable: true,
+    tip: "Today's open versus yesterday's close, in percent. Positive = gapped up (opened higher), negative = gapped down. Surfaces overnight catalysts.",
+  },
+  {
+    id: 'rvol',
+    label: 'RVOL',
+    align: 'right',
+    sortable: true,
+    tip: "Relative Volume — today's volume divided by the 14-day average daily volume. 1.0× = normal, 2.0× = double the usual activity (often a news catalyst or breakout).",
+  },
+  {
+    id: 'volume',
+    label: 'Volume',
+    align: 'right',
+    sortable: true,
+    tip: "Today's traded volume in shares (live). Higher volume means tighter spreads and easier fills.",
+  },
+  {
+    id: 'adv_14d',
+    label: 'ADV (14d)',
+    align: 'right',
+    sortable: true,
+    tip: 'Average Daily Volume — mean daily share volume over the last 14 completed trading sessions. A baseline measure of liquidity.',
+  },
+  {
+    id: 'market_cap',
+    label: 'Market Cap',
+    align: 'right',
+    sortable: true,
+    tip: 'Total market value of all outstanding shares, in USD (shown as M / B / T).',
+  },
+  {
+    id: 'momentum_3m',
+    label: '3m %',
+    align: 'right',
+    sortable: true,
+    tip: '3-month price return — the percent change over the last ~63 trading sessions (about three months). A classic momentum signal. Green = up, red = down.',
+  },
   { id: 'sector', label: 'Sector', align: 'left', sortable: false },
 ];
 
 @Component({
   selector: 'hf-screener-results-table',
   standalone: true,
-  imports: [CommonModule, TickerComponent],
+  imports: [CommonModule, TickerComponent, InfoTooltipComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="tbl-wrap">
@@ -64,6 +108,9 @@ const COLUMNS: ColumnDef[] = [
                   </button>
                 } @else {
                   <span>{{ col.label }}</span>
+                }
+                @if (col.tip) {
+                  <hf-info [text]="col.tip" />
                 }
               </th>
             }
@@ -125,6 +172,9 @@ const COLUMNS: ColumnDef[] = [
     `
       .tbl-wrap {
         overflow-x: auto;
+      }
+      thead th {
+        white-space: nowrap;
       }
       .sort-btn {
         background: transparent;

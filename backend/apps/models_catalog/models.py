@@ -58,6 +58,7 @@ class ProviderKey(models.Model):
     fmp_api_key_enc = models.TextField(blank=True, default="")
     tiingo_api_key_enc = models.TextField(blank=True, default="")
     fred_api_key_enc = models.TextField(blank=True, default="")
+    resend_api_key_enc = models.TextField(blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:

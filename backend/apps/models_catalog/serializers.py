@@ -34,6 +34,7 @@ class ProviderKeyStatusSerializer(serializers.Serializer):
     fmp = serializers.SerializerMethodField()
     tiingo = serializers.SerializerMethodField()
     fred = serializers.SerializerMethodField()
+    resend = serializers.SerializerMethodField()
 
     def get_anthropic(self, obj: ProviderKey) -> str:
         return "set" if obj.has_key("anthropic") else "unset"
@@ -53,6 +54,9 @@ class ProviderKeyStatusSerializer(serializers.Serializer):
     def get_fred(self, obj: ProviderKey) -> str:
         return "set" if obj.has_key("fred") else "unset"
 
+    def get_resend(self, obj: ProviderKey) -> str:
+        return "set" if obj.has_key("resend") else "unset"
+
 
 class ProviderKeyWriteSerializer(serializers.Serializer):
     anthropic_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -62,3 +66,4 @@ class ProviderKeyWriteSerializer(serializers.Serializer):
     fmp_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     tiingo_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     fred_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    resend_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)

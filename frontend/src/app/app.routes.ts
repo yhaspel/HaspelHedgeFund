@@ -126,12 +126,37 @@ export const routes: Routes = [
         (m) => m.StrategiesDetailPage,
       ),
   },
+  { path: 'settings', pathMatch: 'full', redirectTo: 'settings/models' },
   {
     path: 'settings/models',
     canActivate: [authGuard],
     loadComponent: () =>
       import('./presentation/settings/settings-models.page').then(
         (m) => m.SettingsModelsPage,
+      ),
+  },
+  {
+    path: 'settings/providers',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-providers.page').then(
+        (m) => m.SettingsProvidersPage,
+      ),
+  },
+  {
+    path: 'settings/personas',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-personas.page').then(
+        (m) => m.SettingsPersonasPage,
+      ),
+  },
+  {
+    path: 'settings/data-news',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-data-news.page').then(
+        (m) => m.SettingsDataNewsPage,
       ),
   },
   {

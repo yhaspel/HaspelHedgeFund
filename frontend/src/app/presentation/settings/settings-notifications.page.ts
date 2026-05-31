@@ -42,6 +42,8 @@ interface Channel {
 
       <hf-settings-tabs />
 
+      <div role="tabpanel" aria-label="Notifications settings">
+
       @if (msg()) { <p class="note" role="status">{{ msg() }}</p> }
       @if (error()) { <p class="alert" role="alert">{{ error() }}</p> }
 
@@ -103,6 +105,7 @@ interface Channel {
           </div>
         }
       </section>
+      </div>
     </hf-app-shell>
   `,
   styles: [

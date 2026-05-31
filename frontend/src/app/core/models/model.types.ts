@@ -87,6 +87,7 @@ export interface ProviderKeyStatus {
   fmp: 'set' | 'unset';
   tiingo: 'set' | 'unset';
   fred: 'set' | 'unset';
+  resend: 'set' | 'unset';
 }
 
 export const PRESET_NAMES = ['dev', 'research', 'quality', 'frugal', 'hybrid'] as const;
