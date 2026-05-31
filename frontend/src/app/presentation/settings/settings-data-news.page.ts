@@ -79,6 +79,56 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             </div>
 
             <div class="field">
+              <label class="lbl flex items-center justify-between" for="news-translation-enabled">
+                <span>Translation</span>
+                <input id="news-translation-enabled" type="checkbox"
+                       [(ngModel)]="newsForm.translation_enabled"
+                       name="news_translation_enabled"
+                       data-test="news-translation-toggle" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Auto-translate non-English headlines to English and tag them.
+                Off = foreign articles show in their original language.
+              </p>
+            </div>
+
+            <div class="field">
+              <label class="lbl" for="news-translation-model">Translation model</label>
+              <select id="news-translation-model" class="input sans"
+                      [(ngModel)]="newsForm.translation_model"
+                      name="news_translation_model"
+                      [disabled]="!newsForm.translation_enabled"
+                      data-test="news-translation-model">
+                @for (m of newsStore.translationChoices(); track m.id) {
+                  <option [value]="m.id">
+                    {{ m.display_name }} ·
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                  </option>
+                }
+              </select>
+            </div>
+
+            <div class="field">
+              <label class="lbl" for="news-translation-fallback">Fallback model</label>
+              <select id="news-translation-fallback" class="input sans"
+                      [(ngModel)]="newsForm.translation_fallback_model"
+                      name="news_translation_fallback"
+                      [disabled]="!newsForm.translation_enabled"
+                      data-test="news-translation-fallback">
+                @for (m of newsStore.translationChoices(); track m.id) {
+                  <option [value]="m.id">
+                    {{ m.display_name }} ·
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                  </option>
+                }
+              </select>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Used if the primary model fails. If this also fails, the
+                article is left untranslated.
+              </p>
+            </div>
+
+            <div class="field">
               <label class="lbl flex items-center justify-between" for="news-chyron-enabled">
                 <span>Chyron banner</span>
                 <input id="news-chyron-enabled" type="checkbox"
@@ -211,6 +261,9 @@ export class SettingsDataNewsPage implements OnInit {
     chyron_enabled: true,
     chyron_item_count: 8,
     feed_item_count: 20,
+    translation_enabled: true,
+    translation_model: 'openrouter:qwen/qwen3-235b-a22b-2507',
+    translation_fallback_model: 'openrouter:meta-llama/llama-3.3-70b-instruct',
   };
   private savedNews: NewsPreferences = { ...this.newsForm };
   savingNews = signal(false);

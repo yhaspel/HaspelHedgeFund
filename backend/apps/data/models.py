@@ -341,6 +341,13 @@ class MarketNewsItem(models.Model):
     sentiment_rationale = models.CharField(max_length=240, blank=True, default="")
     sentiment_model = models.CharField(max_length=128, blank=True, default="")
     sentiment_at = models.DateTimeField(null=True, blank=True)
+    # --- language & translation (P4-pre-news-xlate); all blank until set ---
+    language = models.CharField(max_length=16, blank=True, default="")
+    headline_en = models.CharField(max_length=512, blank=True, default="")
+    summary_en = models.TextField(blank=True, default="")
+    translated_from = models.CharField(max_length=16, blank=True, default="")
+    translation_model = models.CharField(max_length=128, blank=True, default="")
+    translation_at = models.DateTimeField(null=True, blank=True)
     fetched_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -371,6 +378,14 @@ class UserNewsPreferences(models.Model):
     chyron_enabled = models.BooleanField(default=True)
     chyron_item_count = models.PositiveSmallIntegerField(default=8)  # clamp 5–10
     feed_item_count = models.PositiveSmallIntegerField(default=20)  # clamp 10–20
+    # --- translation (P4-pre-news-xlate) ---
+    translation_enabled = models.BooleanField(default=True)
+    translation_model = models.CharField(
+        max_length=128, default="openrouter:qwen/qwen3-235b-a22b-2507"
+    )
+    translation_fallback_model = models.CharField(
+        max_length=128, default="openrouter:meta-llama/llama-3.3-70b-instruct"
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:

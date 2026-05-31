@@ -704,6 +704,8 @@ FORBIDDEN_IMPORT_PATTERNS = [
     re.compile(r"^\s*(?:from|import)\s+apps\.data\.providers\.market_news\b", re.MULTILINE),
     re.compile(r"^\s*(?:from|import)\s+apps\.data\.market_news_rank\b", re.MULTILINE),
     re.compile(r"^\s*(?:from|import)\s+apps\.data\.market_news_sentiment\b", re.MULTILINE),
+    re.compile(r"^\s*(?:from|import)\s+apps\.data\.market_news_translation\b", re.MULTILINE),
+    re.compile(r"^\s*(?:from|import)\s+apps\.data\.providers\._language\b", re.MULTILINE),
 ]
 
 

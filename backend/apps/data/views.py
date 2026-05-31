@@ -475,14 +475,18 @@ def _serialize_market_news_item(item: MarketNewsItem, cluster_size: int) -> dict
     return {
         "id": item.id,
         "provider": item.provider,
-        "headline": item.headline,
-        "summary": item.summary,
+        "headline": item.headline_en or item.headline,
+        "summary": item.summary_en or item.summary,
         "url": item.url,
         "image_url": item.image_url,
         "source": item.source,
         "published_at": item.published_at.isoformat(),
         "symbols": item.symbols,
         "tags": item.tags,
+        "language": item.language or None,
+        "translated_from": item.translated_from or None,
+        "original_headline": item.headline if item.translated_from else None,
+        "original_summary": item.summary if item.translated_from else None,
         "sentiment": item.sentiment or None,
         "sentiment_score": item.sentiment_score,
         "sentiment_rationale": item.sentiment_rationale or None,
@@ -572,6 +576,30 @@ class MarketNewsFeedView(APIView):
         providers_used = service.providers_used
         needs_keys = (not providers_used) and not rows
 
+        # Translation pass (only when enabled). Detect language for any rep
+        # missing it (covers pre-existing + ignore_conflicts-re-seen rows),
+        # then translate the foreign reps to English. Runs BEFORE sentiment so
+        # the classifier scores the English text.
+        translation_warning: str | None = None
+        if prefs.translation_enabled and page_clusters:
+            from .market_news_translation import translate
+            from .providers._language import detect_language
+
+            reps = [c.representative for c in page_clusters]
+            undetected = [r for r in reps if not r.language]
+            for r in undetected:
+                r.language = detect_language(
+                    f"{r.headline}. {r.summary or ''}".strip()
+                )
+            if undetected:
+                MarketNewsItem.objects.bulk_update(undetected, ["language"])
+            _ok, translation_warning = translate(
+                reps,
+                model_id=prefs.translation_model,
+                fallback_model_id=prefs.translation_fallback_model,
+                user_id=request.user.id,
+            )
+
         sentiment_warning: str | None = None
         if (
             prefs.sentiment_enabled
@@ -619,6 +647,8 @@ class MarketNewsFeedView(APIView):
         }
         if sentiment_warning:
             payload["sentiment_warning"] = sentiment_warning
+        if translation_warning:
+            payload["translation_warning"] = translation_warning
         return Response(payload)
 
 
@@ -629,7 +659,30 @@ def _serialize_prefs(prefs: UserNewsPreferences) -> dict:
         "chyron_enabled": prefs.chyron_enabled,
         "chyron_item_count": prefs.chyron_item_count,
         "feed_item_count": prefs.feed_item_count,
+        "translation_enabled": prefs.translation_enabled,
+        "translation_model": prefs.translation_model,
+        "translation_fallback_model": prefs.translation_fallback_model,
     }
+
+
+def _serialize_translation_choices() -> list[dict]:
+    from .market_news_translation import frugal_translation_models
+
+    return [
+        {
+            "id": m.id,
+            "display_name": m.display_name,
+            "price_in_per_mtok": (
+                float(m.price_in_per_mtok) if m.price_in_per_mtok is not None else None
+            ),
+            "price_out_per_mtok": (
+                float(m.price_out_per_mtok)
+                if m.price_out_per_mtok is not None
+                else None
+            ),
+        }
+        for m in frugal_translation_models()
+    ]
 
 
 def _serialize_sentiment_choices() -> list[dict]:
@@ -663,11 +716,13 @@ class NewsPreferencesView(APIView):
             {
                 "preferences": _serialize_prefs(prefs),
                 "sentiment_model_choices": _serialize_sentiment_choices(),
+                "translation_model_choices": _serialize_translation_choices(),
             }
         )
 
     def put(self, request: Request) -> Response:
         from .market_news_sentiment import is_allowed_sentiment_model
+        from .market_news_translation import is_allowed_translation_model
 
         prefs = _get_or_create_news_prefs(request.user)
         body = request.data or {}
@@ -711,10 +766,30 @@ class NewsPreferencesView(APIView):
             if model_id:
                 prefs.sentiment_model = model_id
 
+        if "translation_enabled" in body:
+            prefs.translation_enabled = bool(body["translation_enabled"])
+        for key in ("translation_model", "translation_fallback_model"):
+            if key in body:
+                model_id = str(body[key]).strip()
+                if model_id and not is_allowed_translation_model(model_id):
+                    return Response(
+                        {
+                            "detail": (
+                                "Translation model is restricted to Llama and "
+                                "Qwen models. Pick one from "
+                                "translation_model_choices."
+                            )
+                        },
+                        status=400,
+                    )
+                if model_id:
+                    setattr(prefs, key, model_id)
+
         prefs.save()
         return Response(
             {
                 "preferences": _serialize_prefs(prefs),
                 "sentiment_model_choices": _serialize_sentiment_choices(),
+                "translation_model_choices": _serialize_translation_choices(),
             }
         )

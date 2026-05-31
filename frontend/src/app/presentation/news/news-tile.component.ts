@@ -8,6 +8,7 @@ import {
 import { CommonModule } from '@angular/common';
 
 import { MarketNewsItem, Sentiment } from '../../core/models/news.model';
+import { languageName } from './language-name';
 
 /**
  * hf-news-tile — one ranked-cluster representative.
@@ -44,6 +45,11 @@ import { MarketNewsItem, Sentiment } from '../../core/models/news.model';
         <ng-container *ngIf="showSentiment && item.sentiment">
           <span class="sep" aria-hidden="true">•</span>
           <span class="pill sentiment" [attr.data-sent]="item.sentiment">{{ item.sentiment }}</span>
+        </ng-container>
+        <ng-container *ngIf="item.translated_from">
+          <span class="sep" aria-hidden="true">•</span>
+          <span class="pill xlate"
+                [attr.aria-label]="'auto-translated from ' + translatedLabel">Auto-translated from {{ translatedLabel }}</span>
         </ng-container>
         <ng-container *ngIf="item.symbols?.length">
           <span class="sep" aria-hidden="true">•</span>
@@ -169,6 +175,13 @@ import { MarketNewsItem, Sentiment } from '../../core/models/news.model';
         font-size: 10.5px;
         color: var(--text-2);
       }
+      .pill.xlate {
+        font-size: 10.5px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-2);
+      }
     `,
   ],
 })
@@ -179,6 +192,10 @@ export class NewsTileComponent {
 
   get showSentiment(): boolean {
     return this.sentimentEnabled;
+  }
+
+  get translatedLabel(): string {
+    return languageName(this.item.translated_from);
   }
 
   get relativeTime(): string {

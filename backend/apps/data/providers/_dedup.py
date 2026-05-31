@@ -27,5 +27,13 @@ def dedup_key(headline: str, published_at: dt.datetime) -> str:
     """
     norm = _NORMALIZE_RE.sub(" ", headline.lower()).strip()
     norm = " ".join(norm.split()[:12])
+    if not norm:
+        # All-non-Latin headline: [a-z0-9] normalisation erased it. Fall back to
+        # the raw casefolded, whitespace-collapsed headline so distinct foreign
+        # stories don't all collapse into one cluster. Two providers carrying the
+        # SAME foreign headline still match (true cross-provider dupes still
+        # merge). English/mixed headlines have a non-empty ``norm`` and are
+        # completely unaffected (byte-identical key to before).
+        norm = " ".join(headline.lower().split())[:200]
     day_bucket = published_at.strftime("%Y-%m-%d")
     return hashlib.sha256(f"{norm}|{day_bucket}".encode()).hexdigest()[:32]

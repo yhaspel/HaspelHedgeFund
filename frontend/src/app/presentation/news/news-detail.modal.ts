@@ -4,6 +4,7 @@ import {
   EventEmitter,
   Input,
   Output,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
@@ -11,6 +12,7 @@ import { Router } from '@angular/router';
 import { ModalComponent } from '../shared/modal.component';
 import { TickerComponent } from '../shared/ticker.component';
 import { MarketNewsItem } from '../../core/models/news.model';
+import { languageName } from './language-name';
 
 /**
  * hf-news-detail-modal — full detail of one market-news story.
@@ -47,7 +49,15 @@ import { MarketNewsItem } from '../../core/models/news.model';
             (error)="imgFailed = true"
             [hidden]="imgFailed"
           />
-          <h2 class="headline">{{ item.headline }}</h2>
+          <h2 class="headline">{{ displayHeadline }}</h2>
+          <div class="xlate-row" *ngIf="item.translated_from">
+            <span class="pill xlate"
+                  [attr.aria-label]="'auto-translated from ' + translatedLabel">Auto-translated from {{ translatedLabel }}</span>
+            <button type="button" class="btn ghost xs" (click)="toggleOriginal()"
+                    data-test="news-view-original">
+              {{ showOriginal() ? 'View translation' : 'View original' }}
+            </button>
+          </div>
           <div class="meta">
             <span class="src">{{ item.source || item.provider }}</span>
             <span class="sep" aria-hidden="true">•</span>
@@ -56,8 +66,8 @@ import { MarketNewsItem } from '../../core/models/news.model';
               {{ item.cluster_size }} sources
             </span>
           </div>
-          <p class="summary" *ngIf="item.summary">{{ item.summary }}</p>
-          <p class="summary muted" *ngIf="!item.summary">
+          <p class="summary" *ngIf="displaySummary">{{ displaySummary }}</p>
+          <p class="summary muted" *ngIf="!displaySummary">
             No preview text from the publisher; open the article for the full
             story.
           </p>
@@ -151,6 +161,18 @@ import { MarketNewsItem } from '../../core/models/news.model';
         gap: 8px;
         font-size: 12px;
         color: var(--text-3);
+      }
+      .xlate-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .pill.xlate {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-2);
       }
       .summary {
         margin: 0;
@@ -274,12 +296,43 @@ import { MarketNewsItem } from '../../core/models/news.model';
   ],
 })
 export class NewsDetailModalComponent {
-  @Input({ required: true }) item!: MarketNewsItem;
+  private _item!: MarketNewsItem;
+  @Input({ required: true }) set item(value: MarketNewsItem) {
+    this._item = value;
+    // The modal is reused per selected item; reset to the translated view so
+    // a freshly-opened article never opens stuck on the previous "original".
+    this.showOriginal.set(false);
+    this.imgFailed = false;
+  }
+  get item(): MarketNewsItem {
+    return this._item;
+  }
   @Output() closed = new EventEmitter<void>();
 
+  readonly showOriginal = signal(false);
   imgFailed = false;
 
   constructor(private readonly router: Router) {}
+
+  get translatedLabel(): string {
+    return languageName(this.item.translated_from);
+  }
+
+  get displayHeadline(): string {
+    return this.showOriginal() && this.item.original_headline
+      ? this.item.original_headline
+      : this.item.headline;
+  }
+
+  get displaySummary(): string {
+    return this.showOriginal() && this.item.original_summary != null
+      ? this.item.original_summary
+      : this.item.summary;
+  }
+
+  toggleOriginal(): void {
+    this.showOriginal.update((v) => !v);
+  }
 
   analyzeInRun(symbol: string): void {
     this.router.navigate(['/runs/new'], {

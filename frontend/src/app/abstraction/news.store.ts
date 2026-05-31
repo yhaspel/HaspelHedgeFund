@@ -32,6 +32,7 @@ export class NewsStore {
 
   private readonly _preferences = signal<NewsPreferences | null>(null);
   private readonly _sentimentChoices = signal<SentimentModelChoice[]>([]);
+  private readonly _translationChoices = signal<SentimentModelChoice[]>([]);
   private readonly _loading = signal(false);
   private readonly _loadingMore = signal(false);
   private readonly _refreshing = signal(false);
@@ -49,6 +50,7 @@ export class NewsStore {
   readonly totalAvailable = this._totalAvailable.asReadonly();
   readonly preferences = this._preferences.asReadonly();
   readonly sentimentChoices = this._sentimentChoices.asReadonly();
+  readonly translationChoices = this._translationChoices.asReadonly();
   readonly loading = this._loading.asReadonly();
   readonly loadingMore = this._loadingMore.asReadonly();
   readonly refreshing = this._refreshing.asReadonly();
@@ -201,6 +203,7 @@ export class NewsStore {
           next: (r) => {
             this._preferences.set(r.preferences);
             this._sentimentChoices.set(r.sentiment_model_choices);
+            this._translationChoices.set(r.translation_model_choices);
             this._prefsInFlight = null;
           },
           error: () => {
@@ -224,6 +227,7 @@ export class NewsStore {
           next: (r) => {
             this._preferences.set(r.preferences);
             this._sentimentChoices.set(r.sentiment_model_choices);
+            this._translationChoices.set(r.translation_model_choices);
             // Force the next feed-load to refetch (chyron/feed may change).
             this._feedFetchedAt = 0;
           },

@@ -14,6 +14,10 @@ export interface MarketNewsItem {
   symbols: string[];
   tags: string[];
   cluster_size: number;
+  language: string | null;
+  translated_from: string | null;
+  original_headline?: string | null;
+  original_summary?: string | null;
   sentiment: Sentiment | null;
   sentiment_score: number | null;
   sentiment_rationale: string | null;
@@ -36,6 +40,7 @@ export interface NewsFeed {
   chyron_item_count: number;
   ranking_basis: string;
   sentiment_warning?: string;
+  translation_warning?: string;
 }
 
 export interface NewsPreferences {
@@ -44,6 +49,9 @@ export interface NewsPreferences {
   chyron_enabled: boolean;
   chyron_item_count: number;
   feed_item_count: number;
+  translation_enabled: boolean;
+  translation_model: string;
+  translation_fallback_model: string;
 }
 
 export interface SentimentModelChoice {
@@ -56,4 +64,5 @@ export interface SentimentModelChoice {
 export interface NewsPreferencesResponse {
   preferences: NewsPreferences;
   sentiment_model_choices: SentimentModelChoice[];
+  translation_model_choices: SentimentModelChoice[];
 }

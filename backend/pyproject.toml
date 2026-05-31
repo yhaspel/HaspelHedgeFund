@@ -25,6 +25,7 @@ dependencies = [
     "croniter>=3.0",
     "cron-descriptor>=1.4",
     "tzdata>=2024.1",
+    "langdetect>=1.0.9",
 ]
 
 [dependency-groups]

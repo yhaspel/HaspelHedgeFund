@@ -92,8 +92,9 @@ _SYSTEM_PROMPT = (
 def _build_user_prompt(rows: list[MarketNewsItem]) -> str:
     lines = ["Classify the sentiment of each of the following news items:"]
     for i, r in enumerate(rows):
-        summary = (r.summary or "").strip().replace("\n", " ")[:400]
-        lines.append(f"\n[{i}] HEADLINE: {r.headline}")
+        headline = r.headline_en or r.headline
+        summary = ((r.summary_en or r.summary) or "").strip().replace("\n", " ")[:400]
+        lines.append(f"\n[{i}] HEADLINE: {headline}")
         if summary:
             lines.append(f"    SUMMARY: {summary}")
     lines.append(
@@ -103,7 +104,16 @@ def _build_user_prompt(rows: list[MarketNewsItem]) -> str:
 
 
 def _needs_classification(row: MarketNewsItem, model_id: str) -> bool:
-    return (row.sentiment_at is None) or (row.sentiment_model != model_id)
+    return (
+        (row.sentiment_at is None)
+        or (row.sentiment_model != model_id)
+        # Re-score when a translation landed after the last scoring, so a row
+        # scored on its original text gets re-scored on the English text.
+        or (
+            row.translation_at is not None
+            and (row.sentiment_at is None or row.translation_at > row.sentiment_at)
+        )
+    )
 
 
 def classify(
