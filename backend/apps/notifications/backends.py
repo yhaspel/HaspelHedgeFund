@@ -20,7 +20,9 @@ RESEND_API_URL = "https://api.resend.com/emails"
 
 
 class ResendEmailBackend(BaseEmailBackend):
-    def __init__(self, *, api_key: str | None = None, fail_silently: bool = False, **kwargs) -> None:
+    def __init__(
+        self, *, api_key: str | None = None, fail_silently: bool = False, **kwargs
+    ) -> None:
         super().__init__(fail_silently=fail_silently, **kwargs)
         # api_key lets a caller thread a per-user BYOK key via
         # get_connection(api_key=...); None falls back to the platform key.
