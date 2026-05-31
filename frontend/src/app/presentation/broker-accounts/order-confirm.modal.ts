@@ -44,7 +44,7 @@ const NOTIONAL_THRESHOLD = 1000;
               </div>
             }
 
-            @if (typedRequired()) {
+            @if (typedNeeded()) {
               <label class="lbl block mt-2.5" data-test="typed-confirmation-row">
                 Type the ticker (<strong class="mono">{{ order.ticker }}</strong>)
                 to confirm — required for orders over {{ '$' + threshold }}.
@@ -96,14 +96,27 @@ export class OrderConfirmModalComponent {
   protected typedTicker = '';
   protected livePhrase = '';
 
+  /** Set when the backend's notional gate demands typed confirmation for an
+   *  order whose client-side estimate was under the threshold. Market orders
+   *  carry no limit price, so `notional_estimate` is "0.00" until fill while
+   *  the gate re-prices them and can cross the $1,000 threshold — without this
+   *  the rejection message would show with no input to satisfy it. */
+  protected readonly typedRevealed = signal(false);
+
   protected readonly typedRequired = computed(() => {
     if (!this.order) return false;
     return parseFloat(this.order.notional_estimate || '0') > NOTIONAL_THRESHOLD;
   });
 
+  /** Show and enforce the typed-ticker input when either the client-side
+   *  estimate crosses the threshold or the backend gate has demanded it. */
+  protected readonly typedNeeded = computed(
+    () => this.typedRequired() || this.typedRevealed(),
+  );
+
   canConfirm(): boolean {
     if (!this.order) return false;
-    if (this.typedRequired()) {
+    if (this.typedNeeded()) {
       if (this.typedTicker.trim().toUpperCase() !== this.order.ticker.toUpperCase()) return false;
     }
     if (this.account?.mode === 'live') {
@@ -126,7 +139,7 @@ export class OrderConfirmModalComponent {
     this.error.set(null);
     this.store
       .confirmOrder(this.order.id, {
-        typed_confirmation: this.typedRequired() ? this.typedTicker : undefined,
+        typed_confirmation: this.typedNeeded() ? this.typedTicker : undefined,
         live_confirmation: this.account?.mode === 'live' ? this.livePhrase : undefined,
         confirmation_method: 'manual_ui',
       })
@@ -137,7 +150,17 @@ export class OrderConfirmModalComponent {
         },
         error: (err) => {
           this.busy.set(false);
-          this.error.set(err?.error?.detail ?? 'Submission failed.');
+          const detail: string = err?.error?.detail ?? 'Submission failed.';
+          // The gate re-prices the order server-side and may require typed
+          // confirmation even when our estimate didn't (market orders). Reveal
+          // the ticker input so the user can satisfy the gate and resubmit.
+          const needsTyped =
+            err?.error?.code === 'typed_confirmation_required' ||
+            /typ\w*\s+the\s+ticker/i.test(detail);
+          if (needsTyped) {
+            this.typedRevealed.set(true);
+          }
+          this.error.set(detail);
         },
       });
   }
