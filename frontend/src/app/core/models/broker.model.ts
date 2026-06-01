@@ -44,6 +44,7 @@ export interface BrokerAccount {
   account_id: string;
   label: string;
   base_currency: string;
+  default_quantity_mode: 'whole' | 'fractional';
   connection_status: BrokerConnectionStatus;
   is_active: boolean;
   last_synced_at: string | null;
@@ -140,6 +141,7 @@ export interface CreateOrderRequest {
   ticker: string;
   side: 'buy' | 'sell';
   quantity: string | number;
+  quantity_mode?: 'whole' | 'fractional';
   order_type?: 'market' | 'limit' | 'stop';
   limit_price?: string | number | null;
   stop_price?: string | number | null;

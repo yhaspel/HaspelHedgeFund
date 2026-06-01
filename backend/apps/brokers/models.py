@@ -41,6 +41,13 @@ class BrokerAccount(models.Model):
         (STATUS_ERROR, "Error"),
     ]
 
+    QMODE_WHOLE = "whole"
+    QMODE_FRACTIONAL = "fractional"
+    QMODE_CHOICES = [
+        (QMODE_WHOLE, "Whole shares"),
+        (QMODE_FRACTIONAL, "Fractional"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name="broker_accounts",
@@ -51,6 +58,13 @@ class BrokerAccount(models.Model):
     account_id = models.CharField(max_length=64)
     label = models.CharField(max_length=80)
     base_currency = models.CharField(max_length=8, default="USD")
+    # P4 fix: per-account default order quantity granularity. Whole by default;
+    # the broker-order create path uses this when the request omits an explicit
+    # quantity_mode, and never honors "fractional" for brokers whose
+    # capabilities don't support it.
+    default_quantity_mode = models.CharField(
+        max_length=10, choices=QMODE_CHOICES, default=QMODE_WHOLE,
+    )
     config = models.JSONField(default=dict, blank=True)
     portfolio = models.OneToOneField(
         "portfolios.Portfolio",

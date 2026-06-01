@@ -123,9 +123,12 @@ import { ModalComponent } from '../shared/modal.component';
               </div>
               <div class="est-modal__head-bd">
                 <p class="text-[11.5px] text-text-3 m-0">
-                  Book <span class="mono text-text">{{ enr.portfolio.name }}</span> ·
-                  cash <span class="mono">$ {{ enr.portfolio.cash }}</span> ·
-                  {{ enr.portfolio.positions_count }} positions held
+                  Enters the <span class="mono text-text">{{ store.currentStrategy()?.name || enr.portfolio.name }}</span>
+                  book (shown under Portfolios) · cash <span class="mono">$ {{ enr.portfolio.cash }}</span> ·
+                  {{ enr.portfolio.positions_count }} held
+                </p>
+                <p class="text-[11.5px] text-text-3 m-0">
+                  Makes the book match this cycle's target — holdings not in the target are closed.
                 </p>
                 <p class="text-[11.5px] text-text-3 m-0">
                   {{ enr.totals.n_open }} open · {{ enr.totals.n_increase }} increase ·
@@ -454,6 +457,10 @@ import { ModalComponent } from '../shared/modal.component';
 
               <div class="strat-group">
                 <div class="strat-group-hd">Book structure</div>
+                <p class="text-[11.5px] text-text-3 m-0 mb-2">
+                  The cycle's <strong>target</strong> — what this strategy wants to hold. The paper
+                  book's actual holdings (after you Enter) show under Portfolios.
+                </p>
                 @if (c.status === 'done' && c.marked_snapshot; as snap) {
                 <div data-test="marked-snapshot" class="marked-snapshot-card">
                   <div class="flex items-baseline justify-between gap-3 flex-wrap">

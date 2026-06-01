@@ -46,6 +46,16 @@ type OrderType = 'market' | 'limit' | 'stop';
             <p class="text-[11.5px] text-text-3 mt-1 mono">
               account_id={{ o.account.account_id }} · status={{ o.account.connection_status }}
             </p>
+            <p class="text-[11.5px] text-text-3 mt-1 flex items-center gap-1.5">
+              <span>Order quantity default:</span>
+              <select class="input mono" style="width:auto;padding:2px 6px"
+                      [value]="o.account.default_quantity_mode"
+                      (change)="setDefaultQuantityMode($any($event.target).value)"
+                      data-test="account-qty-mode">
+                <option value="whole">Whole shares</option>
+                <option value="fractional">Fractional</option>
+              </select>
+            </p>
           </div>
           <div class="head-actions">
             <button class="btn" (click)="onSync()" data-test="sync-btn"
@@ -383,6 +393,17 @@ export class BrokerAccountOverviewPage implements OnInit {
       (o) => o.status === 'submitted' || o.status === 'partial',
     ),
   );
+
+  /** Persist the per-account default order quantity mode (whole|fractional). */
+  setDefaultQuantityMode(mode: string): void {
+    const id = this.account()?.id;
+    if (!id || (mode !== 'whole' && mode !== 'fractional')) return;
+    this.store.updateAccountSettings(id, { default_quantity_mode: mode }).subscribe({
+      next: () => this.refresh(id),
+      error: (err) =>
+        this.lastError.set(err?.error?.detail ?? 'Could not update order defaults.'),
+    });
+  }
 
   ngOnInit(): void {
     const accountId = Number(this.route.snapshot.paramMap.get('id'));

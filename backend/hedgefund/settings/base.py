@@ -109,6 +109,13 @@ SIMPLE_JWT = {
     "SIGNING_KEY": os.environ.get("JWT_SIGNING_KEY", SECRET_KEY),
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    # Rotate the refresh token on every /auth/refresh/ call so an actively-used
+    # session never expires: each refresh issues a fresh 7-day refresh token,
+    # giving a sliding window. A user is only logged out after 7 days of zero
+    # activity (or on explicit logout). BLACKLIST_AFTER_ROTATION stays at its
+    # default (False) so this needs no token_blacklist app / migration; rotated
+    # tokens simply lapse at their natural expiry instead of being revoked.
+    "ROTATE_REFRESH_TOKENS": True,
 }
 # SimpleJWT emits a UserWarning when SIGNING_KEY is shorter than 32 bytes.
 # In dev/test we already guarantee a 32+ byte sentinel above; in non-dev envs

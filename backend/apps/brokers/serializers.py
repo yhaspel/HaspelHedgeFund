@@ -30,7 +30,8 @@ class BrokerAccountSerializer(serializers.ModelSerializer):
         model = BrokerAccount
         fields = (
             "id", "broker", "broker_display", "mode", "account_id", "label",
-            "base_currency", "connection_status", "is_active", "last_synced_at",
+            "base_currency", "default_quantity_mode",
+            "connection_status", "is_active", "last_synced_at",
             "created_at", "portfolio_id", "portfolio_name", "credential",
             "drift_pending",
         )

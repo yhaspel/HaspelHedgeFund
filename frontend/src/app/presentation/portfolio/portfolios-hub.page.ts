@@ -26,7 +26,9 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
           <h1 class="mt-1.5">Portfolios</h1>
           <p class="text-text-3 text-[12.5px] mt-1 max-w-[640px]">
             Every book you own — your hand-managed Manual book, each broker
-            account, and each strategy book. Open any row to manage it.
+            account, and each strategy book you've entered. Positions shown are
+            what each book currently holds (a strategy's per-cycle target lives
+            on the strategy page). Strategy books appear here once they hold something.
           </p>
         </div>
       </div>

@@ -106,6 +106,18 @@ class PortfolioHubView(APIView):
         books: list[dict] = []
         for p in portfolios:
             positions = list(p.positions.all())
+            # Hide un-enrolled strategy books. A kind="strategy" book with no
+            # positions and no ledger history isn't something the user is
+            # paper-trading yet — the cycle engine still uses it as the
+            # strategy's (empty) current-holdings reference, but it shouldn't
+            # clutter the hub or inflate the cash/equity totals with its default
+            # notional cash. Manual and broker books always show.
+            if (
+                p.kind == Portfolio.KIND_STRATEGY
+                and not positions
+                and not p.ledger.exists()
+            ):
+                continue
             market_value = sum(
                 (pos.quantity * pos.avg_cost for pos in positions),
                 Decimal("0"),

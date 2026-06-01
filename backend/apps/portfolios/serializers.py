@@ -191,6 +191,14 @@ class PositionSuggestionSerializer(serializers.Serializer):
 class StrategySerializer(serializers.ModelSerializer):
     universe_name = serializers.CharField(source="universe.name", read_only=True)
     portfolio_name = serializers.CharField(source="portfolio.name", read_only=True)
+    # P4 fix: `portfolio` is optional on create. When omitted (or null), a
+    # dedicated kind="strategy" book named after the strategy is auto-created
+    # (see `create`). This stops every new strategy from defaulting onto one
+    # shared "Default paper portfolio" — which made all books collapse into a
+    # single hub row and let enrollment close sibling strategies' positions.
+    portfolio = serializers.PrimaryKeyRelatedField(
+        queryset=Portfolio.objects.all(), required=False, allow_null=True,
+    )
     # P4 WS-C: count of non-cancelled cycles. Gates the Delete affordance — a
     # strategy is deletable only when this is 0. Reads a queryset annotation
     # when present (list/detail views provide it) to avoid an N+1 count.
@@ -255,6 +263,22 @@ class StrategySerializer(serializers.ModelSerializer):
                 "broker-backed portfolios cannot be used as a strategy portfolio"
             )
         return portfolio
+
+    def create(self, validated_data):
+        # When the caller doesn't pass an explicit portfolio, give the strategy
+        # its OWN dedicated book named after it, so it shows up as a distinct
+        # row on the Portfolios hub and never shares positions/cash with other
+        # strategies. Explicit reuse stays available for advanced callers.
+        if validated_data.get("portfolio") is None:
+            validated_data.pop("portfolio", None)
+            raw_name = (validated_data.get("name") or "Strategy book").strip()
+            book_name = raw_name[:64] or "Strategy book"
+            validated_data["portfolio"] = Portfolio.objects.create(
+                user=validated_data["user"],
+                kind=Portfolio.KIND_STRATEGY,
+                name=book_name,
+            )
+        return super().create(validated_data)
 
 
 class RebalanceOrderSerializer(serializers.ModelSerializer):

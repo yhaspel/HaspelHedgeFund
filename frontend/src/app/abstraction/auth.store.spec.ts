@@ -69,15 +69,17 @@ describe('AuthStore', () => {
     expect(navigatedTo).toContain('/login');
   });
 
-  it('refreshMe with an expired token logs the user out', () => {
-    tokens.set('expired', 'r');
+  it('refreshMe leaves the session intact when /me/ fails (interceptor owns logout)', () => {
+    tokens.set('tok', 'r');
     store.refreshMe();
     http
       .expectOne((r) => r.url.endsWith('/me/'))
-      .flush({ detail: 'Token expired' }, { status: 401, statusText: 'Unauthorized' });
+      .flush({ detail: 'boom' }, { status: 500, statusText: 'Server Error' });
 
+    // A transient error must not clear tokens or redirect — only the interceptor
+    // (on a failed refresh) or an explicit logout() ends the session.
     expect(store.user()).toBeNull();
-    expect(tokens.getAccess()).toBeNull();
-    expect(store.isAuthenticated()).toBe(false);
+    expect(tokens.getAccess()).toBe('tok');
+    expect(navigatedTo).toEqual([]);
   });
 });

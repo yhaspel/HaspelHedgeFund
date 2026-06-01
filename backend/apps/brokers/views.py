@@ -34,6 +34,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.portfolios.models import Portfolio
+from apps.portfolios.quantity_policy import (
+    QuantityPolicy,
+    round_quantity_toward_zero,
+)
 from apps.runs.models import Decision
 
 from . import market_calendar
@@ -912,6 +916,27 @@ class BrokerAccountAckDriftView(APIView):
         return Response({"ok": True, "acknowledged_at": account.drift_acknowledged_at})
 
 
+class BrokerAccountSettingsView(APIView):
+    """PATCH /api/broker-accounts/<id>/settings/ — per-account order defaults.
+
+    v1 exposes ``default_quantity_mode`` (whole|fractional). Fractional only
+    makes sense for brokers whose capabilities support it; the order-create
+    path enforces the broker capability regardless of this stored default.
+    """
+
+    def patch(self, request, account_id: int) -> Response:
+        account = BrokerAccountOverviewView._get(request.user, account_id)
+        mode = str(request.data.get("default_quantity_mode") or "").strip().lower()
+        valid = {choice[0] for choice in BrokerAccount.QMODE_CHOICES}
+        if mode not in valid:
+            raise ValidationError(
+                {"default_quantity_mode": f"must be one of {sorted(valid)}"},
+            )
+        account.default_quantity_mode = mode
+        account.save(update_fields=["default_quantity_mode"])
+        return Response(BrokerAccountSerializer(account).data)
+
+
 # --- Orders -----------------------------------------------------------------
 
 
@@ -957,11 +982,41 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
         if not ticker:
             raise ValidationError({"ticker": "required"})
         try:
-            quantity = Decimal(str(data.get("quantity") or "0"))
+            raw_quantity = Decimal(str(data.get("quantity") or "0"))
         except Exception as exc:
             raise ValidationError({"quantity": "must be a number"}) from exc
-        if quantity <= 0:
+        if raw_quantity <= 0:
             raise ValidationError({"quantity": "must be positive"})
+
+        # Whole-vs-fractional enforcement. Equities default to WHOLE shares;
+        # fractional is allowed only when the caller explicitly opts in AND the
+        # broker supports it. This mirrors the Manual Book / strategy-enrollment
+        # quantity policy so a run's fractional ``target_quantity`` (dollars /
+        # price) can never silently place a fractional broker order.
+        cap = get_capabilities(account.broker)
+        broker_fractional = bool(cap and cap.supports_fractional)
+        requested_mode = (str(data.get("quantity_mode") or "").strip().lower() or None)
+        # Per-account default (added in the 1.3 migration); safe before it exists.
+        account_default_mode = getattr(account, "default_quantity_mode", None) or None
+        effective_mode = requested_mode or account_default_mode or "whole"
+        if effective_mode == "fractional" and not broker_fractional:
+            if requested_mode == "fractional":
+                raise ValidationError({
+                    "quantity_mode": (
+                        f"{cap.display_name if cap else account.broker} does not "
+                        "support fractional shares; use whole shares"
+                    ),
+                })
+            effective_mode = "whole"
+        policy = QuantityPolicy.from_mode(effective_mode)
+        quantity = round_quantity_toward_zero(raw_quantity, policy)
+        if quantity <= 0:
+            raise ValidationError({
+                "quantity": (
+                    "rounds to zero whole shares at this size; increase the "
+                    "quantity or switch to fractional shares"
+                ),
+            })
 
         order_type = (data.get("order_type") or "market").strip().lower()
         if order_type not in ("market", "limit", "stop"):

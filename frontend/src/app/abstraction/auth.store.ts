@@ -32,7 +32,11 @@ export class AuthStore {
     if (!this.tokens.getAccess()) return;
     this.api.get<User>('/me/').subscribe({
       next: (u) => this._user.set(u),
-      error: () => this.logout(),
+      // Session termination is owned solely by the auth interceptor: it silently
+      // refreshes an expired access token and only redirects to /login when the
+      // refresh token itself is dead. A transient /me/ failure must NOT log the
+      // user out — they stay signed in until they explicitly click "Log out".
+      error: () => undefined,
     });
   }
 

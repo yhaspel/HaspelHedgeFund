@@ -57,6 +57,53 @@ def test_me_returns_user_with_token(client: APIClient) -> None:
     assert resp.data["email"] == "a@b.com"
 
 
+@pytest.mark.django_db
+def test_refresh_rotates_and_returns_new_tokens(client: APIClient) -> None:
+    """A session stays alive while active: /auth/refresh/ must accept the
+    refresh token and, with rotation enabled, hand back BOTH a new access token
+    and a new (different) refresh token so the 7-day window keeps sliding."""
+    User.objects.create_user(email="a@b.com", password="supersecret")
+    login = client.post(
+        reverse("login"),
+        {"email": "a@b.com", "password": "supersecret"},
+        format="json",
+    )
+    original_refresh = login.data["refresh"]
+
+    resp = client.post(
+        reverse("refresh"),
+        {"refresh": original_refresh},
+        format="json",
+    )
+    assert resp.status_code == 200
+    assert "access" in resp.data
+    # Rotation is on, so the response includes a fresh refresh token, and it is
+    # not the one we sent in.
+    assert "refresh" in resp.data
+    assert resp.data["refresh"] != original_refresh
+
+
+@pytest.mark.django_db
+def test_refreshed_access_token_authorizes_me(client: APIClient) -> None:
+    """The access token minted by /auth/refresh/ must actually work against a
+    protected endpoint — this is the silent renewal the frontend relies on."""
+    User.objects.create_user(email="a@b.com", password="supersecret")
+    login = client.post(
+        reverse("login"),
+        {"email": "a@b.com", "password": "supersecret"},
+        format="json",
+    )
+    refreshed = client.post(
+        reverse("refresh"),
+        {"refresh": login.data["refresh"]},
+        format="json",
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {refreshed.data['access']}")
+    resp = client.get(reverse("me"))
+    assert resp.status_code == 200
+    assert resp.data["email"] == "a@b.com"
+
+
 def test_ping_task_runs_eagerly() -> None:
     result = ping.delay().get()
     assert isinstance(result, str)

@@ -668,11 +668,39 @@ def _totals(rows: list[EnrollmentRow]) -> dict:
     }
 
 
+def _assert_portfolio_not_shared(
+    strategy: PortfolioStrategy, portfolio: Portfolio,
+) -> None:
+    """Refuse enrollment when >1 strategy points at the same book.
+
+    Enrollment diffs the target against whatever is already in the book and
+    *closes any position not in this strategy's target*. If two strategies
+    share one Portfolio, enrolling strategy A would force-close strategy B's
+    holdings (and co-mingle their cash/P&L). Block the write until the books
+    are split — see the ``split_shared_strategy_books`` management command.
+    """
+    siblings = (
+        PortfolioStrategy.objects
+        .filter(user_id=strategy.user_id, portfolio_id=portfolio.id)
+        .exclude(pk=strategy.pk)
+        .count()
+    )
+    if siblings:
+        raise EnrollmentError(
+            f"this strategy's book is shared by {siblings + 1} strategies; "
+            "enrolling would close the other strategies' positions and "
+            "co-mingle their cash. Give each strategy its own book before "
+            "enrolling (run: python manage.py split_shared_strategy_books).",
+            status_code=409,
+        )
+
+
 def preview_enrollment(target: PortfolioTarget, *, user) -> EnrollmentResult:
     """GET preview: rows + totals + portfolio snapshot. No mutation."""
     portfolio = target.strategy.portfolio
     if portfolio.kind == Portfolio.KIND_MANUAL:
         raise EnrollmentError("the Manual Book cannot receive strategy enrollment")
+    _assert_portfolio_not_shared(target.strategy, portfolio)
     rows = _build_enrollment_rows(target, portfolio, user=user)
     return EnrollmentResult(
         target_id=target.id,
@@ -712,6 +740,7 @@ def enroll_target_into_portfolio(
     portfolio = strategy.portfolio
     if portfolio.kind == Portfolio.KIND_MANUAL:
         raise EnrollmentError("enrollment must never write into the Manual Book")
+    _assert_portfolio_not_shared(strategy, portfolio)
 
     approved = (
         None if mode == "auto"

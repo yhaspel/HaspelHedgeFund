@@ -177,6 +177,16 @@ export class BrokerStore {
     );
   }
 
+  updateAccountSettings(
+    accountId: number,
+    body: { default_quantity_mode: 'whole' | 'fractional' },
+  ): Observable<BrokerAccount> {
+    return this.api.patch<BrokerAccount>(
+      `/broker-accounts/${accountId}/settings/`,
+      body,
+    );
+  }
+
   createDraftOrder(body: CreateOrderRequest): Observable<BrokerOrderRow> {
     this._busy.set(true);
     return this.api

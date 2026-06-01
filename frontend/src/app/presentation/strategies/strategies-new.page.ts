@@ -75,14 +75,18 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                   Portfolio
                   <hf-info text="The simulated account this strategy trades against. Holds cash + positions; the rebalancer computes orders relative to it." />
                 </label>
-                <select class="input sans" name="portfolio" [(ngModel)]="portfolio" required id="strat-portfolio">
+                <select class="input sans" name="portfolio" [(ngModel)]="portfolio" id="strat-portfolio">
+                  <option [ngValue]="null">★ New dedicated book (recommended)</option>
                   @for (p of strategyPortfolios(); track p.id) {
-                    <option [value]="p.id">{{ p.name }} ($ {{ p.cash_balance }})</option>
+                    <option [ngValue]="p.id">Reuse: {{ p.name }} ($ {{ p.cash_balance }})</option>
                   }
                 </select>
-                <button type="button" (click)="createPortfolio()" class="strat-link-button">
-                  + Create starter portfolio
-                </button>
+                <p class="text-[11.5px] text-text-3 m-0 mt-1">
+                  A new book is created for this strategy and named after it. Reuse an
+                  existing book only for an advanced single-book workflow — strategies
+                  that share a book can't be enrolled (they would close each other's
+                  positions).
+                </p>
               </div>
             </div>
           </div>
@@ -740,36 +744,14 @@ export class StrategiesNewPage implements OnInit {
       if (us.length && this.universe === null) this.universe = us[0].id;
       this.refreshAutoName();
     });
-    this.store.loadPortfolios().subscribe((ps) => {
-      if (this.portfolio === null) this.portfolio = this.pickDefaultPortfolioId(ps);
-    });
-  }
-
-  /** Filter must match `strategyPortfolios()` (kind==='strategy') so we never
-   *  pre-select an id the dropdown can't render. Prefer the "Default paper
-   *  portfolio" by name when present so users who created it via the starter
-   *  button land on it; otherwise fall back to the newest strategy book. */
-  private pickDefaultPortfolioId(ps: { id: number; name: string; kind?: string }[]): number | null {
-    const strategyPs = ps.filter((p) => p.kind === 'strategy');
-    if (!strategyPs.length) return null;
-    const named = strategyPs.find(
-      (p) => p.name.trim().toLowerCase() === 'default paper portfolio',
-    );
-    return (named ?? strategyPs[0]).id;
-  }
-
-  createPortfolio(): void {
-    this.store.createPortfolio({
-      name: 'Default paper portfolio',
-      cash_balance: 100000,
-    }).subscribe((created) => this.store.loadPortfolios().subscribe(() => {
-      this.portfolio = created.id;
-    }));
+    // Default to a new dedicated book (portfolio === null). The dropdown still
+    // lists existing strategy books for the advanced reuse case.
+    this.store.loadPortfolios().subscribe();
   }
 
   submit(): void {
-    if (this.universe === null || this.portfolio === null) {
-      this.error.set('Pick a universe and a portfolio first.');
+    if (this.universe === null) {
+      this.error.set('Pick a universe first.');
       return;
     }
     this.error.set(null);
@@ -778,7 +760,6 @@ export class StrategiesNewPage implements OnInit {
       name: this.name,
       kind: this.kind,
       universe: this.universe,
-      portfolio: this.portfolio,
       target_gross_pct: String(this.targetGross),
       target_net_pct: String(this.targetNet),
       max_position_pct: String(this.maxPosition),
@@ -796,6 +777,9 @@ export class StrategiesNewPage implements OnInit {
         ? []
         : [...this.selectedPersonas],
     };
+    // null → backend creates a dedicated strategy book named after the
+    // strategy. A non-null id reuses that existing book (advanced).
+    if (this.portfolio !== null) payload['portfolio'] = this.portfolio;
     if (this.kind === 'market_neutral') {
       // P02f review: surface market-neutral parameters in the payload.
       payload['benchmark_ticker'] = this.benchmarkTicker.toUpperCase();

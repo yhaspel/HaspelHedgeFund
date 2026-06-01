@@ -11,7 +11,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../shared/modal.component';
 import { BrokerStore } from '../../abstraction/broker.store';
-import { BrokerAccount, BrokerOrderRow } from '../../core/models/broker.model';
+import { BrokerAccount, BrokerCapability, BrokerOrderRow } from '../../core/models/broker.model';
 
 /** Minimal decision shape the ticket needs — normalized by the caller so the
  *  modal doesn't depend on the full run-model DecisionRow. */
@@ -49,7 +49,7 @@ export interface BrokerOrderTicketDecision {
           <label class="lbl block mt-2.5">
             Broker account
             <select class="input mt-1" [(ngModel)]="accountId" name="account"
-                    data-test="ticket-account">
+                    (ngModelChange)="onAccountChange()" data-test="ticket-account">
               @for (a of accounts; track a.id) {
                 <option [ngValue]="a.id">{{ a.label }} · {{ a.broker_display }} ({{ a.mode }})</option>
               }
@@ -57,10 +57,29 @@ export interface BrokerOrderTicketDecision {
           </label>
 
           <label class="lbl block mt-2.5">
+            Quantity mode
+            <select class="input mt-1" [(ngModel)]="quantityMode" name="quantityMode"
+                    (ngModelChange)="setQuantityMode(quantityMode)" data-test="ticket-quantity-mode">
+              <option value="whole">Whole shares</option>
+              <option value="fractional" [disabled]="!selectedSupportsFractional()">
+                Fractional{{ selectedSupportsFractional() ? '' : ' (broker n/a)' }}
+              </option>
+            </select>
+          </label>
+
+          <label class="lbl block mt-2.5">
             Quantity (shares)
-            <input class="input mt-1 mono" type="number" min="0" step="any"
+            <input class="input mt-1 mono" type="number" min="0"
+                   [step]="quantityMode === 'whole' ? '1' : 'any'"
                    [(ngModel)]="quantity" name="quantity" data-test="ticket-quantity" />
           </label>
+
+          @if (quantityMode === 'whole' && showRoundedHint()) {
+            <p class="text-[11.5px] text-text-3 m-0 mt-1" data-test="ticket-rounding-note">
+              Whole-share order — rounded down from a {{ rawTargetLabel() }}-share target.
+              {{ selectedSupportsFractional() ? 'Switch to Fractional to keep the remainder.' : '' }}
+            </p>
+          }
 
           <label class="lbl block mt-2.5">
             Order type
@@ -109,13 +128,76 @@ export class BrokerOrderTicketModalComponent implements OnInit {
 
   protected accountId: number | null = null;
   protected quantity: number | null = null;
+  protected quantityMode: 'whole' | 'fractional' = 'whole';
   protected orderType: 'market' | 'limit' = 'market';
   protected limitPrice: number | null = null;
 
+  /** Absolute, unrounded target quantity from the decision (for the residual hint). */
+  private rawTarget = 0;
+
   ngOnInit(): void {
-    this.accountId = this.accounts[0]?.id ?? null;
+    const account = this.accounts[0] ?? null;
+    this.accountId = account?.id ?? null;
+    // Initial mode: the account's stored default (whole unless the user set the
+    // account to fractional). Downgraded to whole below if the broker can't do
+    // fractional once the capability registry is known.
+    this.quantityMode = account?.default_quantity_mode === 'fractional'
+      ? 'fractional'
+      : 'whole';
     const q = Math.abs(parseFloat(this.decision.targetQuantity));
-    this.quantity = Number.isFinite(q) && q > 0 ? q : null;
+    this.rawTarget = Number.isFinite(q) && q > 0 ? q : 0;
+    this.applyQuantityForMode();
+    // The broker registry carries supports_fractional; ensure it's loaded so
+    // the fractional option is gated to brokers that actually support it.
+    if (!this.store.registry().length) {
+      this.store.loadRegistry().subscribe(() => this.onAccountChange());
+    } else {
+      this.onAccountChange();
+    }
+  }
+
+  /** Set the quantity from the raw target per the current mode (floor for whole). */
+  private applyQuantityForMode(): void {
+    if (this.rawTarget <= 0) {
+      this.quantity = null;
+      return;
+    }
+    this.quantity = this.quantityMode === 'whole'
+      ? Math.floor(this.rawTarget)
+      : this.rawTarget;
+  }
+
+  private capForSelected(): BrokerCapability | undefined {
+    const account = this.accounts.find((a) => a.id === this.accountId);
+    if (!account) return undefined;
+    return this.store.registry().find((c) => c.code === account.broker);
+  }
+
+  selectedSupportsFractional(): boolean {
+    return this.capForSelected()?.supports_fractional ?? false;
+  }
+
+  /** True when the unrounded target has a fractional part (so whole-share rounds it down). */
+  showRoundedHint(): boolean {
+    return this.rawTarget > 0 && this.rawTarget - Math.floor(this.rawTarget) > 1e-9;
+  }
+
+  rawTargetLabel(): string {
+    return this.rawTarget.toFixed(6).replace(/\.?0+$/, '');
+  }
+
+  setQuantityMode(mode: 'whole' | 'fractional'): void {
+    this.quantityMode = mode;
+    if (mode === 'whole' && this.quantity != null) {
+      this.quantity = Math.floor(Math.abs(this.quantity));
+    }
+  }
+
+  onAccountChange(): void {
+    // A broker that can't do fractional forces whole-share mode.
+    if (this.quantityMode === 'fractional' && !this.selectedSupportsFractional()) {
+      this.setQuantityMode('whole');
+    }
   }
 
   canReview(): boolean {
@@ -141,6 +223,7 @@ export class BrokerOrderTicketModalComponent implements OnInit {
         ticker: this.decision.ticker,
         side: this.decision.side,
         quantity: String(this.quantity),
+        quantity_mode: this.quantityMode,
         order_type: this.orderType,
         limit_price: this.orderType === 'limit' ? String(this.limitPrice) : null,
         decision: this.decision.id,
