@@ -1,5 +1,5 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { CommonModule, DecimalPipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { AuthStore } from '../../abstraction/auth.store';
@@ -9,28 +9,32 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { RunSummary } from '../../core/models/run.model';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
-import { GrossNetMeterComponent } from '../shared/gross-net-meter.component';
-import { PopoverComponent } from '../shared/popover.component';
 import { TickerComponent } from '../shared/ticker.component';
 import { WatchlistCardComponent } from '../watchlist/watchlist-card.component';
+import { NavHeroComponent } from './nav-hero.component';
+import { BookExposureComponent, BookExposureVm } from './book-exposure.component';
+import { RegimeStripComponent } from './regime-strip.component';
+import { SectorHeatmapComponent } from './sector-heatmap.component';
 
-type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
+type SigKind = 'buy' | 'sell' | 'hold' | 'info';
 
 @Component({
   selector: 'hf-dashboard',
   standalone: true,
   imports: [
     CommonModule,
-    DecimalPipe,
     RouterLink,
     AppShellComponent,
     EmptyStateComponent,
     KpiTileComponent,
-    GrossNetMeterComponent,
-    PopoverComponent,
     TickerComponent,
     WatchlistCardComponent,
+    NavHeroComponent,
+    BookExposureComponent,
+    RegimeStripComponent,
+    SectorHeatmapComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Dashboard'}]">
@@ -46,165 +50,52 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         </div>
       </div>
 
-      <!-- KPI row: macro + 3 tiles -->
-      <div class="kpi-row">
-        <!-- Macro tile (wider) -->
-        <section class="card macro">
-          <div class="card-hd">
-            <h2 class="title">Macro regime</h2>
-            @if (macro.snapshot(); as s) {
-              <span class="pill"><span class="dot"></span>as of {{ s.as_of_date }}</span>
-            }
-          </div>
-          <div class="card-bd">
-            @if (macro.snapshot(); as s) {
-              <div class="chips">
-                <span class="pill help" [class.ok]="chipKind('growth', s.growth_quadrant)==='ok'"
-                  [class.warn]="chipKind('growth', s.growth_quadrant)==='warn'"
-                  [class.err]="chipKind('growth', s.growth_quadrant)==='err'"
-                  tabindex="0"
-                  [attr.aria-describedby]="popGrowth.open() ? popGrowth.popoverId : null"
-                  (mouseenter)="popGrowth.show()" (mouseleave)="popGrowth.maybeHide()"
-                  (focus)="popGrowth.show()" (blur)="popGrowth.maybeHide()">
-                  <span class="dot"></span>growth · {{ s.growth_quadrant }}
-                  <hf-popover #popGrowth placement="top" align="start">{{ chipTooltip('growth', s.growth_quadrant) }}</hf-popover>
-                </span>
-                <span class="pill help" [class.ok]="chipKind('inflation', s.inflation_regime)==='ok'"
-                  [class.warn]="chipKind('inflation', s.inflation_regime)==='warn'"
-                  [class.err]="chipKind('inflation', s.inflation_regime)==='err'"
-                  tabindex="0"
-                  [attr.aria-describedby]="popInfl.open() ? popInfl.popoverId : null"
-                  (mouseenter)="popInfl.show()" (mouseleave)="popInfl.maybeHide()"
-                  (focus)="popInfl.show()" (blur)="popInfl.maybeHide()">
-                  <span class="dot"></span>inflation · {{ s.inflation_regime }}
-                  <hf-popover #popInfl placement="top" align="start">{{ chipTooltip('inflation', s.inflation_regime) }}</hf-popover>
-                </span>
-                <span class="pill help" [class.ok]="chipKind('curve', s.yield_curve_state)==='ok'"
-                  [class.warn]="chipKind('curve', s.yield_curve_state)==='warn'"
-                  [class.err]="chipKind('curve', s.yield_curve_state)==='err'"
-                  tabindex="0"
-                  [attr.aria-describedby]="popCurve.open() ? popCurve.popoverId : null"
-                  (mouseenter)="popCurve.show()" (mouseleave)="popCurve.maybeHide()"
-                  (focus)="popCurve.show()" (blur)="popCurve.maybeHide()">
-                  <span class="dot"></span>curve · {{ s.yield_curve_state }}
-                  <hf-popover #popCurve placement="top" align="start">{{ chipTooltip('curve', s.yield_curve_state) }}</hf-popover>
-                </span>
-                <span class="pill help" [class.ok]="chipKind('policy', s.policy_stance)==='ok'"
-                  [class.warn]="chipKind('policy', s.policy_stance)==='warn'"
-                  [class.info]="chipKind('policy', s.policy_stance)==='info'"
-                  tabindex="0"
-                  [attr.aria-describedby]="popPolicy.open() ? popPolicy.popoverId : null"
-                  (mouseenter)="popPolicy.show()" (mouseleave)="popPolicy.maybeHide()"
-                  (focus)="popPolicy.show()" (blur)="popPolicy.maybeHide()">
-                  <span class="dot"></span>policy · {{ s.policy_stance }}
-                  <hf-popover #popPolicy placement="top" align="start">{{ chipTooltip('policy', s.policy_stance) }}</hf-popover>
-                </span>
-                @if (s.markov_consensus; as mc) {
-                  @if (mc.consensus_state !== 'unavailable') {
-                    <span class="pill help"
-                          [class.ok]="mc.consensus_state==='bull'"
-                          [class.warn]="mc.consensus_state==='sideways'"
-                          [class.err]="mc.consensus_state==='bear'"
-                          tabindex="0"
-                          [attr.aria-describedby]="popMarkov.open() ? popMarkov.popoverId : null"
-                          (mouseenter)="popMarkov.show()" (mouseleave)="popMarkov.maybeHide()"
-                          (focus)="popMarkov.show()" (blur)="popMarkov.maybeHide()">
-                      <span class="dot"></span>markov · {{ mc.consensus_state }} ({{ (mc.consensus_strength*100).toFixed(0) }}%)
-                      <hf-popover #popMarkov placement="top" align="start">{{ markovTooltip(mc) }}</hf-popover>
-                    </span>
-                  }
-                }
-              </div>
-              <p class="narrative">{{ s.narrative }}</p>
-              @if (s.markov_consensus; as mc) {
-                @if (mc.available_count > 0) {
-                  <p class="muted text-[11.5px] mt-1">
-                    Markov consensus: {{ mc.vote.bull || 0 }} bull · {{ mc.vote.sideways || 0 }} sideways · {{ mc.vote.bear || 0 }} bear
-                    across {{ mc.available_count }} always-modelled ETFs
-                    @if (mc.stale_count > 0) { · {{ mc.stale_count }} stale }
-                  </p>
-                }
-              }
-            } @else {
-              <div aria-busy="true" aria-label="Loading macro snapshot">
-                <div class="flex gap-1.5 flex-wrap mb-2.5">
-                  @for (_ of [1,2,3,4]; track $index) {
-                    <div class="skel h-[18px] w-[88px] rounded-full"></div>
-                  }
-                </div>
-                <div class="skel h-3.5 w-full mb-1.5"></div>
-                <div class="skel h-3.5 w-[85%]"></div>
-              </div>
-            }
-          </div>
-        </section>
-
-        @if (book(); as b) {
-          <hf-kpi-tile
-            eyebrow="Gross"
-            [value]="b.gross_pct + '%'"
-            [sub]="'Long ' + b.longPct.toFixed(0) + '% · Short ' + b.shortPct.toFixed(0) + '%'" />
-          <hf-kpi-tile
-            eyebrow="Target book (latest cycle)"
-            [value]="b.positionCount.toString()"
-            [sub]="b.longCount + ' L · ' + b.shortCount + ' S · ' + b.as_of_date" />
-        } @else if (!bookLoaded()) {
-          <section class="card placeholder" aria-busy="true" aria-label="Loading strategy book">
-            <div class="skel h-2.5 w-[55%]"></div>
-            <div class="skel h-[26px] w-[70%] mt-2"></div>
-            <div class="skel h-[11px] w-[80%] mt-2"></div>
-          </section>
-          <section class="card placeholder" aria-hidden="true">
-            <div class="skel h-2.5 w-[55%]"></div>
-            <div class="skel h-[26px] w-[70%] mt-2"></div>
-            <div class="skel h-[11px] w-[80%] mt-2"></div>
-          </section>
-        } @else {
-          <section class="card placeholder">
-            <p class="muted">No strategy cycles yet.
-              <a routerLink="/strategies/new" class="link">Create a strategy →</a>
-            </p>
-          </section>
-          <section class="card placeholder">
-            <p class="muted">—</p>
-          </section>
-        }
-
-        <!-- P3: Real Manual Book positions, not strategy target weights. -->
+      <!-- KPI strip: 5 Manual-Book tiles (all from /portfolio/) -->
+      <div class="kpi-strip">
         @if (portfolio.overview(); as p) {
           <hf-kpi-tile
-            eyebrow="Positions (Manual Book)"
+            eyebrow="NAV · Manual Book"
+            [value]="compact(p.total_value)"
+            [sub]="p.positions.length + ' positions'" />
+          <hf-kpi-tile
+            eyebrow="Unrealized P&amp;L"
+            [value]="signed(p.unrealized_pnl)"
+            [tone]="signTone(p.unrealized_pnl)"
+            [sub]="'realized ' + signed(p.realized_pnl)" />
+          <hf-kpi-tile
+            eyebrow="Gross exposure"
+            [value]="pct(p.gross_exposure_pct)"
+            [sub]="money(p.long_market_value) + ' L · ' + money(p.short_market_value) + ' S'" />
+          <hf-kpi-tile
+            eyebrow="Net exposure"
+            [value]="netStr(p.net_exposure_pct)"
+            [tone]="signTone(p.net_exposure_pct)"
+            [sub]="netBias(p.net_exposure_pct)" />
+          <hf-kpi-tile
+            eyebrow="Open positions"
             [value]="p.positions.length.toString()"
-            [sub]="manualLongCount() + ' L · ' + manualShortCount() + ' S · $' + (+p.total_value | number: '1.0-0')" />
+            [sub]="manualLongCount() + ' L · ' + manualShortCount() + ' S'" />
         } @else {
-          <a class="card placeholder kpi-link no-underline text-inherit"
-             routerLink="/portfolio"
-             aria-busy="true" aria-label="Loading Manual Book">
-            <div class="skel h-2.5 w-[60%]"></div>
-            <div class="skel h-[26px] w-1/2 mt-2"></div>
-            <div class="skel h-[11px] w-3/4 mt-2"></div>
-          </a>
+          @for (_ of [1,2,3,4,5]; track $index) {
+            <section class="card placeholder" aria-busy="true" aria-label="Loading Manual Book">
+              <div class="skel h-2.5 w-[55%]"></div>
+              <div class="skel h-[26px] w-[70%] mt-2"></div>
+              <div class="skel h-[11px] w-[80%] mt-2"></div>
+            </section>
+          }
         }
       </div>
 
-      <!-- Gross·Net meter (only when we have data) -->
-      @if (book(); as b) {
-        <section class="card mb-[18px]">
-          <div class="card-hd">
-            <h2 class="title">Exposure</h2>
-            <span class="pill"><span class="dot"></span>target gross {{ b.target_gross_pct }}% · net {{ b.target_net_pct }}%</span>
-          </div>
-          <div class="card-bd">
-            <hf-gross-net-meter [longPct]="b.longPct" [shortPct]="b.shortPct" />
-            <div class="meter-labels">
-              <span class="long-lbl">Long {{ b.longPct.toFixed(1) }}%</span>
-              <span class="short-lbl">Short {{ b.shortPct.toFixed(1) }}%</span>
-            </div>
-          </div>
-        </section>
-      }
+      <!-- Hero: NAV (point-in-time, no series) + strategy book exposure -->
+      <div class="hero-top">
+        <hf-nav-hero [overview]="portfolio.overview()" />
+        <hf-book-exposure [book]="book()" [loaded]="bookLoaded()" />
+      </div>
 
-      <!-- 2-col: Active runs + Strategies summary -->
+      <!-- Compact macro-regime strip (below NAV) -->
+      <hf-regime-strip [snapshot]="macro.snapshot()" />
+
+      <!-- Activity: active runs + strategies summary -->
       <div class="two-col">
         <section class="card">
           <div class="card-hd">
@@ -285,6 +176,13 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
                           <hf-ticker [ticker]="t"></hf-ticker>@if (!last) {<span class="text-text-3">, </span>}
                         }
                       </span>
+                      @if (runSig(r); as sig) {
+                        <span class="sig"
+                          [class.buy]="sig.kind==='buy'"
+                          [class.sell]="sig.kind==='sell'"
+                          [class.hold]="sig.kind==='hold'"
+                          [class.info]="sig.kind==='info'">{{ sig.label }}</span>
+                      }
                       @if (r.source === 'strategy' && r.strategy_backlink) {
                         <span class="pill pill-source">
                           via {{ r.strategy_backlink.strategy_name }}
@@ -347,7 +245,12 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         </section>
       </div>
 
-      <!-- P3-prereq-5: Watchlist card. -->
+      <!-- Sector implications heatmap (from macro.sector_implications) -->
+      @if (macro.snapshot(); as s) {
+        <hf-sector-heatmap [implications]="s.sector_implications" />
+      }
+
+      <!-- P3-prereq-5: Watchlist card (interactive footnote, full-width). -->
       <div class="watchlist-row">
         <hf-watchlist-card></hf-watchlist-card>
       </div>
@@ -355,66 +258,44 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
   `,
   styles: [
     `
-      .kpi-row {
+      .kpi-strip {
         display: grid;
-        grid-template-columns: 2fr 1fr 1fr 1fr;
+        grid-template-columns: repeat(5, 1fr);
         gap: 12px;
         margin-bottom: 18px;
       }
-      @media (max-width: 1100px) {
-        .kpi-row { grid-template-columns: 1fr 1fr; }
-        .kpi-row .macro { grid-column: 1 / -1; }
+      @media (max-width: 1180px) {
+        .kpi-strip { grid-template-columns: repeat(2, 1fr); }
       }
-      .kpi-row .macro { margin: 0; }
-      .kpi-row .placeholder {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 14px;
-        grid-column: span 3;
+      .kpi-strip .placeholder { padding: 14px 16px; min-height: 96px; }
+
+      .hero-top {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 12px;
+        margin-bottom: 18px;
       }
-      .chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 10px;
-        position: relative;
+      @media (max-width: 1180px) {
+        .hero-top { grid-template-columns: 1fr; }
       }
-      .chips .pill.help {
-        cursor: help;
-        text-decoration: underline dotted;
-        text-decoration-color: var(--text-3, rgba(255, 255, 255, 0.25));
-        text-underline-offset: 3px;
-        position: relative;
-      }
-      .card.macro { overflow: visible; }
-      .narrative {
-        font-size: 13px;
-        color: var(--text-2);
-        line-height: 20px;
-        margin: 0;
-      }
-      .muted { font-size: 13px; color: var(--text-3); margin: 0; }
-      .link { color: var(--acc-info-fg); text-decoration: underline; text-underline-offset: 2px; }
-      .link:hover { text-decoration-thickness: 2px; }
-      .meter-labels {
-        display: flex;
-        justify-content: space-between;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        margin-top: 6px;
-      }
-      .long-lbl { color: var(--acc-long-fg); }
-      .short-lbl { color: var(--acc-short-fg); }
+
+      hf-regime-strip { display: block; margin-bottom: 18px; }
+      hf-sector-heatmap { display: block; margin-bottom: 18px; }
 
       .two-col {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 12px;
+        margin-bottom: 18px;
       }
-      @media (max-width: 1100px) {
+      @media (max-width: 1180px) {
         .two-col { grid-template-columns: 1fr; }
       }
+
+      .muted { font-size: 13px; color: var(--text-3); margin: 0; }
+      .link { color: var(--acc-info-fg); text-decoration: underline; text-underline-offset: 2px; }
+      .link:hover { text-decoration-thickness: 2px; }
+
       .runlist {
         list-style: none;
         padding: 0;
@@ -424,8 +305,7 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         gap: 4px;
       }
       .runrow {
-        display: grid;
-        grid-template-columns: 56px 1fr auto auto;
+        display: flex;
         align-items: center;
         gap: 10px;
         padding: 8px 10px;
@@ -438,6 +318,8 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
       .runrow:hover { background: var(--surface-2); }
       .runrow:focus-visible { outline: none; box-shadow: var(--focus-ring); }
       .run-tickers {
+        flex: 1;
+        min-width: 0;
         display: inline-flex;
         flex-wrap: wrap;
         align-items: center;
@@ -446,14 +328,30 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         font-size: 13px;
         color: var(--text);
       }
-      .run-id { color: var(--text-3); font-size: 12px; }
-      .cost { color: var(--text-2); font-size: 12px; }
+      .run-id { color: var(--text-3); font-size: 12px; flex: none; }
+      .cost { color: var(--text-2); font-size: 12px; flex: none; }
       .recent-eyebrow {
         margin-top: 14px;
         margin-bottom: 6px;
         color: var(--text-3);
         font-size: 10px;
       }
+      .sig {
+        flex: none;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        padding: 2px 7px;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+      }
+      .sig.buy { background: var(--acc-long-soft); color: var(--acc-long-fg); }
+      .sig.sell { background: var(--acc-short-soft); color: var(--acc-short-fg); }
+      .sig.hold { background: var(--acc-hold-soft); color: var(--acc-hold-fg); }
+      .sig.info { background: var(--acc-info-soft); color: var(--acc-info-fg); }
       .chip {
         background: transparent;
         border: 1px solid var(--border);
@@ -475,12 +373,14 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
         border-color: var(--text-3);
       }
       .pill-source {
+        flex: none;
         background: var(--surface-2);
         color: var(--text-3);
         height: auto;
         padding: 2px 6px;
         font-size: 11px;
       }
+      .watchlist-row { margin-bottom: 0; }
     `,
   ],
 })
@@ -495,26 +395,10 @@ export class DashboardPage implements OnInit {
 
   openRun(id: number): void { this.router.navigate(['/runs', id]); }
 
-  book = signal<{
-    strategy_name: string;
-    as_of_date: string;
-    gross_pct: string;
-    net_pct: string;
-    target_gross_pct: string;
-    target_net_pct: string;
-    longPct: number;
-    shortPct: number;
-    netSigned: number;
-    longCount: number;
-    shortCount: number;
-    positionCount: number;
-    longs: { ticker: string; weight: number }[];
-    shorts: { ticker: string; weight: number }[];
-  } | null>(null);
+  book = signal<BookExposureVm | null>(null);
 
-  // Load tracking — distinguish "still fetching" (show skeleton) from
-  // "loaded but empty" (show hf-empty-state). Each flag flips true once
-  // the relevant store call settles (success or empty path).
+  // Load tracking — distinguish "still fetching" (skeleton) from "loaded but
+  // empty" (empty-state). Each flag flips true once the store call settles.
   readonly runsLoaded = signal(false);
   readonly strategiesLoaded = signal(false);
   readonly bookLoaded = signal(false);
@@ -568,6 +452,61 @@ export class DashboardPage implements OnInit {
     return (this.portfolio.overview()?.positions ?? []).filter((p) => p.is_short).length;
   }
 
+  // ── KPI strip formatting (Manual Book, point-in-time) ──────────────────
+  private num(v: string | null | undefined): number {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  compact(v: string | null | undefined): string {
+    const n = this.num(v);
+    const a = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+    if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)}M`;
+    if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1)}K`;
+    return `${sign}$${a.toFixed(2)}`;
+  }
+  money(v: string | null | undefined): string {
+    return `$${this.num(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  }
+  signed(v: string | null | undefined): string {
+    const n = this.num(v);
+    return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  }
+  pct(v: string | null | undefined): string {
+    return `${this.num(v).toFixed(1)}%`;
+  }
+  netStr(v: string | null | undefined): string {
+    const n = this.num(v);
+    return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  }
+  netBias(v: string | null | undefined): string {
+    const n = this.num(v);
+    if (n > 0.05) return 'long-biased';
+    if (n < -0.05) return 'short-biased';
+    return 'balanced';
+  }
+  signTone(v: string | null | undefined): 'up' | 'down' | 'neutral' {
+    const n = this.num(v);
+    return n > 0 ? 'up' : n < 0 ? 'down' : 'neutral';
+  }
+
+  /** Decision sig chip from the real RunSummary.decisions[] (empty until a run finishes). */
+  runSig(r: RunSummary): { label: string; kind: SigKind } | null {
+    const d = r.decisions;
+    if (!d || d.length === 0) return null;
+    if (d.length > 1) return { label: `${d.length} decisions`, kind: 'info' };
+    const map: Record<string, { label: string; kind: SigKind }> = {
+      buy: { label: 'buy', kind: 'buy' },
+      enter: { label: 'enter', kind: 'buy' },
+      hold: { label: 'hold', kind: 'hold' },
+      skip: { label: 'skip', kind: 'info' },
+      sell: { label: 'sell', kind: 'sell' },
+      open_short: { label: 'short', kind: 'sell' },
+      cover_short: { label: 'cover', kind: 'info' },
+    };
+    return map[d[0].action] ?? { label: d[0].action, kind: 'info' };
+  }
+
   ngOnInit(): void {
     this.runs.listRuns().subscribe({
       next: (rows) => { this._prefetchTickerNames(rows); this.runsLoaded.set(true); },
@@ -599,6 +538,7 @@ export class DashboardPage implements OnInit {
                 const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
                 this.book.set({
                   strategy_name: recent.name,
+                  strategy_id: recent.id,
                   as_of_date: d.as_of_date,
                   gross_pct: d.gross_pct,
                   net_pct: d.net_pct,
@@ -623,81 +563,5 @@ export class DashboardPage implements OnInit {
       },
       error: () => { this.strategiesLoaded.set(true); this.bookLoaded.set(true); },
     });
-  }
-
-  chipKind(kind: string, value: string): PillKind {
-    const map: Record<string, Record<string, PillKind>> = {
-      growth: { expansion: 'ok', recovery: 'ok', slowdown: 'warn', recession: 'err' },
-      inflation: { low: 'ok', moderate: '', high: 'warn', accelerating: 'err' },
-      curve: { normal: 'ok', flat: 'warn', inverted: 'err' },
-      policy: { easing: 'info', neutral: '', tightening: 'warn' },
-    };
-    return map[kind]?.[value] ?? '';
-  }
-
-  /**
-   * Hover tooltip for each macro chip. Format: header explaining what the
-   * metric is, then a line decoding the current value. Values + thresholds
-   * mirror `hedgefund_agents.macro.macro_agent.classify_regime`.
-   */
-  chipTooltip(kind: string, value: string): string {
-    const HEADERS: Record<string, string> = {
-      growth:
-        'Growth quadrant — derived from unemployment (UNRATE) and industrial production (INDPRO).',
-      inflation: 'Inflation regime — based on CPI level (CPIAUCSL).',
-      curve: 'Yield curve — 10-year minus 2-year Treasury spread (T10Y2Y).',
-      policy: 'Policy stance — Federal Funds effective rate (FEDFUNDS).',
-    };
-    const VALUES: Record<string, Record<string, string>> = {
-      growth: {
-        expansion: 'Expansion: unemployment ≤4% and INDPRO ≥100. Healthy growth — risk-on tilt favoured.',
-        recovery: 'Recovery: improving labour market, INDPRO climbing back. Early-cycle conditions.',
-        slowdown: 'Slowdown: unemployment ≥4.5%. Late-cycle deceleration — trim cyclicals, watch credit.',
-        recession: 'Recession: unemployment ≥5.5% and INDPRO ≤100. Defensive tilt; growth contracting.',
-      },
-      inflation: {
-        low: 'Low: CPI <290. Disinflationary backdrop — supports long duration / growth equities.',
-        moderate: 'Moderate: CPI 290–320. Mid-range price pressures — broad-market neutral.',
-        high: 'High: CPI ≥320. Persistent inflation — favours commodities, value, short duration.',
-        accelerating: 'Accelerating: inflation rising fast — defensive tilt, reduce long duration.',
-      },
-      curve: {
-        normal: 'Normal: 10y−2y ≥0.5pp. Healthy term premium; no recession signal from the curve.',
-        flat: 'Flat: 10y−2y in (0, 0.5pp). Late-cycle warning — curve is compressing.',
-        inverted: 'Inverted: 10y−2y <0. Historically a recession leading indicator (12–18mo lag).',
-      },
-      policy: {
-        easing: 'Easing: Fed Funds ≤2%. Stimulative monetary policy — supports risk assets and duration.',
-        neutral: 'Neutral: Fed Funds 2–4.5%. Neither restrictive nor stimulative.',
-        tightening: 'Tightening: Fed Funds ≥4.5%. Restrictive policy — headwind for duration and growth.',
-      },
-    };
-    const header = HEADERS[kind] ?? '';
-    const explanation = VALUES[kind]?.[value] ?? `Current value: ${value}.`;
-    return header ? `${header}\n\n${explanation}` : explanation;
-  }
-
-  /** Hover tooltip for the Markov consensus chip. */
-  markovTooltip(mc: {
-    consensus_state: string;
-    consensus_strength: number;
-    vote: Record<string, number>;
-    available_count: number;
-    stale_count: number;
-  }): string {
-    const header =
-      'Markov regime consensus — deterministic, price-based regime detector ' +
-      'run nightly on SPY, QQQ, the 11 SPDR sector ETFs, and TLT/GLD/UUP.';
-    const winner = mc.consensus_state;
-    const strength = (mc.consensus_strength * 100).toFixed(0);
-    const tally =
-      `${mc.vote['bull'] ?? 0} bull · ${mc.vote['sideways'] ?? 0} sideways · ` +
-      `${mc.vote['bear'] ?? 0} bear (out of ${mc.available_count} fresh snapshots` +
-      (mc.stale_count > 0 ? `, ${mc.stale_count} stale` : '') +
-      ').';
-    return (
-      `${header}\n\nCurrent: ${winner} at ${strength}% agreement.\n${tally}\n\n` +
-      'Disagreement with the LLM macro classification is itself a signal — see the strategy detail page widget.'
-    );
   }
 }
