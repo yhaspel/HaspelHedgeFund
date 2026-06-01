@@ -9,12 +9,14 @@ It is built for **learning and experimentation**. Think of it as a flight simula
 There are three core activities. Each has its own guide.
 
 - **Runs** — a one-off analysis. You pick some stocks, the AI council studies them, and you get a recommendation with the full reasoning. This is the quickest way to see the app work.
-- **Strategies** — a standing, automated portfolio. You choose a *strategy type* (for example "Long/Short" or "Pairs Trading"), set its rules, and it runs on its own schedule, deciding what to hold.
+- **Strategies** — a standing portfolio that makes its own decisions. You choose a *strategy type* (for example "Long/Short" or "Pairs Trading"), set its rules, and run it in **cycles** that decide what to hold.
 - **Backtests** — a replay of a strategy against the past. The app steps day by day through historical data and shows how the strategy would have performed, so you can judge an idea before trusting it.
+
+Around those three, you can connect a **paper broker** and place orders from a run, track every holding on the **Portfolios** page, automate analysis on a **schedule**, and see what's actually working on the **Leaderboard**. Each has its own guide in the *Trading & Automation* section.
 
 ## What it is NOT
 
-- **It is not real trading.** By default the app is *paper-trading only* — every position and profit is simulated. No brokerage account is connected and no real orders are placed.
+- **It is not real-money trading.** The app is *paper-trading* — every position and profit is simulated. You *can* connect a brokerage account, but only **paper** (simulated) accounts are supported today (Alpaca paper, plus a built-in Demo broker); live, real-money trading is disabled.
 - **It is not financial advice.** The AI agents produce opinions, not recommendations you should act on with real money. They can be confidently wrong.
 - **It is not free to run.** The AI models cost money per use. Please read the **Models & Cost Disclaimer** guide before running anything.
 - **It is not a prediction machine.** A good backtest is a description of the past, not a promise about the future.

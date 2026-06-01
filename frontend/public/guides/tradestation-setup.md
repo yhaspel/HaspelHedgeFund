@@ -1,5 +1,12 @@
 # TradeStation Setup
 
+> [!NOTE]
+> **Not enabled yet.** Connecting a TradeStation account is not available in the
+> app today — its tile in the connect wizard is marked *"ships in a later
+> release."* This guide documents the developer-app setup so you are ready when
+> it lands. To connect a broker right now, see *Connect a Broker Account*
+> (Alpaca paper, or the built-in Demo broker).
+
 To connect a TradeStation account (paper or live) you need a TradeStation
 developer application. Credentials are **bring-your-own** — the platform
 never ships a shared TradeStation app, so each deployer registers their

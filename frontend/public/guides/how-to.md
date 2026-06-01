@@ -20,14 +20,14 @@ A Run is a one-off study of a handful of stocks. It is the fastest way to see th
 
 ## How to build and run a Strategy
 
-A Strategy is a standing portfolio that makes its own decisions on a repeating cycle. A Run answers "what about these stocks today?"; a Strategy answers "manage this book for me, over and over."
+A Strategy is a standing portfolio that makes its own decisions in repeatable **cycles**. A Run answers "what about these stocks today?"; a Strategy answers "decide what this book should hold."
 
 1. From the sidebar, open **Strategies** and choose **New strategy**.
 2. **Pick the strategy type** (its "kind"). This is the most important choice — it decides *how* the book behaves. Each type has its own guide in the Strategies section; read the one you are considering.
 3. **Set the universe** — the list of stocks or ETFs the strategy is allowed to choose from.
 4. **Set the limits** — how concentrated a single position may be, how much trading is allowed, and a **cost ceiling per cycle** that caps AI spend. Always set a cost ceiling.
-5. Save it. The strategy then runs **cycles** — each cycle, the council reviews the universe, the Portfolio Manager proposes trades, and the book is updated. Depending on your settings, trades may apply automatically or wait for you to approve them.
-6. Open the strategy's page any time to see its holdings, recent cycles, and the reasoning behind each trade.
+5. Save it, then open the strategy and choose **Run cycle now**. A **cycle** runs a cheap screener over the universe, the council debates the names that survive, and the Portfolio Manager proposes a target book. You see a cost estimate before it dispatches.
+6. When the cycle is **done**, use **Enter strategy** to apply its target to the strategy's paper book, or open any candidate run to place positions one at a time. Open the strategy's page any time to see its cycles, holdings, and the reasoning behind each trade. (To run an analysis automatically on a recurring schedule, see *Schedules & Automation* — note that schedules drive watchlist analyses, not strategy cycles.)
 
 ## How to run a Backtest
 
@@ -46,3 +46,14 @@ From a backtest's page you can open a **Compare** view to put two runs side by s
 ## A sensible workflow
 
 Run a small analysis to build intuition → pick a strategy type and read its guide → backtest it on a modest window with a cheap model → only then increase the window, the universe, or the model quality. Let cost rise *after* an idea has shown promise, never before.
+
+## Beyond the basics
+
+Once you are comfortable with runs, strategies, and backtests, the app can do more — each covered in the *Trading & Automation* section:
+
+- **Connect a paper broker** and place orders from a run — see *Connect a Broker Account* and *Placing Orders from a Run*.
+- **Track every book** (manual, strategy, and broker) on the Portfolios page — see *Portfolios & Books*.
+- **Automate** analysis of a watchlist on a recurring schedule — see *Schedules & Automation*.
+- **See what's working** — which agents, models, and strategies actually produce good calls — on the *Leaderboards*.
+
+And from anywhere, press **⌘K** / **Ctrl+K** to jump to any run, strategy, or backtest — see *App-Wide Search*.

@@ -34,11 +34,23 @@ The current holdings plus cash. "Book" is industry slang for the same thing.
 
 ### Paper trading
 
-Trading with simulated money. Everything in this app is paper trading by default — no real orders, no real money.
+Trading with simulated money. Everything in this app is paper trading: positions and profits are simulated. You can connect a *paper* brokerage account (Alpaca paper, or the built-in Demo broker) to place simulated orders; live, real-money trading is disabled.
 
 ### Ticker / Symbol
 
 The short code that identifies a security on an exchange, like `AAPL` (Apple) or `SPY` (an S&P 500 ETF).
+
+### Broker / Brokerage account
+
+The connected account through which the app places orders. Today only *paper* (simulated) accounts are supported — **Alpaca** paper and a built-in **Demo** broker. See the *Connect a Broker Account* guide.
+
+### Leaderboard
+
+A scoreboard that ranks agents, models, and strategies on how well their past calls actually turned out. See the *Leaderboards* guide.
+
+### Scheduled run
+
+An analysis that runs automatically on a recurring schedule over a watchlist, notifying you only when something material changes. See the *Schedules & Automation* guide.
 
 ## The AI layer
 
@@ -220,6 +232,22 @@ The gap between the price you expected and the price you actually got.
 
 The final, concrete trade instruction: which ticker, buy or sell, how much.
 
+### Market order
+
+An order to trade immediately at the best price currently available. Fast, but the exact fill price is not guaranteed.
+
+### Limit order
+
+An order to trade only at a stated price or better. The price is controlled, but the order may not fill if the market never reaches it.
+
+### Whole shares vs. fractional shares
+
+Whole-share orders trade in units of one share; fractional orders allow a fraction of a share, so a fixed-dollar target can be matched exactly. Some brokers support fractional shares; others do not.
+
+### Mark / Mark price
+
+The current price used to value a holding. A portfolio's positions are "marked" to recent prices to compute their value and profit. A mark can be a live quote, a delayed quote, or the last daily close.
+
 ## Performance & risk metrics
 
 ### Alpha
@@ -269,6 +297,14 @@ A chart of the portfolio's value over time. The first thing to look at in a back
 ### Correlation
 
 How closely two return streams move together: +1 in lockstep, 0 unrelated, −1 exactly opposite. Two strategies with high correlation are not really diversifying you.
+
+### Hit rate
+
+The share of an agent's directional (bullish or bearish) calls that turned out correct. The headline accuracy number on the agents leaderboard.
+
+### Brier score
+
+A measure of how well-*calibrated* a confidence score is: it compares stated confidence against actual outcomes. Lower is better — a well-calibrated agent that says "70% confident" is right about 70% of the time.
 
 ## Valuation & fundamentals
 

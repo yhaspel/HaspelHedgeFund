@@ -284,7 +284,9 @@ def test_split_shared_books_command(user):
 
     # Apply: earliest (s1) keeps the book; the others get their own.
     call_command("split_shared_strategy_books", "--apply", stdout=StringIO())
-    s1.refresh_from_db(); s2.refresh_from_db(); s3.refresh_from_db()
+    s1.refresh_from_db()
+    s2.refresh_from_db()
+    s3.refresh_from_db()
     assert s1.portfolio_id == book.id
     assert s2.portfolio_id != book.id
     assert s3.portfolio_id != book.id
@@ -341,8 +343,10 @@ def test_clear_strategy_book_flattens_positions(user):
         user=user, name="Dirty", kind=Portfolio.KIND_STRATEGY, cash_balance=Decimal("1000"))
     s = PortfolioStrategy.objects.create(
         user=user, name="DirtyS", kind="long_only", universe=universe, portfolio=pf)
-    Position.objects.create(portfolio=pf, ticker="SOXX", quantity=Decimal("10"), avg_cost=Decimal("50"))
-    Position.objects.create(portfolio=pf, ticker="XLE", quantity=Decimal("5"), avg_cost=Decimal("80"))
+    Position.objects.create(
+        portfolio=pf, ticker="SOXX", quantity=Decimal("10"), avg_cost=Decimal("50"))
+    Position.objects.create(
+        portfolio=pf, ticker="XLE", quantity=Decimal("5"), avg_cost=Decimal("80"))
 
     # Dry run mutates nothing.
     call_command("clear_strategy_book", "--strategy", str(s.id), stdout=StringIO())

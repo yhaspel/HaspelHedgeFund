@@ -171,6 +171,12 @@ export class InfoListPage implements OnInit {
       guides: this.info.guidesByGroup('strategies'),
     },
     {
+      group: 'trading-automation',
+      label: 'Trading & Automation',
+      eyebrow: 'Trading & Automation',
+      guides: this.info.guidesByGroup('trading-automation'),
+    },
+    {
       group: 'reference',
       label: 'Reference',
       eyebrow: 'Reference',

@@ -1,6 +1,10 @@
 import { StrategyKind } from './strategy.model';
 
-export type InfoGuideGroup = 'getting-started' | 'strategies' | 'reference';
+export type InfoGuideGroup =
+  | 'getting-started'
+  | 'strategies'
+  | 'trading-automation'
+  | 'reference';
 export type InfoGuideStatus = 'available' | 'coming-soon';
 
 export interface InfoGuide {
@@ -67,13 +71,14 @@ export const INFO_GUIDES: InfoGuide[] = [
     slug: 'tradestation-setup',
     title: 'TradeStation Setup',
     summary:
-      'Register a TradeStation developer app so you can connect a paper (SIM) or live account.',
+      'Register a TradeStation developer app, ready for when paper/live connection ships.',
     group: 'getting-started',
     icon: 'i-key',
     keywords: [
       'tradestation', 'broker', 'oauth', 'paper', 'sim', 'simulated',
       'live', 'client id', 'client secret', 'redirect uri', 'developer app',
     ],
+    status: 'coming-soon',
   },
   {
     slug: 'telegram-setup',
@@ -172,6 +177,73 @@ export const INFO_GUIDES: InfoGuide[] = [
     icon: 'i-layers',
     keywords: ['pairs', 'cointegration', 'spread', 'z-score', 'engle granger'],
   },
+  // Trading & Automation
+  {
+    slug: 'connect-broker',
+    title: 'Connect a Broker Account',
+    summary:
+      'Connect a paper broker (Alpaca) or the built-in Demo broker so the app can place orders.',
+    group: 'trading-automation',
+    icon: 'i-link',
+    keywords: [
+      'broker', 'brokerage', 'alpaca', 'paper', 'demo', 'connect', 'account',
+      'credentials', 'api key', 'secret', 'disconnect', 'reconnect', 'ibkr',
+      'tradestation', 'live',
+    ],
+  },
+  {
+    slug: 'placing-orders',
+    title: 'Placing Orders from a Run',
+    summary:
+      'Turn a run\'s decisions into broker orders: ticket, whole vs fractional, confirm gates, fills.',
+    group: 'trading-automation',
+    icon: 'i-arrow-rt',
+    keywords: [
+      'order', 'broker order', 'buy', 'sell', 'market', 'limit', 'whole share',
+      'fractional', 'quantity', 'submit', 'confirm', 'notional', 'ticket',
+      'fill', 'cancel', 'add to portfolio',
+    ],
+  },
+  {
+    slug: 'portfolios',
+    title: 'Portfolios & Books',
+    summary:
+      'Manual, strategy, and broker books: positions, cash, NAV, exposure, marks, and the ledger.',
+    group: 'trading-automation',
+    icon: 'i-wallet',
+    keywords: [
+      'portfolio', 'book', 'position', 'holding', 'cash', 'nav', 'exposure',
+      'gross', 'net', 'ledger', 'mark', 'marks', 'enroll', 'enrol',
+      'manual book', 'strategy book', 'broker book', 'weight', 'realized',
+      'unrealized',
+    ],
+  },
+  {
+    slug: 'schedules',
+    title: 'Schedules & Automation',
+    summary:
+      'Run a watchlist through the council on a recurring schedule, with cost ceilings and alerts.',
+    group: 'trading-automation',
+    icon: 'i-rerun',
+    keywords: [
+      'schedule', 'scheduled run', 'automation', 'cron', 'cadence', 'daily',
+      'weekly', 'weekday', 'watchlist', 'materiality', 'notification', 'alert',
+      'cost ceiling', 'auto-submit', 'market-aware', 'pause', 'resume',
+    ],
+  },
+  {
+    slug: 'leaderboard',
+    title: 'Leaderboards',
+    summary:
+      'How agents, models, and strategies are ranked on real outcomes — hit rate, cost, council alpha.',
+    group: 'trading-automation',
+    icon: 'i-pulse',
+    keywords: [
+      'leaderboard', 'ranking', 'performance', 'hit rate', 'brier', 'sharpe',
+      'sortino', 'drawdown', 'council alpha', 'contrarian', 'provisional',
+      'agents', 'models', 'strategies', 'scorecard',
+    ],
+  },
   // Reference
   {
     slug: 'glossary',
@@ -205,6 +277,18 @@ export const INFO_GUIDES: InfoGuide[] = [
     group: 'reference',
     icon: 'i-shield',
     keywords: ['regime', 'markov', 'hmm', 'bull', 'bear', 'sideways', 'classifier'],
+  },
+  {
+    slug: 'search',
+    title: 'App-Wide Search',
+    summary:
+      'The Cmd/Ctrl-K command palette for runs, strategies, and backtests, plus transcript search.',
+    group: 'reference',
+    icon: 'i-search',
+    keywords: [
+      'search', 'command palette', 'cmd k', 'ctrl k', 'find', 'jump',
+      'runs', 'strategies', 'backtests', 'tickers', 'transcript', 'filter',
+    ],
   },
 ];
 
