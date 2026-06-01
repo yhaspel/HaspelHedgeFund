@@ -19,7 +19,7 @@ import httpx
 from django.conf import settings
 
 from ..client import LLMResponse, Message
-from ._openai_compat import is_response_format_unsupported
+from ._openai_compat import is_response_format_unsupported, to_openai_messages
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class OllamaClient:
     ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": to_openai_messages(messages),
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": False,

@@ -260,6 +260,54 @@ def test_unrelated_4xx_still_raises_and_does_not_retry():
     assert http.post.call_count == 1
 
 
+def test_coalesces_consecutive_system_messages():
+    """Regression for run 198: call_structured prepends a schema-hint `system`
+    message ahead of each agent's own `system` prompt, so the adapter receives
+    [system, system, user]. Strict OpenRouter upstreams (Phala/Parasail via
+    vLLM) extract only messages[0] as the system turn and then enforce strict
+    user/assistant alternation on the rest, rejecting the second `system` with a
+    400 "Conversation roles must alternate user/assistant/...". The adapter must
+    merge the two system turns into one before sending."""
+    http = _fake_http({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+    })
+    _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[
+            Message("system", "SCHEMA: {...}"),
+            Message("system", "You are Buffett."),
+            Message("user", "Analyze AAPL."),
+        ],
+    )
+    sent = http.post.call_args.kwargs["json"]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user"]
+    assert sent[0]["content"] == "SCHEMA: {...}\n\nYou are Buffett."
+    assert sent[1]["content"] == "Analyze AAPL."
+
+
+def test_preserves_alternating_messages_unchanged():
+    """Coalescing must be a no-op for already-alternating turns — the
+    validation-retry path (system, user, assistant, user) must pass through with
+    every turn intact."""
+    http = _fake_http({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+    })
+    _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct",
+        messages=[
+            Message("system", "sys"),
+            Message("user", "first"),
+            Message("assistant", "reply"),
+            Message("user", "retry"),
+        ],
+    )
+    sent = http.post.call_args.kwargs["json"]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant", "user"]
+    assert [m["content"] for m in sent] == ["sys", "first", "reply", "retry"]
+
+
 def test_reasoning_effort_set_for_reasoning_slugs_only():
     """gpt-oss (and other reasoning slugs) get `reasoning={"effort":"low"}` so
     the token budget goes to the visible answer instead of hidden thinking
