@@ -126,6 +126,22 @@ export const routes: Routes = [
         (m) => m.StrategiesDetailPage,
       ),
   },
+  {
+    path: 'graphs',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/graph-editor/graphs-list.page').then(
+        (m) => m.GraphsListPage,
+      ),
+  },
+  {
+    path: 'graphs/:id/edit',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/graph-editor/graph-editor.page').then(
+        (m) => m.GraphEditorPage,
+      ),
+  },
   { path: 'settings', pathMatch: 'full', redirectTo: 'settings/models' },
   {
     path: 'settings/models',

@@ -17,4 +17,5 @@ urlpatterns = [
     path("api/", include("apps.investor_profile.urls")),
     path("api/", include("apps.persona_evolution.urls")),
     path("api/", include("apps.brokers.urls")),
+    path("api/", include("apps.graphs.urls")),
 ]

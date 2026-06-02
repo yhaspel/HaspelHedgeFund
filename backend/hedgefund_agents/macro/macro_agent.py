@@ -14,7 +14,7 @@ from apps.data.providers.factory import get_fred_provider
 from apps.data.providers.fred import FredProvider, MacroObservation
 
 from .._persist import record_llm_call
-from ..base import AgentState
+from ..base import AgentState, pick_model
 from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import MacroOutput
@@ -181,7 +181,7 @@ def _llm_narrative(
     backtest_id: int | None = None,
 ):
     default = DEFAULT_MODELS.get("macro", ("openrouter", "qwen/qwen3.6-27b"))
-    provider, model = default
+    provider, model = pick_model(state or {}, "macro", default)
     client = get_llm(provider, state=state)
     system = (
         "You are a macro strategist. The growth/inflation/yield-curve/policy "

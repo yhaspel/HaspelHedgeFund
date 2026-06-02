@@ -82,6 +82,8 @@ export interface CreateBacktestRequest {
   baseline: 'universe_ew' | 'spy';
   max_budget_usd?: number;
   disable_cio?: boolean;
+  // P4c: backtest on a saved agent-graph version (its models + personas win).
+  graph_version_id?: number | null;
 }
 
 export interface EstimateRequest {

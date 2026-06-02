@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -9,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { ApiClient } from '../../core/api/api-client';
+import { GraphsStore } from '../../abstraction/graphs.store';
 import { AppShellComponent } from '../shared/app-shell.component';
 
 interface Schedule {
@@ -160,6 +162,18 @@ const DOW_NAMES: Record<number, string> = {
                 <option value="frugal">frugal</option>
                 <option value="dev">dev</option>
               </select>
+            </label>
+
+            <label>Agent graph
+              <select [(ngModel)]="f.graph_version_id" data-testid="sched-graph-select">
+                <option [ngValue]="null">Council classic (default)</option>
+                @for (g of graphOptions(); track g.versionId) {
+                  <option [ngValue]="g.versionId">{{ g.label }}</option>
+                }
+              </select>
+              @if (f.graph_version_id) {
+                <span class="muted" style="font-size:11px">Models &amp; personas come from this graph; the preset still sets the cost tier.</span>
+              }
             </label>
             <label>Cost ceiling (USD / run)
               <input type="number" step="0.01" [(ngModel)]="f.cost_ceiling_usd" placeholder="2.00" />
@@ -332,7 +346,18 @@ const DOW_NAMES: Record<number, string> = {
 })
 export class SchedulesPage implements OnInit {
   private readonly api = inject(ApiClient);
+  private readonly graphs = inject(GraphsStore);
   readonly dows = DOWS;
+
+  readonly graphOptions = computed(() =>
+    this.graphs
+      .graphs()
+      .filter((g) => g.latest_version && g.latest_version.validation_status === 'valid')
+      .map((g) => ({
+        versionId: g.latest_version!.id,
+        label: g.name + (g.is_template ? ' (template)' : ''),
+      })),
+  );
 
   readonly schedules = signal<Schedule[]>([]);
   readonly watchlists = signal<Watchlist[]>([]);
@@ -355,6 +380,7 @@ export class SchedulesPage implements OnInit {
     watchlist: null as number | null,
     cron_expression: '25 9 * * 1-5',
     model_preset: 'frugal',
+    graph_version_id: null as number | null,
     cost_ceiling_usd: '' as string,
     on_breach: 'degrade',
     notification_channel: null as number | null,
@@ -368,6 +394,7 @@ export class SchedulesPage implements OnInit {
 
   ngOnInit(): void {
     this.reload();
+    this.graphs.loadGraphs().subscribe();
     this.api.get<Watchlist[]>('/watchlists/').subscribe((w) => {
       this.watchlists.set(w);
       const def = w.find((x) => x.is_default) ?? w[0];
@@ -448,6 +475,7 @@ export class SchedulesPage implements OnInit {
       watchlist: this.f.watchlist,
       cron_expression: this.f.cron_expression,
       model_preset: this.f.model_preset,
+      graph_version_id: this.f.graph_version_id,
       on_breach: this.f.on_breach,
       is_market_aware: this.f.is_market_aware,
       notification_channel: this.f.notification_channel,

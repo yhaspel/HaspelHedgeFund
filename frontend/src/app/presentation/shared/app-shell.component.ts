@@ -106,6 +106,14 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
           <hf-popover #popSt placement="right" align="center" size="compact">Strategies</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/graphs" routerLinkActive="active" #navGraphs="routerLinkActive"
+           [attr.aria-current]="navGraphs.isActive ? 'page' : null"
+           aria-label="Agent graphs"
+           (mouseenter)="popGraphs.show()" (mouseleave)="popGraphs.maybeHide()"
+           (focus)="popGraphs.show()" (blur)="popGraphs.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-graph" /></svg>
+          <hf-popover #popGraphs placement="right" align="center" size="compact">Agent graphs</hf-popover>
+        </a>
         <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
            [attr.aria-current]="navNews.isActive ? 'page' : null"
            aria-label="News"

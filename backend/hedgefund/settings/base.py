@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.investor_profile",
     "apps.persona_evolution",
     "apps.brokers",
+    "apps.graphs",
     "hedgefund_agents",
 ]
 
@@ -228,6 +229,18 @@ ALLOW_PLATFORM_DATA_KEYS = os.environ.get("ALLOW_PLATFORM_DATA_KEYS", "0") == "1
 
 # P4 13F: enrich the Fundamentals agent with institutional-ownership data.
 FUNDAMENTALS_USE_13F = os.environ.get("FUNDAMENTALS_USE_13F", "1") == "1"
+
+# P4c: user-composed agent graphs. Defaults preserve today's behavior (every
+# run uses the hardcoded council.py) until the editor ships.
+#   ENABLE_DB_GRAPHS                 master switch for resolving a run/backtest's
+#                                    graph from its AgentGraphVersion FK.
+#   GRAPH_FALLBACK_TO_HARDCODED      on compile failure, fall back to council.py
+#                                    and log instead of failing the run.
+#   BLOCK_INVALID_GRAPH_AT_SUBMISSION reject submissions whose selected version
+#                                    isn't validation_status="valid".
+ENABLE_DB_GRAPHS = os.environ.get("ENABLE_DB_GRAPHS", "0") == "1"
+GRAPH_FALLBACK_TO_HARDCODED = os.environ.get("GRAPH_FALLBACK_TO_HARDCODED", "1") == "1"
+BLOCK_INVALID_GRAPH_AT_SUBMISSION = os.environ.get("BLOCK_INVALID_GRAPH_AT_SUBMISSION", "1") == "1"
 
 # P3b: email + notification delivery. Dev defaults to the console backend so
 # scheduled-run notifications are visible in the worker logs without an SMTP

@@ -33,6 +33,17 @@ class Backtest(models.Model):
     commission_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
     spread_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
     agent_graph_version = models.CharField(max_length=64, default="council-v1")
+    # P4c: the immutable agent-graph version this backtest executed on. NULL ⇒
+    # the hardcoded council.py. The CharField above is kept as a denormalized
+    # display label (e.g. "my-graph:v3") set alongside this FK; the FK is the
+    # authoritative reference. PROTECT enforces version immutability.
+    graph_version = models.ForeignKey(
+        "graphs.AgentGraphVersion",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
     agent_versions = models.JSONField(default=dict, blank=True)
     model_overrides = models.JSONField(default=dict, blank=True)
     personas = models.JSONField(default=list, blank=True)

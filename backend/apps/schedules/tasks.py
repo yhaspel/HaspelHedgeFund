@@ -159,6 +159,18 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     # ---- fan out: one single-ticker Run per watchlist ticker ----
     as_of = timezone.localdate()
     personas = list(sr.personas or [])
+    # P4c: when the schedule pins an agent-graph version, each child Run inherits
+    # it (resolve_graph compiles it). Flatten the version's per-node models over
+    # the preset (graph wins for the agents it specifies) and adopt its persona
+    # subset, so the chosen models actually take effect at runtime.
+    graph_version = sr.graph_version
+    if graph_version is not None:
+        from apps.graphs.submission import model_overrides_for_version, personas_for_version
+
+        overrides = {**overrides, **model_overrides_for_version(graph_version)}
+        gpersonas = personas_for_version(graph_version)
+        if gpersonas:
+            personas = gpersonas
     run_ids: list[int] = []
     for tk in tickers:
         run = Run.objects.create(
@@ -168,6 +180,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
             as_of_date=as_of,
             personas=personas,
             source=Run.ADHOC,
+            graph_version=graph_version,
         )
         run_ids.append(run.id)
         try:

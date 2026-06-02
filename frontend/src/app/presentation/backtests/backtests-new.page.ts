@@ -1,9 +1,10 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { GraphsStore } from '../../abstraction/graphs.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { EstimateResponse } from '../../core/models/backtest.model';
 import { ALL_PERSONAS } from '../../core/models/run.model';
@@ -14,7 +15,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 @Component({
   selector: 'hf-backtests-new',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, ModelPanelComponent, PersonaCardComponent, AppShellComponent, GlossaryTermComponent],
+  imports: [CommonModule, FormsModule, DecimalPipe, RouterLink, ModelPanelComponent, PersonaCardComponent, AppShellComponent, GlossaryTermComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label:'New'}]">
       <div class="page-head">
@@ -106,6 +107,29 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
         </section>
 
         <section class="card">
+          <div class="card-bd">
+            <div class="field">
+              <label class="lbl" for="bt-graph">Agent graph</label>
+              <select id="bt-graph" class="input sans" name="graph"
+                [ngModel]="graphVersionId()" (ngModelChange)="onGraphChange($event)"
+                data-testid="bt-graph-select">
+                <option [ngValue]="null">Council classic (default)</option>
+                @for (g of graphOptions(); track g.versionId) {
+                  <option [ngValue]="g.versionId">{{ g.label }}</option>
+                }
+              </select>
+              @if (graphVersionId()) {
+                <p class="mono text-[11px] text-text-3 mt-1">
+                  Models &amp; personas come from this saved graph.
+                  <a routerLink="/graphs">Manage graphs</a>
+                </p>
+              }
+            </div>
+          </div>
+        </section>
+
+        @if (!graphVersionId()) {
+        <section class="card">
           <div class="card-hd">
             <h2 class="title">Council shape</h2>
             <span class="pill"><span class="dot"></span>{{ selectedPersonas.size }} of {{ allPersonas.length }}</span>
@@ -137,12 +161,18 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
             <hf-model-panel [agents]="activeAgents()" [multiplier]="rebalanceCountEstimate()" [(overrides)]="overrides" />
           </div>
         </section>
+        }
 
         @if (error()) {
           <p id="bt-form-error" role="alert" class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
         }
 
-        @if (!estimate()) {
+        @if (graphVersionId()) {
+          <button type="button" class="btn primary h-9 justify-center"
+            (click)="submit()" [disabled]="submitting()" data-testid="bt-run-graph">
+            {{ submitting() ? 'Submitting…' : 'Run walk-forward' }}
+          </button>
+        } @else if (!estimate()) {
           <button type="button" class="btn primary h-9 justify-center"
             (click)="estimateCost()" [disabled]="estimating()">
             {{ estimating() ? 'Estimating…' : 'Estimate cost' }}
@@ -232,7 +262,24 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
 export class BacktestsNewPage implements OnInit {
   readonly store = inject(BacktestsStore);
   readonly modelsStore = inject(ModelsStore);
+  readonly graphs = inject(GraphsStore);
   private readonly router = inject(Router);
+
+  graphVersionId = signal<number | null>(null);
+  graphOptions = computed(() =>
+    this.graphs
+      .graphs()
+      .filter((g) => g.latest_version && g.latest_version.validation_status === 'valid')
+      .map((g) => ({
+        versionId: g.latest_version!.id,
+        label: g.name + (g.is_template ? ' (template)' : ''),
+      })),
+  );
+
+  onGraphChange(v: number | null): void {
+    this.graphVersionId.set(v ?? null);
+    this.estimate.set(null);
+  }
 
   // Shared `PersonaMeta[]` from runs.model — same source the Runs Console uses,
   // so the persona card UX stays consistent across surfaces (icon + tagline +
@@ -297,6 +344,7 @@ export class BacktestsNewPage implements OnInit {
   ngOnInit(): void {
     this.store.loadDefaultUniverse().subscribe();
     this.modelsStore.loadAll().subscribe();
+    this.graphs.loadGraphs().subscribe();
   }
 
   private parsedUniverse(): string[] {
@@ -335,9 +383,12 @@ export class BacktestsNewPage implements OnInit {
   }
 
   submit(): void {
+    const gv = this.graphVersionId();
     const est = this.estimate();
-    if (!est) return;
-    if (est.exceeds_budget) {
+    // In ad-hoc mode an estimate is required first; with a graph selected the
+    // server-side max_budget_usd cap still protects, so submit directly.
+    if (!gv && !est) return;
+    if (est?.exceeds_budget) {
       this.error.set('Estimated cost exceeds the max budget. Raise the cap or shrink the run.');
       return;
     }
@@ -359,9 +410,10 @@ export class BacktestsNewPage implements OnInit {
       rebalance_frequency: this.rebalance,
       baseline: this.baseline,
       max_budget_usd: this.maxBudgetUsd,
-      model_overrides: this.overrides(),
-      personas: Array.from(this.selectedPersonas),
+      model_overrides: gv ? {} : this.overrides(),
+      personas: gv ? [] : Array.from(this.selectedPersonas),
       disable_cio: !this.includeCio,
+      graph_version_id: gv,
     }).subscribe({
       next: (bt) => this.router.navigate(['/backtests', bt.id]),
       error: (e) => {
