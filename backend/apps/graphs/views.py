@@ -13,6 +13,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.models_catalog.presets import HYBRID_LOCAL_FALLBACK, PRESETS
+from apps.models_catalog.tier_menus import tier_menu
+
 from .models import AgentGraph, AgentGraphVersion
 from .registry import ALL_AGENTS, SCHEMA_VERSION
 from .serializers import (
@@ -70,6 +73,44 @@ def _node_meta(name: str) -> dict:
     }
 
 
+# Price tiers = the model presets (Dev/Frugal/Hybrid/Research/Quality), cheap→premium.
+_TIER_ORDER = ["dev", "frugal", "hybrid", "research", "quality"]
+_TIER_LABELS = {
+    "dev": "Dev (free)", "frugal": "Frugal", "hybrid": "Hybrid",
+    "research": "Research", "quality": "Quality",
+}
+
+
+def _tier_default(preset: str, menu: list[str]) -> str | None:
+    """The single representative model a tier applies to every node — the
+    preset's persona wildcard (e.g. frugal→qwen3.6-27b, dev→gpt-oss-120b:free),
+    falling back to the menu's first entry."""
+    rules = PRESETS.get(preset, {})
+    default = rules.get("*persona*") or rules.get("*")
+    if default == "<local-tier-a>":
+        default = HYBRID_LOCAL_FALLBACK
+    if not default:
+        default = menu[0] if menu else None
+    return default
+
+
+def _tiers_payload() -> list[dict]:
+    """For the editor's bulk tier switcher: each tier's curated model menu +
+    the default model applied to all nodes when the tier is picked."""
+    out = []
+    for name in _TIER_ORDER:
+        if name not in PRESETS:
+            continue
+        menu = tier_menu(name)
+        out.append({
+            "name": name,
+            "label": _TIER_LABELS.get(name, name.title()),
+            "default_model": _tier_default(name, menu),
+            "models": menu,
+        })
+    return out
+
+
 class GraphRegistryView(APIView):
     """GET /api/graphs/registry/ — palette + locked-tail metadata for the editor.
 
@@ -92,6 +133,7 @@ class GraphRegistryView(APIView):
             "personas": [_node_meta(n) for n in personas],
             "tail": [_node_meta(n) for n in tail],
             "structural": ["entry", "analytical_join", "persona_join"],
+            "tiers": _tiers_payload(),
             "notes": {
                 "macro": "Shared per-date cache: this model applies on the first run "
                          "for a date; later runs reuse the cached narrative.",

@@ -47,6 +47,14 @@ def test_registry_endpoint(client):
     pm = next(t for t in body["tail"] if t["agent_name"] == "portfolio_manager")
     assert pm["model_selectable"] is False
     assert "macro" in body["notes"]
+    # Bulk tier switcher: each tier has a curated model menu + a default model.
+    tiers = {t["name"]: t for t in body["tiers"]}
+    assert {"dev", "frugal", "hybrid", "research", "quality"} <= set(tiers)
+    frugal = tiers["frugal"]
+    assert frugal["default_model"] == "openrouter:qwen/qwen3.6-27b"
+    assert frugal["default_model"] in frugal["models"]
+    assert "openrouter:meta-llama/llama-3.3-70b-instruct" in frugal["models"]
+    assert tiers["dev"]["default_model"] == "openrouter:openai/gpt-oss-120b:free"
 
 
 # ---- list / templates --------------------------------------------------

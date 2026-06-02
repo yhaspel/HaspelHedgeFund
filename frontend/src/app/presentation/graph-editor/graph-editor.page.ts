@@ -9,6 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { GraphsStore } from '../../abstraction/graphs.store';
@@ -30,6 +31,7 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     AppShellComponent,
     GraphCanvasComponent,
     GraphPaletteComponent,
@@ -74,6 +76,33 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
               {{ saving() ? 'Saving…' : 'Save version' }}
             </button>
           </div>
+        </div>
+
+        <div class="tier-bar">
+          <span class="tier-lbl">Set all models</span>
+          <label class="tier-field">
+            <span>Tier</span>
+            <select [ngModel]="selectedTier()" (ngModelChange)="onTierChange($event)"
+                    name="tier" data-testid="tier-select">
+              <option [ngValue]="null">— pick a price tier —</option>
+              @for (t of store.registry()?.tiers ?? []; track t.name) {
+                <option [ngValue]="t.name">{{ t.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="tier-field">
+            <span>Model</span>
+            <select [ngModel]="selectedTierModel()" (ngModelChange)="onTierModelChange($event)"
+                    name="tierModel" [disabled]="!selectedTier()" data-testid="tier-model-select">
+              @if (!selectedTier()) {
+                <option [ngValue]="null">— select a tier first —</option>
+              }
+              @for (m of tierModelOptions(); track m.id) {
+                <option [ngValue]="m.id">{{ m.label }}</option>
+              }
+            </select>
+          </label>
+          <span class="tier-hint">Applies one model to every persona + agent (overwrites per-node picks).</span>
         </div>
 
         @if (saveError()) {
@@ -146,6 +175,15 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
       .btn.primary:disabled { opacity: .45; cursor: not-allowed; }
       .save-error { background: #3a1b1b; color: #f6b3b3; padding: 8px 12px; border-radius: 8px;
                     font-size: 12.5px; margin-bottom: 8px; }
+      .tier-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 10px;
+                  margin-bottom: 8px; border: 1px solid var(--border, #2a3142); border-radius: 9px;
+                  background: var(--surface, #151b26); }
+      .tier-lbl { font-size: 12px; font-weight: 600; color: var(--text, #e6ebf5); }
+      .tier-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim, #93a0b5); }
+      .tier-field select { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border, #2a3142);
+                           background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); font-size: 12px; }
+      .tier-field select:disabled { opacity: .5; }
+      .tier-hint { font-size: 10.5px; color: var(--text-dim, #93a0b5); margin-left: auto; }
       .panes { flex: 1; display: grid; grid-template-columns: 210px 1fr 270px; gap: 10px; min-height: 0; position: relative; }
       .rail { border: 1px solid var(--border, #2a3142); border-radius: 10px; background: var(--surface, #151b26); overflow: hidden; }
       .canvas-wrap { position: relative; min-width: 0; }
@@ -173,6 +211,18 @@ export class GraphEditorPage implements OnInit {
   readonly draftRestored = signal(false);
   // Gates autosave until the initial version load completes (see constructor).
   private readonly ready = signal(false);
+
+  // Bulk "set all models to a tier" switcher.
+  readonly selectedTier = signal<string | null>(null);
+  readonly selectedTierModel = signal<string | null>(null);
+  readonly tierModelOptions = computed<{ id: string; label: string }[]>(() => {
+    const tier = (this.store.registry()?.tiers ?? []).find((t) => t.name === this.selectedTier());
+    if (!tier) return [];
+    return tier.models.map((id) => {
+      const m = this.modelsStore.models().find((x) => x.id === id);
+      return { id, label: m ? m.display_name : id };
+    });
+  });
 
   readonly presentTypes = computed(() => new Set(this.workingNodes().map((n) => n.type)));
 
@@ -332,6 +382,36 @@ export class GraphEditorPage implements OnInit {
         ns.map((n) => (n.id === e.id ? { ...n, model_id: e.modelId } : n)),
       );
     }
+  }
+
+  // ---- bulk tier switcher ----------------------------------------------
+  onTierChange(name: string | null): void {
+    this.selectedTier.set(name ?? null);
+    if (!name) {
+      this.selectedTierModel.set(null);
+      return;
+    }
+    const tier = (this.store.registry()?.tiers ?? []).find((t) => t.name === name);
+    const model = tier?.default_model ?? null;
+    this.selectedTierModel.set(model);
+    if (model) this.applyModelToAll(model);
+  }
+
+  onTierModelChange(modelId: string | null): void {
+    this.selectedTierModel.set(modelId ?? null);
+    if (modelId) this.applyModelToAll(modelId);
+  }
+
+  /** Set one model on every persona/analytical node + the selectable tail
+   *  (risk, cio). PM is deterministic and untouched. */
+  private applyModelToAll(modelId: string): void {
+    this.workingNodes.update((ns) => ns.map((n) => ({ ...n, model_id: modelId })));
+    const selectableTail = (this.store.registry()?.tail ?? []).filter((t) => t.model_selectable);
+    this.tailModels.update((tm) => {
+      const next = { ...tm };
+      for (const t of selectableTail) next[t.agent_name] = modelId;
+      return next;
+    });
   }
 
   // ---- drag-drop from palette ------------------------------------------

@@ -19,12 +19,21 @@ export interface NodeSpec {
   label: string;
 }
 
+/** A price tier (model preset) for the bulk "set all nodes to one model" switcher. */
+export interface GraphTier {
+  name: string; // dev | frugal | hybrid | research | quality
+  label: string;
+  default_model: string | null;
+  models: string[]; // ModelEntry ids in this tier's curated menu
+}
+
 export interface GraphRegistry {
   schema_version: number;
   analytical: NodeSpec[];
   personas: NodeSpec[];
   tail: NodeSpec[];
   structural: string[];
+  tiers: GraphTier[];
   notes: { macro: string; news_digest_min_context: number };
 }
 

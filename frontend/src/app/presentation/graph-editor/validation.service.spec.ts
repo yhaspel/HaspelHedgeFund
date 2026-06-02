@@ -15,6 +15,7 @@ const REGISTRY: GraphRegistry = {
   ],
   tail: [],
   structural: ['entry', 'analytical_join', 'persona_join'],
+  tiers: [],
   notes: { macro: 'x', news_digest_min_context: 32000 },
 };
 
