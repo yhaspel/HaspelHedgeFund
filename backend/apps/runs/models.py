@@ -68,6 +68,17 @@ class Run(models.Model):
         on_delete=models.SET_NULL,
     )
 
+    # P4c: the immutable agent-graph version this run executed on. NULL ⇒ the
+    # hardcoded council.py (back-compat + when ENABLE_DB_GRAPHS is off). PROTECT
+    # enforces version immutability — a finished run can never lose its graph.
+    graph_version = models.ForeignKey(
+        "graphs.AgentGraphVersion",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+
     # P01 review: first-class evidence/provenance for run outputs.
     # Structure: {"items": [{"agent": str, "provider": str, "source": str,
     #             "url": str, "as_of": iso-date, "retrieved_at": iso-ts,

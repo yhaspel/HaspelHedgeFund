@@ -1,9 +1,10 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { take } from 'rxjs/operators';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { GraphsStore } from '../../abstraction/graphs.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { RunsStore } from '../../abstraction/runs.store';
 import { ALL_PERSONAS, DEFAULT_PERSONA_IDS } from '../../core/models/run.model';
@@ -54,25 +55,49 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         </section>
 
         <section class="card">
-          <div class="card-bd">
-            <hf-model-panel [agents]="panelAgents()" [(overrides)]="overrides" />
+          <div class="card-bd flex flex-col gap-3.5">
+            <div class="field">
+              <label class="lbl" for="run-graph">Agent graph</label>
+              <select id="run-graph" class="input" name="graph"
+                [ngModel]="graphVersionId()" (ngModelChange)="onGraphChange($event)"
+                data-testid="run-graph-select">
+                <option [ngValue]="null">Council classic (default)</option>
+                @for (g of graphOptions(); track g.versionId) {
+                  <option [ngValue]="g.versionId">{{ g.label }}</option>
+                }
+              </select>
+              @if (graphVersionId()) {
+                <p class="mono text-[11px] text-text-3 mt-1">
+                  Models &amp; personas come from this saved graph.
+                  <a routerLink="/graphs">Manage graphs</a>
+                </p>
+              }
+            </div>
           </div>
         </section>
 
-        <section class="card">
-          <div class="card-hd">
-            <h2 class="title"><hf-term key="council">Council</hf-term> personas</h2>
-            <span class="pill"><span class="dot"></span>{{ selected().size }} of {{ allPersonas.length }}</span>
-          </div>
-          <div class="card-bd persona-grid">
-            @for (p of allPersonas; track p.id) {
-              <hf-persona-card
-                [persona]="p"
-                [selected]="selected().has(p.id)"
-                (toggled)="toggle(p.id)" />
-            }
-          </div>
-        </section>
+        @if (!graphVersionId()) {
+          <section class="card">
+            <div class="card-bd">
+              <hf-model-panel [agents]="panelAgents()" [(overrides)]="overrides" />
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-hd">
+              <h2 class="title"><hf-term key="council">Council</hf-term> personas</h2>
+              <span class="pill"><span class="dot"></span>{{ selected().size }} of {{ allPersonas.length }}</span>
+            </div>
+            <div class="card-bd persona-grid">
+              @for (p of allPersonas; track p.id) {
+                <hf-persona-card
+                  [persona]="p"
+                  [selected]="selected().has(p.id)"
+                  (toggled)="toggle(p.id)" />
+              }
+            </div>
+          </section>
+        }
 
         @if (error()) {
           <p role="alert" class="text-[var(--acc-short-fg)] text-2xs">{{ error() }}</p>
@@ -81,7 +106,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         <div class="flex gap-2">
           <a class="btn ghost" routerLink="/runs">Cancel</a>
           <button type="submit" class="btn primary flex-1 h-9 justify-center"
-            [disabled]="submitting() || selected().size === 0">
+            [disabled]="submitting() || (!graphVersionId() && selected().size === 0)">
             {{ submitting() ? 'Submitting…' : 'Run council' }}
           </button>
         </div>
@@ -104,6 +129,7 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
 export class RunsNewPage implements OnInit {
   readonly runs = inject(RunsStore);
   readonly modelsStore = inject(ModelsStore);
+  readonly graphs = inject(GraphsStore);
   private readonly router = inject(Router);
   private readonly history = inject(TickerHistoryStore);
   private readonly route = inject(ActivatedRoute);
@@ -115,6 +141,18 @@ export class RunsNewPage implements OnInit {
   error = signal<string | null>(null);
   selected = signal<Set<string>>(new Set(DEFAULT_PERSONA_IDS));
   overrides = signal<Record<string, string>>({});
+  graphVersionId = signal<number | null>(null);
+
+  // Own graphs + templates that have a valid latest version.
+  graphOptions = computed(() =>
+    this.graphs
+      .graphs()
+      .filter((g) => g.latest_version && g.latest_version.validation_status === 'valid')
+      .map((g) => ({
+        versionId: g.latest_version!.id,
+        label: g.name + (g.is_template ? ' (template)' : ''),
+      })),
+  );
   tickerSpark = signal<number[] | null>(null);
   sparkLoading = signal(false);
   private sparkDebounce?: ReturnType<typeof setTimeout>;
@@ -133,8 +171,13 @@ export class RunsNewPage implements OnInit {
     this.selected.set(next);
   }
 
+  onGraphChange(v: number | null): void {
+    this.graphVersionId.set(v ?? null);
+  }
+
   ngOnInit(): void {
     this.modelsStore.loadAll().subscribe();
+    this.graphs.loadGraphs().subscribe();
     this.route.queryParamMap.pipe(take(1)).subscribe((params) => {
       const t = (params.get('ticker') || '').trim().toUpperCase();
       if (t) {
@@ -181,12 +224,16 @@ export class RunsNewPage implements OnInit {
   submit(): void {
     this.error.set(null);
     this.submitting.set(true);
+    const gv = this.graphVersionId();
     this.runs
       .submitRun({
         tickers: [this.ticker.toUpperCase()],
         as_of_date: this.asOfDate,
-        model_overrides: this.overrides(),
-        personas: Array.from(this.selected()),
+        // When a graph is chosen, the backend flattens its models + personas;
+        // omit the ad-hoc model/persona pickers.
+        model_overrides: gv ? {} : this.overrides(),
+        personas: gv ? [] : Array.from(this.selected()),
+        graph_version_id: gv,
       })
       .subscribe({
         next: (run) => this.router.navigate(['/runs', run.id]),

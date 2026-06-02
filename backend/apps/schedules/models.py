@@ -43,6 +43,16 @@ class ScheduledRun(models.Model):
     # more for recurring jobs than one-off ad-hoc runs).
     model_preset = models.CharField(max_length=32, default="frugal")
     model_overrides = models.JSONField(default=dict, blank=True)
+    # P4c: the immutable agent-graph version each child Run inherits. NULL ⇒ the
+    # hardcoded council.py. PROTECT keeps the version pinned for the schedule's
+    # lifetime. Copied onto every Run the dispatcher creates (schedules/tasks.py).
+    graph_version = models.ForeignKey(
+        "graphs.AgentGraphVersion",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
 
     cron_expression = models.CharField(max_length=64)  # e.g. "25 9 * * 1-5"
     timezone = models.CharField(max_length=64, default="America/New_York")

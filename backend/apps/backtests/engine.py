@@ -231,10 +231,8 @@ def prime_agent_cache(
         get_fmp_provider,
         get_ownership_provider,
     )
-    from hedgefund_agents.graphs.council import (
-        ANALYTICAL_NODES,
-        build_council_graph,
-    )
+    from apps.graphs.compiler import resolve_graph
+    from hedgefund_agents.graphs.council import ANALYTICAL_NODES
     from hedgefund_agents.personas import ALL_PERSONAS
     from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
@@ -250,7 +248,10 @@ def prime_agent_cache(
     bt.save(update_fields=["agent_versions"])
 
     # LangGraph compiled graphs are stateless under invoke(); shared across threads.
-    graph = build_council_graph(personas=selected_personas)
+    # P4c: resolve from bt.graph_version when ENABLE_DB_GRAPHS is on; else fall
+    # back to the hardcoded council with bt.personas. disable_cio still flows via
+    # state (below), unchanged — the compiler takes no disable_cio argument.
+    graph = resolve_graph(bt)
     # FMP / EDGAR providers wrap an httpx.Client; httpx Client is thread-safe.
     data_provider = get_fmp_provider(user=bt.user)
     filings_provider = get_edgar_provider()

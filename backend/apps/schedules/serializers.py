@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rest_framework import serializers
 
 from apps.brokers.models import BrokerAccount
+from apps.graphs.models import AgentGraphVersion
 from apps.models_catalog.presets import PRESETS
 from apps.notifications.models import NotificationChannel
 from apps.watchlists.models import Watchlist
@@ -23,6 +24,11 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
         queryset=BrokerAccount.objects.all(), required=False, allow_null=True
     )
     auto_submit_account_label = serializers.SerializerMethodField()
+    # P4c: optional agent-graph version each child Run inherits.
+    graph_version_id = serializers.PrimaryKeyRelatedField(
+        source="graph_version", required=False, allow_null=True,
+        queryset=AgentGraphVersion.objects.all(),
+    )
     # Human-readable rendering of cron_expression, e.g. "At 09:25 AM, Monday
     # through Friday" — so the UI never has to show a raw cron string.
     cron_description = serializers.SerializerMethodField()
@@ -31,7 +37,7 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
         model = ScheduledRun
         fields = (
             "id", "name", "watchlist", "watchlist_name", "personas",
-            "model_preset", "model_overrides", "cron_expression",
+            "model_preset", "model_overrides", "graph_version_id", "cron_expression",
             "cron_description", "timezone",
             "is_market_aware", "cost_ceiling_usd", "on_breach",
             "notification_channel",
@@ -74,6 +80,13 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
                 f"Unknown preset {value!r}. Choices: {sorted(PRESETS)}."
             )
         return value
+
+    def validate_graph_version_id(self, value):
+        if value is None:
+            return value
+        from apps.graphs.submission import check_submittable
+
+        return check_submittable(value, self._request_user())
 
     def validate_watchlist(self, wl: Watchlist) -> Watchlist:
         user = self._request_user()

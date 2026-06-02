@@ -14,11 +14,9 @@ from apps.data.providers.factory import (
     get_fmp_provider,
     get_ownership_provider,
 )
+from apps.graphs.compiler import resolve_graph
 from hedgefund_agents.analytical.valuation import run_valuation  # noqa: F401 — register spec
-from hedgefund_agents.graphs.council import (
-    ANALYTICAL_NODES,
-    build_council_graph,
-)
+from hedgefund_agents.graphs.council import ANALYTICAL_NODES
 from hedgefund_agents.models import LLMCall
 from hedgefund_agents.personas import ALL_PERSONAS
 from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
@@ -202,7 +200,12 @@ def execute_run(run_id: int) -> None:
     run.save(update_fields=["status"])
 
     selected_personas = list(run.personas or ALL_PERSONAS)
-    graph = build_council_graph(personas=selected_personas)
+    # P4c: resolve from the run's AgentGraphVersion when ENABLE_DB_GRAPHS is on;
+    # otherwise (or on compile failure) fall back to the hardcoded council with
+    # run.personas. The submission serializer already flattened the chosen
+    # version's models into run.model_overrides and its personas into
+    # run.personas, so selected_personas stays correct for both paths.
+    graph = resolve_graph(run)
     data_provider = get_fmp_provider(user=run.user)
     filings_provider = get_edgar_provider()
     ownership_provider = get_ownership_provider(user=run.user)

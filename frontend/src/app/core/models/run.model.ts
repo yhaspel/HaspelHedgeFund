@@ -182,6 +182,8 @@ export interface CreateRunRequest {
   as_of_date: string;
   model_overrides?: Record<string, string>;
   personas?: string[];
+  // P4c: run on a saved agent-graph version (its models + personas win).
+  graph_version_id?: number | null;
 }
 
 export interface PersonaMeta {

@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.graphs.models import AgentGraphVersion
+
 from .models import Backtest, BacktestFold, BacktestMetrics
 
 
@@ -80,6 +82,12 @@ DEFAULT_UNIVERSE_20 = [
 
 
 class BacktestCreateSerializer(serializers.ModelSerializer):
+    # P4c: optional agent-graph version (same semantics as Run).
+    graph_version_id = serializers.PrimaryKeyRelatedField(
+        source="graph_version", required=False, allow_null=True,
+        queryset=AgentGraphVersion.objects.all(),
+    )
+
     class Meta:
         model = Backtest
         fields = (
@@ -87,7 +95,7 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             "commission_bps", "spread_bps", "personas", "model_overrides",
             "rebalance_frequency", "is_window_days", "oos_window_days", "step_days",
             "search_space", "n_candidates", "is_objective", "rng_seed", "baseline",
-            "max_budget_usd", "disable_cio", "status",
+            "max_budget_usd", "disable_cio", "status", "graph_version_id",
         )
         read_only_fields = ("id", "status")
 
@@ -106,4 +114,13 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "master window too short for one fold (need >= is_window + oos_window days)"
             )
+        version = attrs.get("graph_version")
+        if version is not None:
+            from apps.graphs.submission import apply_graph_version, check_submittable
+
+            user = getattr(self.context.get("request"), "user", None)
+            check_submittable(version, user)
+            apply_graph_version(attrs, version, user=user)
+            # Keep the denormalized display label in sync alongside the FK.
+            attrs["agent_graph_version"] = version.display_label
         return attrs
