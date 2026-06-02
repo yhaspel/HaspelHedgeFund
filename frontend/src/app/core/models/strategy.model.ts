@@ -134,6 +134,34 @@ export interface Strategy {
   created_at: string;
 }
 
+/** Pre-flight cost estimate for a `Run cycle now` dispatch. `preset` echoes
+ *  the resolved/chosen price tier; `overrides` is the full per-agent model map
+ *  that would be used. */
+export interface CycleEstimate {
+  n_candidates: number;
+  per_call_usd: number;
+  est_total_usd: number;
+  cost_ceiling_usd: number;
+  exceeds_ceiling: boolean;
+  per_agent: {
+    agent: string;
+    model: string;
+    model_name: string;
+    tier: string;
+    per_call_usd: number;
+  }[];
+  overrides: Record<string, string>;
+  preset: string;
+}
+
+/** Transient per-cycle model selection sent from the dispatch modal. Applies
+ *  to this dispatch only — it never mutates the strategy's saved preset or the
+ *  user's global model preferences. */
+export interface CycleOverrideBody {
+  preset?: string;
+  model_overrides?: Record<string, string>;
+}
+
 export interface RebalanceOrder {
   id: number;
   ticker: string;

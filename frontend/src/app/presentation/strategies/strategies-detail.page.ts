@@ -1,11 +1,14 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
-import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleMarkedSnapshot, CycleStatus, EnrollmentResult, EnrollmentRow, ScreenerCandidate } from '../../core/models/strategy.model';
+import { GraphsStore } from '../../abstraction/graphs.store';
+import { ModelsStore } from '../../abstraction/models.store';
+import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleEstimate, CycleMarkedSnapshot, CycleStatus, EnrollmentResult, EnrollmentRow, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
@@ -14,7 +17,7 @@ import { ModalComponent } from '../shared/modal.component';
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, EmptyStateComponent, GlossaryTermComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, EmptyStateComponent, GlossaryTermComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
       <div class="page-head">
@@ -70,6 +73,33 @@ import { ModalComponent } from '../shared/modal.component';
                 }
 
                 <div class="eyebrow">Per-agent model assignment</div>
+
+                <div class="cyc-tier-bar">
+                  <label class="cyc-field">
+                    <span>Price tier</span>
+                    <select [ngModel]="cycleTier()" (ngModelChange)="onCycleTierChange($event)"
+                            [disabled]="reEstimating()" data-test="cyc-tier">
+                      @for (t of tiers(); track t.name) {
+                        <option [ngValue]="t.name">{{ t.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="cyc-field">
+                    <span>Set all to</span>
+                    <select [ngModel]="cycleModelAll()" (ngModelChange)="onCycleModelAll($event)"
+                            [disabled]="reEstimating() || !tierMenuModels().length" data-test="cyc-model-all">
+                      <option [ngValue]="null">— per-agent (varied) —</option>
+                      @for (m of tierMenuModels(); track m.id) {
+                        <option [ngValue]="m.id" [disabled]="!m.available">{{ m.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  @if (reEstimating()) {
+                    <span class="cyc-hint">Re-estimating…</span>
+                  } @else {
+                    <span class="cyc-hint">Applies to this cycle only — saved defaults untouched.</span>
+                  }
+                </div>
               </div>
             </div>
 
@@ -83,7 +113,17 @@ import { ModalComponent } from '../shared/modal.component';
                   @for (row of est.per_agent; track row.agent) {
                     <tr [style.color]="row.model.startsWith('anthropic') ? 'var(--acc-short-fg)' : null">
                       <td class="mono">{{ row.agent }}</td>
-                      <td class="mono">{{ row.model_name || row.model }}</td>
+                      <td>
+                        <select class="input sans cyc-agent-select"
+                                [ngModel]="cycleOverrides()[row.agent] || row.model"
+                                (ngModelChange)="onAgentModelChange(row.agent, $event)"
+                                [disabled]="reEstimating()"
+                                [attr.data-test]="'cyc-model-' + row.agent">
+                          @for (m of agentModelOptions(row.agent); track m.id) {
+                            <option [value]="m.id" [disabled]="!m.available">{{ m.label }}</option>
+                          }
+                        </select>
+                      </td>
                       <td>{{ row.tier }}</td>
                       <td class="num">{{ row.per_call_usd.toFixed(4) }}</td>
                     </tr>
@@ -102,7 +142,7 @@ import { ModalComponent } from '../shared/modal.component';
               }
               <div class="est-modal__actions">
                 <button class="btn" (click)="cancelEstimate()">Cancel</button>
-                <button class="btn primary" (click)="confirmRun()" [disabled]="running()" data-test="confirm-run"
+                <button class="btn primary" (click)="confirmRun()" [disabled]="running() || reEstimating()" data-test="confirm-run"
                   [style.background]="est.exceeds_ceiling ? 'var(--acc-hold)' : null"
                   [style.borderColor]="est.exceeds_ceiling ? 'var(--acc-hold)' : null">
                   {{ running() ? 'Dispatching…' : 'Confirm & run cycle' }}
@@ -993,6 +1033,47 @@ import { ModalComponent } from '../shared/modal.component';
         justify-content: flex-end;
         gap: 8px;
       }
+      /* Confirm-cycle modal — transient tier / model override controls. */
+      .cyc-tier-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 8px 10px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-6);
+      }
+      .cyc-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--text-2);
+      }
+      .cyc-field select {
+        padding: 5px 8px;
+        border-radius: var(--r-4);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        max-width: 240px;
+      }
+      .cyc-field select:disabled {
+        opacity: 0.5;
+      }
+      .cyc-hint {
+        font-size: 10.5px;
+        color: var(--text-3);
+        margin-left: auto;
+      }
+      .cyc-agent-select {
+        width: 100%;
+        max-width: 320px;
+        font-size: 12px;
+        padding: 3px 6px;
+      }
       /* Marked-book snapshot card — uses --r-8 radius token. */
       .marked-snapshot-card {
         border: 1px solid var(--border);
@@ -1040,6 +1121,8 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly profiles = inject(TickerProfileStore);
+  private readonly graphs = inject(GraphsStore);
+  private readonly models = inject(ModelsStore);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
   /** Flips true after the first `listCycles` call settles so the left-rail
@@ -1092,18 +1175,22 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
 
   running = signal(false);
   estimating = signal(false);
-  estimate = signal<{
-    n_candidates: number;
-    per_call_usd: number;
-    est_total_usd: number;
-    cost_ceiling_usd: number;
-    exceeds_ceiling: boolean;
-    per_agent: { agent: string; model: string; model_name: string; tier: string; per_call_usd: number }[];
-    overrides: Record<string, string>;
-    preset: string;
-  } | null>(null);
+  estimate = signal<CycleEstimate | null>(null);
   notice = signal<string | null>(null);
   cycle = signal<CycleDetail | null>(null);
+
+  // P4c: transient (this-run-only) tier/model override state for the dispatch
+  // modal. `cycleTier` mirrors the chosen price tier; `cycleOverrides` is the
+  // full per-agent model map currently in effect (seeded from the estimate);
+  // `cycleModelAll` is the bulk "apply one model to every agent" pick.
+  // `cycleExplicit` = the user tweaked per-agent / bulk models (vs only the
+  // tier), so the dispatch sends an explicit map rather than a preset name.
+  cycleTier = signal<string | null>(null);
+  cycleOverrides = signal<Record<string, string>>({});
+  cycleModelAll = signal<string | null>(null);
+  cycleDirty = signal(false);
+  cycleExplicit = signal(false);
+  reEstimating = signal(false);
 
   // P2l: review-panel state. Refresh whenever a new awaiting_review cycle loads.
   approving = signal(false);
@@ -1117,16 +1204,165 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   openEstimate(): void {
     this.estimating.set(true);
     this.notice.set(null);
+    // Load the price-tier registry (cached) + model catalog so the modal's
+    // selectors have labels and per-tier menus.
+    this.graphs.loadRegistry().subscribe();
+    if (this.models.models().length === 0) this.models.loadAll().subscribe();
     this.store.estimate(this.strategyId).subscribe({
-      next: (e) => { this.estimating.set(false); this.estimate.set(e); },
+      next: (e) => {
+        this.estimating.set(false);
+        this.estimate.set(e);
+        this.cycleOverrides.set({ ...e.overrides });
+        this.cycleTier.set(e.preset || null);
+        this.cycleModelAll.set(null);
+        this.cycleDirty.set(false);
+        this.cycleExplicit.set(false);
+      },
       error: () => { this.estimating.set(false); this.notice.set('Failed to fetch cost estimate.'); },
     });
   }
-  cancelEstimate(): void { this.estimate.set(null); }
+  cancelEstimate(): void {
+    this.estimate.set(null);
+    this.cycleDirty.set(false);
+    this.cycleExplicit.set(false);
+    this.cycleModelAll.set(null);
+  }
   anyAnthropic(est: { per_agent: { model: string }[] }): boolean {
     return est.per_agent.some((r) => r.model.startsWith('anthropic'));
   }
-  confirmRun(): void { this.estimate.set(null); this.runNow(); }
+  confirmRun(): void {
+    // Transient override, this run only: an explicit per-agent map if the user
+    // tweaked models, else just the chosen tier (let the server expand it),
+    // else nothing (resolve from the strategy's saved defaults as before).
+    let body: { preset?: string; model_overrides?: Record<string, string> } = {};
+    if (this.cycleExplicit()) {
+      body = { model_overrides: this.cycleOverrides() };
+    } else if (this.cycleDirty() && this.cycleTier()) {
+      body = { preset: this.cycleTier()! };
+    }
+    this.estimate.set(null);
+    this.runNow(body);
+  }
+
+  // --- P4c dispatch-modal tier / model selection -----------------------------
+
+  /** Price tiers from the graph registry — {name,label,default_model,models}. */
+  tiers(): { name: string; label: string; default_model: string | null; models: string[] }[] {
+    return this.graphs.registry()?.tiers ?? [];
+  }
+
+  /** Curated model menu for the selected tier (the "Set all to" dropdown). */
+  tierMenuModels(): { id: string; label: string; available: boolean }[] {
+    const t = this.tiers().find((x) => x.name === this.cycleTier());
+    if (!t) return [];
+    const all = this.models.models();
+    return t.models.map((id) => {
+      const m = all.find((x) => x.id === id);
+      return { id, label: m ? `${m.display_name} · ${m.tier}` : id, available: m ? m.available : true };
+    });
+  }
+
+  /** Options for a per-agent dropdown: the active tier's menu (or the full
+   *  catalog when no tier is selected), plus the agent's current pick if it
+   *  isn't in the menu — so the select never renders blank. */
+  agentModelOptions(agent: string): { id: string; label: string; available: boolean }[] {
+    const all = this.models.models();
+    const tier = this.tiers().find((x) => x.name === this.cycleTier());
+    const base = tier
+      ? all.filter((m) => tier.models.includes(m.id) || m.provider === 'ollama')
+      : all;
+    const out = base.map((m) => ({ id: m.id, label: `${m.display_name} · ${m.tier}`, available: m.available }));
+    const cur = this.cycleOverrides()[agent];
+    if (cur && !out.some((o) => o.id === cur)) {
+      const stale = all.find((m) => m.id === cur);
+      out.push(stale
+        ? { id: cur, label: `${stale.display_name} · ${stale.tier}`, available: stale.available }
+        : { id: cur, label: cur, available: true });
+    }
+    return out;
+  }
+
+  /** Re-fetch the authoritative estimate for a transient override, then sync
+   *  local state from the response. */
+  /** Snapshot of the transient selection so a failed re-estimate can roll the
+   *  modal back to the last good state — keeping the dropdowns, the cost table,
+   *  and the body confirmRun() would send all internally consistent. */
+  private snapshotCycleState(): {
+    tier: string | null; overrides: Record<string, string>;
+    modelAll: string | null; explicit: boolean; dirty: boolean;
+  } {
+    return {
+      tier: this.cycleTier(),
+      overrides: { ...this.cycleOverrides() },
+      modelAll: this.cycleModelAll(),
+      explicit: this.cycleExplicit(),
+      dirty: this.cycleDirty(),
+    };
+  }
+
+  private reEstimate(
+    body: { preset?: string; model_overrides?: Record<string, string> },
+    rollback: {
+      tier: string | null; overrides: Record<string, string>;
+      modelAll: string | null; explicit: boolean; dirty: boolean;
+    },
+  ): void {
+    this.reEstimating.set(true);
+    this.cycleDirty.set(true);
+    this.store.estimateWith(this.strategyId, body).subscribe({
+      next: (e) => {
+        this.reEstimating.set(false);
+        this.estimate.set(e);
+        this.cycleOverrides.set({ ...e.overrides });
+      },
+      error: () => {
+        this.reEstimating.set(false);
+        this.notice.set('Failed to re-estimate with the selected models — reverted.');
+        this.cycleTier.set(rollback.tier);
+        this.cycleOverrides.set(rollback.overrides);
+        this.cycleModelAll.set(rollback.modelAll);
+        this.cycleExplicit.set(rollback.explicit);
+        this.cycleDirty.set(rollback.dirty);
+      },
+    });
+  }
+
+  onCycleTierChange(name: string | null): void {
+    if (!name) return;
+    const snap = this.snapshotCycleState();
+    this.cycleTier.set(name);
+    this.cycleModelAll.set(null);
+    this.cycleExplicit.set(false);
+    // A tier switch applies that tier's per-agent spread (the "set"); the
+    // server expands it (resolving any local model) and echoes the map back.
+    this.reEstimate({ preset: name }, snap);
+  }
+
+  onCycleModelAll(modelId: string | null): void {
+    const snap = this.snapshotCycleState();
+    this.cycleModelAll.set(modelId ?? null);
+    if (!modelId) {
+      // Revert to the selected tier's varied per-agent spread.
+      if (this.cycleTier()) {
+        this.cycleExplicit.set(false);
+        this.reEstimate({ preset: this.cycleTier()! }, snap);
+      }
+      return;
+    }
+    // Apply one model to every agent in the current map, overwriting the spread.
+    const next: Record<string, string> = {};
+    for (const a of Object.keys(this.cycleOverrides())) next[a] = modelId;
+    this.cycleExplicit.set(true);
+    this.reEstimate({ preset: this.cycleTier() ?? undefined, model_overrides: next }, snap);
+  }
+
+  onAgentModelChange(agent: string, modelId: string): void {
+    const snap = this.snapshotCycleState();
+    this.cycleModelAll.set(null);
+    this.cycleExplicit.set(true);
+    const next = { ...this.cycleOverrides(), [agent]: modelId };
+    this.reEstimate({ preset: this.cycleTier() ?? undefined, model_overrides: next }, snap);
+  }
 
   strategyId = 0;
 
@@ -1303,6 +1539,9 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     this.strategyId = Number(this.route.snapshot.paramMap.get('id'));
     this.store.detail(this.strategyId).subscribe();
     this.refreshCycles();
+    // Warm the price-tier registry (cached) so the dispatch modal's tier
+    // selector is populated before the user can open it.
+    this.graphs.loadRegistry().subscribe();
   }
   ngOnDestroy(): void { if (this.pollHandle) clearInterval(this.pollHandle); }
 
@@ -1444,10 +1683,10 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     });
   }
 
-  runNow(): void {
+  runNow(body: { preset?: string; model_overrides?: Record<string, string> } = {}): void {
     this.running.set(true);
     this.notice.set(null);
-    this.store.runNow(this.strategyId).subscribe({
+    this.store.runNow(this.strategyId, body).subscribe({
       next: (r) => {
         this.running.set(false);
         this.notice.set(`Cycle dispatched (task ${r.task_id}). Refreshing every 5s.`);

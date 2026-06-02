@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -252,6 +253,23 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _parse_cycle_overrides(request: Request) -> tuple[str | None, dict | None]:
+    """Validate the optional transient model selection sent by the `Run cycle
+    now` dispatch modal (P4c). Returns (preset, model_overrides), each None
+    when absent. Raises ValidationError (→ 400) on an unknown preset or an
+    invalid override map. The choice applies to this dispatch only."""
+    from apps.models_catalog.overrides import validate_model_overrides
+    from apps.models_catalog.presets import PRESETS
+
+    preset = request.data.get("preset") or None
+    if preset is not None and preset not in PRESETS:
+        raise ValidationError(f"unknown preset {preset!r}")
+    overrides = request.data.get("model_overrides") or None
+    if overrides is not None:
+        overrides = validate_model_overrides(overrides, request.user)
+    return preset, (overrides or None)
+
+
 class StrategyEstimateView(APIView):
     def get(self, request: Request, pk: int) -> Response:
         try:
@@ -262,6 +280,21 @@ class StrategyEstimateView(APIView):
             return Response({"detail": "not found"}, status=404)
         return Response(estimate_cycle(strategy))
 
+    def post(self, request: Request, pk: int) -> Response:
+        """Re-estimate with a transient tier/model choice from the dispatch
+        modal — same shape as GET, but reflecting `preset` / `model_overrides`
+        from the body."""
+        try:
+            strategy = PortfolioStrategy.objects.select_related("user").get(
+                pk=pk, user=request.user
+            )
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        preset, overrides = _parse_cycle_overrides(request)
+        return Response(
+            estimate_cycle(strategy, override_preset=preset, override_models=overrides)
+        )
+
 
 class StrategyRunNowView(APIView):
     def post(self, request: Request, pk: int) -> Response:
@@ -271,7 +304,11 @@ class StrategyRunNowView(APIView):
             return Response({"detail": "not found"}, status=404)
         as_of = request.data.get("as_of_date") or date_cls.today().isoformat()
         force = bool(request.data.get("force", False))
-        result = daily_long_short_cycle.delay(strategy.pk, as_of, force=force)
+        preset, overrides = _parse_cycle_overrides(request)
+        result = daily_long_short_cycle.delay(
+            strategy.pk, as_of, force=force,
+            override_preset=preset, override_models=overrides,
+        )
         return Response(
             {"task_id": str(result.id), "status": "queued"},
             status=status.HTTP_202_ACCEPTED,

@@ -155,8 +155,18 @@ def _maybe_auto_enroll(target: PortfolioTarget) -> None:
         log.exception("auto_enroll_failed target_id=%s", target.pk)
 
 
-def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
+def _resolve_model_overrides(
+    strategy: PortfolioStrategy,
+    *,
+    preset: str | None = None,
+    overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Order of precedence:
+      0. A transient per-cycle choice from the `Run cycle now` dispatch modal
+         (P4c): an explicit `overrides` map wins outright; otherwise an explicit
+         `preset` name is expanded, bypassing the user/strategy resolution
+         below. Both apply to this dispatch only — they never mutate saved
+         preferences.
       1. User's per-agent defaults from Settings → Models (the "Default model"
          selector populates this with the same model for every agent).
       2. The strategy's model_preset (e.g. 'frugal', 'hybrid') expanded into a
@@ -174,13 +184,16 @@ def _resolve_model_overrides(strategy: PortfolioStrategy) -> dict[str, str]:
     falls through to the env default — otherwise dev strategies created before
     this guard would keep resolving to the frontier `hybrid` map.
     """
+    if overrides:
+        return dict(overrides)
     default_preset = getattr(settings, "LLM_DEFAULT_PRESET", "hybrid")
-    user_prefs = getattr(strategy.user, "model_prefs", None)
-    if user_prefs and user_prefs.per_agent_defaults:
-        return dict(user_prefs.per_agent_defaults)
-    preset = strategy.model_preset or default_preset
-    if preset == "hybrid" and default_preset != "hybrid":
-        preset = default_preset
+    if preset is None:
+        user_prefs = getattr(strategy.user, "model_prefs", None)
+        if user_prefs and user_prefs.per_agent_defaults:
+            return dict(user_prefs.per_agent_defaults)
+        preset = strategy.model_preset or default_preset
+        if preset == "hybrid" and default_preset != "hybrid":
+            preset = default_preset
 
     # P3-C §12.3: when the resolved preset actually uses the <local-tier-a>
     # token, discover the user's local models and pass the best local-A
@@ -225,15 +238,28 @@ PER_AGENT_TOKEN_ESTIMATES = {
 }
 
 
-def estimate_cycle(strategy: PortfolioStrategy) -> dict:
+def estimate_cycle(
+    strategy: PortfolioStrategy,
+    *,
+    override_preset: str | None = None,
+    override_models: dict[str, str] | None = None,
+) -> dict:
     """Pre-flight cost estimate for a manual `Run cycle now`.
 
     Returns the resolved per-agent model map plus the projected USD spend
     for `top_k_longs + top_k_shorts` council invocations. CIO is excluded
-    because the cycle disables it (disable_cio=True)."""
+    because the cycle disables it (disable_cio=True).
+
+    `override_preset` / `override_models` (P4c dispatch modal): when set, the
+    estimate reflects that transient choice instead of the strategy's saved
+    resolution — `override_models` wins, else `override_preset` is expanded.
+    The returned `preset` echoes the chosen tier so the modal header/menu stay
+    in sync with the table below."""
     from apps.models_catalog.models import ModelEntry
 
-    overrides = _resolve_model_overrides(strategy)
+    overrides = _resolve_model_overrides(
+        strategy, preset=override_preset, overrides=override_models
+    )
     prices = {m.id: m for m in ModelEntry.objects.all()}
     n = int(strategy.top_k_longs) + int(strategy.top_k_shorts)
     per_agent = []
@@ -262,21 +288,30 @@ def estimate_cycle(strategy: PortfolioStrategy) -> dict:
         "exceeds_ceiling": (per_call_cost * n) > float(strategy.cost_ceiling_per_cycle_usd),
         "per_agent": per_agent,
         "overrides": overrides,
-        "preset": strategy.model_preset,
+        "preset": override_preset or strategy.model_preset,
     }
 
 
-def _per_council_call_cost(strategy: PortfolioStrategy) -> float:
+def _per_council_call_cost(
+    strategy: PortfolioStrategy,
+    *,
+    preset: str | None = None,
+    overrides: dict[str, str] | None = None,
+) -> float:
     """P02e review: derive the per-council-call cost from the same model
     catalog estimate the API endpoint shows. Replaces the prior hardcoded
     $0.05 / call so trimming and the pre-flight estimate agree.
+
+    `preset` / `overrides` carry a transient per-cycle choice (P4c dispatch
+    modal) so the budget trim prices the SAME models the estimate showed —
+    otherwise a re-tiered cycle would trim against the strategy's saved preset.
 
     Falls back to $0.05 only when no ModelEntry rows are available (fresh
     install / unseeded test DB).
     """
     from apps.models_catalog.models import ModelEntry
 
-    overrides = _resolve_model_overrides(strategy)
+    overrides = _resolve_model_overrides(strategy, preset=preset, overrides=overrides)
     prices = {m.id: m for m in ModelEntry.objects.all()}
     if not prices:
         return 0.05
@@ -292,12 +327,16 @@ def _per_council_call_cost(strategy: PortfolioStrategy) -> float:
     return per_call or 0.05
 
 
-def _trim_k_for_budget(strategy: PortfolioStrategy, n_longs: int, n_shorts: int) -> tuple[int, int]:
+def _trim_k_for_budget(
+    strategy: PortfolioStrategy, n_longs: int, n_shorts: int,
+    *, preset: str | None = None, overrides: dict[str, str] | None = None,
+) -> tuple[int, int]:
     """Trim symmetrically until the projected cost fits inside
     ``cost_ceiling_per_cycle_usd``. Uses the same model-catalog estimate as
-    the pre-flight endpoint so the displayed budget and the actual trim
-    decision agree (P02e review fix)."""
-    per_call = _per_council_call_cost(strategy)
+    the pre-flight endpoint — including any transient per-cycle override
+    (P4c) — so the displayed budget and the actual trim decision agree
+    (P02e review fix)."""
+    per_call = _per_council_call_cost(strategy, preset=preset, overrides=overrides)
     cap = float(strategy.cost_ceiling_per_cycle_usd)
     if cap <= 0 or per_call <= 0:
         return 0, 0
@@ -1059,6 +1098,8 @@ def _run_risk_parity_cycle(
 def _run_pairs_cycle(
     strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]],
     *, supersedes_target_id: int | None = None,
+    override_preset: str | None = None,
+    override_models: dict[str, str] | None = None,
 ) -> dict:
     """Deterministic pairs-trading cycle (no LLM, no council).
 
@@ -1192,7 +1233,9 @@ def _run_pairs_cycle(
 
         from .models import PortfolioTargetRun as _PortfolioTargetRun
         min_conf = float(strategy.pair_council_min_confidence)
-        overrides = _resolve_model_overrides(strategy)
+        overrides = _resolve_model_overrides(
+            strategy, preset=override_preset, overrides=override_models
+        )
         personas = list(strategy.personas or [])
         news_service = get_news_service(user=strategy.user)
         # Ensure a target row exists so we can link Runs to it. The cycle's
@@ -1671,6 +1714,8 @@ def daily_long_short_cycle(
     *,
     force: bool = False,
     supersedes_target_id: int | None = None,
+    override_preset: str | None = None,
+    override_models: dict[str, str] | None = None,
 ) -> dict:
     strategy = PortfolioStrategy.objects.select_related("universe", "portfolio").get(
         pk=strategy_id
@@ -1708,13 +1753,17 @@ def daily_long_short_cycle(
     # council. Drops the entire LLM cost (matches plan default
     # enable_council_veto=False). The veto-mode wiring is a follow-up.
     if strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
+        # Pure deterministic inverse-vol — no council, no LLM calls — so the
+        # dispatch-modal model/tier override has nothing to apply here and is
+        # intentionally not threaded.
         return _run_risk_parity_cycle(
             strategy, as_of, members, supersedes_target_id=supersedes_target_id
         )
 
     if strategy.kind == PortfolioStrategy.KIND_PAIRS:
         return _run_pairs_cycle(
-            strategy, as_of, members, supersedes_target_id=supersedes_target_id
+            strategy, as_of, members, supersedes_target_id=supersedes_target_id,
+            override_preset=override_preset, override_models=override_models,
         )
 
     try:
@@ -1849,6 +1898,8 @@ def daily_long_short_cycle(
         members=members,
         approved_longs=None,
         approved_shorts=None,
+        override_preset=override_preset,
+        override_models=override_models,
     )
 
 
@@ -1896,6 +1947,8 @@ def _dispatch_council_chord(
     members: list[tuple[str, str]],
     approved_longs: list[str] | None,
     approved_shorts: list[str] | None,
+    override_preset: str | None = None,
+    override_models: dict[str, str] | None = None,
 ) -> dict:
     """P2l: create per-candidate Run rows + dispatch the council chord.
 
@@ -1919,7 +1972,10 @@ def _dispatch_council_chord(
     if approved_longs is None and approved_shorts is None:
         n_l = len(long_entries)
         n_s = len(short_entries)
-        new_l, new_s = _trim_k_for_budget(strategy, n_l, n_s)
+        new_l, new_s = _trim_k_for_budget(
+            strategy, n_l, n_s,
+            preset=override_preset, overrides=override_models,
+        )
         long_entries = long_entries[:new_l]
         short_entries = short_entries[:new_s]
         long_subset = None
@@ -1964,7 +2020,9 @@ def _dispatch_council_chord(
         # shows a row.
         return finalize_cycle.run([], target.pk)
 
-    overrides = _resolve_model_overrides(strategy)
+    overrides = _resolve_model_overrides(
+        strategy, preset=override_preset, overrides=override_models
+    )
 
     payloads, _runs = runs_bridge.create_candidate_runs(
         strategy=strategy,

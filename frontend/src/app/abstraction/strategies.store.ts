@@ -3,7 +3,9 @@ import { Observable, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import {
   CycleDetail,
+  CycleEstimate,
   CycleMarkedSnapshot,
+  CycleOverrideBody,
   CycleSummary,
   EnrollmentApplyRequest,
   EnrollmentResult,
@@ -64,21 +66,17 @@ export class StrategiesStore {
       tap((r) => this._currentStrategy.set(r)),
     );
   }
-  estimate(id: number): Observable<{
-    n_candidates: number;
-    per_call_usd: number;
-    est_total_usd: number;
-    cost_ceiling_usd: number;
-    exceeds_ceiling: boolean;
-    per_agent: { agent: string; model: string; model_name: string; tier: string; per_call_usd: number }[];
-    overrides: Record<string, string>;
-    preset: string;
-  }> {
-    return this.api.get(`/strategies/${id}/estimate/`);
+  estimate(id: number): Observable<CycleEstimate> {
+    return this.api.get<CycleEstimate>(`/strategies/${id}/estimate/`);
   }
-  runNow(id: number): Observable<{ task_id: string; status: string }> {
+  /** P4c: re-estimate with a transient tier/model choice from the dispatch
+   *  modal (this-run-only — nothing is persisted). */
+  estimateWith(id: number, body: CycleOverrideBody): Observable<CycleEstimate> {
+    return this.api.post<CycleEstimate>(`/strategies/${id}/estimate/`, body);
+  }
+  runNow(id: number, body: CycleOverrideBody = {}): Observable<{ task_id: string; status: string }> {
     return this.api.post<{ task_id: string; status: string }>(
-      `/strategies/${id}/run-now/`, {},
+      `/strategies/${id}/run-now/`, body,
     );
   }
   /** P2l: approve a subset of the persisted screener candidates and dispatch
