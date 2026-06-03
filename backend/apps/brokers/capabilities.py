@@ -35,6 +35,10 @@ class BrokerCapabilities:
     quantity_increment: Decimal
     supported_order_types: tuple[str, ...]
     supported_time_in_force: tuple[str, ...]
+    # P3a: native bracket / OTO / OCO support. The frontend reads this to
+    # offer the bracket affordances; the order-create view reads it to accept
+    # an order_class other than "simple". Default False — only Alpaca is True.
+    supports_bracket: bool = False
     description: str = ""
     available: bool = True            # False = "ships in a later release"
     community_unverified: bool = False  # Alpaca lifts this in 3a-4 sandbox checklist
@@ -53,6 +57,7 @@ class BrokerCapabilities:
             "quantity_increment": str(self.quantity_increment),
             "supported_order_types": list(self.supported_order_types),
             "supported_time_in_force": list(self.supported_time_in_force),
+            "supports_bracket": self.supports_bracket,
             "description": self.description,
             "available": self.available,
             "community_unverified": self.community_unverified,

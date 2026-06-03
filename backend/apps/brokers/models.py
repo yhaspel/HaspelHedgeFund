@@ -163,6 +163,35 @@ class BrokerOrder(models.Model):
     ]
     OPEN_STATUSES = (STATUS_SUBMITTED, STATUS_PARTIAL)
 
+    # P3a bracket/protective order types (validated at the view + adapter,
+    # not as a DB constraint — see ADR 0015). "trailing_stop" is 13 chars,
+    # which is why order_type.max_length is widened to 16.
+    TYPE_MARKET = "market"
+    TYPE_LIMIT = "limit"
+    TYPE_STOP = "stop"
+    TYPE_STOP_LIMIT = "stop_limit"
+    TYPE_TRAILING_STOP = "trailing_stop"
+    ORDER_TYPE_CHOICES = [
+        (TYPE_MARKET, "Market"),
+        (TYPE_LIMIT, "Limit"),
+        (TYPE_STOP, "Stop"),
+        (TYPE_STOP_LIMIT, "Stop limit"),
+        (TYPE_TRAILING_STOP, "Trailing stop"),
+    ]
+
+    # Role of this row within a bracket/OTO/OCO group. "" = a plain
+    # single order with no group. The entry leg of a bracket/OTO is the
+    # group anchor (parent_order is null); protective legs FK to it. A
+    # standalone OCO has no entry — its take-profit leg is the anchor.
+    LEG_ENTRY = "entry"
+    LEG_STOP_LOSS = "stop_loss"
+    LEG_TAKE_PROFIT = "take_profit"
+    LEG_ROLE_CHOICES = [
+        (LEG_ENTRY, "Entry"),
+        (LEG_STOP_LOSS, "Stop loss"),
+        (LEG_TAKE_PROFIT, "Take profit"),
+    ]
+
     IDEM_UNSUBMITTED = "unsubmitted"
     IDEM_SUBMIT_PENDING = "submit_pending"
     IDEM_ACKNOWLEDGED = "acknowledged"
@@ -196,14 +225,25 @@ class BrokerOrder(models.Model):
     ticker = models.CharField(max_length=16, db_index=True)
     side = models.CharField(max_length=8)
     quantity = models.DecimalField(max_digits=20, decimal_places=8)
-    order_type = models.CharField(max_length=12, default="market")
+    order_type = models.CharField(
+        max_length=16, choices=ORDER_TYPE_CHOICES, default="market",
+    )
     limit_price = models.DecimalField(
         max_digits=12, decimal_places=4, null=True, blank=True,
     )
-    # Trigger price for stop orders. A stop order rests until the market
-    # crosses this level, then fills at market. Null for market/limit orders.
+    # Trigger price for stop / stop_limit orders. A stop order rests until
+    # the market crosses this level, then fills at market (stop) or rests as
+    # a limit at limit_price (stop_limit). Null for market/limit orders.
     stop_price = models.DecimalField(
         max_digits=12, decimal_places=4, null=True, blank=True,
+    )
+    # Trailing-stop offset: exactly one of trail_price ($) / trail_percent (%)
+    # for a trailing_stop order; both null otherwise.
+    trail_price = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+    )
+    trail_percent = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
     )
     time_in_force = models.CharField(max_length=8, default="day")
     status = models.CharField(
@@ -237,6 +277,16 @@ class BrokerOrder(models.Model):
     error_message = models.TextField(blank=True, default="")
     raw_broker_response = models.JSONField(default=dict, blank=True)
     group_id = models.UUIDField(null=True, blank=True, db_index=True)
+    # Bracket / OTO / OCO grouping. The protective legs FK to their anchor
+    # (the entry leg for a bracket/OTO; the take-profit leg for a standalone
+    # OCO). CASCADE: deleting the anchor removes its legs. See ADR 0015.
+    parent_order = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="child_legs",
+    )
+    leg_role = models.CharField(
+        max_length=12, choices=LEG_ROLE_CHOICES, blank=True, default="",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

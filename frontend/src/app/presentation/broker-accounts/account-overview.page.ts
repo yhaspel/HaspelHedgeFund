@@ -6,11 +6,15 @@ import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
-import { BrokerOrderRow, BrokerPortfolioSnapshot } from '../../core/models/broker.model';
+import {
+  BrokerOrderRow,
+  BrokerOrderType,
+  BrokerPortfolioSnapshot,
+} from '../../core/models/broker.model';
 
 type BrokerPosition = BrokerPortfolioSnapshot['positions'][number];
 
-type OrderType = 'market' | 'limit' | 'stop';
+type OrderType = BrokerOrderType;
 
 /**
  * Broker account overview — the demo book's main surface.
@@ -131,8 +135,14 @@ type OrderType = 'market' | 'limit' | 'stop';
                       </span>
                     </td>
                     <td class="text-right mono">{{ '$' + (+p.realized_pnl | number: '1.2-2') }}</td>
-                    <td class="text-right">
-                      <button class="btn ghost btn-sm" (click)="closePosition(p)"
+                    <td class="text-right whitespace-nowrap">
+                      @if (supportsBracket()) {
+                        <button class="btn ghost btn-sm" (click)="openProtect(p)"
+                                [attr.data-test]="'protect-position-' + p.ticker">
+                          Protect
+                        </button>
+                      }
+                      <button class="btn ghost btn-sm ml-1" (click)="closePosition(p)"
                               [attr.data-test]="'close-position-' + p.ticker">
                         Close
                       </button>
@@ -268,12 +278,12 @@ type OrderType = 'market' | 'limit' | 'stop';
             <div class="field">
               <span class="lbl">Order type</span>
               <div class="seg" role="radiogroup" aria-label="Order type">
-                @for (t of orderTypes; track t) {
+                @for (t of availableOrderTypes(); track t) {
                   <button type="button" class="opt" role="radio"
                           [attr.aria-checked]="orderType() === t"
                           [class.on]="orderType() === t"
                           (click)="setOrderType(t)"
-                          [attr.data-test]="'new-order-type-' + t">{{ t }}</button>
+                          [attr.data-test]="'new-order-type-' + t">{{ typeLabel(t) }}</button>
                 }
               </div>
               <span class="help">{{ typeHelp() }}</span>
@@ -286,7 +296,7 @@ type OrderType = 'market' | 'limit' | 'stop';
                      data-test="new-order-qty" />
             </label>
 
-            @if (orderType() === 'limit') {
+            @if (orderType() === 'limit' || orderType() === 'stop_limit') {
               <label class="lbl block">Limit price
                 <input class="input mono" type="number" step="0.01" min="0"
                        [value]="limitPrice()"
@@ -294,12 +304,28 @@ type OrderType = 'market' | 'limit' | 'stop';
                        data-test="new-order-limit" />
               </label>
             }
-            @if (orderType() === 'stop') {
+            @if (orderType() === 'stop' || orderType() === 'stop_limit') {
               <label class="lbl block">Stop (trigger) price
                 <input class="input mono" type="number" step="0.01" min="0"
                        [value]="stopPrice()"
                        (input)="stopPrice.set($any($event.target).value)"
                        data-test="new-order-stop" />
+              </label>
+            }
+            @if (orderType() === 'trailing_stop') {
+              <label class="lbl block">Trail by
+                <select class="input mono" [value]="trailMode()"
+                        (change)="trailMode.set($any($event.target).value)"
+                        data-test="new-order-trail-mode">
+                  <option value="price">Amount ($)</option>
+                  <option value="percent">Percent (%)</option>
+                </select>
+              </label>
+              <label class="lbl block">{{ trailMode() === 'percent' ? 'Trail percent' : 'Trail amount' }}
+                <input class="input mono" type="number" step="0.01" min="0"
+                       [value]="trailValue()"
+                       (input)="trailValue.set($any($event.target).value)"
+                       data-test="new-order-trail-value" />
               </label>
             }
 
@@ -330,6 +356,60 @@ type OrderType = 'market' | 'limit' | 'stop';
                       [disabled]="!canSubmit() || placing()"
                       data-test="new-order-submit">
                 {{ placing() ? 'Placing…' : 'Place ' + side() + ' order' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (protectOpen(); as pos) {
+      <div class="modal-overlay" (click)="protectOpen.set(null)">
+        <div class="card order-modal" (click)="$event.stopPropagation()"
+             role="dialog" aria-label="Attach protection" data-test="protect-modal">
+          <div class="card-hd"><h2 class="title">Attach protection · {{ pos.ticker }}</h2></div>
+          <div class="p-3.5 space-y-3">
+            <p class="text-[11.5px] text-text-3 m-0">
+              Sized to the current position ({{ +pos.quantity | number: '1.0-6' }} shares).
+              A stop-loss and a take-profit submit as a linked OCO pair — when one
+              fills, the other is cancelled. Either alone submits as a single
+              protective order.
+            </p>
+            <label class="lbl block">Stop-loss trigger
+              <input class="input mono" type="number" step="0.01" min="0"
+                     [value]="protectStop()"
+                     (input)="protectStop.set($any($event.target).value)"
+                     data-test="protect-stop" />
+            </label>
+            <label class="lbl flex items-center gap-2 text-[11.5px]">
+              <input type="checkbox" [checked]="protectStopLimit()"
+                     (change)="protectStopLimit.set($any($event.target).checked)"
+                     data-test="protect-stop-limit-toggle" />
+              Use a stop-limit (rests at a limit on trigger — may not fill if price gaps)
+            </label>
+            @if (protectStopLimit()) {
+              <label class="lbl block">Stop-loss limit
+                <input class="input mono" type="number" step="0.01" min="0"
+                       [value]="protectStopLimitPrice()"
+                       (input)="protectStopLimitPrice.set($any($event.target).value)"
+                       data-test="protect-stop-limit-price" />
+              </label>
+            }
+            <label class="lbl block">Take-profit limit
+              <input class="input mono" type="number" step="0.01" min="0"
+                     [value]="protectTakeProfit()"
+                     (input)="protectTakeProfit.set($any($event.target).value)"
+                     data-test="protect-take-profit" />
+            </label>
+            @if (lastError(); as e) {
+              <div role="alert" class="pill err h-auto py-1.5 px-2.5"><span class="dot"></span>{{ e }}</div>
+            }
+            <div class="text-right pt-1">
+              <button class="btn" (click)="protectOpen.set(null)">Cancel</button>
+              <button class="btn primary ml-2" (click)="submitProtect()"
+                      [disabled]="!canProtect() || placing()"
+                      data-test="protect-submit">
+                {{ placing() ? 'Placing…' : 'Attach protection' }}
               </button>
             </div>
           </div>
@@ -373,8 +453,6 @@ export class BrokerAccountOverviewPage implements OnInit {
   protected readonly placing = signal(false);
   protected readonly account = computed(() => this.overview()?.account ?? null);
 
-  protected readonly orderTypes: OrderType[] = ['market', 'limit', 'stop'];
-
   // --- new-order modal state ---
   protected readonly newOrderOpen = signal(false);
   protected readonly ticker = signal('AAPL');
@@ -383,8 +461,17 @@ export class BrokerAccountOverviewPage implements OnInit {
   protected readonly qty = signal('5');
   protected readonly limitPrice = signal('');
   protected readonly stopPrice = signal('');
+  protected readonly trailMode = signal<'price' | 'percent'>('price');
+  protected readonly trailValue = signal('');
   protected readonly livePrice = signal<number | null>(null);
   protected readonly priceLoading = signal(false);
+
+  // --- attach-protection modal state ---
+  protected readonly protectOpen = signal<BrokerPosition | null>(null);
+  protected readonly protectStop = signal('');
+  protected readonly protectStopLimit = signal(false);
+  protected readonly protectStopLimitPrice = signal('');
+  protected readonly protectTakeProfit = signal('');
 
   protected readonly lastError = signal<string | null>(null);
 
@@ -408,6 +495,11 @@ export class BrokerAccountOverviewPage implements OnInit {
   ngOnInit(): void {
     const accountId = Number(this.route.snapshot.paramMap.get('id'));
     if (!accountId) return;
+    // The capability registry gates the advanced order types + the Protect
+    // action; load it once if it isn't already populated.
+    if (!this.store.registry().length) {
+      this.store.loadRegistry().subscribe();
+    }
     this.refresh(accountId);
   }
 
@@ -450,6 +542,7 @@ export class BrokerAccountOverviewPage implements OnInit {
     this.livePrice.set(null);
     this.limitPrice.set('');
     this.stopPrice.set('');
+    this.trailValue.set('');
     this.newOrderOpen.set(true);
     this.fetchPrice();
   }
@@ -468,6 +561,7 @@ export class BrokerAccountOverviewPage implements OnInit {
     this.qty.set(String(absQty));
     this.limitPrice.set('');
     this.stopPrice.set('');
+    this.trailValue.set('');
     this.livePrice.set(null);
     this.newOrderOpen.set(true);
     this.fetchPrice();
@@ -483,8 +577,12 @@ export class BrokerAccountOverviewPage implements OnInit {
     // price-bearing type is chosen (item 3).
     const price = this.livePrice();
     if (price === null) return;
-    if (t === 'limit' && !this.limitPrice()) this.limitPrice.set(price.toFixed(2));
-    if (t === 'stop' && !this.stopPrice()) this.stopPrice.set(price.toFixed(2));
+    if ((t === 'limit' || t === 'stop_limit') && !this.limitPrice()) {
+      this.limitPrice.set(price.toFixed(2));
+    }
+    if ((t === 'stop' || t === 'stop_limit') && !this.stopPrice()) {
+      this.stopPrice.set(price.toFixed(2));
+    }
   }
 
   fetchPrice(): void {
@@ -512,16 +610,122 @@ export class BrokerAccountOverviewPage implements OnInit {
     });
   }
 
+  typeLabel(t: OrderType): string {
+    return {
+      market: 'market', limit: 'limit', stop: 'stop',
+      stop_limit: 'stop limit', trailing_stop: 'trailing',
+    }[t];
+  }
+
+  availableOrderTypes(): OrderType[] {
+    const acc = this.account();
+    const cap = acc
+      ? this.store.registry().find((c) => c.code === acc.broker)
+      : undefined;
+    const all: OrderType[] = ['market', 'limit', 'stop', 'stop_limit', 'trailing_stop'];
+    if (!cap) return ['market', 'limit', 'stop'];
+    return all.filter((t) => cap.supported_order_types.includes(t));
+  }
+
+  supportsBracket(): boolean {
+    const acc = this.account();
+    const cap = acc
+      ? this.store.registry().find((c) => c.code === acc.broker)
+      : undefined;
+    return cap?.supports_bracket ?? false;
+  }
+
   typeHelp(): string {
     switch (this.orderType()) {
       case 'market': return 'Fills immediately at the current market price.';
       case 'limit': return 'Rests until the price reaches your limit, then fills.';
       case 'stop': return 'Rests until the price crosses your stop, then fills at market.';
+      case 'stop_limit':
+        return 'Rests until the stop triggers, then becomes a limit at your limit price.';
+      case 'trailing_stop':
+        return 'Trails the high-water mark by your amount/percent, then fills at market.';
     }
   }
 
+  // --- attach protection ---
+
+  openProtect(pos: BrokerPosition): void {
+    this.lastError.set(null);
+    this.protectStop.set('');
+    this.protectStopLimit.set(false);
+    this.protectStopLimitPrice.set('');
+    this.protectTakeProfit.set('');
+    this.protectOpen.set(pos);
+  }
+
+  canProtect(): boolean {
+    const hasStop = parseFloat(this.protectStop()) > 0;
+    const hasTp = parseFloat(this.protectTakeProfit()) > 0;
+    if (!hasStop && !hasTp) return false;
+    if (this.protectStopLimit() && hasStop
+        && !(parseFloat(this.protectStopLimitPrice()) > 0)) return false;
+    return true;
+  }
+
+  submitProtect(): void {
+    const pos = this.protectOpen();
+    const id = this.account()?.id;
+    if (!pos || !id || !this.canProtect()) return;
+    const qty = Math.abs(parseFloat(pos.quantity));
+    // Exits are the opposite side of the held position.
+    const exitSide: 'buy' | 'sell' = pos.is_short ? 'buy' : 'sell';
+    const hasStop = parseFloat(this.protectStop()) > 0;
+    const hasTp = parseFloat(this.protectTakeProfit()) > 0;
+    const stopLossLimit =
+      this.protectStopLimit() && hasStop ? this.protectStopLimitPrice() : null;
+
+    let body: Parameters<BrokerStore['createProtective']>[0];
+    if (hasStop && hasTp) {
+      // OCO pair.
+      body = {
+        broker_account: id, ticker: pos.ticker, side: exitSide,
+        quantity: String(qty), order_class: 'oco', order_type: 'limit',
+        take_profit_limit_price: this.protectTakeProfit(),
+        stop_loss_stop_price: this.protectStop(),
+        stop_loss_limit_price: stopLossLimit,
+      };
+    } else if (hasStop) {
+      body = {
+        broker_account: id, ticker: pos.ticker, side: exitSide,
+        quantity: String(qty),
+        order_type: stopLossLimit ? 'stop_limit' : 'stop',
+        stop_price: this.protectStop(),
+        limit_price: stopLossLimit,
+      };
+    } else {
+      body = {
+        broker_account: id, ticker: pos.ticker, side: exitSide,
+        quantity: String(qty), order_type: 'limit',
+        limit_price: this.protectTakeProfit(),
+      };
+    }
+
+    this.lastError.set(null);
+    this.placing.set(true);
+    this.store.createProtective(body).subscribe({
+      next: () => {
+        this.placing.set(false);
+        this.protectOpen.set(null);
+        this.refresh(id);
+      },
+      error: (err) => {
+        this.placing.set(false);
+        this.lastError.set(
+          err?.error?.detail
+          ?? Object.values(err?.error ?? {})[0] as string
+          ?? 'Could not attach protection.',
+        );
+      },
+    });
+  }
+
   private refPrice(): number | null {
-    if (this.orderType() === 'limit') {
+    if (this.orderType() === 'limit' || this.orderType() === 'stop_limit') {
       const v = parseFloat(this.limitPrice());
       return Number.isFinite(v) ? v : this.livePrice();
     }
@@ -544,13 +748,13 @@ export class BrokerAccountOverviewPage implements OnInit {
 
   canSubmit(): boolean {
     const q = parseFloat(this.qty() || '0');
+    const type = this.orderType();
     if (!this.ticker().trim() || !(q > 0)) return false;
-    if (this.orderType() === 'limit' && !(parseFloat(this.limitPrice()) > 0)) {
-      return false;
-    }
-    if (this.orderType() === 'stop' && !(parseFloat(this.stopPrice()) > 0)) {
-      return false;
-    }
+    if ((type === 'limit' || type === 'stop_limit')
+        && !(parseFloat(this.limitPrice()) > 0)) return false;
+    if ((type === 'stop' || type === 'stop_limit')
+        && !(parseFloat(this.stopPrice()) > 0)) return false;
+    if (type === 'trailing_stop' && !(parseFloat(this.trailValue()) > 0)) return false;
     return true;
   }
 
@@ -560,14 +764,17 @@ export class BrokerAccountOverviewPage implements OnInit {
     this.lastError.set(null);
     this.placing.set(true);
     const type = this.orderType();
+    const isTrail = type === 'trailing_stop';
     this.store.createDraftOrder({
       broker_account: id,
       ticker: this.ticker().trim().toUpperCase(),
       side: this.side(),
       quantity: this.qty(),
       order_type: type,
-      limit_price: type === 'limit' ? this.limitPrice() : null,
-      stop_price: type === 'stop' ? this.stopPrice() : null,
+      limit_price: type === 'limit' || type === 'stop_limit' ? this.limitPrice() : null,
+      stop_price: type === 'stop' || type === 'stop_limit' ? this.stopPrice() : null,
+      trail_price: isTrail && this.trailMode() === 'price' ? this.trailValue() : null,
+      trail_percent: isTrail && this.trailMode() === 'percent' ? this.trailValue() : null,
     }).subscribe({
       next: () => {
         this.placing.set(false);
@@ -591,6 +798,14 @@ export class BrokerAccountOverviewPage implements OnInit {
     }
     if (ord.order_type === 'stop' && ord.stop_price) {
       return '$' + Number(ord.stop_price).toFixed(2);
+    }
+    if (ord.order_type === 'stop_limit' && ord.stop_price) {
+      const lim = ord.limit_price ? ' / $' + Number(ord.limit_price).toFixed(2) : '';
+      return '$' + Number(ord.stop_price).toFixed(2) + lim;
+    }
+    if (ord.order_type === 'trailing_stop') {
+      if (ord.trail_price) return '−$' + Number(ord.trail_price).toFixed(2);
+      if (ord.trail_percent) return '−' + Number(ord.trail_percent).toFixed(2) + '%';
     }
     return '—';
   }

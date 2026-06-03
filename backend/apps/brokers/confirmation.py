@@ -70,6 +70,10 @@ class GateResult:
     quote_price: Decimal
     gates_fired: list[str] = field(default_factory=list)
     audit: dict = field(default_factory=dict)
+    # P3a bracket extras (None for a single order or when no quote is
+    # available). Loss is a positive magnitude; gain is positive.
+    max_loss: Decimal | None = None
+    target_gain: Decimal | None = None
 
 
 def _now() -> datetime:
@@ -222,3 +226,72 @@ def gate(order: BrokerOrder, ctx: GateContext) -> GateResult:
     return GateResult(
         notional=notional, quote_price=quote, gates_fired=gates_fired, audit=audit,
     )
+
+
+def _max_loss_target_gain(
+    anchor: BrokerOrder, entry_price: Decimal,
+) -> tuple[Decimal | None, Decimal | None]:
+    """Compute max loss / target gain for a bracket/OTO entry from the stop &
+    take-profit legs, sign-correct for longs and shorts. Returns positive
+    magnitudes; either side is None when its leg is absent (OTO). For a
+    standalone OCO (no entry) both are None — there is no entry reference."""
+    if anchor.leg_role != BrokerOrder.LEG_ENTRY:
+        return None, None
+    qty = Decimal(str(anchor.quantity))
+    legs = list(anchor.child_legs.all())
+    sl = next((c for c in legs if c.leg_role == BrokerOrder.LEG_STOP_LOSS), None)
+    tp = next((c for c in legs if c.leg_role == BrokerOrder.LEG_TAKE_PROFIT), None)
+    is_long = anchor.side == "buy"
+
+    max_loss = None
+    if sl is not None and sl.stop_price is not None:
+        stop = Decimal(str(sl.stop_price))
+        diff = (entry_price - stop) if is_long else (stop - entry_price)
+        max_loss = (diff * qty).quantize(Decimal("0.01"))
+    target_gain = None
+    if tp is not None and tp.limit_price is not None:
+        target = Decimal(str(tp.limit_price))
+        diff = (target - entry_price) if is_long else (entry_price - target)
+        target_gain = (diff * qty).quantize(Decimal("0.01"))
+    return max_loss, target_gain
+
+
+def gate_bracket(anchor: BrokerOrder, ctx: GateContext) -> GateResult:
+    """Confirmation gate for a bracket / OTO / standalone OCO group.
+
+    Wraps the single-order `gate` on the **anchor** (the entry leg for a
+    bracket/OTO; the take-profit primary for an OCO) — so the entry notional
+    drives the >$1,000 typed gate and exactly ONE confirmation is recorded.
+    The child legs inherit that confirmation. Adds the max-loss / target-gain
+    computation on top.
+
+    Entry-price source: `ctx.quote_price` — the caller passes the limit price
+    for a limit entry (exact) or a live mark (`valuation.get_mark`) for a
+    market entry (an estimate, labelled as such in the UI). When no quote is
+    available, max-loss is left None rather than blocking submission.
+    """
+    result = gate(anchor, ctx)
+
+    # Propagate the single confirmation to the child legs (read-through via the
+    # parent would also work; copying lets the UI show each leg as confirmed).
+    if anchor.child_legs.exists():
+        BrokerOrder.objects.filter(parent_order=anchor).update(
+            status=BrokerOrder.STATUS_CONFIRMED,
+            confirmed_by=anchor.confirmed_by,
+            confirmed_at=anchor.confirmed_at,
+            confirmation_method=anchor.confirmation_method,
+            confirmation_audit=anchor.confirmation_audit,
+        )
+
+    max_loss, target_gain = _max_loss_target_gain(anchor, result.quote_price)
+    result.max_loss = max_loss
+    result.target_gain = target_gain
+
+    # Fold the figures into the entry's audit trail.
+    audit = dict(anchor.confirmation_audit or {})
+    audit["max_loss"] = str(max_loss) if max_loss is not None else None
+    audit["target_gain"] = str(target_gain) if target_gain is not None else None
+    anchor.confirmation_audit = audit
+    anchor.save(update_fields=["confirmation_audit"])
+
+    return result

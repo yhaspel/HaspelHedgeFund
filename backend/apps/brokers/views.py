@@ -43,16 +43,21 @@ from apps.runs.models import Decision
 from . import market_calendar
 from .adapters.ibkr_gateway import IBKRGatewaySession
 from .adapters.mock import seed_demo_book
+from .brackets import create_group, is_child_leg, is_group_anchor
 from .capabilities import (
     AUTH_GATEWAY,
     AUTH_NONE,
     all_capabilities,
     get_capabilities,
 )
-from .confirmation import ConfirmationError, GateContext, gate
+from .confirmation import ConfirmationError, GateContext, gate, gate_bracket
 from .credentials import set_api_key_secret, zero_credential
 from .demo_fills import place_demo_order
-from .idempotency import IdempotencyConflict, submit_idempotent
+from .idempotency import (
+    IdempotencyConflict,
+    submit_bracket_idempotent,
+    submit_idempotent,
+)
 from .interfaces import BrokerError, BrokerTransientError
 from .models import (
     BrokerAccount,
@@ -988,40 +993,40 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
         if raw_quantity <= 0:
             raise ValidationError({"quantity": "must be positive"})
 
-        # Whole-vs-fractional enforcement. Equities default to WHOLE shares;
-        # fractional is allowed only when the caller explicitly opts in AND the
-        # broker supports it. This mirrors the Manual Book / strategy-enrollment
-        # quantity policy so a run's fractional ``target_quantity`` (dollars /
-        # price) can never silently place a fractional broker order.
         cap = get_capabilities(account.broker)
-        broker_fractional = bool(cap and cap.supports_fractional)
-        requested_mode = (str(data.get("quantity_mode") or "").strip().lower() or None)
-        # Per-account default (added in the 1.3 migration); safe before it exists.
-        account_default_mode = getattr(account, "default_quantity_mode", None) or None
-        effective_mode = requested_mode or account_default_mode or "whole"
-        if effective_mode == "fractional" and not broker_fractional:
-            if requested_mode == "fractional":
-                raise ValidationError({
-                    "quantity_mode": (
-                        f"{cap.display_name if cap else account.broker} does not "
-                        "support fractional shares; use whole shares"
-                    ),
-                })
-            effective_mode = "whole"
-        policy = QuantityPolicy.from_mode(effective_mode)
-        quantity = round_quantity_toward_zero(raw_quantity, policy)
-        if quantity <= 0:
+        order_type = (data.get("order_type") or "market").strip().lower()
+        order_class = (data.get("order_class") or "simple").strip().lower()
+        time_in_force = (data.get("time_in_force") or "day").strip().lower()
+
+        # Capability gate — closes the "stop silently becomes market" hole for
+        # ANY broker. The broker must support the order type; an order_class
+        # other than "simple" requires native bracket support.
+        supported_types = (
+            tuple(cap.supported_order_types) if cap else ("market", "limit", "stop")
+        )
+        if order_type not in supported_types:
             raise ValidationError({
-                "quantity": (
-                    "rounds to zero whole shares at this size; increase the "
-                    "quantity or switch to fractional shares"
+                "order_type": (
+                    f"{cap.display_name if cap else account.broker} does not "
+                    f"support '{order_type}' orders"
                 ),
             })
-
-        order_type = (data.get("order_type") or "market").strip().lower()
-        if order_type not in ("market", "limit", "stop"):
+        if order_class not in ("simple", "bracket", "oto", "oco"):
             raise ValidationError(
-                {"order_type": "must be 'market', 'limit' or 'stop'"},
+                {"order_class": "must be 'simple', 'bracket', 'oto' or 'oco'"},
+            )
+        if order_class != "simple" and not (cap and cap.supports_bracket):
+            raise ValidationError({
+                "order_class": (
+                    f"{cap.display_name if cap else account.broker} does not "
+                    "support bracket / OTO / OCO orders"
+                ),
+            })
+        # Advanced orders accept only day / gtc time-in-force.
+        is_advanced = order_class != "simple" or order_type == "trailing_stop"
+        if is_advanced and time_in_force not in ("day", "gtc"):
+            raise ValidationError(
+                {"time_in_force": "advanced orders accept only 'day' or 'gtc'"},
             )
 
         def _opt_price(field: str) -> Decimal | None:
@@ -1038,14 +1043,122 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
 
         limit_price = _opt_price("limit_price")
         stop_price = _opt_price("stop_price")
+        trail_price = _opt_price("trail_price")
+        trail_percent = _opt_price("trail_percent")
+        take_profit_limit_price = _opt_price("take_profit_limit_price")
+        stop_loss_stop_price = _opt_price("stop_loss_stop_price")
+        stop_loss_limit_price = _opt_price("stop_loss_limit_price")
+
+        # Whole-vs-fractional. Advanced orders (any grouped class, or a
+        # trailing_stop) force whole shares — Alpaca rejects fractional for
+        # those — regardless of account default / requested mode. Otherwise
+        # fractional is allowed only when the caller opts in AND the broker
+        # supports it (mirrors the Manual Book / enrollment quantity policy).
+        broker_fractional = bool(cap and cap.supports_fractional)
+        requested_mode = (str(data.get("quantity_mode") or "").strip().lower() or None)
+        account_default_mode = getattr(account, "default_quantity_mode", None) or None
+        if is_advanced:
+            effective_mode = "whole"
+        else:
+            effective_mode = requested_mode or account_default_mode or "whole"
+            if effective_mode == "fractional" and not broker_fractional:
+                if requested_mode == "fractional":
+                    raise ValidationError({
+                        "quantity_mode": (
+                            f"{cap.display_name if cap else account.broker} does not "
+                            "support fractional shares; use whole shares"
+                        ),
+                    })
+                effective_mode = "whole"
+        policy = QuantityPolicy.from_mode(effective_mode)
+        quantity = round_quantity_toward_zero(raw_quantity, policy)
+        if quantity <= 0:
+            raise ValidationError({
+                "quantity": (
+                    "rounds to zero whole shares at this size; increase the "
+                    "quantity or switch to fractional shares"
+                ),
+            })
+
+        # --- Grouped order: bracket / OTO / OCO ------------------------------
+        if order_class != "simple":
+            if order_class != "oco" and order_type not in ("market", "limit"):
+                raise ValidationError(
+                    {"order_type": "a bracket / OTO entry must be market or limit"},
+                )
+            if order_class == "bracket" and (
+                take_profit_limit_price is None or stop_loss_stop_price is None
+            ):
+                raise ValidationError({
+                    "detail": "a bracket requires both a take-profit and a stop-loss",
+                })
+            if order_class == "oto" and (
+                (take_profit_limit_price is None) == (stop_loss_stop_price is None)
+            ):
+                raise ValidationError({
+                    "detail": "an OTO requires exactly one protective exit",
+                })
+            if order_class == "oco" and (
+                take_profit_limit_price is None or stop_loss_stop_price is None
+            ):
+                raise ValidationError({
+                    "detail": "an OCO requires both a take-profit and a stop-loss",
+                })
+            if order_class in ("bracket", "oto") and order_type == "limit" \
+                    and limit_price is None:
+                raise ValidationError(
+                    {"limit_price": "required for a limit entry"},
+                )
+            if order_class == "oco":
+                entry_order_type = None
+                entry_limit_price = None
+            else:
+                entry_order_type = order_type
+                entry_limit_price = limit_price if order_type == "limit" else None
+            anchor = create_group(
+                account=account,
+                decision=decision,
+                ticker=ticker,
+                side=side,
+                quantity=quantity,
+                time_in_force=time_in_force,
+                order_class=order_class,
+                entry_order_type=entry_order_type,
+                entry_limit_price=entry_limit_price,
+                take_profit_limit_price=take_profit_limit_price,
+                stop_loss_stop_price=stop_loss_stop_price,
+                stop_loss_limit_price=stop_loss_limit_price,
+            )
+            return Response(
+                BrokerOrderSerializer(anchor).data, status=status.HTTP_201_CREATED,
+            )
+
+        # --- Simple single order ---------------------------------------------
         if order_type == "limit" and limit_price is None:
             raise ValidationError({"limit_price": "required for a limit order"})
-        if order_type == "stop" and stop_price is None:
-            raise ValidationError({"stop_price": "required for a stop order"})
-        if order_type == "market":
+        if order_type in ("stop", "stop_limit") and stop_price is None:
+            raise ValidationError(
+                {"stop_price": f"required for a {order_type} order"},
+            )
+        if order_type == "stop_limit" and limit_price is None:
+            raise ValidationError(
+                {"limit_price": "required for a stop_limit order"},
+            )
+        if order_type == "trailing_stop" and (
+            (trail_price is None) == (trail_percent is None)
+        ):
+            raise ValidationError({
+                "detail": "trailing_stop requires exactly one of "
+                          "trail_price / trail_percent",
+            })
+        # Null out the fields that don't apply to the chosen type.
+        if order_type not in ("limit", "stop_limit"):
             limit_price = None
+        if order_type not in ("stop", "stop_limit"):
             stop_price = None
-        time_in_force = (data.get("time_in_force") or "day").strip().lower()
+        if order_type != "trailing_stop":
+            trail_price = None
+            trail_percent = None
 
         order = BrokerOrder.objects.create(
             broker_account=account,
@@ -1056,13 +1169,14 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
             order_type=order_type,
             limit_price=limit_price,
             stop_price=stop_price,
+            trail_price=trail_price,
+            trail_percent=trail_percent,
             time_in_force=time_in_force,
         )
 
         # Demo accounts skip the draft -> confirm gate: the order is
         # submitted straight to the demo book and marketable orders fill
         # within this request. Credentialed brokers keep the draft flow.
-        cap = get_capabilities(account.broker)
         if cap is not None and cap.auth_kind == AUTH_NONE:
             place_demo_order(order, user=request.user)
             order.refresh_from_db()
@@ -1081,6 +1195,18 @@ class BrokerOrderConfirmView(APIView):
         except BrokerOrder.DoesNotExist as exc:
             raise ValidationError({"detail": "not found"}) from exc
 
+        # A protective child leg is confirmed and submitted only through its
+        # anchor (the bracket/OTO entry or the OCO take-profit primary).
+        if is_child_leg(order):
+            return Response(
+                {
+                    "detail": "confirm the group through its entry / primary "
+                              "order, not a protective leg",
+                    "code": "not_group_anchor",
+                },
+                status=409,
+            )
+
         typed = (request.data.get("typed_confirmation") or "").strip()
         live = (request.data.get("live_confirmation") or "").strip()
         method = (
@@ -1095,8 +1221,29 @@ class BrokerOrderConfirmView(APIView):
             ip_address=_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
         )
+
+        is_group = is_group_anchor(order)
+        gate_result = None
+
+        # For a market bracket/OTO entry there is no order-carried reference
+        # price, so fetch a live mark for the entry notional + max-loss display.
+        # A missing FMP key / unknown ticker degrades gracefully — the gate
+        # falls back to its own quote resolution and max-loss is left blank.
+        if is_group and order.leg_role == BrokerOrder.LEG_ENTRY \
+                and order.order_type == BrokerOrder.TYPE_MARKET:
+            from apps.portfolios.valuation import get_mark
+            try:
+                mark = get_mark(order.ticker, user=request.user)
+                if mark is not None:
+                    ctx.quote_price = mark.price
+            except Exception:  # noqa: BLE001 - quote feed optional for display
+                pass
+
         try:
-            gate(order, ctx)
+            if is_group:
+                gate_result = gate_bracket(order, ctx)
+            else:
+                gate(order, ctx)
         except ConfirmationError as exc:
             return Response(
                 {"detail": str(exc), "code": exc.code},
@@ -1105,7 +1252,10 @@ class BrokerOrderConfirmView(APIView):
 
         broker = get_broker(order.broker_account)
         try:
-            submit_idempotent(order=order, broker=broker)
+            if is_group:
+                submit_bracket_idempotent(anchor=order, broker=broker)
+            else:
+                submit_idempotent(order=order, broker=broker)
         except IdempotencyConflict as exc:
             return Response({"detail": str(exc)}, status=409)
         except Exception as exc:
@@ -1139,7 +1289,20 @@ class BrokerOrderConfirmView(APIView):
         except Exception:  # pragma: no cover
             pass
         order.refresh_from_db()
-        return Response(BrokerOrderSerializer(order).data)
+        payload = BrokerOrderSerializer(order).data
+        if gate_result is not None:
+            payload = {
+                **payload,
+                "max_loss": (
+                    str(gate_result.max_loss)
+                    if gate_result.max_loss is not None else None
+                ),
+                "target_gain": (
+                    str(gate_result.target_gain)
+                    if gate_result.target_gain is not None else None
+                ),
+            }
+        return Response(payload)
 
 
 class BrokerOrderCancelView(APIView):
