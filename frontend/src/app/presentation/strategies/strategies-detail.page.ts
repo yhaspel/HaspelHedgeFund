@@ -445,7 +445,11 @@ import { ModalComponent } from '../shared/modal.component';
                     @for (cr of c.candidate_runs; track cr.run_id) {
                       <tr>
                         <td class="mono">{{ cr.screener_rank }}</td>
-                        <td class="mono text-text">{{ cr.candidate_key }}</td>
+                        <td class="mono text-text">
+                          @for (leg of cr.candidate_key.split('/'); track $index; let last = $last) {
+                            <hf-ticker [ticker]="leg"></hf-ticker>@if (!last) {<span class="text-text-3 px-0.5">/</span>}
+                          }
+                        </td>
                         <td class="mono"
                             [style.color]="cr.side === 'short' ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'">
                           {{ cr.side }}
@@ -885,7 +889,7 @@ import { ModalComponent } from '../shared/modal.component';
                   <ul class="mono m-0 mt-2 p-0 list-none flex flex-col gap-1.5 text-[11.5px] text-text-2">
                     @for (v of c.sector_veto_log; track v.ticker) {
                       <li>
-                        <span class="text-text">{{ v.ticker }}</span>
+                        <hf-ticker [ticker]="v.ticker"></hf-ticker>
                         @if (v.decision === 'veto') {
                           <span class="text-[var(--acc-short-fg)]">— <hf-term key="veto">vetoed</hf-term></span>
                           @if (v.rm_veto) { <span> · <hf-term key="rm">risk-manager</hf-term> <hf-term key="veto">veto</hf-term></span> }
@@ -909,7 +913,14 @@ import { ModalComponent } from '../shared/modal.component';
                   </summary>
                   <ul class="mono m-0 mt-2 p-0 list-none flex flex-col gap-1 text-[11.5px] text-text-2">
                     @for (r of c.rejected_candidates; track $index) {
-                      <li><span class="text-text">{{ r.ticker ?? '(sector)' }}</span> — {{ r.reason }}</li>
+                      <li>
+                        @if (r.ticker) {
+                          <hf-ticker [ticker]="r.ticker"></hf-ticker>
+                        } @else {
+                          <span class="text-text-3">(sector)</span>
+                        }
+                        — {{ r.reason }}
+                      </li>
                     }
                   </ul>
                 </details>
