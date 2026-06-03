@@ -127,6 +127,15 @@ def wrap_backtest_tolerant(
         try:
             return node_fn(state)
         except Exception as exc:
+            # Config/availability errors (out-of-credits, bad key, exhausted
+            # free-tier rate-limit pool) recur on every ticker-day, so a null
+            # signal here would mask them and let the backtest "complete" with
+            # all-hold garbage. Re-raise so prime_agent_cache aborts the whole
+            # run once with the actionable upstream message. (RateLimited is a
+            # ModelUnavailable subclass, so this covers both.)
+            from apps.backtests.exceptions import ModelUnavailable
+            if isinstance(exc, ModelUnavailable):
+                raise
             fb = _fallback_for(state_key)
             if fb is None:
                 # No fallback registered: don't swallow silently.

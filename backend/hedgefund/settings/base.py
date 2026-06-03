@@ -166,6 +166,15 @@ BLOCK_ANTHROPIC = os.environ.get("BLOCK_ANTHROPIC", "0") == "1"
 # paid options. Pairs with BLOCK_ANTHROPIC for zero-spend dev environments.
 LLM_FREE_ONLY = os.environ.get("LLM_FREE_ONLY", "0") == "1"
 
+# Opt-in paid escape hatch for the OpenRouter adapter. When True, a :free route
+# whose 429 retries AND same-tier free fallbacks are all exhausted hops once to
+# the cheap paid analytical default (meta-llama/llama-3.3-70b-instruct, non-:free)
+# instead of raising RateLimited and aborting the run. Default off so dev /
+# zero-spend environments (which pair this with BLOCK_ANTHROPIC) never silently
+# bill when the shared free pool is saturated. Kept independent of BLOCK_ANTHROPIC
+# so flipping it on can't defeat that guard.
+OPENROUTER_PAID_FALLBACK = os.environ.get("OPENROUTER_PAID_FALLBACK", "0") == "1"
+
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
