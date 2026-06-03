@@ -59,3 +59,35 @@ class ModelUnavailable(RuntimeError):
         self.model = model
         self.status_code = status_code
         self.body = body
+
+
+class RateLimited(ModelUnavailable):
+    """Raised by the OpenRouter adapter on a *terminal* HTTP 429 — one whose
+    transient-retry budget AND every configured same-tier fallback are exhausted.
+
+    Unlike its 401/402/403/404 parent this is technically transient (a later run
+    may succeed), but for the lifetime of THIS run it is effectively unavailable:
+    every OpenRouter ":free" route draws the same shared account/upstream rate-
+    limit pool, so when that pool is saturated a hop to another free route 429s
+    in lockstep. We subclass ModelUnavailable so prime_agent_cache (backtest) and
+    the run task (live) abort ONCE with an actionable message — instead of, live,
+    a raw httpx.HTTPStatusError stack trace, or, backtest, silently null-signalling
+    every council and "completing" with all-hold garbage. Remedy: enable
+    settings.OPENROUTER_PAID_FALLBACK, add OpenRouter credit, or supply a BYOK key.
+    """
+
+    def __init__(self, model: str, body: str) -> None:
+        # Bypass ModelUnavailable's "is unavailable" message for an actionable
+        # rate-limit one, but keep the same .model/.status_code/.body attributes
+        # the orchestrator reads.
+        RuntimeError.__init__(
+            self,
+            f"Model {model!r} is rate-limited (HTTP 429): transient retries and "
+            f"same-tier fallbacks are exhausted. If this is a :free route the "
+            f"shared OpenRouter free pool is saturated — enable "
+            f"settings.OPENROUTER_PAID_FALLBACK, add OpenRouter credit, or use a "
+            f"BYOK key. Upstream: {body[:300]}"
+        )
+        self.model = model
+        self.status_code = 429
+        self.body = body

@@ -72,6 +72,26 @@ def test_unknown_state_key_re_raises():
         wrapped({"ticker": "AAPL", "backtest_id": 1})
 
 
+def test_backtest_re_raises_fatal_model_errors():
+    """ModelUnavailable (and its RateLimited subclass) must NOT be masked as a
+    null signal in backtest context — they recur on every ticker-day, so the
+    wrapper re-raises and lets prime_agent_cache abort the whole run once with
+    the actionable upstream message."""
+    from apps.backtests.exceptions import ModelUnavailable, RateLimited
+
+    def _mu_node(_state):
+        raise ModelUnavailable(model="dead/model:free", status_code=402, body="Out of credits")
+
+    with pytest.raises(ModelUnavailable):
+        wrap_backtest_tolerant(_mu_node, "fundamentals")({"ticker": "AAPL", "backtest_id": 1})
+
+    def _rl_node(_state):
+        raise RateLimited(model="x:free", body="pool saturated")
+
+    with pytest.raises(RateLimited):
+        wrap_backtest_tolerant(_rl_node, "fundamentals")({"ticker": "AAPL", "backtest_id": 1})
+
+
 def test_successful_node_passes_through_untouched():
     """Wrapper is transparent when the node succeeds — same state delta out."""
     def ok_node(state):

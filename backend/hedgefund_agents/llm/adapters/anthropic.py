@@ -16,6 +16,10 @@ API_VERSION = "2023-06-01"
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504, 529}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
+# Cap on a single retry sleep — mirrors OpenRouterClient so the agent layer sees
+# one consistent retry budget regardless of provider. Bounds a long upstream
+# Retry-After so an overloaded API can't stall the worker for minutes per call.
+RETRY_AFTER_CAP_SECONDS = 8.0
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +111,7 @@ class AnthropicClient:
                 wait = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2 ** attempt)
             except ValueError:
                 wait = BASE_BACKOFF_SECONDS * (2 ** attempt)
-            wait += random.uniform(0, 0.5)  # jitter
+            wait = min(wait, RETRY_AFTER_CAP_SECONDS) + random.uniform(0, 0.5)  # clamp + jitter
             log.warning(
                 "anthropic %s on attempt %d; sleeping %.1fs", resp.status_code, attempt + 1, wait
             )

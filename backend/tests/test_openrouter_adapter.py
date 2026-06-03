@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+from apps.backtests.exceptions import RateLimited
 from hedgefund_agents.llm.adapters.openrouter import OpenRouterClient
 from hedgefund_agents.llm.client import Message
 
@@ -394,12 +395,13 @@ def test_rate_limit_fallback_on_exhausted_429(monkeypatch):
 
 
 def test_rate_limit_fallback_does_not_loop_when_fallback_also_429(monkeypatch):
-    """If the fallback target ALSO stays 429, surface the error — the hop fires
-    once (guarded by _tried), no recursion."""
+    """If the fallback target ALSO stays 429, the hop fires once (guarded by
+    _tried) and the terminal 429 surfaces as the typed RateLimited (default:
+    paid fallback off), not a raw HTTPStatusError — no recursion."""
     monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
     rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(12)]
     http = _seq_http(*rate_limited)
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(RateLimited):
         _build_client(http).complete(
             model="meta-llama/llama-3.3-70b-instruct:free", messages=[Message("user", "hi")]
         )
@@ -493,3 +495,82 @@ def test_fallback_retry_second_failure_surfaces_and_does_not_loop():
             json_mode=True,
         )
     assert http.post.call_count == 2  # original + one fallback retry, no loop
+
+
+def test_terminal_429_raises_rate_limited_not_http_error(monkeypatch):
+    """A 429 whose retry budget AND same-tier free fallbacks are exhausted raises
+    the typed RateLimited (so the run aborts once with an actionable message),
+    not a raw httpx.HTTPStatusError. hermes-3-405b:free has no onward fallback,
+    so it reaches the terminal branch after its own retries are spent."""
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    rate_limited = [_resp({}, status_code=429, text="upstream pool saturated") for _ in range(6)]
+    http = _seq_http(*rate_limited)
+    with pytest.raises(RateLimited) as exc_info:
+        _build_client(http).complete(
+            model="nousresearch/hermes-3-llama-3.1-405b:free", messages=[Message("user", "hi")]
+        )
+    assert exc_info.value.model == "nousresearch/hermes-3-llama-3.1-405b:free"
+    assert exc_info.value.status_code == 429
+    assert "upstream pool saturated" in exc_info.value.body
+    assert http.post.call_count == 6  # retries spent, no fallback for hermes
+
+
+def test_retry_after_is_clamped(monkeypatch):
+    """A large upstream Retry-After is clamped to RETRY_AFTER_CAP_SECONDS so a
+    saturated pool can't stall the worker for minutes per call."""
+    from hedgefund_agents.llm.adapters.openrouter import RETRY_AFTER_CAP_SECONDS
+
+    waits: list[float] = []
+    monkeypatch.setattr(
+        "hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda w: waits.append(w)
+    )
+
+    def _rl():
+        r = _resp({}, status_code=429, text="rate-limited")
+        r.headers = {"retry-after": "29"}  # 29s hint, far above the cap
+        return r
+
+    http = _seq_http(*[_rl() for _ in range(6)])
+    with pytest.raises(RateLimited):
+        _build_client(http).complete(
+            model="nousresearch/hermes-3-llama-3.1-405b:free", messages=[Message("user", "hi")]
+        )
+    assert waits, "expected at least one retry sleep"
+    # Each clamped sleep is at most the cap + the <=0.5s jitter, never the 29s hint.
+    assert max(waits) <= RETRY_AFTER_CAP_SECONDS + 0.5
+
+
+def test_paid_fallback_off_by_default_does_not_escalate(monkeypatch, settings):
+    """With OPENROUTER_PAID_FALLBACK off (the default), an exhausted free chain
+    raises RateLimited rather than silently escalating to a paid route."""
+    settings.OPENROUTER_PAID_FALLBACK = False
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(12)]
+    http = _seq_http(*rate_limited)
+    with pytest.raises(RateLimited):
+        _build_client(http).complete(
+            model="meta-llama/llama-3.3-70b-instruct:free", messages=[Message("user", "hi")]
+        )
+    # llama:free (6) -> hermes:free (6) -> no paid hop. 12 posts, never a 13th.
+    assert http.post.call_count == 12
+
+
+def test_paid_fallback_on_escalates_to_paid_route_once(monkeypatch, settings):
+    """With OPENROUTER_PAID_FALLBACK on, an exhausted free chain hops ONCE to the
+    paid (non-:free) analytical default instead of failing the run. _tried guards
+    against re-hopping, so it's exactly one extra call."""
+    settings.OPENROUTER_PAID_FALLBACK = True
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(12)]
+    ok = _resp({"choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}]})
+    http = _seq_http(*rate_limited, ok)
+    resp = _build_client(http).complete(
+        model="meta-llama/llama-3.3-70b-instruct:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"ok":true}'
+    # llama:free (6×429) -> hermes:free (6×429) -> paid llama-3.3-70b (ok) = 13 posts.
+    assert resp.model == "meta-llama/llama-3.3-70b-instruct"
+    assert http.post.call_count == 13
+    assert http.post.call_args_list[-1].kwargs["json"]["model"] == (
+        "meta-llama/llama-3.3-70b-instruct"
+    )

@@ -585,11 +585,16 @@ def test_get_order_via_orders_endpoint(broker, stub):
     assert snap.quantity == Decimal("10")
 
 
-def test_get_order_falls_back_to_trades_for_terminal_orders(broker, stub):
+def test_get_order_falls_back_to_trades_for_terminal_orders(broker, stub, monkeypatch):
     """Risks #7b: terminal orders may roll off /iserver/account/orders
     quickly. The adapter falls back to /iserver/account/trades to derive
     the final status."""
     now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    # The fallback derives its window from timezone.now() - 7d (ibkr.py:485), so
+    # against the real clock the fixed-date fixture trade rolls outside the window
+    # once wall-time passes now+7d, making this test self-expire. Freeze now to
+    # the fixture's frame so the window is deterministic.
+    monkeypatch.setattr("apps.brokers.adapters.ibkr.timezone.now", lambda: now)
     # /orders is empty (the order rolled off).
     stub.responses[("GET", "/iserver/account/orders")] = {"orders": []}
     # /trades has the matching execution.
