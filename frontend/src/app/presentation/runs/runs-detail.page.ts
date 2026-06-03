@@ -1128,7 +1128,10 @@ export class RunsDetailPage implements OnInit, OnDestroy {
         return;
       }
       this.brokerTicket.set({
-        decision: { id: d.id, ticker: d.ticker, side, targetQuantity: d.target_quantity },
+        decision: {
+          id: d.id, ticker: d.ticker, side, targetQuantity: d.target_quantity,
+          ...this.protectiveLevels(d, side),
+        },
         accounts: active,
       });
     };
@@ -1141,6 +1144,45 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     } else {
       open(accounts);
     }
+  }
+
+  /** Translate the run's risk/valuation output into absolute protective
+   *  prices for the bracket pre-fill. The stop comes from the Risk Manager's
+   *  `stop_loss_pct` (a decimal fraction) off the current price; the target
+   *  from a positive `upside_pct` (percent units), else the fair-value bound
+   *  on the profit side. Returns nulls when the data isn't there — the modal
+   *  then opens as a plain order. */
+  private protectiveLevels(
+    d: DecisionRow, side: 'buy' | 'sell',
+  ): { stopLossPrice: number | null; takeProfitPrice: number | null } {
+    const none = { stopLossPrice: null, takeProfitPrice: null };
+    const val = this.valuationOutput();
+    const risk = this.riskOutput();
+    const ref = Number(val?.['current_price']);
+    const slPct = Number(
+      risk?.['stop_loss_pct'] ?? d.risk_overrides?.stop_loss_pct,
+    );
+    if (!Number.isFinite(ref) || ref <= 0 || !Number.isFinite(slPct) || slPct <= 0) {
+      return none;
+    }
+    const round2 = (x: number) => Math.round(x * 100) / 100;
+    const isLong = side === 'buy';
+    const stopLossPrice = round2(isLong ? ref * (1 - slPct) : ref * (1 + slPct));
+
+    const upside = Number(val?.['upside_pct']);     // percent units
+    const fvHi = Number(val?.['fair_value_high']);
+    const fvLo = Number(val?.['fair_value_low']);
+    let takeProfitPrice: number | null = null;
+    if (Number.isFinite(upside) && upside > 0) {
+      takeProfitPrice = round2(
+        isLong ? ref * (1 + upside / 100) : ref * (1 - upside / 100),
+      );
+    } else if (isLong && Number.isFinite(fvHi) && fvHi > ref) {
+      takeProfitPrice = round2(fvHi);
+    } else if (!isLong && Number.isFinite(fvLo) && fvLo < ref) {
+      takeProfitPrice = round2(fvLo);
+    }
+    return { stopLossPrice, takeProfitPrice };
   }
 
   // Draft created in the ticket modal → open the gated confirm modal.

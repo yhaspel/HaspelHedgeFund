@@ -25,9 +25,10 @@ from django.utils import timezone
 
 from apps.portfolios.models import LedgerEntry, Portfolio, Position
 
+from .brackets import is_group_anchor
 from .capabilities import AUTH_NONE, get_adapter_factory, get_capabilities
-from .idempotency import resolve_unknown
-from .interfaces import Broker, BrokerError, FillSnapshot, PositionSnapshot
+from .idempotency import _match_leg_to_child, resolve_unknown
+from .interfaces import Broker, BrokerError, FillSnapshot, OrderSnapshot, PositionSnapshot
 from .models import BrokerAccount, BrokerFill, BrokerOrder, BrokerSyncEvent
 
 
@@ -49,22 +50,11 @@ def get_broker(account: BrokerAccount) -> Broker:
 # --- poll_open_orders -------------------------------------------------------
 
 
-def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
-    """Pull `order`'s fills from the broker and write any new `BrokerFill` +
-    `LedgerEntry(broker_fill)` rows. Returns # of fills written. Idempotent."""
-    adapter = broker or get_broker(order.broker_account)
-    if order.idempotency_state == BrokerOrder.IDEM_UNKNOWN:
-        resolve_unknown(order, adapter)
-        order.refresh_from_db()
-    if not order.broker_order_id:
-        return 0
-    try:
-        snapshot = adapter.get_order(order.broker_order_id)
-    except BrokerError as exc:
-        order.error_message = str(exc)[:500]
-        order.save(update_fields=["error_message"])
-        return 0
-    fills = adapter.get_recent_fills(order.created_at)
+def _ingest_fills_for(
+    order: BrokerOrder, snapshot: OrderSnapshot, fills: list[FillSnapshot],
+) -> int:
+    """Ingest the subset of `fills` belonging to `order` and apply the
+    snapshot status. Returns # of new fills written."""
     written = 0
     for fill in fills:
         if fill.broker_order_id != order.broker_order_id:
@@ -77,11 +67,62 @@ def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
     return written
 
 
+def _poll_group(anchor: BrokerOrder, broker: Broker) -> int:
+    """Poll a bracket / OTO / OCO via its anchor: one `get_order` returns the
+    parent + nested legs[]. Ingest the anchor's fills and each leg's fills
+    (each leg now carries its own broker_order_id), applying every leg's
+    status — so Alpaca's native OCO sibling cancel is simply observed."""
+    snapshot = broker.get_order(anchor.broker_order_id)
+    fills = broker.get_recent_fills(anchor.created_at)
+    written = _ingest_fills_for(anchor, snapshot, fills)
+    children = list(anchor.child_legs.all())
+    for leg in snapshot.legs:
+        child = _match_leg_to_child(leg, children)
+        if child is None:
+            continue
+        if not child.broker_order_id and leg.broker_order_id:
+            BrokerOrder.objects.filter(pk=child.pk).update(
+                broker_order_id=leg.broker_order_id,
+            )
+            child.refresh_from_db()
+        if not child.broker_order_id:
+            continue
+        written += _ingest_fills_for(child, leg, fills)
+    return written
+
+
+def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
+    """Pull `order`'s fills from the broker and write any new `BrokerFill` +
+    `LedgerEntry(broker_fill)` rows. Returns # of fills written. Idempotent.
+
+    A group anchor (bracket/OTO/OCO) is polled as a unit — its legs come back
+    nested in one `get_order`."""
+    adapter = broker or get_broker(order.broker_account)
+    if order.idempotency_state == BrokerOrder.IDEM_UNKNOWN:
+        resolve_unknown(order, adapter)
+        order.refresh_from_db()
+    if not order.broker_order_id:
+        return 0
+    if is_group_anchor(order):
+        return _poll_group(order, adapter)
+    try:
+        snapshot = adapter.get_order(order.broker_order_id)
+    except BrokerError as exc:
+        order.error_message = str(exc)[:500]
+        order.save(update_fields=["error_message"])
+        return 0
+    fills = adapter.get_recent_fills(order.created_at)
+    return _ingest_fills_for(order, snapshot, fills)
+
+
 def poll_open_orders_for_account(account: BrokerAccount) -> int:
-    """Pull every open order and ingest any new fills. Returns # of fills written."""
+    """Pull every open order and ingest any new fills. Returns # of fills
+    written. Child legs are skipped as independent orders — they are polled
+    through their anchor in one `get_order` to avoid double work."""
     broker = get_broker(account)
     open_orders = BrokerOrder.objects.filter(
         broker_account=account, status__in=BrokerOrder.OPEN_STATUSES,
+        parent_order__isnull=True,
     )
     fills_written = 0
     for order in open_orders:
@@ -92,6 +133,11 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
             order.refresh_from_db()
             if not order.broker_order_id:
                 continue
+
+        if is_group_anchor(order):
+            fills_written += _poll_group(order, broker)
+            continue
+
         try:
             snapshot = broker.get_order(order.broker_order_id)
         except BrokerError as exc:
@@ -100,14 +146,7 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
             continue
 
         fills = broker.get_recent_fills(order.created_at)
-        order_fills = [f for f in fills if f.broker_order_id == order.broker_order_id]
-        for fill in order_fills:
-            written = _ingest_fill(order, fill)
-            if written:
-                fills_written += 1
-
-        _apply_snapshot_status(order, snapshot.status, snapshot.filled_quantity,
-                                snapshot.avg_fill_price)
+        fills_written += _ingest_fills_for(order, snapshot, fills)
     return fills_written
 
 

@@ -50,9 +50,20 @@ class OrderTicket:
     ticker: str
     side: str                  # "buy" | "sell"
     quantity: Decimal
-    order_type: str = "market"  # "market" | "limit"
+    # "market" | "limit" | "stop" | "stop_limit" | "trailing_stop"
+    order_type: str = "market"
     limit_price: Decimal | None = None
     time_in_force: str = "day"  # "day" | "gtc"
+    # NEW (P3a) — standalone stop / trailing:
+    stop_price: Decimal | None = None
+    trail_price: Decimal | None = None
+    trail_percent: Decimal | None = None
+    # NEW (P3a) — bracket / OTO / OCO carrier (the entry/anchor ticket carries
+    # its protective exits): "simple" | "bracket" | "oto" | "oco".
+    order_class: str = "simple"
+    take_profit_limit_price: Decimal | None = None
+    stop_loss_stop_price: Decimal | None = None
+    stop_loss_limit_price: Decimal | None = None   # present ⇒ stop-limit exit
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,13 @@ class OrderSnapshot:
     filled_quantity: Decimal = Decimal("0")
     avg_fill_price: Decimal | None = None
     queued_until_open: bool = False
+    # NEW (P3a) — echoed back for stop / stop_limit / trailing + grouped orders:
+    stop_price: Decimal | None = None
+    trail_price: Decimal | None = None
+    trail_percent: Decimal | None = None
+    order_class: str = "simple"
+    leg_role: str = ""         # "" | "entry" | "stop_loss" | "take_profit"
+    legs: list[OrderSnapshot] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -89,6 +107,10 @@ class Broker(Protocol):
     def submit_order(self, ticket: OrderTicket) -> OrderSnapshot: ...
     def cancel_order(self, broker_order_id: str) -> None: ...
     def get_order(self, broker_order_id: str) -> OrderSnapshot: ...
+    # Grouped paths (P3a). Brokers without bracket support
+    # (supports_bracket=False) need not implement these.
+    def submit_bracket(self, ticket: OrderTicket) -> OrderSnapshot: ...
+    def submit_protective(self, ticket: OrderTicket) -> OrderSnapshot: ...
     def find_order_by_client_id(
         self,
         client_order_id: str,

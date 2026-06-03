@@ -202,6 +202,26 @@ export class BrokerStore {
       );
   }
 
+  /**
+   * P3a: create a bracket / OTO draft (entry + protective exits). Thin wrapper
+   * over the order-create endpoint that sets `order_class`. Returns the entry
+   * anchor with its nested `legs`.
+   */
+  createBracketDraft(
+    body: CreateOrderRequest & { order_class: 'bracket' | 'oto' },
+  ): Observable<BrokerOrderRow> {
+    return this.createDraftOrder(body);
+  }
+
+  /**
+   * P3a: attach protection to a held position — an OCO pair (`order_class`
+   * 'oco') or a single standalone stop / stop-limit / take-profit / trailing
+   * ('simple'). Returns the primary order.
+   */
+  createProtective(body: CreateOrderRequest): Observable<BrokerOrderRow> {
+    return this.createDraftOrder(body);
+  }
+
   confirmOrder(orderId: number, body: ConfirmOrderRequest): Observable<BrokerOrderRow> {
     this._busy.set(true);
     return this.api

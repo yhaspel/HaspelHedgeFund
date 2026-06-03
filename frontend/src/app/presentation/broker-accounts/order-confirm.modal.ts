@@ -35,6 +35,46 @@ const NOTIONAL_THRESHOLD = 1000;
               }
               · est. notional <span class="mono">{{ '$' + (+order.notional_estimate | number:'1.2-2') }}</span>
             </div>
+
+            @if (isGroupEntry()) {
+              <div class="mt-2.5 text-xs text-text-2 border-t border-border pt-2.5"
+                   data-test="bracket-summary">
+                <div class="font-medium mb-1">Protective exits</div>
+                @if (stopLeg(); as sl) {
+                  <div>
+                    Stop-loss {{ sl.order_type === 'stop_limit' ? 'limit' : 'trigger' }}
+                    <span class="mono">{{ '$' + (+(sl.stop_price || 0) | number:'1.2-2') }}</span>
+                    @if (maxLoss() !== null) {
+                      · max loss
+                      <span class="mono" data-test="max-loss">{{ '$' + (maxLoss()! | number:'1.2-2') }}</span>
+                    }
+                  </div>
+                }
+                @if (takeProfitLeg(); as tp) {
+                  <div>
+                    Take-profit limit
+                    <span class="mono">{{ '$' + (+(tp.limit_price || 0) | number:'1.2-2') }}</span>
+                    @if (targetGain() !== null) {
+                      · target gain
+                      <span class="mono" data-test="target-gain">{{ '$' + (targetGain()! | number:'1.2-2') }}</span>
+                    }
+                  </div>
+                }
+                @if (isMarketEntry()) {
+                  <p class="text-[11.5px] text-text-3 m-0 mt-1" data-test="market-entry-note">
+                    Max loss / target gain are estimated at the live quote on submit
+                    (market entry).
+                  </p>
+                }
+                @if (hasStopLimitExit()) {
+                  <p class="text-[11.5px] text-warn-fg m-0 mt-1" data-test="stop-limit-caveat">
+                    A stop-limit exit can fail to fill if price gaps through the limit —
+                    it is not guaranteed protection. Stop-market is the safer default.
+                  </p>
+                }
+              </div>
+            }
+
             @if (account?.mode === 'live') {
               <div role="alert" class="pill err h-auto py-1.5 px-2.5 mt-2.5">
                 <span class="dot"></span>
@@ -113,6 +153,56 @@ export class OrderConfirmModalComponent {
   protected readonly typedNeeded = computed(
     () => this.typedRequired() || this.typedRevealed(),
   );
+
+  // --- Bracket / OTO entry summary (client-side; server is authoritative) ---
+
+  isGroupEntry(): boolean {
+    return this.order?.leg_role === 'entry';
+  }
+
+  isMarketEntry(): boolean {
+    return this.isGroupEntry() && this.order?.order_type === 'market';
+  }
+
+  stopLeg(): BrokerOrderRow | null {
+    return (this.order?.legs ?? []).find((l) => l.leg_role === 'stop_loss') ?? null;
+  }
+
+  takeProfitLeg(): BrokerOrderRow | null {
+    return (this.order?.legs ?? []).find((l) => l.leg_role === 'take_profit') ?? null;
+  }
+
+  hasStopLimitExit(): boolean {
+    return this.stopLeg()?.order_type === 'stop_limit';
+  }
+
+  /** The entry reference: a limit entry prices exactly; a market entry has no
+   *  client-side price (the server estimates from a live quote on submit). */
+  private entryRef(): number | null {
+    if (!this.order || this.order.limit_price == null) return null;
+    const ref = Number(this.order.limit_price);
+    return Number.isFinite(ref) ? ref : null;
+  }
+
+  maxLoss(): number | null {
+    const sl = this.stopLeg();
+    const ref = this.entryRef();
+    if (!this.isGroupEntry() || !this.order || ref === null || !sl?.stop_price) return null;
+    const qty = Number(this.order.quantity);
+    const stop = Number(sl.stop_price);
+    const diff = this.order.side === 'buy' ? ref - stop : stop - ref;
+    return diff * qty;
+  }
+
+  targetGain(): number | null {
+    const tp = this.takeProfitLeg();
+    const ref = this.entryRef();
+    if (!this.isGroupEntry() || !this.order || ref === null || !tp?.limit_price) return null;
+    const qty = Number(this.order.quantity);
+    const target = Number(tp.limit_price);
+    const diff = this.order.side === 'buy' ? target - ref : ref - target;
+    return diff * qty;
+  }
 
   canConfirm(): boolean {
     if (!this.order) return false;

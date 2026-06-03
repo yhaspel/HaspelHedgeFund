@@ -30,11 +30,31 @@ export interface BrokerCapability {
   quantity_increment: string;
   supported_order_types: string[];
   supported_time_in_force: string[];
+  supports_bracket: boolean;
   description: string;
   available: boolean;
   community_unverified: boolean;
   connect_form: Array<Record<string, string>>;
 }
+
+export type BrokerOrderType =
+  | 'market'
+  | 'limit'
+  | 'stop'
+  | 'stop_limit'
+  | 'trailing_stop';
+
+export type BrokerOrderClass = 'simple' | 'bracket' | 'oto' | 'oco';
+
+export type BrokerLegRole = '' | 'entry' | 'stop_loss' | 'take_profit';
+
+export type BrokerGroupStatus =
+  | 'draft'
+  | 'confirmed'
+  | 'working'
+  | 'closed'
+  | 'cancelled'
+  | 'error';
 
 export interface BrokerAccount {
   id: number;
@@ -107,9 +127,11 @@ export interface BrokerOrderRow {
   ticker: string;
   side: 'buy' | 'sell';
   quantity: string;
-  order_type: 'market' | 'limit' | 'stop';
+  order_type: BrokerOrderType;
   limit_price: string | null;
   stop_price: string | null;
+  trail_price: string | null;
+  trail_percent: string | null;
   time_in_force: 'day' | 'gtc';
   status:
     | 'draft'
@@ -132,8 +154,16 @@ export interface BrokerOrderRow {
   filled_quantity: string;
   error_message: string;
   group_id: string | null;
+  parent_order: number | null;
+  leg_role: BrokerLegRole;
+  // Present only on a group anchor (the bracket/OTO entry or the OCO primary).
+  legs: BrokerOrderRow[];
+  group_status: BrokerGroupStatus | null;
   notional_estimate: string;
   created_at: string;
+  // Returned by the confirm endpoint for a bracket/OTO entry (not on list rows).
+  max_loss?: string | null;
+  target_gain?: string | null;
 }
 
 export interface CreateOrderRequest {
@@ -142,11 +172,19 @@ export interface CreateOrderRequest {
   side: 'buy' | 'sell';
   quantity: string | number;
   quantity_mode?: 'whole' | 'fractional';
-  order_type?: 'market' | 'limit' | 'stop';
+  order_type?: BrokerOrderType;
   limit_price?: string | number | null;
   stop_price?: string | number | null;
   time_in_force?: 'day' | 'gtc';
   decision?: number | null;
+  // Bracket / OTO / OCO carrier fields. order_class !== 'simple' creates a
+  // grouped order; the anchor is returned with nested `legs`.
+  order_class?: BrokerOrderClass;
+  take_profit_limit_price?: string | number | null;
+  stop_loss_stop_price?: string | number | null;
+  stop_loss_limit_price?: string | number | null;
+  trail_price?: string | number | null;
+  trail_percent?: string | number | null;
 }
 
 export interface ConfirmOrderRequest {

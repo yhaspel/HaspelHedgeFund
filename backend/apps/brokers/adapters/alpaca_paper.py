@@ -66,11 +66,15 @@ CAPABILITIES = BrokerCapabilities(
     supports_live=False,  # structural — see module docstring + ADR 0013.
     supports_fractional=True,
     quantity_increment=Decimal("0.000001"),
-    supported_order_types=("market", "limit"),
+    supported_order_types=(
+        "market", "limit", "stop", "stop_limit", "trailing_stop",
+    ),
     supported_time_in_force=("day", "gtc"),
+    supports_bracket=True,
     description=(
         "Alpaca paper Trading API. API key id + secret. Verified end-to-end "
-        "against a live Alpaca paper sandbox 2026-05-29."
+        "against a live Alpaca paper sandbox 2026-05-29; bracket / OTO / OCO / "
+        "stop / stop-limit / trailing-stop verified live 2026-06-03."
     ),
     available=True,
     community_unverified=False,
@@ -113,6 +117,34 @@ _STATUS_MAP: dict[str, str] = {
 
 def _map_status(raw: Any) -> str:
     return _STATUS_MAP.get(_enum_value(raw).lower(), "error")
+
+
+# Alpaca `OrderType` → framework order_type. Note the exact-key match: the old
+# substring test ("limit" in raw) wrongly collapsed `stop_limit` → limit and
+# `stop` → market. Unknown types fall back to `market` (never matching a
+# protective leg), which is fine for the supported shapes.
+_ORDER_TYPE_MAP: dict[str, str] = {
+    "market": "market",
+    "limit": "limit",
+    "stop": "stop",
+    "stop_limit": "stop_limit",
+    "trailing_stop": "trailing_stop",
+}
+
+
+def _map_order_type(raw: Any) -> str:
+    return _ORDER_TYPE_MAP.get(_enum_value(raw).lower(), "market")
+
+
+def _leg_role_from_type(order_type: str) -> str:
+    """Infer a protective leg's role from its order type: a plain limit is the
+    take-profit; a stop / stop-limit / trailing is the stop-loss. The
+    reconcile layer keys on the same signal (see ADR 0015)."""
+    if order_type == "limit":
+        return "take_profit"
+    if order_type in ("stop", "stop_limit", "trailing_stop"):
+        return "stop_loss"
+    return ""
 
 
 def _enum_value(v: Any) -> str:
@@ -361,40 +393,166 @@ class AlpacaPaperBroker:
 
     # -- submit_order -----------------------------------------------------
 
-    def submit_order(self, ticket: OrderTicket) -> OrderSnapshot:
+    def _common_kwargs(self, ticket: OrderTicket) -> dict:
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
         side = OrderSide.BUY if ticket.side == "buy" else OrderSide.SELL
-        tif = TimeInForce.GTC if (ticket.time_in_force or "day") == "gtc" else TimeInForce.DAY
-        common = dict(
+        tif = (
+            TimeInForce.GTC
+            if (ticket.time_in_force or "day") == "gtc"
+            else TimeInForce.DAY
+        )
+        return dict(
             symbol=ticket.ticker.upper(),
             qty=float(ticket.quantity),
             side=side,
             time_in_force=tif,
             client_order_id=ticket.client_order_id,
         )
-        if ticket.order_type == "limit":
+
+    def _build_simple_request(self, ticket: OrderTicket):
+        """Map a standalone OrderTicket onto the right SDK request class. Each
+        type fails fast on a missing required price — this is what closes the
+        latent "stop silently becomes a market order" path."""
+        from alpaca.trading.requests import (
+            LimitOrderRequest,
+            MarketOrderRequest,
+            StopLimitOrderRequest,
+            StopOrderRequest,
+            TrailingStopOrderRequest,
+        )
+
+        common = self._common_kwargs(ticket)
+        ot = ticket.order_type
+        if ot == "limit":
             if ticket.limit_price is None:
                 raise BrokerError("limit order requires limit_price")
-            req = LimitOrderRequest(limit_price=float(ticket.limit_price), **common)
-        else:
-            req = MarketOrderRequest(**common)
+            return LimitOrderRequest(limit_price=float(ticket.limit_price), **common)
+        if ot == "stop":
+            if ticket.stop_price is None:
+                raise BrokerError("stop order requires stop_price")
+            return StopOrderRequest(stop_price=float(ticket.stop_price), **common)
+        if ot == "stop_limit":
+            if ticket.stop_price is None or ticket.limit_price is None:
+                raise BrokerError("stop_limit order requires stop_price and limit_price")
+            return StopLimitOrderRequest(
+                stop_price=float(ticket.stop_price),
+                limit_price=float(ticket.limit_price),
+                **common,
+            )
+        if ot == "trailing_stop":
+            has_price = ticket.trail_price is not None
+            has_percent = ticket.trail_percent is not None
+            if has_price == has_percent:  # neither or both
+                raise BrokerError(
+                    "trailing_stop requires exactly one of trail_price / trail_percent",
+                )
+            if has_price:
+                return TrailingStopOrderRequest(
+                    trail_price=float(ticket.trail_price), **common,
+                )
+            return TrailingStopOrderRequest(
+                trail_percent=float(ticket.trail_percent), **common,
+            )
+        return MarketOrderRequest(**common)
 
+    def _exit_legs(self, ticket: OrderTicket) -> tuple[Any, Any]:
+        """Build the (take_profit, stop_loss) SDK leg DTOs from a carrier
+        ticket. Either may be None (OTO carries exactly one)."""
+        from alpaca.trading.requests import StopLossRequest, TakeProfitRequest
+
+        take_profit = None
+        if ticket.take_profit_limit_price is not None:
+            take_profit = TakeProfitRequest(
+                limit_price=float(ticket.take_profit_limit_price),
+            )
+        stop_loss = None
+        if ticket.stop_loss_stop_price is not None:
+            sl_kwargs: dict = {"stop_price": float(ticket.stop_loss_stop_price)}
+            if ticket.stop_loss_limit_price is not None:
+                sl_kwargs["limit_price"] = float(ticket.stop_loss_limit_price)
+            stop_loss = StopLossRequest(**sl_kwargs)
+        return take_profit, stop_loss
+
+    def _do_submit(self, req: Any, ticket: OrderTicket) -> OrderSnapshot:
         _LIMITER.acquire()
         try:
             order = self._client.submit_order(order_data=req)
         except Exception as exc:  # noqa: BLE001
             # Native idempotency: a retried POST with the same
             # client_order_id returns 422. Treat that as proof the first
-            # order already exists, resolve it, and surface the existing
-            # snapshot instead of failing.
+            # order already exists, resolve it (with its legs[] for a
+            # grouped order), and surface the existing snapshot.
             if _is_duplicate_client_order_id(exc):
                 existing = self.find_order_by_client_id(ticket.client_order_id)
                 if existing is not None:
                     return existing
             _raise_translated(exc, "submit_order")
         return self._snapshot_from_order(order, fallback_ticket=ticket)
+
+    def submit_order(self, ticket: OrderTicket) -> OrderSnapshot:
+        return self._do_submit(self._build_simple_request(ticket), ticket)
+
+    # -- submit_bracket / submit_protective -------------------------------
+
+    def submit_bracket(self, ticket: OrderTicket) -> OrderSnapshot:
+        """Submit an entry-carrying bracket / OTO ticket. The entry is a
+        market or limit base request; `order_class` + nested take-profit /
+        stop-loss legs ride on it. Returns the parent snapshot with `.legs`."""
+        from alpaca.trading.enums import OrderClass
+        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
+
+        take_profit, stop_loss = self._exit_legs(ticket)
+        if ticket.order_class == "bracket":
+            if take_profit is None or stop_loss is None:
+                raise BrokerError("bracket requires both take_profit and stop_loss")
+            order_class = OrderClass.BRACKET
+        elif ticket.order_class == "oto":
+            if (take_profit is None) == (stop_loss is None):
+                raise BrokerError("oto requires exactly one protective leg")
+            order_class = OrderClass.OTO
+        else:
+            raise BrokerError(f"submit_bracket got order_class {ticket.order_class!r}")
+
+        common = self._common_kwargs(ticket)
+        extra: dict = {"order_class": order_class}
+        if take_profit is not None:
+            extra["take_profit"] = take_profit
+        if stop_loss is not None:
+            extra["stop_loss"] = stop_loss
+        if ticket.order_type == "limit":
+            if ticket.limit_price is None:
+                raise BrokerError("limit entry requires limit_price")
+            req = LimitOrderRequest(
+                limit_price=float(ticket.limit_price), **common, **extra,
+            )
+        else:
+            req = MarketOrderRequest(**common, **extra)
+        return self._do_submit(req, ticket)
+
+    def submit_protective(self, ticket: OrderTicket) -> OrderSnapshot:
+        """Submit a standalone OCO pair against a held position: a take-profit
+        limit base request with `order_class=OCO` carrying the stop-loss leg.
+        The take-profit IS the parent; the stop-loss comes back in `.legs`. A
+        single standalone stop/stop_limit/trailing goes through `submit_order`."""
+        from alpaca.trading.enums import OrderClass
+        from alpaca.trading.requests import LimitOrderRequest
+
+        take_profit, stop_loss = self._exit_legs(ticket)
+        if take_profit is None or stop_loss is None:
+            raise BrokerError("oco requires both take_profit and stop_loss")
+        common = self._common_kwargs(ticket)
+        # Alpaca OCO wants BOTH the base limit (the take-profit) AND a nested
+        # take_profit leg — it rejects with 422 "oco orders require
+        # take_profit.limit_price" if the take_profit object is omitted.
+        req = LimitOrderRequest(
+            limit_price=float(ticket.take_profit_limit_price),
+            order_class=OrderClass.OCO,
+            take_profit=take_profit,
+            stop_loss=stop_loss,
+            **common,
+        )
+        return self._do_submit(req, ticket)
 
     # -- get_order --------------------------------------------------------
 
@@ -446,11 +604,15 @@ class AlpacaPaperBroker:
     # -- SDK row → DTO ----------------------------------------------------
 
     def _snapshot_from_order(
-        self, order: Any, *, fallback_ticket: OrderTicket | None = None,
+        self,
+        order: Any,
+        *,
+        fallback_ticket: OrderTicket | None = None,
+        as_leg: bool = False,
     ) -> OrderSnapshot:
-        order_type_raw = _enum_value(getattr(order, "order_type", None)
-                                     or getattr(order, "type", None)).lower()
-        order_type = "limit" if "limit" in order_type_raw else "market"
+        order_type = _map_order_type(
+            getattr(order, "order_type", None) or getattr(order, "type", None),
+        )
         side_raw = _enum_value(getattr(order, "side", "")).lower()
         side = "sell" if side_raw.startswith("sell") else "buy"
         tif_raw = _enum_value(getattr(order, "time_in_force", "")).lower() or "day"
@@ -459,6 +621,26 @@ class AlpacaPaperBroker:
             or (fallback_ticket.quantity if fallback_ticket else None),
         )
         status = _map_status(getattr(order, "status", None))
+        order_class = _enum_value(getattr(order, "order_class", None)).lower() or "simple"
+
+        # leg_role: a leg infers its role from its own type; the parent's role
+        # follows the order_class (entry for bracket/oto, take_profit for oco).
+        if as_leg:
+            leg_role = _leg_role_from_type(order_type)
+        elif order_class in ("bracket", "oto"):
+            leg_role = "entry"
+        elif order_class == "oco":
+            leg_role = "take_profit"
+        else:
+            leg_role = ""
+
+        # `legs` is Optional[List] on the SDK model — guard for None. One level
+        # of nesting only; a leg carries no further legs.
+        legs: list[OrderSnapshot] = []
+        if not as_leg:
+            for leg in getattr(order, "legs", None) or []:
+                legs.append(self._snapshot_from_order(leg, as_leg=True))
+
         return OrderSnapshot(
             broker_order_id=str(getattr(order, "id", "") or ""),
             client_order_id=str(
@@ -475,6 +657,12 @@ class AlpacaPaperBroker:
             status=status,
             filled_quantity=_dec(getattr(order, "filled_qty", None)),
             avg_fill_price=_opt_dec(getattr(order, "filled_avg_price", None)),
+            stop_price=_opt_dec(getattr(order, "stop_price", None)),
+            trail_price=_opt_dec(getattr(order, "trail_price", None)),
+            trail_percent=_opt_dec(getattr(order, "trail_percent", None)),
+            order_class=order_class,
+            leg_role=leg_role,
+            legs=legs,
             raw=_to_raw(order),
         )
 

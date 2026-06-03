@@ -69,7 +69,15 @@ import {
                       <span class="text-text-3">{{ ord.broker_account }}</span>
                     }
                   </td>
-                  <td class="font-medium">{{ ord.ticker }}</td>
+                  <td class="font-medium">
+                    {{ ord.ticker }}
+                    @if (ord.legs.length) {
+                      <span class="pill ml-1.5 text-[10px]"
+                            [attr.data-test]="'group-kind-' + ord.id">
+                        <span class="dot"></span>{{ groupKind(ord) }}
+                      </span>
+                    }
+                  </td>
                   <td>
                     <span class="pill" [class.ok]="ord.side === 'buy'" [class.warn]="ord.side === 'sell'">
                       <span class="dot"></span>{{ ord.side }}
@@ -78,7 +86,7 @@ import {
                   <td class="text-right mono">{{ +ord.quantity | number: '1.0-4' }}</td>
                   <td class="text-right mono">{{ '$' + (+ord.notional_estimate | number: '1.2-2') }}</td>
                   <td>
-                    <span class="pill"><span class="dot"></span>{{ ord.status }}</span>
+                    <span class="pill"><span class="dot"></span>{{ ord.group_status || ord.status }}</span>
                   </td>
                   <td class="text-[11.5px] text-text-3 mono">
                     @if (ord.group_id) { {{ ord.group_id.slice(0, 8) }}… } @else { — }
@@ -90,6 +98,21 @@ import {
                     </button>
                   </td>
                 </tr>
+                @for (leg of ord.legs; track leg.id) {
+                  <tr class="text-text-3" [attr.data-test]="'pending-leg-' + leg.id">
+                    <td></td>
+                    <td class="pl-4 text-[11.5px]">↳ {{ legLabel(leg) }}</td>
+                    <td>
+                      <span class="pill" [class.ok]="leg.side === 'buy'" [class.warn]="leg.side === 'sell'">
+                        <span class="dot"></span>{{ leg.side }}
+                      </span>
+                    </td>
+                    <td class="text-right mono text-[11.5px]">{{ +leg.quantity | number: '1.0-4' }}</td>
+                    <td></td>
+                    <td><span class="pill text-[10px]"><span class="dot"></span>{{ leg.status }}</span></td>
+                    <td colspan="2"></td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -112,12 +135,48 @@ export class PendingOrdersPage implements OnInit {
   protected readonly accounts = this.store.accounts;
   protected readonly loading = signal(true);
   protected readonly confirming = signal<BrokerOrderRow | null>(null);
+  // Top-level rows only — a group's protective legs render nested under their
+  // anchor (entry / OCO primary), never as standalone rows.
   protected readonly pending = computed(() =>
-    this.orders().filter((o) => o.status === 'draft' || o.status === 'confirmed'),
+    this.orders().filter(
+      (o) =>
+        (o.status === 'draft' || o.status === 'confirmed') &&
+        o.parent_order === null,
+    ),
   );
 
   ngOnInit(): void {
     this.refresh();
+  }
+
+  groupKind(ord: BrokerOrderRow): string {
+    const hasTp = ord.legs.some((l) => l.leg_role === 'take_profit');
+    const hasSl = ord.legs.some((l) => l.leg_role === 'stop_loss');
+    if (ord.leg_role === 'take_profit') return 'OCO';
+    if (hasTp && hasSl) return 'bracket';
+    return 'OTO';
+  }
+
+  legLabel(leg: BrokerOrderRow): string {
+    const role =
+      leg.leg_role === 'stop_loss'
+        ? 'Stop-loss'
+        : leg.leg_role === 'take_profit'
+          ? 'Take-profit'
+          : leg.order_type;
+    let price = '';
+    if (leg.order_type === 'limit' && leg.limit_price) {
+      price = '$' + Number(leg.limit_price).toFixed(2);
+    } else if (
+      (leg.order_type === 'stop' || leg.order_type === 'stop_limit') &&
+      leg.stop_price
+    ) {
+      price = '$' + Number(leg.stop_price).toFixed(2);
+      if (leg.order_type === 'stop_limit' && leg.limit_price) {
+        price += ' / $' + Number(leg.limit_price).toFixed(2);
+      }
+    }
+    return `${role} · ${leg.order_type} ${price}`.trim();
   }
 
   refresh(): void {

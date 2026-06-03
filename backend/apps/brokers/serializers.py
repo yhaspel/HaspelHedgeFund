@@ -66,16 +66,20 @@ class BrokerAccountSerializer(serializers.ModelSerializer):
 class BrokerOrderSerializer(serializers.ModelSerializer):
     decision_id = serializers.IntegerField(source="decision.id", read_only=True)
     notional_estimate = serializers.SerializerMethodField()
+    legs = serializers.SerializerMethodField()
+    group_status = serializers.SerializerMethodField()
 
     class Meta:
         model = BrokerOrder
         fields = (
             "id", "broker_account", "client_order_id", "decision_id", "ticker",
             "side", "quantity", "order_type", "limit_price", "stop_price",
-            "time_in_force", "status", "idempotency_state", "broker_order_id",
+            "trail_price", "trail_percent", "time_in_force", "status",
+            "idempotency_state", "broker_order_id",
             "confirmed_at", "confirmation_method", "queued_until_open",
             "submitted_at", "filled_at", "cancelled_at", "avg_fill_price",
-            "filled_quantity", "error_message", "group_id", "notional_estimate",
+            "filled_quantity", "error_message", "group_id", "parent_order",
+            "leg_role", "legs", "group_status", "notional_estimate",
             "created_at",
         )
         read_only_fields = (
@@ -83,6 +87,7 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
             "broker_order_id", "confirmed_at", "confirmation_method",
             "queued_until_open", "submitted_at", "filled_at", "cancelled_at",
             "avg_fill_price", "filled_quantity", "error_message", "group_id",
+            "parent_order", "leg_role", "legs", "group_status",
             "created_at", "decision_id", "notional_estimate",
         )
 
@@ -96,6 +101,23 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
         if price is None:
             return "0.00"
         return str((obj.quantity * price).quantize(Decimal("0.01")))
+
+    def get_legs(self, obj: BrokerOrder) -> list:
+        # Only a group anchor carries nested legs. A child returns [] — which
+        # also stops the recursion when the anchor serializes its children.
+        if obj.parent_order_id is not None:
+            return []
+        children = obj.child_legs.all()
+        if not children:
+            return []
+        return BrokerOrderSerializer(children, many=True).data
+
+    def get_group_status(self, obj: BrokerOrder) -> str | None:
+        from .brackets import derive_group_status, is_group_anchor
+
+        if obj.group_id is None or not is_group_anchor(obj):
+            return None
+        return derive_group_status(obj)
 
 
 class BrokerFillSerializer(serializers.ModelSerializer):
