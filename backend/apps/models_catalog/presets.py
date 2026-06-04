@@ -80,7 +80,10 @@ PRESETS: dict[str, dict[str, str]] = {
         "wood": "openrouter:google/gemma-3-27b-it",
         "druckenmiller": "openrouter:z-ai/glm-4-32b",
         "burry": "openrouter:deepseek/deepseek-v4-flash",
-        "damodaran": "openrouter:amazon/nova-lite-v1",
+        # damodaran reuses deepseek-v4-flash (validated clean); amazon/nova-lite-v1
+        # was dropped after it degraded 4 council agents. 6 proven non-reasoning
+        # models cover the 8 personas.
+        "damodaran": "openrouter:deepseek/deepseek-v4-flash",
         "lynch": "openrouter:meta-llama/llama-3.3-70b-instruct",
         "*persona*": "openrouter:meta-llama/llama-3.3-70b-instruct",
         "*": "openrouter:meta-llama/llama-3.3-70b-instruct",

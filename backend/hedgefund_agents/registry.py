@@ -75,9 +75,13 @@ _PROD_PERSONA = ("anthropic", "claude-haiku-4-5-20251001")
 _PROD_ANALYTICAL = ("openrouter", "meta-llama/llama-3.3-70b-instruct")
 # Dev/blocked fallback: every agent on a free OpenRouter slug. Used when an
 # environment sets BLOCK_ANTHROPIC=True so a missing per-agent override can
-# never resolve to Haiku and silently spend credits. GPT-OSS 120B chosen as
-# the universal fallback — flagship-grade and $0/Mtok.
-_BLOCKED_FALLBACK = ("openrouter", "openai/gpt-oss-120b:free")
+# never resolve to Haiku and silently spend credits. Nemotron-3-Super-120B
+# chosen as the universal fallback — flagship-grade, $0/Mtok, and crucially
+# NON-reasoning: the previous pick (GPT-OSS 120B) burns its budget on hidden
+# thinking and emits empty content (the reasoning-exhaustion class behind the
+# qwen3.6-27b hang). Same non-reasoning rule the dev/frugal presets follow;
+# guarded by test_preset_invariants.
+_BLOCKED_FALLBACK = ("openrouter", "nvidia/nemotron-3-super-120b-a12b:free")
 
 _ALL_AGENT_NAMES = (
     "fundamentals", "technicals", "valuation", "sentiment",

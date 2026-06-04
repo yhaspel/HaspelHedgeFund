@@ -29,8 +29,11 @@ DEV_TIER_SLUGS: list[str] = [
 # --- frugal: cheap OpenRouter PAID slugs (stable, non-ephemeral). All
 #     NON-REASONING — the reasoning routes (openai/gpt-oss-120b,
 #     qwen/qwen3-235b-a22b-2507, qwen/qwen3.6-27b) were removed because they
-#     reasoning-exhaust to empty content on the cheap tier. sync_tier_models()
-#     drops any above the FRUGAL_PRICE_CEILING_* bounds.
+#     reasoning-exhaust to empty content on the cheap tier. amazon/nova-lite-v1
+#     was dropped after a validation run degraded 4 of its council agents
+#     (it returns non-schema-conforming output, not empty content, so it can't
+#     even self-heal-hop). sync_tier_models() drops any above the
+#     FRUGAL_PRICE_CEILING_* bounds.
 FRUGAL_TIER_SLUGS: list[str] = [
     "meta-llama/llama-3.3-70b-instruct",
     "nvidia/nemotron-3-nano-30b-a3b",
@@ -38,7 +41,6 @@ FRUGAL_TIER_SLUGS: list[str] = [
     "google/gemma-3-27b-it",
     "z-ai/glm-4-32b",
     "deepseek/deepseek-v4-flash",
-    "amazon/nova-lite-v1",
 ]
 
 # --- static menus for the Anthropic-anchored tiers (decision #4). These

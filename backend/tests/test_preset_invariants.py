@@ -84,3 +84,17 @@ def test_dev_and_frugal_menus_are_disjoint() -> None:
     catalog sync builds rows from both lists with different free/paid pricing."""
     overlap = set(DEV_TIER_SLUGS) & set(FRUGAL_TIER_SLUGS)
     assert not overlap, f"dev and frugal menus overlap on: {sorted(overlap)}"
+
+
+def test_blocked_fallback_is_free_vetted_and_non_reasoning() -> None:
+    """registry._BLOCKED_FALLBACK is the universal model every agent uses when
+    BLOCK_ANTHROPIC is on and an agent has no override. It bypasses the presets,
+    so it gets the SAME guards: a free OpenRouter slug, drawn from the vetted dev
+    menu, and NON-reasoning (the old GPT-OSS 120B reasoning pick emptied out)."""
+    from hedgefund_agents.registry import _BLOCKED_FALLBACK
+
+    provider, model = _BLOCKED_FALLBACK
+    assert provider == "openrouter"
+    assert model.endswith(":free"), model
+    assert not _is_reasoning(model), f"{model} is a reasoning slug"
+    assert model in DEV_TIER_SLUGS, f"{model} should be a vetted dev-menu slug"
