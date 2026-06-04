@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { of } from 'rxjs';
+
+import { FundDashboardPage } from './fund-dashboard.page';
+import { FundStore } from '../../abstraction/fund.store';
+import { FundOverview } from '../../core/models/autopilot.model';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Cmp = any;
+
+function overview(overrides: Partial<FundOverview> = {}): FundOverview {
+  return {
+    fund_id: 1, name: 'Autonomous Fund', state: 'active',
+    aggregate_nav: '300000', peak_equity: '305000', fund_dd_halt_pct: '6',
+    per_account: [
+      { strategy_id: 1, name: 'Multi-Factor', kind: 'long_short', state: 'active',
+        is_enabled: true, nav: '100000', peak_equity: '100000', rolling_sharpe: 0.8,
+        next_run_at: '2026-06-05T20:30:00Z' },
+    ],
+    correlation: { available: false, reason: 'insufficient_data', min_sample: 8 },
+    recommendations: [],
+    ...overrides,
+  };
+}
+
+function setup(o: FundOverview | null): Cmp {
+  const store = {
+    fund: signal(o).asReadonly(),
+    loadFund: () => of(o),
+    haltFund: () => of({}),
+    resumeFund: () => of({}),
+  } as unknown as FundStore;
+  TestBed.configureTestingModule({ providers: [{ provide: FundStore, useValue: store }] });
+  return TestBed.runInInjectionContext(() => new FundDashboardPage());
+}
+
+describe('FundDashboardPage', () => {
+  it('exposes the fund overview from the store', () => {
+    const cmp = setup(overview());
+    expect(cmp.fund().aggregate_nav).toBe('300000');
+    expect(cmp.cols()).toEqual([]); // correlation suppressed → no columns
+  });
+
+  it('derives correlation columns when the matrix is available', () => {
+    const cmp = setup(overview({
+      correlation: { available: true, matrix: { A: { A: 1, B: 0.2 }, B: { A: 0.2, B: 1 } } },
+    }));
+    expect(cmp.cols()).toEqual(['A', 'B']);
+  });
+});

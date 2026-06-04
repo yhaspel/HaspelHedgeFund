@@ -217,6 +217,23 @@ EDGAR_USER_AGENT = os.environ.get(
 )
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
+
+# P7 — Autonomous 3-account fund bootstrap. Each Alpaca paper account has its
+# own distinct API key/secret; NAME is a human label that becomes the
+# BrokerAccount.label + maps to a strategy. ``bootstrap_autonomous_fund`` reads
+# these (paper-only) + the owner email. Empty defaults keep the default install
+# unchanged (the command no-ops on missing triples). .env stays gitignored.
+ALPACA_PAPER_ACCOUNTS = [
+    {
+        "slot": i,
+        "name": os.environ.get(f"ALPACA_PAPER_{i}_NAME", ""),
+        "key_id": os.environ.get(f"ALPACA_PAPER_{i}_KEY_ID", ""),
+        "secret": os.environ.get(f"ALPACA_PAPER_{i}_SECRET", ""),
+    }
+    for i in (1, 2, 3)
+]
+ALPACA_FUND_OWNER_EMAIL = os.environ.get("ALPACA_FUND_OWNER_EMAIL", "")
+
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 # P3a-2: IBKR Client Portal Gateway URLs. The gateway is a docker-compose

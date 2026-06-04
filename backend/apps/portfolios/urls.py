@@ -1,5 +1,15 @@
 from django.urls import path
 
+from .api_autopilot import (
+    StrategyAutopilotDisableView,
+    StrategyAutopilotEnableView,
+    StrategyAutopilotHistoryView,
+    StrategyAutopilotResumeView,
+    StrategyAutopilotRunNowView,
+    StrategyAutopilotView,
+    StrategyExecutedView,
+)
+from .api_fund import FundHaltView, FundOverviewView, FundResumeView
 from .manual_book_views import (
     PortfolioCashView,
     PortfolioLedgerView,
@@ -98,4 +108,23 @@ urlpatterns = [
          name="portfolio-preferences"),
     path("portfolio/refresh-marks/", PortfolioRefreshMarksView.as_view(),
          name="portfolio-refresh-marks"),
+
+    # P7 — per-strategy autopilot + fund rollup.
+    path("strategies/<int:pk>/autopilot/", StrategyAutopilotView.as_view(),
+         name="strategy-autopilot"),
+    path("strategies/<int:pk>/autopilot/enable/", StrategyAutopilotEnableView.as_view(),
+         name="strategy-autopilot-enable"),
+    path("strategies/<int:pk>/autopilot/disable/", StrategyAutopilotDisableView.as_view(),
+         name="strategy-autopilot-disable"),
+    path("strategies/<int:pk>/autopilot/resume/", StrategyAutopilotResumeView.as_view(),
+         name="strategy-autopilot-resume"),
+    path("strategies/<int:pk>/autopilot/run-now/", StrategyAutopilotRunNowView.as_view(),
+         name="strategy-autopilot-run-now"),
+    path("strategies/<int:pk>/autopilot/history/", StrategyAutopilotHistoryView.as_view(),
+         name="strategy-autopilot-history"),
+    path("strategies/<int:pk>/executed/", StrategyExecutedView.as_view(),
+         name="strategy-executed"),
+    path("fund/", FundOverviewView.as_view(), name="fund-overview"),
+    path("fund/halt/", FundHaltView.as_view(), name="fund-halt"),
+    path("fund/resume/", FundResumeView.as_view(), name="fund-resume"),
 ]

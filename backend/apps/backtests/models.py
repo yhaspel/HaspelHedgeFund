@@ -25,6 +25,18 @@ class Backtest(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="backtests", on_delete=models.CASCADE
     )
+    # P7 §9: the strategy this backtest validates. The autopilot validation gate
+    # reads a strategy's latest DONE backtest (created after the strategy's last
+    # config edit) and requires positive OOS Sharpe + max DD within the
+    # hard-halt limit before its autopilot can be enabled. Nullable — ad-hoc
+    # backtests (the existing flow) carry no strategy link.
+    strategy = models.ForeignKey(
+        "portfolios.PortfolioStrategy",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="backtests",
+    )
     name = models.CharField(max_length=200)
     universe = models.JSONField(default=list)
     start_date = models.DateField()

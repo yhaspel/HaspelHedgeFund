@@ -420,10 +420,40 @@ def apply_drift_as_ledger_entries(
     return written
 
 
+DRIFT_TOLERANCE_FLOOR_USD = Decimal("50")
+DRIFT_TOLERANCE_PCT = Decimal("0.01")  # 1% of position market value
+
+
+def drift_within_tolerance(drift, portfolio) -> bool:
+    """P7 §11: is the drift small enough to auto-square safely? Per position,
+    ``|drift notional| <= max(1% of the position's market value, $50)``; the same
+    band applies to cash drift vs. the book's cash. A conservative starting band
+    (tuned on the live-sandbox checklist). Beyond it, the caller halts the
+    autopilot instead of silently trading against an unexplained book."""
+    cash_tol = max(DRIFT_TOLERANCE_PCT * abs(portfolio.cash_balance), DRIFT_TOLERANCE_FLOOR_USD)
+    if abs(drift.cash_delta) > cash_tol:
+        return False
+    local = {
+        p.ticker.upper(): (Decimal(str(p.quantity)), Decimal(str(p.avg_cost or 0)))
+        for p in portfolio.positions.all()
+    }
+    for ticker, dq in drift.position_deltas.items():
+        if abs(dq) <= Decimal("0.000001"):
+            continue
+        qty, cost = local.get(ticker.upper(), (Decimal("0"), Decimal("100")))
+        price = cost if cost > 0 else Decimal("100")
+        drift_notional = abs(dq) * price
+        mv = abs(qty) * price
+        if drift_notional > max(DRIFT_TOLERANCE_PCT * mv, DRIFT_TOLERANCE_FLOOR_USD):
+            return False
+    return True
+
+
 def reconcile_account(
     account: BrokerAccount,
     *,
     triggered_by: str = BrokerSyncEvent.TRIGGER_PERIODIC,
+    halt_beyond_tolerance: bool = False,
 ) -> BrokerSyncEvent:
     # Always refetch — the BrokerAccount + Portfolio passed in by a view
     # may carry stale cash_balance loaded before the post-confirm fill
@@ -500,21 +530,32 @@ def reconcile_account(
         portfolio=account.portfolio,
     )
     written = 0
+    beyond_tolerance = False
     if drift.has_differences:
-        broker_positions_by_ticker = {p.ticker.upper(): p for p in broker_positions}
-        written = apply_drift_as_ledger_entries(
-            drift=drift,
-            portfolio=account.portfolio,
-            event=event,
-            broker_positions=broker_positions_by_ticker,
-        )
+        # P7 §11: gate the EXISTING auto-write (no second path). Within tolerance
+        # squares as before; beyond tolerance leaves the book untouched and flags
+        # the event so the autopilot layer halts + notifies instead of trading
+        # against an unexplained book.
+        if halt_beyond_tolerance and not drift_within_tolerance(drift, account.portfolio):
+            beyond_tolerance = True
+        else:
+            broker_positions_by_ticker = {p.ticker.upper(): p for p in broker_positions}
+            written = apply_drift_as_ledger_entries(
+                drift=drift,
+                portfolio=account.portfolio,
+                event=event,
+                broker_positions=broker_positions_by_ticker,
+            )
 
     event.drift_detected = drift.has_differences
     event.ledger_entries_written = written
     event.finished_at = timezone.now()
     event.notes = drift.human_readable() if drift.has_differences else ""
+    if beyond_tolerance:
+        event.error_message = "drift_beyond_tolerance"
     event.save(update_fields=[
         "drift_detected", "ledger_entries_written", "finished_at", "notes",
+        "error_message",
     ])
 
     # Update the account header.

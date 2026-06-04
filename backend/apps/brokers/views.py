@@ -23,6 +23,7 @@ Routes:
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from decimal import Decimal
 
@@ -1273,21 +1274,23 @@ class BrokerOrderConfirmView(APIView):
         #   2) poll any other still-open orders on the same account.
         #   3) reconcile_account squares residual drift the fill stream
         #      didn't account for.
+        # P7 §11: run the three steps ATOMICALLY so a mid-pipeline failure can't
+        # leave fills ingested but drift unrecorded — either the whole
+        # ingest→poll→reconcile sequence commits or none of it does. Still
+        # best-effort at the response level (a failure logs, never 500s the
+        # confirm); the periodic reconcile beat retries.
         try:
-            ingest_order_fills(order, broker)
-        except Exception:  # pragma: no cover
-            pass
-        try:
-            poll_open_orders_for_account(order.broker_account)
-        except Exception:  # pragma: no cover
-            pass
-        try:
-            reconcile_account(
-                order.broker_account,
-                triggered_by=BrokerSyncEvent.TRIGGER_POST_ORDER,
+            with transaction.atomic():
+                ingest_order_fills(order, broker)
+                poll_open_orders_for_account(order.broker_account)
+                reconcile_account(
+                    order.broker_account,
+                    triggered_by=BrokerSyncEvent.TRIGGER_POST_ORDER,
+                )
+        except Exception:  # pragma: no cover - best-effort; periodic reconcile retries
+            logging.getLogger(__name__).exception(
+                "post-confirm pipeline failed (rolled back) order=%s", order.pk
             )
-        except Exception:  # pragma: no cover
-            pass
         order.refresh_from_db()
         payload = BrokerOrderSerializer(order).data
         if gate_result is not None:

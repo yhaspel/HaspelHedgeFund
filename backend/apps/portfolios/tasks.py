@@ -146,6 +146,14 @@ def _maybe_auto_enroll(target: PortfolioTarget) -> None:
     failure (e.g. a stale mark) must never flip a successful cycle to failed."""
     try:
         strategy = target.strategy
+        # P7: a broker-linked strategy's book of record is its broker account
+        # (real fills), not a simulated Position book — never enroll it.
+        from apps.brokers.models import StrategyBrokerLink
+
+        if StrategyBrokerLink.objects.filter(
+            strategy=strategy, is_active=True
+        ).exists():
+            return
         if not getattr(strategy, "auto_enroll_on_done", False):
             return
         from . import runs_bridge
@@ -908,6 +916,12 @@ def finalize_cycle(council_results: list[dict], target_id: int) -> dict:
     target.finished_at = timezone.now()
     target.save()
     _maybe_auto_enroll(target)
+    # P7: shared terminal hook — for a broker-linked strategy with an enabled
+    # autopilot, autonomously convert this cycle into paper broker orders (the
+    # status flips to autopilot_submitted inside). No-op otherwise.
+    from .autopilot import _finalize_target
+
+    _finalize_target(target)
 
     PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}

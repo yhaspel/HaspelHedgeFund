@@ -1,0 +1,233 @@
+"""P7 Stage C — validation gate, fund layer (aggregate/correlation/halt),
+the autopilot + fund API endpoints, and autopilot notifications."""
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+from django.contrib.auth import get_user_model
+from rest_framework.test import APIClient
+
+from apps.backtests.models import Backtest, BacktestMetrics
+from apps.brokers.models import BrokerAccount, StrategyBrokerLink
+from apps.notifications.models import NotificationChannel, NotificationEvent
+from apps.portfolios import fund as fund_layer
+from apps.portfolios.models import (
+    AutonomousFund,
+    Portfolio,
+    PortfolioStrategy,
+    StrategyAutopilot,
+    Universe,
+    UniverseMembership,
+)
+from apps.portfolios.validation import validation_status
+
+User = get_user_model()
+
+
+@pytest.fixture
+def user(db):
+    return User.objects.create_user(email="p7f@x.test", password="pw-fake-123456789")
+
+
+@pytest.fixture
+def client(user):
+    c = APIClient()
+    c.force_authenticate(user)
+    return c
+
+
+def _strategy(user, name="S", **kw):
+    u = Universe.objects.create(name=f"f-uni-{name}")
+    UniverseMembership.objects.create(universe=u, ticker="AAPL", effective_from=dt.date(2020, 1, 1))
+    pf = Portfolio.objects.create(user=user, kind=Portfolio.KIND_STRATEGY, name=name)
+    return PortfolioStrategy.objects.create(
+        user=user, name=name, universe=u, portfolio=pf,
+        kind=PortfolioStrategy.KIND_LONG_SHORT, **kw,
+    )
+
+
+def _account(user, label="A", cash="100000"):
+    pf = Portfolio.objects.create(
+        user=user, kind=Portfolio.KIND_BROKER, name=f"bk-{label}", cash_balance=Decimal(cash),
+    )
+    return BrokerAccount.objects.create(
+        user=user, broker="mock", mode=BrokerAccount.MODE_PAPER,
+        account_id=f"mock-{label}", label=label, portfolio=pf,
+        connection_status=BrokerAccount.STATUS_ACTIVE,
+    )
+
+
+def _passing_backtest(strategy, *, oos="0.8", dd="4.0"):
+    bt = Backtest.objects.create(
+        user=strategy.user, strategy=strategy, name="bt",
+        start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 1, 1),
+        status=Backtest.DONE,
+    )
+    BacktestMetrics.objects.create(
+        backtest=bt, mean_oos_sharpe=Decimal(oos), max_drawdown_pct=Decimal(dd),
+    )
+    return bt
+
+
+# --------------------------------------------------------------------------
+# §9 validation gate.
+# --------------------------------------------------------------------------
+def test_validation_fails_without_backtest(user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s)
+    out = validation_status(s)
+    assert out["passed"] is False
+    assert any(c["key"] == "has_backtest" and not c["ok"] for c in out["checks"])
+
+
+def test_validation_passes_with_good_backtest(user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s, dd_hard_halt_pct=Decimal("7.5"))
+    _passing_backtest(s, oos="0.8", dd="4.0")
+    out = validation_status(s)
+    assert out["passed"] is True
+
+
+def test_validation_fails_dd_over_limit(user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s, dd_hard_halt_pct=Decimal("7.5"))
+    _passing_backtest(s, oos="0.8", dd="12.0")        # 12% > 7.5% limit
+    out = validation_status(s)
+    assert out["passed"] is False
+    assert any(c["key"] == "drawdown_within_limit" and not c["ok"] for c in out["checks"])
+
+
+def test_validation_stale_after_edit(user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s)
+    _passing_backtest(s)
+    s.max_position_pct = Decimal("0.03")
+    s.save()                                          # bumps updated_at past the backtest
+    out = validation_status(s)
+    assert out["passed"] is False
+    assert any(c["key"] == "backtest_fresh" and not c["ok"] for c in out["checks"])
+
+
+# --------------------------------------------------------------------------
+# Autopilot API — enable gate forces validation + auto_run_council.
+# --------------------------------------------------------------------------
+def test_enable_rejected_without_validation(client, user):
+    s = _strategy(user)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    r = client.put(f"/api/strategies/{s.id}/autopilot/", {"is_enabled": True}, format="json")
+    assert r.status_code == 409
+    assert r.json()["validation"]["passed"] is False
+
+
+def test_enable_succeeds_and_forces_council(client, user):
+    s = _strategy(user, auto_run_council=False)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    StrategyAutopilot.objects.create(
+        strategy=s, broker_account=acc, dd_hard_halt_pct=Decimal("7.5"),
+    )
+    _passing_backtest(s)
+    r = client.post(f"/api/strategies/{s.id}/autopilot/enable/")
+    assert r.status_code == 200
+    s.refresh_from_db()
+    assert s.auto_run_council is True                 # §6.0 forced on enable
+    assert s.autopilot.is_enabled is True
+    assert s.autopilot.next_run_at is not None
+
+
+def test_disable_and_resume(client, user):
+    s = _strategy(user)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    ap = StrategyAutopilot.objects.create(
+        strategy=s, broker_account=acc, is_enabled=True,
+        state=StrategyAutopilot.STATE_HALTED,
+    )
+    assert client.post(f"/api/strategies/{s.id}/autopilot/disable/").status_code == 200
+    ap.refresh_from_db()
+    assert ap.is_enabled is False
+    # resume clears the halt state.
+    r = client.post(f"/api/strategies/{s.id}/autopilot/resume/")
+    assert r.status_code == 200
+    ap.refresh_from_db()
+    assert ap.state == StrategyAutopilot.STATE_ACTIVE
+
+
+def test_executed_returns_broker_book(client, user):
+    s = _strategy(user)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    r = client.get(f"/api/strategies/{s.id}/executed/")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["linked"] is True
+    assert body["account_label"] == "A"
+
+
+# --------------------------------------------------------------------------
+# Fund layer + API.
+# --------------------------------------------------------------------------
+def _fund_of_three(user):
+    fund = AutonomousFund.objects.create(owner=user, name="Autonomous Fund")
+    for i in range(3):
+        s = _strategy(user, name=f"S{i}")
+        acc = _account(user, label=f"A{i}")
+        StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+        StrategyAutopilot.objects.create(strategy=s, broker_account=acc, is_enabled=True)
+        fund.strategies.add(s)
+    return fund
+
+
+def test_fund_overview_aggregates_and_suppresses_correlation(user):
+    fund = _fund_of_three(user)
+    out = fund_layer.fund_overview(fund)
+    assert len(out["per_account"]) == 3
+    assert Decimal(out["aggregate_nav"]) == Decimal("300000")     # 3 × $100k demo books
+    assert out["correlation"]["available"] is False               # cold start
+    assert out["correlation"]["reason"] == "insufficient_data"
+
+
+def test_fund_halt_halts_all_then_resume(user):
+    fund = _fund_of_three(user)
+    n = fund_layer.halt_fund(fund)
+    assert n == 3
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_HALTED
+    assert all(
+        ap.state == StrategyAutopilot.STATE_HALTED
+        for ap in StrategyAutopilot.objects.all()
+    )
+    fund_layer.resume_fund(fund)
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_ACTIVE
+    # per-account halts persist (fail-safe — re-evaluated on the next tick).
+    assert all(ap.state == StrategyAutopilot.STATE_HALTED for ap in StrategyAutopilot.objects.all())
+
+
+def test_fund_api_halt_resume(client, user):
+    _fund_of_three(user)
+    assert client.get("/api/fund/").status_code == 200
+    r = client.post("/api/fund/halt/")
+    assert r.status_code == 200
+    assert r.json()["accounts_halted"] == 3
+    assert client.post("/api/fund/resume/").json()["state"] == "active"
+
+
+# --------------------------------------------------------------------------
+# Notifications — carry the disclaimer.
+# --------------------------------------------------------------------------
+def test_notify_autopilot_creates_event_with_disclaimer(user):
+    from apps.notifications.autopilot import DISCLAIMER, FILL, notify_autopilot
+
+    s = _strategy(user)
+    channel = NotificationChannel.objects.create(
+        user=user, kind=NotificationChannel.EMAIL, config={"address": "x@y.test"},
+    )
+    ap = StrategyAutopilot.objects.create(strategy=s, notification_channel=channel)
+    assert notify_autopilot(ap, FILL, "AAPL filled 10 @ 200") is True
+    ev = NotificationEvent.objects.filter(channel=channel).first()
+    assert ev is not None
+    assert DISCLAIMER in ev.body

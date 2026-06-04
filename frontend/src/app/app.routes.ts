@@ -127,6 +127,24 @@ export const routes: Routes = [
       ),
   },
   {
+    // P7 — per-strategy autopilot panel.
+    path: 'strategies/:id/autopilot',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/strategies/autopilot-panel.page').then(
+        (m) => m.AutopilotPanelPage,
+      ),
+  },
+  {
+    // P7 — the autonomous fund dashboard (3 accounts + aggregate + correlation).
+    path: 'fund',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/fund/fund-dashboard.page').then(
+        (m) => m.FundDashboardPage,
+      ),
+  },
+  {
     path: 'graphs',
     canActivate: [authGuard],
     loadComponent: () =>

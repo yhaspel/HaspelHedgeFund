@@ -57,6 +57,24 @@ app.conf.beat_schedule = {
         "task": "apps.schedules.tasks.dispatch_due_scheduled_runs",
         "schedule": 60.0,
     },
+    # P7: autopilot dispatcher. Fires every minute; finds enabled, non-halted
+    # StrategyAutopilots whose next_run_at has passed (the 3 staggered fund
+    # accounts) and hands each to run_autopilot_cycle.
+    "dispatch-due-autopilots": {
+        "task": "apps.portfolios.tasks_autopilot.dispatch_due_autopilots",
+        "schedule": 60.0,
+    },
+    # P7: release locally-held pending_open orders once the market opens.
+    "release-pending-open-orders": {
+        "task": "apps.portfolios.tasks_autopilot.release_pending_open_orders",
+        "schedule": 60.0,
+    },
+    # P7: hourly guardrail sweep — per-account drawdown auto-halt + (Stage C)
+    # fund-level aggregate drawdown halt.
+    "autopilot-guardrail-sweep": {
+        "task": "apps.portfolios.tasks_autopilot.guardrail_sweep",
+        "schedule": 3600.0,
+    },
     # P3b: nightly leaderboard recompute (agents + strategies). Pure Python.
     "recompute-leaderboards": {
         "task": "apps.leaderboard.tasks.recompute_leaderboards",

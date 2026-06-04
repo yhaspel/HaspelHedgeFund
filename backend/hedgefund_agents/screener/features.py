@@ -21,6 +21,10 @@ class ScreenerFeatures:
     momentum_1m: float = 0.0
     momentum_3m: float = 0.0
     momentum_6m: float = 0.0
+    # P7: low-volatility factor. Stored as the NEGATIVE annualised realised vol
+    # so "higher = better long" holds (a calmer name scores higher). Default 0.0
+    # is neutral; only strategies that weight `low_vol` (Account 1) feel it.
+    low_vol: float = 0.0
     earnings_yield: float = 0.0          # 1 / PE; higher = cheaper
     quality_roic: float = 0.0
     fcf_margin: float = 0.0
@@ -70,6 +74,7 @@ def _synthetic_fallback(ticker: str, as_of: date) -> ScreenerFeatures:
     feats.fcf_margin = f(6, -0.05, 0.25)
     feats.debt_to_equity = f(7, 0.0, 3.0)
     feats.news_negative_score = f(8, 0.0, 1.0)
+    feats.low_vol = -f(11, 0.10, 0.45)   # negative annualised vol (higher = calmer)
     feats.last_close = f(9, 10.0, 500.0)
     feats.market_cap = f(10, 1e9, 3e12)
     feats.available = True
@@ -105,9 +110,17 @@ def compute_features(
         feats.momentum_6m = (closes[-1] / closes[0] - 1.0)
         rolling_high = max(closes[-min(252, len(closes)):])
         feats.drawdown_from_high = closes[-1] / rolling_high - 1.0
+        # P7 low-vol factor: annualised realised vol over the trailing window
+        # (≈1 quarter), stored negated so a calmer name scores higher.
+        window = closes[-min(63, len(closes)):]
+        rets = [window[i] / window[i - 1] - 1.0 for i in range(1, len(window)) if window[i - 1] > 0]
+        if len(rets) >= 2:
+            mean = sum(rets) / len(rets)
+            var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+            feats.low_vol = -math.sqrt(max(0.0, var)) * math.sqrt(252)
         feats.available = True
         feats.synthetic = False
-        feats.real_signals = ("price_momentum", "drawdown")
+        feats.real_signals = ("price_momentum", "drawdown", "low_vol")
         feats.sector = sector
         return feats
     # Fallback to synthetic so ranking still produces a stable list.
@@ -127,6 +140,7 @@ def long_score(f: ScreenerFeatures, weights: dict[str, float]) -> float:
         + weights.get("quality_roic", 1.0) * f.quality_roic
         + weights.get("fcf_margin", 1.0) * f.fcf_margin
         - weights.get("debt_to_equity", 0.25) * f.debt_to_equity
+        + weights.get("low_vol", 0.0) * f.low_vol
     )
 
 
@@ -151,6 +165,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "quality_roic": 1.0,
     "fcf_margin": 1.0,
     "debt_to_equity": 0.25,
+    "low_vol": 0.0,          # P7: off by default; Account 1 opts in (§3).
     # Shorts
     "short_drawdown": 1.0,
     "short_momentum_3m": 1.0,

@@ -13,6 +13,7 @@ the credential without dropping audit history on the account.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -151,6 +152,11 @@ class BrokerOrder(models.Model):
     STATUS_CANCELLED = "cancelled"
     STATUS_REJECTED = "rejected"
     STATUS_ERROR = "error"
+    # P7: a locally-held order awaiting the next market open. NOT an OPEN
+    # status (it has not reached the broker yet) — the release beat task
+    # submits it at the open. Distinct from the broker-round-tripped
+    # ``queued_until_open`` flag (see ``release_after`` below).
+    STATUS_PENDING_OPEN = "pending_open"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "Draft"),
         (STATUS_CONFIRMED, "Confirmed"),
@@ -160,6 +166,7 @@ class BrokerOrder(models.Model):
         (STATUS_CANCELLED, "Cancelled"),
         (STATUS_REJECTED, "Rejected"),
         (STATUS_ERROR, "Error"),
+        (STATUS_PENDING_OPEN, "Pending market open"),
     ]
     OPEN_STATUSES = (STATUS_SUBMITTED, STATUS_PARTIAL)
 
@@ -265,6 +272,20 @@ class BrokerOrder(models.Model):
     confirmation_user_agent = models.CharField(max_length=255, blank=True, default="")
     confirmation_audit = models.JSONField(default=dict, blank=True)
     queued_until_open = models.BooleanField(default=False)
+    # P7: a locally-held pre-submit intent for a market-closed order. When the
+    # bridge creates an order while the market is closed it is left in
+    # ``status=pending_open`` with ``release_after`` = the next session open;
+    # a beat task (``release_pending_open_orders``) submits it at the open.
+    # This is deliberately NOT ``queued_until_open`` — that flag is overwritten
+    # from the broker snapshot on every reconcile (idempotency.py), so it can't
+    # safely carry a local intent.
+    release_after = models.DateTimeField(null=True, blank=True)
+    # P7: the strategy-cycle order this broker order was emitted from — the
+    # spine (BrokerOrder → RebalanceOrder → PortfolioTarget → strategy).
+    rebalance_order = models.ForeignKey(
+        "portfolios.RebalanceOrder", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="broker_orders",
+    )
     submitted_at = models.DateTimeField(null=True, blank=True)
     filled_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
@@ -449,3 +470,66 @@ class DisclaimerAcceptance(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"accept u={self.user_id} d={self.disclaimer_id}"
+
+
+class StrategyBrokerLink(models.Model):
+    """P7 (carried from the unbuilt P3a-5): binds a ``PortfolioStrategy`` to a
+    **paper** ``BrokerAccount`` so the strategy's weekly rebalance executes as
+    real broker orders against that account's book.
+
+    Paper-only is structural: ``save()`` rejects a link to a ``mode="live"``
+    account unconditionally (mirrors the live hard-block in ``confirmation.gate``
+    and the adapter's ``assert_paper``). At most one *active* link per strategy
+    (partial unique constraint) — a strategy trades exactly one account at a time.
+    For the 3-account fund this is three rows, one per strategy↔account pair.
+    """
+
+    strategy = models.ForeignKey(
+        "portfolios.PortfolioStrategy",
+        on_delete=models.CASCADE,
+        related_name="broker_links",
+    )
+    broker_account = models.ForeignKey(
+        BrokerAccount, on_delete=models.CASCADE, related_name="strategy_links",
+    )
+    # The account's paper balance backing this strategy (e.g. $100k). There is
+    # no shared account to sub-allocate, so this is informational in the
+    # 3-account fund — see ADR 0018.
+    allocation_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("100000"),
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["strategy"],
+                condition=models.Q(is_active=True),
+                name="uniq_active_broker_link_per_strategy",
+            ),
+        ]
+        indexes = [models.Index(fields=["broker_account", "is_active"])]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"link s={self.strategy_id} -> a={self.broker_account_id}"
+
+    def save(self, *args, **kwargs):
+        # Enforce the paper-only guard even when a caller skips full_clean().
+        self._assert_paper()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        self._assert_paper()
+
+    def _assert_paper(self) -> None:
+        if self.broker_account_id:
+            acc = self.broker_account
+            if acc.mode == BrokerAccount.MODE_LIVE:
+                from django.core.exceptions import ValidationError
+
+                raise ValidationError(
+                    "StrategyBrokerLink is paper-only; a live broker account "
+                    "can never be linked to an autonomous strategy."
+                )

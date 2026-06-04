@@ -279,6 +279,25 @@ def run_macro(state: AgentState) -> AgentState:
     # UI consumes. Kept as a sibling key rather than added to MacroOutput so
     # the LLM contract stays narrow.
     payload["_freshness"] = _macro_freshness(snapshot, as_of)
+    # P7: cross-asset trend (TSMOM) for THIS candidate — a regime input the
+    # council debates (the CTA-lite sleeve, Account 3). Additive + best-effort:
+    # the council runs per-ticker, so each candidate gets its own trend posture.
+    try:
+        from .tsmom import tsmom_score
+
+        ticker = state.get("ticker") if state else None
+        provider = state.get("data_provider") if state else None
+        if ticker and provider is not None:
+            ts = tsmom_score(ticker, as_of, provider)
+            payload["tsmom"] = ts
+            if ts.get("available"):
+                payload["narrative"] = (
+                    f"{payload.get('narrative', '')}\n\nCross-asset trend (TSMOM) "
+                    f"for {ticker}: {ts['posture']} (1/3/12-mo blend "
+                    f"{ts['score']:+.1%})."
+                ).strip()
+    except Exception:  # noqa: BLE001 — trend is an optional regime input
+        pass
     return {"macro": payload}  # type: ignore[return-value]
 
 

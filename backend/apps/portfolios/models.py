@@ -446,6 +446,11 @@ class PortfolioStrategy(models.Model):
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # P7: bumped on every save (caps/weights edits). The §9 autopilot
+    # validation gate compares a qualifying backtest's created_at against this
+    # so editing a strategy's config re-locks the enable toggle until a fresh
+    # passing walk-forward backtest exists (staleness rule).
+    updated_at = models.DateTimeField(auto_now=True, null=True)
 
     def __str__(self) -> str:
         return f"{self.name} ({self.universe.name})"
@@ -593,6 +598,13 @@ class PortfolioTarget(models.Model):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # P7: a cycle whose RebalanceOrder plan was autonomously converted to paper
+    # BrokerOrders and submitted by the autopilot bridge. Treated as TERMINAL
+    # (like ``done``) and deliberately kept OUT of ``ACTIVE_STATUSES`` — that
+    # set is the dispatcher's "still in flight" guard, so marking a finished
+    # submitted cycle active would make it look perpetually running and block
+    # the next weekly dispatch.
+    AUTOPILOT_SUBMITTED = "autopilot_submitted"
     STATUS_CHOICES = [
         (QUEUED, "Queued"),
         (SCREENING, "Screening"),
@@ -603,8 +615,10 @@ class PortfolioTarget(models.Model):
         (DONE, "Done"),
         (FAILED, "Failed"),
         (CANCELLED, "Cancelled"),
+        (AUTOPILOT_SUBMITTED, "Autopilot submitted"),
     ]
-    # Non-terminal: still progressing. Terminal: done|failed|cancelled.
+    # Non-terminal: still progressing. Terminal: done|failed|cancelled|
+    # autopilot_submitted.
     ACTIVE_STATUSES = {QUEUED, SCREENING, AWAITING_REVIEW, RUNNING_COUNCIL, CONSTRUCTING, RUNNING}
 
     strategy = models.ForeignKey(
@@ -887,3 +901,200 @@ class RebalanceOrder(models.Model):
 
     def __str__(self) -> str:
         return f"{self.side} {self.ticker} qty={self.quantity}"
+
+
+# ---------------------------------------------------------------------------
+# P7 — Autonomous fund: per-strategy autopilot + run history + fund roster.
+# These mirror the proven ``ScheduledRun`` / ``ScheduledRunHistory`` shapes
+# (apps/schedules/models.py). All additive — a strategy with no autopilot row
+# behaves exactly as before P7.
+# ---------------------------------------------------------------------------
+class StrategyAutopilot(models.Model):
+    """A per-strategy weekly scheduler + deterministic guardrail config.
+
+    Mirrors ``ScheduledRun`` (cron + market gate + cost ceiling + on_breach)
+    and adds the pod-style risk guardrails (vol target, drawdown breaker,
+    daily caps, liquidity floor) and the state machine the dispatcher and
+    guardrail sweep key on. ``is_enabled`` is the per-account kill switch and
+    cannot be set true until the §9 validation gate passes (enforced in the API
+    layer). Guardrail ``*_pct`` fields are WHOLE PERCENTS (10 = 10%) — a
+    deliberate, separate convention from the strategy's fraction fields.
+    """
+
+    ON_BREACH_DEGRADE = "degrade"
+    ON_BREACH_SKIP = "skip"
+    ON_BREACH_NOTIFY = "notify_only"
+    ON_BREACH_CHOICES = [
+        (ON_BREACH_DEGRADE, "Degrade to a cheaper preset"),
+        (ON_BREACH_SKIP, "Skip the cycle"),
+        (ON_BREACH_NOTIFY, "Run anyway and notify"),
+    ]
+
+    SHORT_SINGLE_NAME = "single_name"
+    SHORT_ETF_HEDGE = "etf_hedge"
+    SHORT_CASH = "cash"
+    SHORT_MODE_CHOICES = [
+        (SHORT_SINGLE_NAME, "Single-name shorts"),
+        (SHORT_ETF_HEDGE, "ETF hedge"),
+        (SHORT_CASH, "Cash (no shorts)"),
+    ]
+
+    STATE_ACTIVE = "active"
+    STATE_SOFT_CUT = "soft_cut"
+    STATE_HALTED = "halted"
+    STATE_CHOICES = [
+        (STATE_ACTIVE, "Active"),
+        (STATE_SOFT_CUT, "Soft cut (gross halved)"),
+        (STATE_HALTED, "Halted"),
+    ]
+
+    strategy = models.OneToOneField(
+        PortfolioStrategy, on_delete=models.CASCADE, related_name="autopilot",
+    )
+    is_enabled = models.BooleanField(default=False)
+    cron_expression = models.CharField(max_length=64, default="30 16 * * 5")
+    timezone = models.CharField(max_length=64, default="America/New_York")
+    is_market_aware = models.BooleanField(default=True)
+    broker_account = models.ForeignKey(
+        "brokers.BrokerAccount", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="autopilots",
+    )
+    model_preset = models.CharField(max_length=32, default="frugal")
+    cost_ceiling_usd = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+    )
+    on_breach = models.CharField(
+        max_length=16, choices=ON_BREACH_CHOICES, default=ON_BREACH_DEGRADE,
+    )
+
+    # Guardrails (research defaults). Whole-percent convention.
+    target_vol_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("10"))
+    dd_soft_cut_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("5"))
+    dd_hard_halt_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("7.5"))
+    max_orders_per_day = models.PositiveIntegerField(default=30)
+    max_notional_per_day_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("50000"),
+    )
+    liquidity_adv_cap_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("5"),
+    )
+    short_mode = models.CharField(
+        max_length=16, choices=SHORT_MODE_CHOICES, default=SHORT_SINGLE_NAME,
+    )
+    # §6.3: on a hard halt, freeze (default) or auto-flatten to cash via the
+    # same gated order path.
+    flatten_on_halt = models.BooleanField(default=False)
+
+    # State machine (deterministic; the dispatcher trusts these, not the caller).
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_ACTIVE)
+    peak_equity_usd = models.DecimalField(
+        max_digits=16, decimal_places=2, null=True, blank=True,
+    )
+    notification_channel = models.ForeignKey(
+        "notifications.NotificationChannel", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="autopilots",
+    )
+
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"autopilot s={self.strategy_id} {self.state} enabled={self.is_enabled}"
+
+    def reschedule(self, after=None) -> None:
+        """Recompute ``next_run_at`` (reuses the scheduler's cron helper). No-op
+        (clears the next fire) when disabled or the cron is invalid."""
+        from apps.schedules.triggers import compute_next, is_valid_cron
+
+        if self.is_enabled and is_valid_cron(self.cron_expression):
+            self.next_run_at = compute_next(self.cron_expression, self.timezone, after=after)
+        else:
+            self.next_run_at = None
+
+
+class AutopilotRun(models.Model):
+    """One row per autopilot fire — mirrors ``ScheduledRunHistory`` (idempotency
+    keyed on ``(autopilot, fire_time_utc)`` so a beat restart can't
+    double-dispatch). Records the cycle target, the broker orders it emitted,
+    and the deterministic guardrail actions (vol scale, caps hit, dd state)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUBMITTED = "submitted"
+    SKIPPED = "skipped"
+    HALTED = "halted"
+    FAILED = "failed"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (RUNNING, "Running"),
+        (SUBMITTED, "Submitted"),
+        (SKIPPED, "Skipped"),
+        (HALTED, "Halted"),
+        (FAILED, "Failed"),
+    ]
+
+    autopilot = models.ForeignKey(
+        StrategyAutopilot, on_delete=models.CASCADE, related_name="runs",
+    )
+    fire_time_utc = models.DateTimeField()
+    target = models.ForeignKey(
+        PortfolioTarget, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="autopilot_runs",
+    )
+    broker_orders = models.ManyToManyField(
+        "brokers.BrokerOrder", related_name="autopilot_runs", blank=True,
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=PENDING)
+    submit_decision = models.JSONField(default=dict, blank=True)
+    guardrail_actions = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True, default="")
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["autopilot", "fire_time_utc"],
+                name="uniq_autopilot_fire_time",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"autopilotrun(ap={self.autopilot_id} @ {self.fire_time_utc})"
+
+
+class AutonomousFund(models.Model):
+    """The fund-level layer over the (up to 3) isolated paper accounts.
+
+    Persisted (not a settings roster) because the fund kill switch needs a
+    mutable, persisted halt flag the ``/api/fund/halt/`` endpoint writes and the
+    guardrail sweep reads. The roster is an M2M of strategies (one fund per
+    strategy). See ADR 0018."""
+
+    STATE_ACTIVE = "active"
+    STATE_HALTED = "halted"
+    STATE_CHOICES = [(STATE_ACTIVE, "Active"), (STATE_HALTED, "Halted")]
+
+    name = models.CharField(max_length=80, default="Autonomous Fund")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="funds",
+    )
+    strategies = models.ManyToManyField(
+        PortfolioStrategy, related_name="funds", blank=True,
+    )
+    # Whole-percent fund-wide drawdown halt (tighter than any single account).
+    fund_dd_halt_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("6"),
+    )
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default=STATE_ACTIVE)
+    peak_equity_usd = models.DecimalField(
+        max_digits=16, decimal_places=2, null=True, blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"fund {self.name} ({self.state})"
