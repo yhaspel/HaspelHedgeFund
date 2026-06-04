@@ -175,6 +175,39 @@ LLM_FREE_ONLY = os.environ.get("LLM_FREE_ONLY", "0") == "1"
 # so flipping it on can't defeat that guard.
 OPENROUTER_PAID_FALLBACK = os.environ.get("OPENROUTER_PAID_FALLBACK", "0") == "1"
 
+# --- Self-healing run resilience (see hedgefund_agents/llm/adapters/openrouter.py
+# and hedgefund_agents/graphs/_node_fallback.py) -------------------------------
+# A run must never hang indefinitely or die because one of ~16 agents drew a
+# dead/slow/misbehaving model route. Three composing layers:
+#
+#   L1  LLM_HTTP_READ_TIMEOUT — per-read socket timeout (seconds). The old scalar
+#       httpx timeout of 120s is a per-OPERATION read timeout; a reasoning route
+#       that trickles bytes resets it on every byte and never fires (run 236 hung
+#       10+ min). A tighter read timeout converts a stalled response into a normal
+#       httpx.ReadTimeout the retry/self-heal path can act on.
+#   L2  LLM_SELF_HEAL + LLM_LAST_RESORT_MODEL — when a route is permanently dead
+#       (HTTP 404/402, run 228-235), returns a non-JSON body (run 241), or is
+#       terminally empty (reasoning exhaustion, run 236/237), the adapter hops
+#       ONCE to a known-good NON-reasoning model instead of failing the whole run.
+#   L3  RUN_SOFT_TIME_LIMIT_SECONDS / RUN_HARD_TIME_LIMIT_SECONDS — Celery
+#       wall-clock cap on execute_run / run_candidate_council so a run is
+#       guaranteed to terminate (soft → clean FAILED; hard → SIGKILL backstop).
+LLM_HTTP_READ_TIMEOUT = float(os.environ.get("LLM_HTTP_READ_TIMEOUT", "45"))
+LLM_SELF_HEAL = os.environ.get("LLM_SELF_HEAL", "1") == "1"
+# Non-reasoning, proven prod analytical default. Under LLM_FREE_ONLY the adapter
+# uses the :free variant so zero-spend environments never silently bill.
+LLM_LAST_RESORT_MODEL = os.environ.get(
+    "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct"
+)
+# When True (default), a live run tolerates a single agent's unrecoverable
+# failure by emitting that agent's null signal (the council proceeds and the run
+# completes "done", flagged degraded) instead of aborting the whole run. Genuine
+# config errors (ModelUnavailable after the L2 hop) still raise so a fully-broken
+# setup surfaces. Backtests have always behaved this way; this extends it to live.
+RUN_SELF_HEAL = os.environ.get("RUN_SELF_HEAL", "1") == "1"
+RUN_SOFT_TIME_LIMIT_SECONDS = int(os.environ.get("RUN_SOFT_TIME_LIMIT_SECONDS", "600"))
+RUN_HARD_TIME_LIMIT_SECONDS = int(os.environ.get("RUN_HARD_TIME_LIMIT_SECONDS", "720"))
+
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

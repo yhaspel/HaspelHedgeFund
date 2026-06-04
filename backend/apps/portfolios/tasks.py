@@ -352,7 +352,13 @@ def _trim_k_for_budget(
     return new_longs, new_shorts
 
 
-@shared_task(bind=True)
+@shared_task(
+    bind=True,
+    # L3: per-candidate wall-clock cap (same rationale as execute_run) so one
+    # stalled council in a cycle can't park a worker slot indefinitely.
+    soft_time_limit=getattr(settings, "RUN_SOFT_TIME_LIMIT_SECONDS", 600),
+    time_limit=getattr(settings, "RUN_HARD_TIME_LIMIT_SECONDS", 720),
+)
 def run_candidate_council(self, payload: dict) -> dict:
     """Sub-task: run the full council on one candidate.
 

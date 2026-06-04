@@ -1,6 +1,7 @@
 """OpenRouter adapter — speaks the OpenAI Chat Completions dialect."""
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
@@ -70,6 +71,19 @@ _PAID_FALLBACK_TARGET = "meta-llama/llama-3.3-70b-instruct"
 log = logging.getLogger(__name__)
 
 
+def _last_resort_model() -> str:
+    """The known-good NON-reasoning model the self-heal layer (L2) hops to when a
+    configured route is dead (404/402), returns a non-JSON body, or is terminally
+    empty. Defaults to the prod analytical default (Llama 3.3 70B). Under
+    LLM_FREE_ONLY, use the :free variant so zero-spend environments never bill."""
+    target = getattr(
+        settings, "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct"
+    )
+    if getattr(settings, "LLM_FREE_ONLY", False) and not target.endswith(":free"):
+        target = f"{target}:free"
+    return target
+
+
 class OpenRouterClient:
     provider = "openrouter"
 
@@ -77,12 +91,83 @@ class OpenRouterClient:
         self.api_key = api_key or settings.OPENROUTER_API_KEY
         if not self.api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
-        self._http = http or httpx.Client(timeout=120.0)
+        # L1: a per-operation httpx.Timeout, not a scalar. The scalar 120s was a
+        # per-READ timeout that a trickling reasoning route reset on every byte
+        # and so never fired (run 236 parked the worker 10+ min). A tighter read
+        # timeout turns a stalled response into a normal httpx.ReadTimeout that
+        # the retry / self-heal path handles; connect/write/pool stay bounded too.
+        read_timeout = float(getattr(settings, "LLM_HTTP_READ_TIMEOUT", 45.0))
+        self._http = http or httpx.Client(
+            timeout=httpx.Timeout(
+                connect=10.0, read=read_timeout, write=10.0, pool=10.0
+            )
+        )
         # Models whose route rejected response_format=json_object outright. The
         # client is lru_cache'd (registry._make_client) and reused across every
         # agent call in a run, so memoizing here lets the rest of the run skip
         # the doomed first attempt instead of eating a 4xx + retry per call.
         self._no_response_format: set[str] = set()
+
+    def _self_heal(
+        self,
+        *,
+        reason: str,
+        model: str,
+        messages: list[Message],
+        max_tokens: int,
+        temperature: float,
+        json_mode: bool,
+        _tried: tuple[str, ...],
+    ) -> LLMResponse | None:
+        """L2 self-heal: hop ONCE to the known-good non-reasoning last-resort
+        model when `model` is dead/empty/non-JSON. Returns the recovered
+        response, or None when no hop is possible (self-heal off, or the dead
+        model already IS the last resort, or it was already tried) — the caller
+        then falls back to its terminal raise. `_tried` makes this loop-proof:
+        the dead model is added before recursing, so the last resort is attempted
+        at most once and a broken account still surfaces a real error."""
+        if not getattr(settings, "LLM_SELF_HEAL", True):
+            return None
+        target = _last_resort_model()
+        if target == model or target in _tried:
+            return None
+        log.warning(
+            "openrouter self-heal: %s (model=%s); hopping to last-resort %s",
+            reason, model, target,
+        )
+        return self.complete(
+            model=target,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=json_mode,
+            _tried=_tried + (model,),
+        )
+
+    def _json_with_retry(
+        self, resp: httpx.Response, body: dict, headers: dict, attempts: int = 2
+    ) -> dict | None:
+        """Parse `resp` as JSON, re-POSTing on a non-JSON 2xx body (Bug C).
+
+        A 2xx whose body fails to parse is treated as a transient provider
+        hiccup and the same request is re-sent up to `attempts` times. Returns
+        the parsed dict on success, or None when every attempt yields a
+        non-JSON / non-2xx body (the caller then self-heals or raises)."""
+        for i in range(attempts + 1):
+            if resp.status_code < 400:
+                try:
+                    return resp.json()
+                except (json.JSONDecodeError, ValueError):
+                    pass  # non-JSON 2xx — fall through to a re-POST
+            if i == attempts:
+                break
+            log.warning(
+                "openrouter non-JSON 2xx body (model=%s, status=%s); "
+                "re-POSTing (attempt %d/%d)",
+                body.get("model"), resp.status_code, i + 1, attempts,
+            )
+            resp = self._post_with_retry(body, headers)
+        return None
 
     def complete(
         self,
@@ -103,7 +188,20 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
         t0 = time.perf_counter()
-        resp = self._post_with_retry(body, headers)
+        try:
+            resp = self._post_with_retry(body, headers)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            # L1→L2: the route stalled/failed at the transport layer past the
+            # retry budget. Hop once to the non-reasoning last resort rather than
+            # bubbling a hang/timeout up to the run (run 236 class).
+            healed = self._self_heal(
+                reason=f"transport error ({type(exc).__name__})",
+                model=model, messages=messages, max_tokens=max_tokens,
+                temperature=temperature, json_mode=json_mode, _tried=_tried,
+            )
+            if healed is not None:
+                return healed
+            raise
         # Some OpenRouter routes (e.g. nvidia/nemotron-3-nano via DeepInfra)
         # reject response_format=json_object with a non-retriable 4xx instead of
         # honoring or mis-reading it. call_structured's schema-hint system message
@@ -177,6 +275,17 @@ class OpenRouterClient:
 
                 raise RateLimited(model=model, body=resp.text)
         if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
+            # Bug A (runs 228-235): a removed/dead route (404) or out-of-credits
+            # (402) used to fail the WHOLE run. Self-heal first: hop once to the
+            # known-good non-reasoning model so one dead agent doesn't kill the
+            # council. Only if the last resort is unreachable too do we raise.
+            healed = self._self_heal(
+                reason=f"model unavailable (HTTP {resp.status_code})",
+                model=model, messages=messages, max_tokens=max_tokens,
+                temperature=temperature, json_mode=json_mode, _tried=_tried,
+            )
+            if healed is not None:
+                return healed
             from apps.backtests.exceptions import ModelUnavailable
 
             raise ModelUnavailable(model=model, status_code=resp.status_code, body=resp.text)
@@ -186,7 +295,24 @@ class OpenRouterClient:
                 request=resp.request,
                 response=resp,
             )
-        payload = resp.json()
+        # Bug C (run 241): a 2xx whose body is NOT JSON (an SSE fragment, a
+        # truncated body, or a provider HTML/plain-text error page) used to raise
+        # an unhandled JSONDecodeError and kill the run. A non-JSON 2xx is almost
+        # always a transient provider hiccup, so re-POST the same model a couple
+        # of times; if it persists, self-heal to the last resort; only then raise.
+        payload = self._json_with_retry(resp, body, headers)
+        if payload is None:
+            healed = self._self_heal(
+                reason="non-JSON 2xx response body",
+                model=model, messages=messages, max_tokens=max_tokens,
+                temperature=temperature, json_mode=json_mode, _tried=_tried,
+            )
+            if healed is not None:
+                return healed
+            raise RuntimeError(
+                f"OpenRouter returned a non-JSON body for {model!r} after retries "
+                f"(status {resp.status_code}): {resp.text[:300]!r}"
+            )
         if "choices" not in payload:
             # OpenRouter returns HTTP 200 with {"error": {...}} for upstream
             # provider failures (rate limit, model unavailable, content
@@ -258,6 +384,17 @@ class OpenRouterClient:
                     json_mode=json_mode,
                     _tried=_tried + (model,),
                 )
+            # Bug B (runs 236/237): a reasoning route (e.g. qwen/qwen3.6-27b) burns
+            # its budget on hidden thinking and returns empty content with no
+            # same-tier entry above. Self-heal to the non-reasoning last resort so
+            # the agent still produces a real signal instead of a null one.
+            healed = self._self_heal(
+                reason=f"terminal empty content (finish_reason={finish_reason!r})",
+                model=model, messages=messages, max_tokens=max_tokens,
+                temperature=temperature, json_mode=json_mode, _tried=_tried,
+            )
+            if healed is not None:
+                return healed
         usage = payload.get("usage", {})
         prompt_tokens = int(usage.get("prompt_tokens", 0))
         completion_tokens = int(usage.get("completion_tokens", 0))
@@ -310,7 +447,25 @@ class OpenRouterClient:
         """
         last: httpx.Response | None = None
         for attempt in range(MAX_RETRIES + 1):
-            resp = self._http.post(API_URL, json=body, headers=headers)
+            # L1: a stalled route now trips httpx's tightened read timeout as a
+            # TimeoutException instead of parking the worker indefinitely (run
+            # 236). Treat transport errors like a transient 5xx — back off and
+            # retry; if the budget is exhausted, re-raise so complete()'s
+            # transport-error handler can self-heal to the last-resort model.
+            try:
+                resp = self._http.post(API_URL, json=body, headers=headers)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if attempt == MAX_RETRIES:
+                    raise
+                wait = min(
+                    BASE_BACKOFF_SECONDS * (2 ** attempt), RETRY_AFTER_CAP_SECONDS
+                ) + random.uniform(0, 0.5)
+                log.warning(
+                    "openrouter transport error %s on attempt %d; sleeping %.1fs",
+                    type(exc).__name__, attempt + 1, wait,
+                )
+                time.sleep(wait)
+                continue
             if resp.status_code not in RETRY_STATUSES:
                 return resp
             last = resp

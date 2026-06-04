@@ -6,6 +6,8 @@ import logging
 from decimal import Decimal
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -193,7 +195,15 @@ def sweep_orphan_runs() -> dict:
     return {"swept": swept}
 
 
-@shared_task
+# L3: a per-task wall-clock cap so a run is GUARANTEED to terminate even if every
+# inner timeout/fallback somehow fails. soft_time_limit raises
+# SoftTimeLimitExceeded inside the task (caught below → clean FAILED); the hard
+# time_limit SIGKILLs the worker child as a last-resort backstop. Set per-task
+# (not globally) so legitimately-long jobs (13F bulk ingest) aren't collateral.
+@shared_task(
+    soft_time_limit=getattr(settings, "RUN_SOFT_TIME_LIMIT_SECONDS", 600),
+    time_limit=getattr(settings, "RUN_HARD_TIME_LIMIT_SECONDS", 720),
+)
 def execute_run(run_id: int) -> None:
     run = Run.objects.get(pk=run_id)
     run.status = Run.RUNNING
@@ -262,7 +272,7 @@ def execute_run(run_id: int) -> None:
         try:
             from .search import build_search_text
 
-            run.search_text = build_search_text(run)
+            run.search_text = _scrub_nul(build_search_text(run))
         except Exception:  # never let search indexing fail the run
             log.exception("search_text build failed for run=%s", run_id)
         run.status = Run.DONE
@@ -275,8 +285,19 @@ def execute_run(run_id: int) -> None:
         # delivered will surface here as an unhandled exception.
         current = Run.objects.filter(pk=run_id).values_list("status", flat=True).first()
         if current != Run.CANCELLED:
+            # L3: the wall-clock cap fired — give the operator a clear, actionable
+            # message instead of a bare "SoftTimeLimitExceeded".
+            if isinstance(exc, SoftTimeLimitExceeded):
+                soft = getattr(settings, "RUN_SOFT_TIME_LIMIT_SECONDS", 600)
+                msg = (
+                    f"Run exceeded the {soft}s wall-clock limit and was stopped. "
+                    "An LLM route was likely stalling; the run did not hang the "
+                    "worker (see self-healing layers L1/L2)."
+                )
+            else:
+                msg = f"{type(exc).__name__}: {exc}"
             run.status = Run.FAILED
-            run.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+            run.error_message = msg[:2000]
             run.finished_at = timezone.now()
             run.save(update_fields=["status", "error_message", "finished_at"])
         raise
@@ -290,15 +311,58 @@ def execute_run(run_id: int) -> None:
         Run.objects.filter(pk=run.pk).update(total_cost_usd=total)
 
 
+def _scrub_nul(obj):
+    """Recursively strip NUL bytes (U+0000) from strings in an LLM-output blob.
+
+    PostgreSQL text/jsonb columns cannot store \\u0000 and raise
+    `DataError: unsupported Unicode escape sequence` on insert. Models
+    occasionally emit a stray NUL (observed: a news_digest payload), which used
+    to crash the AgentMessage insert and fail the whole run AFTER every LLM call
+    had already succeeded. Scrubbing at the persistence boundary keeps the
+    in-memory state untouched for downstream aggregation."""
+    if isinstance(obj, str):
+        return obj.replace("\x00", "") if "\x00" in obj else obj
+    if isinstance(obj, dict):
+        return {k: _scrub_nul(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_nul(v) for v in obj]
+    return obj
+
+
 def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> None:
     agent_keys = ANALYTICAL_AGENTS + selected_personas + ["risk", "pm_decision", "cio"]
+    degraded: list[str] = []
     for agent_name in agent_keys:
         payload = state.get(agent_name)
         if payload is None:
             continue
-        AgentMessage.objects.create(run=run, agent_name=agent_name, parsed_output=payload)
+        # Self-heal visibility: a node that the live-tolerance layer degraded to
+        # a null signal carries a private "_degraded" marker. Strip it and record
+        # it on the AgentMessage.status so the operator can see the council ran
+        # with this agent degraded instead of a silent all-"ok" transcript.
+        msg_status = "ok"
+        if isinstance(payload, dict) and payload.pop("_degraded", False):
+            msg_status = "degraded"
+            degraded.append(agent_name)
+        AgentMessage.objects.create(
+            run=run, agent_name=agent_name,
+            parsed_output=_scrub_nul(payload), status=msg_status,
+        )
+    if degraded:
+        log.warning(
+            "run %s completed with %d degraded agent(s) (self-heal): %s",
+            run.pk, len(degraded), ", ".join(degraded),
+        )
 
     decision = state.get("decision")
+    if isinstance(decision, dict):
+        decision.pop("_degraded", None)
+        decision = _scrub_nul(decision)
+    risk_overrides = state.get("risk", {})
+    if isinstance(risk_overrides, dict):
+        risk_overrides = _scrub_nul(
+            {k: v for k, v in risk_overrides.items() if k != "_degraded"}
+        )
     if decision:
         Decision.objects.create(
             run=run,
@@ -309,5 +373,5 @@ def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> Non
             dissenting_views=decision.get("dissenting_personas", []),
             target_quantity=Decimal(str(decision.get("target_quantity", 0))),
             target_weight_pct=Decimal(str(decision.get("target_weight_pct", 0))),
-            risk_overrides=state.get("risk", {}),
+            risk_overrides=risk_overrides,
         )

@@ -30,6 +30,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from django.conf import settings
+
 log = logging.getLogger(__name__)
 
 # Per-output-key fallback dicts. Each one must satisfy the schema in
@@ -117,22 +119,31 @@ def wrap_backtest_tolerant(
     node_fn: Callable[[dict], dict],
     state_key: str,
 ) -> Callable[[dict], dict]:
-    """Wrap a LangGraph node so that, in backtest context, a node exception
-    yields a null-signal state update for `state_key` instead of aborting the
-    whole graph. Live runs (state.backtest_id is None) keep the original
-    raising behavior so operators still see failures."""
+    """Wrap a LangGraph node so a single agent's failure yields a null-signal
+    state update for `state_key` instead of aborting the whole graph.
+
+    This has always protected backtests. As the last layer of run self-healing
+    (settings.RUN_SELF_HEAL, default True) it now ALSO protects live runs: after
+    the adapter's L2 model-fallback has had its chance, a residual unrecoverable
+    failure (e.g. a model that returns valid-but-unparseable output 3× and trips
+    call_structured's ValueError) degrades just that one agent — the council
+    proceeds on the signals that landed and the run completes "done" rather than
+    FAILED. ModelUnavailable still re-raises in BOTH contexts: it means the L2
+    last-resort model is unreachable too (a genuinely broken account/config),
+    which a null signal would mask as all-hold garbage."""
     def wrapped(state: dict) -> dict:
-        if not state.get("backtest_id"):
+        is_backtest = bool(state.get("backtest_id"))
+        tolerant = is_backtest or getattr(settings, "RUN_SELF_HEAL", True)
+        if not tolerant:
             return node_fn(state)
         try:
             return node_fn(state)
         except Exception as exc:
             # Config/availability errors (out-of-credits, bad key, exhausted
-            # free-tier rate-limit pool) recur on every ticker-day, so a null
-            # signal here would mask them and let the backtest "complete" with
-            # all-hold garbage. Re-raise so prime_agent_cache aborts the whole
-            # run once with the actionable upstream message. (RateLimited is a
-            # ModelUnavailable subclass, so this covers both.)
+            # free-tier rate-limit pool) recur on every call, so a null signal
+            # here would mask them and let the run "complete" with all-hold
+            # garbage. Re-raise so the operator sees the actionable upstream
+            # message. (RateLimited is a ModelUnavailable subclass.)
             from apps.backtests.exceptions import ModelUnavailable
             if isinstance(exc, ModelUnavailable):
                 raise
@@ -141,9 +152,15 @@ def wrap_backtest_tolerant(
                 # No fallback registered: don't swallow silently.
                 raise
             log.warning(
-                "backtest agent %r failed; emitting null signal: %s",
-                state_key, exc,
+                "%s agent %r failed; emitting null signal (self-heal): %s",
+                "backtest" if is_backtest else "live", state_key, exc,
             )
+            # Mark the degradation (live only) so _persist_outputs can flag the
+            # AgentMessage — self-healing must be visible, not silent. Backtests
+            # keep their existing null-signal shape byte-identical (they account
+            # for degradation via prime_min_completeness, not this marker).
+            if not is_backtest:
+                fb["_degraded"] = True
             # Stamp the ticker so the null-signal dict is self-identifying
             # for downstream readers that key off it.
             ticker = state.get("ticker", "")

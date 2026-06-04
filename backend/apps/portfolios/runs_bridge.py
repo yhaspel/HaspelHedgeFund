@@ -338,19 +338,32 @@ def persist_council_outputs(
     for strategy-sourced runs. Idempotent: each agent's parsed_output is
     upserted by `(run, agent_name)`.
     """
+    # Strip NUL bytes that PostgreSQL text/jsonb can't store (see
+    # apps.runs.tasks._scrub_nul) — a stray NUL byte in any agent payload would
+    # otherwise crash this candidate's persistence after its council succeeded.
+    from apps.runs.tasks import _scrub_nul
+
     keys = _agent_keys(selected_personas)
     for agent_name in keys:
         payload = state.get(agent_name)
         if payload is None:
             continue
+        # Mirror _persist_outputs: surface a self-heal-degraded agent on
+        # AgentMessage.status and strip the private marker from the stored JSON.
+        status = "ok"
+        if isinstance(payload, dict) and payload.pop("_degraded", False):
+            status = "degraded"
         AgentMessage.objects.update_or_create(
             run=run,
             agent_name=agent_name,
-            defaults={"parsed_output": payload, "status": "ok"},
+            defaults={"parsed_output": _scrub_nul(payload), "status": status},
         )
 
     decision = state.get("decision")
     if decision:
+        if isinstance(decision, dict):
+            decision.pop("_degraded", None)
+        decision = _scrub_nul(decision)
         # signed weight: long positive, short negative (for short side runs).
         target_weight_pct = Decimal(str(decision.get("target_weight_pct", 0)))
         if side == "short":
@@ -367,7 +380,10 @@ def persist_council_outputs(
                 "dissenting_views": decision.get("dissenting_personas", []),
                 "target_quantity": Decimal(str(decision.get("target_quantity", 0))),
                 "target_weight_pct": target_weight_pct,
-                "risk_overrides": state.get("risk", {}),
+                "risk_overrides": _scrub_nul(
+                    {k: v for k, v in (state.get("risk") or {}).items()
+                     if k != "_degraded"}
+                ),
                 "side": side,
                 "target_weight_signed": signed,
             },

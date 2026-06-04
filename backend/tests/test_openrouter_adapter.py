@@ -7,20 +7,33 @@ The adapter has two non-obvious paths that have bitten us:
 """
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
-from apps.backtests.exceptions import RateLimited
+from apps.backtests.exceptions import ModelUnavailable, RateLimited
 from hedgefund_agents.llm.adapters.openrouter import OpenRouterClient
 from hedgefund_agents.llm.client import Message
+
+_LAST_RESORT = "meta-llama/llama-3.3-70b-instruct"
 
 
 def _resp(payload: dict, status_code: int = 200, text: str = "") -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = payload
+    resp.text = text
+    resp.request = MagicMock()
+    return resp
+
+
+def _nonjson_resp(text: str = "data: {...}\n\ndata: [DONE]\n", status_code: int = 200) -> MagicMock:
+    """A 2xx whose body is NOT valid JSON (Bug C, run 241): .json() raises."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.side_effect = json.JSONDecodeError("Expecting value", text, 0)
     resp.text = text
     resp.request = MagicMock()
     return resp
@@ -357,22 +370,27 @@ def test_empty_content_falls_back_to_same_tier_model():
     )
 
 
-def test_empty_content_fallback_does_not_loop_when_fallback_also_empty():
-    """If the fallback model is ALSO empty, surface the empty response — the
-    fallback fires exactly once (guarded by _tried), no recursion."""
-    empty = _resp({
+def test_empty_content_fallback_does_not_loop_when_fallback_also_empty(settings):
+    """If the same-tier fallback is ALSO empty, the chain now makes ONE further
+    bounded hop to the non-reasoning last resort (L2 self-heal), then surfaces
+    the empty response. Each model is tried at most once (guarded by _tried), so
+    there is still no recursion: gpt-oss:free → llama:free → llama (last resort)."""
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_LAST_RESORT_MODEL = _LAST_RESORT
+    settings.LLM_FREE_ONLY = False
+    empty = lambda: _resp({  # noqa: E731 — terse fixture
         "choices": [{"message": {"content": None}, "finish_reason": ""}],
         "usage": {"completion_tokens": 91},
     })
-    http = _seq_http(empty, _resp({
-        "choices": [{"message": {"content": None}, "finish_reason": ""}],
-        "usage": {"completion_tokens": 0},
-    }))
+    http = _seq_http(empty(), empty(), empty())
     resp = _build_client(http).complete(
         model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")]
     )
     assert resp.text == ""
-    assert http.post.call_count == 2  # original + one fallback, no loop
+    # gpt-oss:free (empty) → llama:free same-tier (empty) → llama last resort
+    # (empty) → stop. Three distinct models, each tried once, no loop.
+    assert http.post.call_count == 3
+    assert http.post.call_args_list[-1].kwargs["json"]["model"] == _LAST_RESORT
 
 
 def test_rate_limit_fallback_on_exhausted_429(monkeypatch):
@@ -574,3 +592,138 @@ def test_paid_fallback_on_escalates_to_paid_route_once(monkeypatch, settings):
     assert http.post.call_args_list[-1].kwargs["json"]["model"] == (
         "meta-llama/llama-3.3-70b-instruct"
     )
+
+
+# --- L2 self-healing: last-resort fallback to a known-good non-reasoning model ---
+# Regression coverage for the three production bugs that used to kill a whole run
+# because one of ~16 agents drew a bad route:
+#   Bug A (404, runs 228-235), Bug B (empty/reasoning-exhaustion, 236/237),
+#   Bug C (non-JSON 2xx body, run 241).
+
+
+@pytest.fixture
+def _heal(settings):
+    """Deterministic self-heal config regardless of the ambient test settings."""
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_LAST_RESORT_MODEL = _LAST_RESORT
+    settings.LLM_FREE_ONLY = False
+    return settings
+
+
+def test_self_heal_model_unavailable_hops_to_last_resort(_heal):
+    """Bug A: a 404/dead route used to raise ModelUnavailable and fail the whole
+    run. Self-heal hops ONCE to the known-good non-reasoning last resort."""
+    dead = _resp({}, status_code=404, text="No endpoints found")
+    good = _resp({
+        "choices": [{"message": {"content": '{"signal":"buy"}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    })
+    http = _seq_http(dead, good)
+    resp = _build_client(http).complete(
+        model="arcee-ai/trinity-large-thinking:free", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"signal":"buy"}'
+    assert resp.model == _LAST_RESORT
+    assert http.post.call_count == 2
+    assert http.post.call_args_list[1].kwargs["json"]["model"] == _LAST_RESORT
+
+
+def test_self_heal_model_unavailable_both_dead_raises_no_loop(_heal):
+    """If the last resort is ALSO unavailable (genuinely broken account), the hop
+    fires exactly once (guarded by _tried) and ModelUnavailable surfaces."""
+    dead = _resp({}, status_code=404, text="No endpoints found")
+    http = _seq_http(dead, _resp({}, status_code=404, text="No endpoints found"))
+    with pytest.raises(ModelUnavailable):
+        _build_client(http).complete(
+            model="minimax/minimax-m2.5:free", messages=[Message("user", "hi")]
+        )
+    assert http.post.call_count == 2  # original + one last-resort hop, no loop
+
+
+def test_self_heal_off_preserves_raise(_heal):
+    """With LLM_SELF_HEAL off, a 404 raises ModelUnavailable immediately (old
+    behavior) — no hop."""
+    _heal.LLM_SELF_HEAL = False
+    http = _seq_http(_resp({}, status_code=404, text="No endpoints found"))
+    with pytest.raises(ModelUnavailable):
+        _build_client(http).complete(
+            model="arcee-ai/trinity-large-thinking:free", messages=[Message("user", "hi")]
+        )
+    assert http.post.call_count == 1
+
+
+def test_non_json_body_retries_same_model_and_recovers(_heal):
+    """Bug C (run 241): a 2xx whose body is not JSON is a transient provider
+    hiccup; re-POST the SAME model and recover without changing models."""
+    good = _resp({
+        "choices": [{"message": {"content": '{"signal":"hold"}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    })
+    http = _seq_http(_nonjson_resp(), good)
+    resp = _build_client(http).complete(
+        model=_LAST_RESORT, messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"signal":"hold"}'
+    assert resp.model == _LAST_RESORT  # recovered on the same model, no hop
+    assert http.post.call_count == 2
+
+
+def test_non_json_body_persists_then_hops_to_last_resort(_heal):
+    """If a non-JSON body persists across the re-POST budget on a NON-last-resort
+    model, self-heal hops to the last resort rather than crashing the run."""
+    # _json_with_retry: original + 2 re-POSTs = 3 non-JSON, then the hop succeeds.
+    nonjson = [_nonjson_resp() for _ in range(3)]
+    good = _resp({
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+    })
+    http = _seq_http(*nonjson, good)
+    resp = _build_client(http).complete(
+        model="some/flaky-model", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"ok":true}'
+    assert resp.model == _LAST_RESORT
+    assert http.post.call_count == 4  # 3 non-JSON on flaky + 1 last-resort
+
+
+def test_self_heal_on_transport_timeout_hops_to_last_resort(_heal, monkeypatch):
+    """Bug B / run 236 class: a route that stalls at the transport layer trips
+    the tightened read timeout (L1) as an httpx.ReadTimeout; after the retry
+    budget is spent the adapter hops to the non-reasoning last resort (L2)
+    instead of letting the timeout/hang reach the run."""
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    good = _resp({
+        "choices": [{"message": {"content": '{"signal":"buy"}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    })
+    http = MagicMock()
+    # 6 transport timeouts (initial + MAX_RETRIES) exhaust _post_with_retry for the
+    # stalled model, then the last-resort model answers cleanly.
+    http.post.side_effect = [httpx.ReadTimeout("stalled") for _ in range(6)] + [good]
+    resp = _build_client(http).complete(
+        model="qwen/qwen3.6-27b", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"signal":"buy"}'
+    assert resp.model == _LAST_RESORT
+    assert http.post.call_args_list[-1].kwargs["json"]["model"] == _LAST_RESORT
+
+
+def test_self_heal_terminal_empty_content_hops_to_last_resort(_heal):
+    """Bug B (runs 236/237): a reasoning slug with no _EMPTY_CONTENT_FALLBACK entry
+    returns empty content; self-heal hops to the non-reasoning last resort so the
+    agent still produces a real signal instead of an empty one."""
+    empty = _resp({
+        "choices": [{"message": {"content": None}, "finish_reason": "length"}],
+        "usage": {"completion_tokens": 2048},
+    })
+    good = _resp({
+        "choices": [{"message": {"content": '{"signal":"sell"}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    })
+    http = _seq_http(empty, good)
+    resp = _build_client(http).complete(
+        model="qwen/qwen3.6-27b", messages=[Message("user", "hi")]
+    )
+    assert resp.text == '{"signal":"sell"}'
+    assert resp.model == _LAST_RESORT
+    assert http.post.call_count == 2

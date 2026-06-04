@@ -22,9 +22,22 @@ def _raising_node(_state):
     raise RuntimeError("synthetic LLM failure")
 
 
-def test_live_run_propagates_node_exception():
-    """In live runs (state.backtest_id is None) failures still surface so the
-    operator notices. Wrapping must NOT swallow."""
+def test_live_run_degrades_when_self_heal_on(settings):
+    """Self-healing (RUN_SELF_HEAL, default True): a residual unrecoverable
+    per-agent failure in a LIVE run degrades just that agent to a null signal
+    (marked _degraded for visibility) so the council proceeds and the run
+    completes 'done' instead of FAILED."""
+    settings.RUN_SELF_HEAL = True
+    wrapped = wrap_backtest_tolerant(_raising_node, "fundamentals")
+    out = wrapped({"ticker": "AAPL"})  # live: no backtest_id
+    assert out["fundamentals"]["_degraded"] is True
+    assert out["fundamentals"]["notes"].startswith("fallback")
+
+
+def test_live_run_propagates_when_self_heal_off(settings):
+    """With RUN_SELF_HEAL off, live runs keep the original fail-loud behavior so
+    an operator who wants exceptions surfaced can opt out of degradation."""
+    settings.RUN_SELF_HEAL = False
     wrapped = wrap_backtest_tolerant(_raising_node, "fundamentals")
     with pytest.raises(RuntimeError, match="synthetic LLM failure"):
         wrapped({"ticker": "AAPL"})
