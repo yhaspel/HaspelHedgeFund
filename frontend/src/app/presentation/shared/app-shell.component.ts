@@ -65,6 +65,14 @@ const THEME_KEY = 'hf.theme';
           <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
           <hf-popover #popBrk placement="right" align="center" size="compact">Broker accounts</hf-popover>
         </a>
+        <a class="nav-btn" routerLink="/fund" routerLinkActive="active" #navFund="routerLinkActive"
+           [attr.aria-current]="navFund.isActive ? 'page' : null"
+           aria-label="Autonomous Fund"
+           (mouseenter)="popFund.show()" (mouseleave)="popFund.maybeHide()"
+           (focus)="popFund.show()" (blur)="popFund.maybeHide()">
+          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-shield" /></svg>
+          <hf-popover #popFund placement="right" align="center" size="compact">Autonomous Fund</hf-popover>
+        </a>
         <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
            routerLinkActive="active" #navRuns="routerLinkActive"
            [attr.aria-current]="navRuns.isActive ? 'page' : null"
