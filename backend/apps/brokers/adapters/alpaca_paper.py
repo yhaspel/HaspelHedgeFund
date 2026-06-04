@@ -43,6 +43,7 @@ from ..capabilities import (
 from ..credentials import with_credential
 from ..interfaces import (
     AccountSnapshot,
+    BrokerAuthError,
     BrokerError,
     BrokerTransientError,
     FillSnapshot,
@@ -259,6 +260,8 @@ def _raise_translated(exc: Exception, op: str) -> None:
 
     if isinstance(exc, APIError):
         status_code = getattr(exc, "status_code", None) or 0
+        if status_code in (401, 403):
+            raise BrokerAuthError(f"Alpaca {op} → {status_code}: {exc}") from exc
         if status_code >= 500:
             raise BrokerTransientError(f"Alpaca {op} → {status_code}: {exc}") from exc
         raise BrokerError(f"Alpaca {op} → {status_code}: {exc}") from exc

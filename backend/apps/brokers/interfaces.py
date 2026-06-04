@@ -94,6 +94,14 @@ class BrokerError(Exception):
     """Adapter-side, user-visible error (rejection, validation failure)."""
 
 
+class BrokerAuthError(BrokerError):
+    """Credentials rejected by the broker (HTTP 401/403). A *permanent*
+    failure — the account needs re-authentication, not a retry. Callers in
+    the poll loop flip the account to ``needs_reauth`` instead of erroring
+    (and log-spamming) every cycle. Subclasses ``BrokerError`` so existing
+    ``except BrokerError`` handlers still degrade gracefully."""
+
+
 class BrokerTransientError(Exception):
     """Network/timeout — caller treats the order outcome as unknown."""
 

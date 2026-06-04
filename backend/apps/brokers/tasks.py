@@ -19,9 +19,13 @@ from celery import shared_task
 from .adapters.ibkr_gateway import IBKRGatewaySession
 from .capabilities import AUTH_NONE, get_capabilities
 from .demo_fills import evaluate_resting_demo_orders
-from .interfaces import BrokerError, BrokerTransientError
+from .interfaces import BrokerAuthError, BrokerError, BrokerTransientError
 from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
-from .reconcile import poll_open_orders_for_account, reconcile_account
+from .reconcile import (
+    _flag_needs_reauth,
+    poll_open_orders_for_account,
+    reconcile_account,
+)
 
 log = logging.getLogger(__name__)
 
@@ -30,11 +34,16 @@ log = logging.getLogger(__name__)
 def poll_open_orders() -> dict:
     """Walk every active account with at least one open order and poll the
     adapter for new fills."""
-    summary = {"accounts_scanned": 0, "fills_written": 0}
+    summary = {"accounts_scanned": 0, "fills_written": 0, "needs_reauth": 0}
     account_ids = (
         BrokerOrder.objects
         .filter(status__in=BrokerOrder.OPEN_STATUSES)
         .values_list("broker_account_id", flat=True)
+        # .order_by() clears BrokerOrder's Meta.ordering: without it the
+        # ORDER BY created_at leaks into the SELECT DISTINCT list, so the
+        # dedupe runs on (account_id, created_at) pairs and yields one row
+        # *per open order* — re-polling the same account N times a cycle.
+        .order_by()
         .distinct()
     )
     for acc_id in account_ids:
@@ -54,6 +63,17 @@ def poll_open_orders() -> dict:
                 summary["fills_written"] += evaluate_resting_demo_orders(account)
             else:
                 summary["fills_written"] += poll_open_orders_for_account(account)
+        except BrokerAuthError as exc:
+            # Credentials are rejected (401/403) — a permanent failure. Flip
+            # the account out of ACTIVE so the next cycle skips it instead of
+            # re-failing every 30s. Mirrors the IBKR needs_reauth recovery
+            # path; one concise warning replaces a full traceback per cycle.
+            _flag_needs_reauth(account)
+            summary["needs_reauth"] += 1
+            log.warning(
+                "poll_open_orders: account %s rejected (%s) — "
+                "flipped to needs_reauth", acc_id, exc,
+            )
         except Exception:  # pragma: no cover - log and continue
             log.exception("poll_open_orders failed for account %s", acc_id)
     return summary

@@ -138,6 +138,29 @@ def test_enable_succeeds_and_forces_council(client, user):
     assert s.autopilot.next_run_at is not None
 
 
+def test_save_rejects_invalid_model_preset(client, user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s)
+    r = client.put(
+        f"/api/strategies/{s.id}/autopilot/", {"model_preset": "frugel"}, format="json",
+    )
+    assert r.status_code == 400
+    assert "model_preset" in r.json()["detail"]
+    s.autopilot.refresh_from_db()
+    assert s.autopilot.model_preset == "frugal"  # unchanged default
+
+
+def test_save_accepts_valid_model_preset(client, user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s)
+    r = client.put(
+        f"/api/strategies/{s.id}/autopilot/", {"model_preset": "hybrid"}, format="json",
+    )
+    assert r.status_code == 200
+    s.autopilot.refresh_from_db()
+    assert s.autopilot.model_preset == "hybrid"
+
+
 def test_disable_and_resume(client, user):
     s = _strategy(user)
     acc = _account(user)

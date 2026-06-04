@@ -421,6 +421,28 @@ def test_is_duplicate_client_order_id_recogniser():
     ) is False
 
 
+def test_raise_translated_maps_auth_errors_to_broker_auth_error():
+    """401/403 are permanent credential failures → BrokerAuthError so the
+    poll loop can flip the account to needs_reauth instead of retrying (and
+    log-spamming) every cycle. Other 4xx stay plain BrokerError; 5xx stay
+    transient."""
+    from apps.brokers.adapters.alpaca_paper import _raise_translated
+    from apps.brokers.interfaces import BrokerAuthError, BrokerTransientError
+
+    for status in (401, 403):
+        with pytest.raises(BrokerAuthError):
+            _raise_translated(_make_apierror(status, "unauthorized."), "get_order")
+
+    # A non-auth 4xx is permanent but NOT an auth error.
+    with pytest.raises(BrokerError) as exc_info:
+        _raise_translated(_make_apierror(422, "bad symbol"), "submit_order")
+    assert not isinstance(exc_info.value, BrokerAuthError)
+
+    # 5xx remains transient.
+    with pytest.raises(BrokerTransientError):
+        _raise_translated(_make_apierror(503, "upstream down"), "get_account")
+
+
 def test_duplicate_submit_resolves_existing_order(broker, stub_client):
     """A retried POST with the same client_order_id gets HTTP 422 from
     Alpaca; the adapter resolves the pre-existing order via

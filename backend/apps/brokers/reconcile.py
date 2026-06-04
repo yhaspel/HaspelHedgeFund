@@ -28,7 +28,14 @@ from apps.portfolios.models import LedgerEntry, Portfolio, Position
 from .brackets import is_group_anchor
 from .capabilities import AUTH_NONE, get_adapter_factory, get_capabilities
 from .idempotency import _match_leg_to_child, resolve_unknown
-from .interfaces import Broker, BrokerError, FillSnapshot, OrderSnapshot, PositionSnapshot
+from .interfaces import (
+    Broker,
+    BrokerAuthError,
+    BrokerError,
+    FillSnapshot,
+    OrderSnapshot,
+    PositionSnapshot,
+)
 from .models import BrokerAccount, BrokerFill, BrokerOrder, BrokerSyncEvent
 
 
@@ -45,6 +52,16 @@ def get_broker(account: BrokerAccount) -> Broker:
     if factory is None:
         raise RuntimeError(f"no adapter registered for broker {account.broker!r}")
     return factory(account)
+
+
+def _flag_needs_reauth(account: BrokerAccount) -> None:
+    """A 401/403 means the broker rejected the stored credentials — a
+    permanent failure. Flip the account out of ACTIVE so the poll/reconcile
+    loops skip it until the user re-submits credentials (the credentials
+    endpoint restores STATUS_ACTIVE). Idempotent."""
+    BrokerAccount.objects.filter(pk=account.pk).exclude(
+        connection_status=BrokerAccount.STATUS_NEEDS_REAUTH,
+    ).update(connection_status=BrokerAccount.STATUS_NEEDS_REAUTH)
 
 
 # --- poll_open_orders -------------------------------------------------------
@@ -103,16 +120,23 @@ def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
         order.refresh_from_db()
     if not order.broker_order_id:
         return 0
-    if is_group_anchor(order):
-        return _poll_group(order, adapter)
+    # Both paths hit the adapter and may raise. A 401/403 is a dead-credential
+    # failure: flag the account for re-auth (its callers — the post-confirm
+    # view — only log, so flip here rather than re-raise). Any other broker
+    # error is order-specific: record it on the order.
     try:
+        if is_group_anchor(order):
+            return _poll_group(order, adapter)
         snapshot = adapter.get_order(order.broker_order_id)
+        fills = adapter.get_recent_fills(order.created_at)
+        return _ingest_fills_for(order, snapshot, fills)
+    except BrokerAuthError:
+        _flag_needs_reauth(order.broker_account)
+        return 0
     except BrokerError as exc:
         order.error_message = str(exc)[:500]
         order.save(update_fields=["error_message"])
         return 0
-    fills = adapter.get_recent_fills(order.created_at)
-    return _ingest_fills_for(order, snapshot, fills)
 
 
 def poll_open_orders_for_account(account: BrokerAccount) -> int:
@@ -134,19 +158,24 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
             if not order.broker_order_id:
                 continue
 
-        if is_group_anchor(order):
-            fills_written += _poll_group(order, broker)
-            continue
-
+        # A group anchor is polled as a unit; both paths hit the adapter and
+        # may raise. An auth failure is account-wide — propagate so the caller
+        # flips the account to needs_reauth (and stops the per-cycle log
+        # storm). Any other broker error is order-specific: record it and keep
+        # polling the rest of the account's orders.
         try:
+            if is_group_anchor(order):
+                fills_written += _poll_group(order, broker)
+                continue
             snapshot = broker.get_order(order.broker_order_id)
+            fills = broker.get_recent_fills(order.created_at)
+            fills_written += _ingest_fills_for(order, snapshot, fills)
+        except BrokerAuthError:
+            raise
         except BrokerError as exc:
             order.error_message = str(exc)[:500]
             order.save(update_fields=["error_message"])
             continue
-
-        fills = broker.get_recent_fills(order.created_at)
-        fills_written += _ingest_fills_for(order, snapshot, fills)
     return fills_written
 
 
@@ -518,6 +547,15 @@ def reconcile_account(
         broker_positions = broker.get_positions()
         broker_account = broker.get_account()
         broker_cash = Decimal(str(broker_account.cash))
+    except BrokerAuthError as exc:
+        # Dead credentials — flip out of ACTIVE so the next reconcile/poll
+        # skips this account until the user re-authenticates (rather than
+        # silently recording a generic error every 5 min).
+        _flag_needs_reauth(account)
+        event.finished_at = timezone.now()
+        event.error_message = f"needs_reauth — {str(exc)[:480]}"
+        event.save(update_fields=["finished_at", "error_message"])
+        return event
     except BrokerError as exc:
         event.finished_at = timezone.now()
         event.error_message = str(exc)[:500]

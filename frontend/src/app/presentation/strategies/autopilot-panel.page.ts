@@ -71,7 +71,15 @@ import { AppShellComponent } from '../shared/app-shell.component';
           <h2>Guardrails</h2>
           <div class="grid">
             <label>Cron <input [(ngModel)]="form.cron_expression" /></label>
-            <label>Model preset <input [(ngModel)]="form.model_preset" /></label>
+            <label>Model preset
+              <select [(ngModel)]="form.model_preset">
+                <option value="dev">dev</option>
+                <option value="frugal">frugal</option>
+                <option value="hybrid">hybrid</option>
+                <option value="research">research</option>
+                <option value="quality">quality</option>
+              </select>
+            </label>
             <label>Target vol % <input type="number" [(ngModel)]="form.target_vol_pct" /></label>
             <label>Soft cut % <input type="number" [(ngModel)]="form.dd_soft_cut_pct" /></label>
             <label>Hard halt % <input type="number" [(ngModel)]="form.dd_hard_halt_pct" /></label>

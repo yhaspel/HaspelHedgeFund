@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
+from apps.models_catalog.presets import PRESETS
 
 from .models import AutopilotRun, PortfolioStrategy, StrategyAutopilot
 from .validation import validation_status
@@ -82,6 +83,14 @@ class StrategyAutopilotView(APIView):
             if acc.mode != BrokerAccount.MODE_PAPER:
                 return Response({"detail": "autopilot is paper-only"}, status=400)
             ap.broker_account = acc
+
+        # Model preset must be one of the catalog's known presets — a bad value
+        # would silently expand to {} and route the council to registry defaults.
+        if "model_preset" in data and data["model_preset"] not in PRESETS:
+            return Response(
+                {"detail": f"invalid model_preset (choose: {', '.join(sorted(PRESETS))})"},
+                status=400,
+            )
 
         for f in _STR_FIELDS:
             if f in data:

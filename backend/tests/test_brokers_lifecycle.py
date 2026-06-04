@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -1118,3 +1119,193 @@ def test_keep_warm_ignores_connecting_and_disabled_accounts(
     disabled.refresh_from_db()
     assert connecting.connection_status == BrokerAccount.STATUS_CONNECTING
     assert disabled.connection_status == BrokerAccount.STATUS_DISABLED
+
+
+# ---------------------------------------------------------------------------
+# poll_open_orders: per-cycle dedupe + auth-failure recovery
+# (the Alpaca 401 log-storm fix)
+# ---------------------------------------------------------------------------
+
+
+def _alpaca_account(user, *, status=BrokerAccount.STATUS_ACTIVE):
+    """A non-demo (AUTH_API_KEY) account so poll_open_orders routes through
+    poll_open_orders_for_account rather than the demo book."""
+    portfolio = Portfolio.objects.create(
+        user=user, name="Broker · Alpaca", kind=Portfolio.KIND_BROKER,
+        cash_balance=Decimal("100000"),
+    )
+    return BrokerAccount.objects.create(
+        user=user, broker="alpaca_paper", mode=BrokerAccount.MODE_PAPER,
+        account_id=f"PA-{user.id}", label="alpaca", portfolio=portfolio,
+        connection_status=status,
+    )
+
+
+def _submitted_order(account, *, ticker="MRVL"):
+    return BrokerOrder.objects.create(
+        broker_account=account, ticker=ticker, side="sell",
+        quantity=Decimal("1"), order_type="market",
+        status=BrokerOrder.STATUS_SUBMITTED, broker_order_id=str(uuid4()),
+    )
+
+
+def test_poll_open_orders_scans_account_once_per_cycle(user, monkeypatch):
+    """Regression: BrokerOrder.Meta.ordering leaked created_at into the
+    SELECT DISTINCT, so an account with N open orders was scanned N times a
+    cycle (N× broker calls + N× log lines). It must be scanned exactly once."""
+    from apps.brokers import tasks as tasks_mod
+
+    account = _alpaca_account(user)
+    for _ in range(3):
+        _submitted_order(account)
+
+    seen: list[int] = []
+
+    def _record(acc):
+        seen.append(acc.pk)
+        return 0
+
+    monkeypatch.setattr(tasks_mod, "poll_open_orders_for_account", _record)
+    summary = tasks_mod.poll_open_orders()
+
+    assert seen == [account.pk]            # once, not three times
+    assert summary["accounts_scanned"] == 1
+
+
+def test_poll_open_orders_flips_to_needs_reauth_on_auth_error(user, monkeypatch):
+    """A 401/403 (BrokerAuthError) is permanent: the account is flipped out of
+    ACTIVE so the next cycle skips it — replacing the per-cycle traceback
+    storm with one concise warning. Mirrors the IBKR needs_reauth path."""
+    from apps.brokers import tasks as tasks_mod
+    from apps.brokers.interfaces import BrokerAuthError
+
+    account = _alpaca_account(user)
+    _submitted_order(account)
+
+    def _boom(_acc):
+        raise BrokerAuthError("Alpaca get_order_by_id → 401: unauthorized.")
+
+    monkeypatch.setattr(tasks_mod, "poll_open_orders_for_account", _boom)
+    summary = tasks_mod.poll_open_orders()
+
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+    assert summary["needs_reauth"] == 1
+
+    # Next cycle: no longer ACTIVE → skipped entirely (the storm stops).
+    seen: list[int] = []
+
+    def _record(acc):
+        seen.append(acc.pk)
+        return 0
+
+    monkeypatch.setattr(tasks_mod, "poll_open_orders_for_account", _record)
+    summary2 = tasks_mod.poll_open_orders()
+    assert seen == []
+    assert summary2["accounts_scanned"] == 0
+
+
+class _AuthFailBroker:
+    """Minimal Broker stub whose get_order always raises the given exception."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def get_order(self, broker_order_id):
+        raise self._exc
+
+    def get_recent_fills(self, since):
+        return []
+
+
+def test_poll_account_reraises_auth_error_from_group_anchor(user, monkeypatch):
+    """Bug fix: the group-anchor path (_poll_group) used to bypass the flat
+    path's try/except, so an error escaped to the broad except as a full
+    traceback. An auth failure must now propagate (so the task flips the
+    account); a non-auth BrokerError must be recorded on the order, not
+    raised."""
+    from apps.brokers import reconcile as reconcile_mod
+    from apps.brokers.brackets import is_group_anchor
+    from apps.brokers.interfaces import BrokerAuthError, BrokerError
+    from apps.brokers.reconcile import poll_open_orders_for_account
+
+    account = _alpaca_account(user)
+    anchor = BrokerOrder.objects.create(
+        broker_account=account, ticker="MRVL", side="buy",
+        quantity=Decimal("1"), order_type="market",
+        status=BrokerOrder.STATUS_SUBMITTED, broker_order_id=str(uuid4()),
+        group_id=uuid4(), leg_role=BrokerOrder.LEG_ENTRY,
+    )
+    # Guard: this test is only meaningful if the order routes through the
+    # group-anchor path (_poll_group), not the flat path.
+    assert is_group_anchor(anchor)
+
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _acc: _AuthFailBroker(BrokerAuthError("401")),
+    )
+    with pytest.raises(BrokerAuthError):
+        poll_open_orders_for_account(account)
+
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _acc: _AuthFailBroker(BrokerError("422 rejected")),
+    )
+    written = poll_open_orders_for_account(account)
+    assert written == 0
+    anchor.refresh_from_db()
+    assert "422 rejected" in (anchor.error_message or "")
+
+
+def test_ingest_order_fills_flips_to_needs_reauth_on_group_auth_error(user):
+    """Parity with the poll path: a 401/403 from a group anchor in the
+    post-confirm ingest path flags the account for re-auth instead of
+    propagating raw (the view caller only logs)."""
+    from apps.brokers.interfaces import BrokerAuthError
+    from apps.brokers.reconcile import ingest_order_fills
+
+    account = _alpaca_account(user)
+    anchor = BrokerOrder.objects.create(
+        broker_account=account, ticker="MRVL", side="buy",
+        quantity=Decimal("1"), order_type="market",
+        status=BrokerOrder.STATUS_SUBMITTED, broker_order_id=str(uuid4()),
+        group_id=uuid4(), leg_role=BrokerOrder.LEG_ENTRY,
+    )
+
+    written = ingest_order_fills(anchor, _AuthFailBroker(BrokerAuthError("401")))
+    assert written == 0
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+
+
+class _AuthFailAccountBroker:
+    """Broker stub whose account/position reads raise an auth error."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def get_positions(self):
+        raise self._exc
+
+    def get_account(self):
+        raise self._exc
+
+
+def test_reconcile_account_flips_to_needs_reauth_on_auth_error(user, monkeypatch):
+    """reconcile_account must not silently swallow a 401/403 as a generic
+    error — it flips the account to needs_reauth (BrokerAuthError now
+    subclasses BrokerError, so the auth handler must precede the generic
+    one)."""
+    from apps.brokers import reconcile as reconcile_mod
+    from apps.brokers.interfaces import BrokerAuthError
+
+    account = _alpaca_account(user)
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _acc: _AuthFailAccountBroker(BrokerAuthError("401")),
+    )
+    event = reconcile_mod.reconcile_account(account)
+
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+    assert "needs_reauth" in (event.error_message or "")
