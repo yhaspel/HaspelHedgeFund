@@ -132,7 +132,7 @@ def test_council_enters_fair_pair_when_personas_vote_enter(monkeypatch):
 # ---------- Live-LLM smoke test (opt-in) -------------------------------
 
 LIVE_LLM_ON = os.environ.get("RUN_LIVE_LLM_TESTS") == "1"
-FRUGAL_MODEL = "openrouter:qwen/qwen3.6-27b"
+FRUGAL_MODEL = "openrouter:meta-llama/llama-3.3-70b-instruct"
 
 
 @pytest.mark.live_llm

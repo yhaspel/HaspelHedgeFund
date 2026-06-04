@@ -23,22 +23,27 @@ PRESETS: dict[str, dict[str, str]] = {
     # with model diversity and a single provider 429 takes down only one
     # persona's call. Orchestration stays on the strongest free pick.
     "dev": {
-        # Persona spread (8 personas, 8 distinct free slugs from DEV_TIER_SLUGS):
-        "buffett": "openrouter:openai/gpt-oss-120b:free",
-        "munger": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "graham": "openrouter:deepseek/deepseek-v4-flash:free",
-        "wood": "openrouter:google/gemma-4-31b-it:free",
-        "druckenmiller": "openrouter:z-ai/glm-4.5-air:free",
-        "burry": "openrouter:minimax/minimax-m2.5:free",
-        "damodaran": "openrouter:arcee-ai/trinity-large-thinking:free",
-        "lynch": "openrouter:qwen/qwen3-coder:free",
+        # Persona spread across DEV_TIER_SLUGS — LIVE, NON-REASONING :free
+        # routes only (the old gpt-oss/qwen3-coder reasoning slugs and the
+        # dead arcee/minimax routes are gone). The free non-reasoning pool is
+        # smaller than 8 personas, so the personas SPAN the menu (some reused)
+        # rather than 1-per-persona; the self-heal layer covers any that empty
+        # out, and a provider 429 still only takes down its slug's share.
+        "buffett": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "munger": "openrouter:deepseek/deepseek-v4-flash:free",
+        "graham": "openrouter:google/gemma-4-31b-it:free",
+        "wood": "openrouter:z-ai/glm-4.5-air:free",
+        "druckenmiller": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "burry": "openrouter:deepseek/deepseek-v4-flash:free",
+        "damodaran": "openrouter:google/gemma-4-31b-it:free",
+        "lynch": "openrouter:z-ai/glm-4.5-air:free",
         # Fallback for any future ninth persona — keep the wildcard.
-        "*persona*": "openrouter:openai/gpt-oss-120b:free",
+        "*persona*": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
         "*analytical*": "openrouter:google/gemma-4-31b-it:free",
         "macro": "openrouter:deepseek/deepseek-v4-flash:free",
         "news_digest": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
         "risk_manager": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "portfolio_manager": "openrouter:openai/gpt-oss-120b:free",
+        "portfolio_manager": "openrouter:z-ai/glm-4.5-air:free",
         "cio": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
     },
     "research": {
@@ -63,21 +68,24 @@ PRESETS: dict[str, dict[str, str]] = {
         "macro": "anthropic:claude-sonnet-4-6",
         "news_digest": "anthropic:claude-sonnet-4-6",
     },
-    # Frugal: each persona on a distinct cheap slug (FRUGAL_TIER_SLUGS),
-    # orchestration on the strongest pick.
+    # Frugal: each persona on a distinct cheap NON-REASONING slug
+    # (FRUGAL_TIER_SLUGS, all paid/stable). No reasoning routes on ANY role —
+    # they burn the budget on hidden thinking and emit empty content (the
+    # qwen/qwen3.6-27b hang that stalled runs 236/237). Orchestration + the
+    # analytical catch-all on Llama 3.3 70B, the proven non-reasoning default.
     "frugal": {
         "buffett": "openrouter:meta-llama/llama-3.3-70b-instruct",
-        "munger": "openrouter:qwen/qwen3-235b-a22b-2507",
-        "graham": "openrouter:openai/gpt-oss-120b",
+        "munger": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
+        "graham": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
         "wood": "openrouter:google/gemma-3-27b-it",
-        "druckenmiller": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
-        "burry": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
-        "damodaran": "openrouter:z-ai/glm-4-32b",
-        "lynch": "openrouter:qwen/qwen3.6-27b",
-        "*persona*": "openrouter:qwen/qwen3.6-27b",
-        "*": "openrouter:qwen/qwen3.6-27b",
-        "portfolio_manager": "openrouter:qwen/qwen3-235b-a22b-2507",
-        "cio": "openrouter:qwen/qwen3-235b-a22b-2507",
+        "druckenmiller": "openrouter:z-ai/glm-4-32b",
+        "burry": "openrouter:deepseek/deepseek-v4-flash",
+        "damodaran": "openrouter:amazon/nova-lite-v1",
+        "lynch": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "*persona*": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "*": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "portfolio_manager": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "cio": "openrouter:meta-llama/llama-3.3-70b-instruct",
         "risk_manager": "openrouter:meta-llama/llama-3.3-70b-instruct",
     },
     "hybrid": {

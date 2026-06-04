@@ -51,10 +51,12 @@ def test_registry_endpoint(client):
     tiers = {t["name"]: t for t in body["tiers"]}
     assert {"dev", "frugal", "hybrid", "research", "quality"} <= set(tiers)
     frugal = tiers["frugal"]
-    assert frugal["default_model"] == "openrouter:qwen/qwen3.6-27b"
+    # frugal default = its *persona* wildcard = Llama 3.3 70B (non-reasoning;
+    # the old qwen3.6-27b reasoning default was removed — see preset sanitation).
+    assert frugal["default_model"] == "openrouter:meta-llama/llama-3.3-70b-instruct"
     assert frugal["default_model"] in frugal["models"]
     assert "openrouter:meta-llama/llama-3.3-70b-instruct" in frugal["models"]
-    assert tiers["dev"]["default_model"] == "openrouter:openai/gpt-oss-120b:free"
+    assert tiers["dev"]["default_model"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 # ---- list / templates --------------------------------------------------

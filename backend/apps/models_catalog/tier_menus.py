@@ -12,29 +12,33 @@ from __future__ import annotations
 from decimal import Decimal
 
 # --- dev: OpenRouter :free slugs only. sync_tier_models() drops any that
-#     come back non-free (budget guard).
+#     come back non-free (budget guard). Curated to LIVE, NON-REASONING routes:
+#     reasoning slugs (gpt-oss, qwen3*) burn the budget on hidden thinking and
+#     emit empty content (the qwen3.6-27b hang, runs 236/237); the removed
+#     arcee-ai/trinity-large-thinking:free and minimax/minimax-m2.5:free 404'd
+#     upstream (runs 228-235). The free non-reasoning pool is small, so the
+#     dev preset spreads its 8 personas across these (some reused) rather than
+#     1-per-persona. test_preset_invariants enforces non-reasoning + vetted.
 DEV_TIER_SLUGS: list[str] = [
-    "openai/gpt-oss-120b:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
     "deepseek/deepseek-v4-flash:free",
     "google/gemma-4-31b-it:free",
     "z-ai/glm-4.5-air:free",
-    "qwen/qwen3-coder:free",
-    "minimax/minimax-m2.5:free",
-    "arcee-ai/trinity-large-thinking:free",
 ]
 
-# --- frugal: cheap OpenRouter paid slugs. sync_tier_models() drops any
-#     above the FRUGAL_PRICE_CEILING_* bounds.
+# --- frugal: cheap OpenRouter PAID slugs (stable, non-ephemeral). All
+#     NON-REASONING — the reasoning routes (openai/gpt-oss-120b,
+#     qwen/qwen3-235b-a22b-2507, qwen/qwen3.6-27b) were removed because they
+#     reasoning-exhaust to empty content on the cheap tier. sync_tier_models()
+#     drops any above the FRUGAL_PRICE_CEILING_* bounds.
 FRUGAL_TIER_SLUGS: list[str] = [
-    "openai/gpt-oss-120b",
-    "qwen/qwen3-235b-a22b-2507",
     "meta-llama/llama-3.3-70b-instruct",
     "nvidia/nemotron-3-nano-30b-a3b",
     "mistralai/mistral-small-3.2-24b-instruct",
     "google/gemma-3-27b-it",
     "z-ai/glm-4-32b",
-    "qwen/qwen3.6-27b",
+    "deepseek/deepseek-v4-flash",
+    "amazon/nova-lite-v1",
 ]
 
 # --- static menus for the Anthropic-anchored tiers (decision #4). These

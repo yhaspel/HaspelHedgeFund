@@ -69,7 +69,7 @@ def test_estimate_cycle_override_preset_expands_that_tier(user) -> None:
     # Echoes the chosen tier, not the strategy's saved preset.
     assert est["preset"] == "dev"
     # dev maps every persona onto a distinct OpenRouter :free slug.
-    assert est["overrides"]["buffett"] == "openrouter:openai/gpt-oss-120b:free"
+    assert est["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 @pytest.mark.django_db
@@ -96,7 +96,7 @@ def test_resolve_model_overrides_explicit_overrides_win(user) -> None:
 def test_resolve_model_overrides_explicit_preset_bypasses_strategy(user) -> None:
     strategy = _strategy(user, model_preset="research")
     out = _resolve_model_overrides(strategy, preset="dev")
-    assert out["buffett"] == "openrouter:openai/gpt-oss-120b:free"
+    assert out["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 @pytest.mark.django_db
@@ -104,7 +104,8 @@ def test_resolve_model_overrides_no_args_unchanged(user) -> None:
     # Regression guard: the no-kwarg path still resolves from the strategy.
     strategy = _strategy(user, model_preset="frugal")
     out = _resolve_model_overrides(strategy)
-    assert out["lynch"] == "openrouter:qwen/qwen3.6-27b"
+    # frugal lynch is now a non-reasoning slug (was qwen/qwen3.6-27b).
+    assert out["lynch"] == "openrouter:meta-llama/llama-3.3-70b-instruct"
 
 
 # ---- estimate endpoint (POST) --------------------------------------------
@@ -119,7 +120,7 @@ def test_estimate_post_with_preset(user) -> None:
     )
     assert resp.status_code == 200, resp.data
     assert resp.data["preset"] == "dev"
-    assert resp.data["overrides"]["buffett"] == "openrouter:openai/gpt-oss-120b:free"
+    assert resp.data["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 @pytest.mark.django_db

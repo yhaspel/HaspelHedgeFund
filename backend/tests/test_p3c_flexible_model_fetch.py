@@ -460,12 +460,12 @@ def test_dev_preset_spreads_personas_across_distinct_models() -> None:
 
     mapping = expand_preset("dev")
     persona_models = {mapping[p] for p in PERSONA_AGENTS}
-    assert len(persona_models) == len(PERSONA_AGENTS), (
-        f"dev personas should resolve to {len(PERSONA_AGENTS)} distinct models; "
-        f"got {len(persona_models)}: {persona_models}"
-    )
     allow = {f"openrouter:{s}" for s in DEV_TIER_SLUGS}
-    assert persona_models <= allow
+    # The live, non-reasoning :free pool is smaller than the 8 personas, so we
+    # can't give each a distinct slug. Instead require the personas to SPAN the
+    # whole dev menu (same diversity intent: a provider 429 only takes down its
+    # slug's share). See preset sanitation / test_preset_invariants.
+    assert persona_models == allow, (persona_models, allow)
 
 
 def test_frugal_preset_spreads_personas_across_distinct_models() -> None:
@@ -473,9 +473,10 @@ def test_frugal_preset_spreads_personas_across_distinct_models() -> None:
 
     mapping = expand_preset("frugal")
     persona_models = {mapping[p] for p in PERSONA_AGENTS}
-    assert len(persona_models) == len(PERSONA_AGENTS)
     allow = {f"openrouter:{s}" for s in FRUGAL_TIER_SLUGS}
-    assert persona_models <= allow
+    # Personas span the full (paid, non-reasoning) frugal menu; with 8 personas
+    # and 7 stable non-reasoning slugs one slug is shared.
+    assert persona_models == allow, (persona_models, allow)
 
 
 # --- Management command -------------------------------------------------
