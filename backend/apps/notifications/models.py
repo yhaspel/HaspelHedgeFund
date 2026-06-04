@@ -2,8 +2,7 @@
 
 v1 ships **email** and **telegram**. ``kind`` is a CharField (not a hard FK to
 a channel-type table) so adding Slack/Discord later is a one-line choices edit
-plus a new ``channels/*.py`` sender — see the deferred plan
-``phase-03b-1-slack-discord-notifications.md``.
+plus a new ``channels/*.py`` sender.
 
 ``config`` is per-kind:
 * email    → ``{"address": "you@example.com"}`` (falls back to ``user.email``)

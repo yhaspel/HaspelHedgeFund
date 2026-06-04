@@ -12,7 +12,7 @@ import { CommandPaletteService } from '../../abstraction/command-palette.service
  * palette opens as a dialog with a labelled search input, results render
  * as a listbox with options that carry position-in-set info (via
  * aria-activedescendant). Awkward phrasing / cross-AT differences remain
- * a human gate (see phase-06a-voice-accessibility.md).
+ * a human gate.
  */
 describe('hf-command-palette · virtual screen reader', () => {
   beforeEach(async () => {

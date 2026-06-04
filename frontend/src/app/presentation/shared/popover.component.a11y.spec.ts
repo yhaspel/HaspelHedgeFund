@@ -10,7 +10,7 @@ import { PopoverComponent } from './popover.component';
  * carries role="tooltip" and the trigger's aria-describedby resolves to
  * the popover's content, so a screen reader announces the body when the
  * trigger has focus. Awkward-phrasing / cross-AT differences remain a
- * human-only gate (see phase-06a-voice-accessibility.md).
+ * human-only gate.
  */
 
 @Component({

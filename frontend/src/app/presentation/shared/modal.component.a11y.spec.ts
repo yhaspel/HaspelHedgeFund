@@ -9,8 +9,7 @@ import { ModalComponent } from './modal.component';
  * Catches the *structural* announcement properties that axe can't:
  * dialog role announces, accessible name is reachable, focus lands
  * inside on open, Tab/Shift+Tab stays inside. Awkward-phrasing /
- * cross-AT (VoiceOver vs NVDA) differences remain a human-only gate
- * (see development-plans/phase-06a-voice-accessibility.md).
+ * cross-AT (VoiceOver vs NVDA) differences remain a human-only gate.
  */
 @Component({
   standalone: true,

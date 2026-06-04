@@ -12,8 +12,7 @@ import { virtual } from '@guidepup/virtual-screen-reader';
  * same `.count` / `.count.attn` semantics. Catches regressions in the
  * tab pattern without having to spin up the full page.
  *
- * Cross-AT phrasing checks remain the human gate (see
- * development-plans/phase-06a-voice-accessibility.md).
+ * Cross-AT phrasing checks remain the human gate.
  */
 type Tab = 'decision' | 'council' | 'risk' | 'cio' | 'raw';
 
