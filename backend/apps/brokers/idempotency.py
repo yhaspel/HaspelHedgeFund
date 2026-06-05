@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from .interfaces import (
     Broker,
+    BrokerAuthError,
     BrokerError,
     BrokerTransientError,
     OrderMeta,
@@ -89,6 +90,19 @@ def submit_idempotent(
                 status=BrokerOrder.STATUS_ERROR,
                 error_message=str(exc)[:500],
             )
+        raise
+    except BrokerAuthError as exc:
+        # Credentials were rejected (401/403) — the order never reached the
+        # venue. Walk it back to a clean, re-submittable state (NOT rejected,
+        # which would imply the venue refused the order) and flag the account
+        # so nothing resubmits until it is re-authenticated.
+        with transaction.atomic():
+            BrokerOrder.objects.filter(pk=order.pk).update(
+                idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
+                status=BrokerOrder.STATUS_CONFIRMED,
+                error_message=str(exc)[:500],
+            )
+            order.broker_account.flag_needs_reauth()
         raise
     except BrokerError as exc:
         # Broker said no. Walk back to rejected so the user can decide.
@@ -240,6 +254,20 @@ def submit_bracket_idempotent(
                 status=BrokerOrder.STATUS_ERROR,
                 error_message=str(exc)[:500],
             )
+        raise
+    except BrokerAuthError as exc:
+        # Credentials rejected (401/403) — the group never reached the venue.
+        # Walk the whole group back to a clean, re-submittable state (NOT
+        # rejected) and flag the account so nothing resubmits until re-auth.
+        with transaction.atomic():
+            BrokerOrder.objects.filter(
+                models.Q(pk=anchor.pk) | models.Q(parent_order=anchor),
+            ).update(
+                idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
+                status=BrokerOrder.STATUS_CONFIRMED,
+                error_message=str(exc)[:500],
+            )
+            anchor.broker_account.flag_needs_reauth()
         raise
     except BrokerError as exc:
         # Broker said no. Walk the whole group back so the user can decide.

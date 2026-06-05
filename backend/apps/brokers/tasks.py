@@ -21,11 +21,7 @@ from .capabilities import AUTH_NONE, get_capabilities
 from .demo_fills import evaluate_resting_demo_orders
 from .interfaces import BrokerAuthError, BrokerError, BrokerTransientError
 from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
-from .reconcile import (
-    _flag_needs_reauth,
-    poll_open_orders_for_account,
-    reconcile_account,
-)
+from .reconcile import poll_open_orders_for_account, reconcile_account
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +64,7 @@ def poll_open_orders() -> dict:
             # the account out of ACTIVE so the next cycle skips it instead of
             # re-failing every 30s. Mirrors the IBKR needs_reauth recovery
             # path; one concise warning replaces a full traceback per cycle.
-            _flag_needs_reauth(account)
+            account.flag_needs_reauth()
             summary["needs_reauth"] += 1
             log.warning(
                 "poll_open_orders: account %s rejected (%s) — "

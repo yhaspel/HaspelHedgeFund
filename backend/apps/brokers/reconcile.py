@@ -15,6 +15,7 @@ Both write a BrokerSyncEvent row for auditability.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -38,6 +39,8 @@ from .interfaces import (
 )
 from .models import BrokerAccount, BrokerFill, BrokerOrder, BrokerSyncEvent
 
+log = logging.getLogger(__name__)
+
 
 def _money(x) -> Decimal:
     return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -52,16 +55,6 @@ def get_broker(account: BrokerAccount) -> Broker:
     if factory is None:
         raise RuntimeError(f"no adapter registered for broker {account.broker!r}")
     return factory(account)
-
-
-def _flag_needs_reauth(account: BrokerAccount) -> None:
-    """A 401/403 means the broker rejected the stored credentials — a
-    permanent failure. Flip the account out of ACTIVE so the poll/reconcile
-    loops skip it until the user re-submits credentials (the credentials
-    endpoint restores STATUS_ACTIVE). Idempotent."""
-    BrokerAccount.objects.filter(pk=account.pk).exclude(
-        connection_status=BrokerAccount.STATUS_NEEDS_REAUTH,
-    ).update(connection_status=BrokerAccount.STATUS_NEEDS_REAUTH)
 
 
 # --- poll_open_orders -------------------------------------------------------
@@ -131,7 +124,7 @@ def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
         fills = adapter.get_recent_fills(order.created_at)
         return _ingest_fills_for(order, snapshot, fills)
     except BrokerAuthError:
-        _flag_needs_reauth(order.broker_account)
+        order.broker_account.flag_needs_reauth()
         return 0
     except BrokerError as exc:
         order.error_message = str(exc)[:500]
@@ -177,6 +170,34 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
             order.save(update_fields=["error_message"])
             continue
     return fills_written
+
+
+def run_post_confirm_pipeline(order: BrokerOrder, broker: Broker) -> None:
+    """Best-effort post-confirm sync the confirm view runs inline: ingest this
+    order's fills, poll the account's other open orders, and reconcile — all in
+    ONE transaction so a mid-pipeline failure can't leave fills ingested but
+    drift unrecorded.
+
+    A credential rejection (BrokerAuthError) flips the account to needs_reauth
+    OUTSIDE the rolled-back transaction so the signal survives instead of
+    waiting on the next periodic poll; any other failure is swallowed (the
+    periodic reconcile beat retries)."""
+    try:
+        with transaction.atomic():
+            ingest_order_fills(order, broker)
+            poll_open_orders_for_account(order.broker_account)
+            reconcile_account(
+                order.broker_account,
+                triggered_by=BrokerSyncEvent.TRIGGER_POST_ORDER,
+            )
+    except BrokerAuthError:
+        order.broker_account.flag_needs_reauth()
+        log.warning(
+            "post-confirm: account %s credentials rejected — flagged needs_reauth",
+            order.broker_account_id,
+        )
+    except Exception:  # noqa: BLE001 - best-effort; periodic reconcile retries
+        log.exception("post-confirm pipeline failed (rolled back) order=%s", order.pk)
 
 
 def _ingest_fill(order: BrokerOrder, fill: FillSnapshot) -> bool:
@@ -551,7 +572,7 @@ def reconcile_account(
         # Dead credentials — flip out of ACTIVE so the next reconcile/poll
         # skips this account until the user re-authenticates (rather than
         # silently recording a generic error every 5 min).
-        _flag_needs_reauth(account)
+        account.flag_needs_reauth()
         event.finished_at = timezone.now()
         event.error_message = f"needs_reauth — {str(exc)[:480]}"
         event.save(update_fields=["finished_at", "error_message"])

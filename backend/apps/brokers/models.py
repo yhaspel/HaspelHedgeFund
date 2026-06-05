@@ -100,6 +100,16 @@ class BrokerAccount(models.Model):
     def __str__(self) -> str:
         return f"{self.broker}/{self.mode} u={self.user_id} {self.label}"
 
+    def flag_needs_reauth(self) -> None:
+        """The broker rejected our stored credentials (HTTP 401/403) — a
+        permanent failure. Flip out of ACTIVE so the poll / reconcile / submit
+        paths skip this account until the user re-submits credentials (the
+        credentials endpoint restores STATUS_ACTIVE). Idempotent, and written
+        via a keyed UPDATE so it persists regardless of the in-memory row."""
+        BrokerAccount.objects.filter(pk=self.pk).exclude(
+            connection_status=BrokerAccount.STATUS_NEEDS_REAUTH,
+        ).update(connection_status=BrokerAccount.STATUS_NEEDS_REAUTH)
+
 
 class BrokerCredential(models.Model):
     """One credential per account. Holds API-key OR OAuth material — never both.

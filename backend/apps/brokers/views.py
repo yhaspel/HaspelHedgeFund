@@ -23,7 +23,6 @@ Routes:
 """
 from __future__ import annotations
 
-import logging
 import uuid
 from decimal import Decimal
 
@@ -59,7 +58,7 @@ from .idempotency import (
     submit_bracket_idempotent,
     submit_idempotent,
 )
-from .interfaces import BrokerError, BrokerTransientError
+from .interfaces import BrokerAuthError, BrokerError, BrokerTransientError
 from .models import (
     BrokerAccount,
     BrokerCredential,
@@ -71,9 +70,8 @@ from .models import (
 )
 from .reconcile import (
     get_broker,
-    ingest_order_fills,
-    poll_open_orders_for_account,
     reconcile_account,
+    run_post_confirm_pipeline,
 )
 from .serializers import (
     BrokerAccountSerializer,
@@ -1259,6 +1257,19 @@ class BrokerOrderConfirmView(APIView):
                 submit_idempotent(order=order, broker=broker)
         except IdempotencyConflict as exc:
             return Response({"detail": str(exc)}, status=409)
+        except BrokerAuthError as exc:
+            # Credentials rejected — submit_idempotent already walked the order
+            # back to confirmed/unsubmitted and flagged the account. Surface a
+            # clear re-auth signal instead of a generic 502.
+            order.refresh_from_db()
+            return Response(
+                {
+                    "detail": f"account needs re-authentication: {exc}",
+                    "code": "needs_reauth",
+                    "order_status": order.status,
+                },
+                status=409,
+            )
         except Exception as exc:
             order.refresh_from_db()
             return Response(
@@ -1266,31 +1277,11 @@ class BrokerOrderConfirmView(APIView):
                 status=502,
             )
 
-        # Post-confirm pipeline. Inline (not Celery) so the test/dev
-        # experience surfaces fills immediately:
-        #   1) ingest this order's fills (handles same-tick MockBroker fills
-        #      where the order status went straight to "filled" and so
-        #      wouldn't appear in poll_open_orders' OPEN_STATUSES filter).
-        #   2) poll any other still-open orders on the same account.
-        #   3) reconcile_account squares residual drift the fill stream
-        #      didn't account for.
-        # P7 §11: run the three steps ATOMICALLY so a mid-pipeline failure can't
-        # leave fills ingested but drift unrecorded — either the whole
-        # ingest→poll→reconcile sequence commits or none of it does. Still
-        # best-effort at the response level (a failure logs, never 500s the
-        # confirm); the periodic reconcile beat retries.
-        try:
-            with transaction.atomic():
-                ingest_order_fills(order, broker)
-                poll_open_orders_for_account(order.broker_account)
-                reconcile_account(
-                    order.broker_account,
-                    triggered_by=BrokerSyncEvent.TRIGGER_POST_ORDER,
-                )
-        except Exception:  # pragma: no cover - best-effort; periodic reconcile retries
-            logging.getLogger(__name__).exception(
-                "post-confirm pipeline failed (rolled back) order=%s", order.pk
-            )
+        # Post-confirm pipeline — ingest this order's fills, poll the account's
+        # other open orders, reconcile drift — atomically and best-effort. A
+        # credential rejection flips the account to needs_reauth durably (see
+        # run_post_confirm_pipeline); the periodic beat retries everything else.
+        run_post_confirm_pipeline(order, broker)
         order.refresh_from_db()
         payload = BrokerOrderSerializer(order).data
         if gate_result is not None:

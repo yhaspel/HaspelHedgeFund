@@ -1309,3 +1309,113 @@ def test_reconcile_account_flips_to_needs_reauth_on_auth_error(user, monkeypatch
     account.refresh_from_db()
     assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
     assert "needs_reauth" in (event.error_message or "")
+
+
+# ---------------------------------------------------------------------------
+# Issue 1: a 401 on submit flags the account instead of marking the order
+# "rejected" (which would imply the venue refused it).
+# ---------------------------------------------------------------------------
+
+
+class _AuthFailSubmitBroker:
+    """Broker stub whose submit paths raise an auth error."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def submit_order(self, ticket):
+        raise self._exc
+
+    def submit_bracket(self, ticket):
+        raise self._exc
+
+    def submit_protective(self, ticket):
+        raise self._exc
+
+
+def test_submit_idempotent_auth_error_flags_account_not_rejected(user):
+    from apps.brokers.idempotency import submit_idempotent
+    from apps.brokers.interfaces import BrokerAuthError
+
+    account = _alpaca_account(user)
+    order = BrokerOrder.objects.create(
+        broker_account=account, ticker="MRVL", side="buy",
+        quantity=Decimal("1"), order_type="market",
+        status=BrokerOrder.STATUS_CONFIRMED,
+        idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
+    )
+
+    with pytest.raises(BrokerAuthError):
+        submit_idempotent(
+            order=order, broker=_AuthFailSubmitBroker(BrokerAuthError("401")),
+        )
+
+    order.refresh_from_db()
+    # NOT rejected — the venue never saw the order; it stays re-submittable.
+    assert order.status == BrokerOrder.STATUS_CONFIRMED
+    assert order.idempotency_state == BrokerOrder.IDEM_UNSUBMITTED
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+
+
+def test_submit_bracket_idempotent_auth_error_flags_account_not_rejected(user):
+    from apps.brokers.idempotency import submit_bracket_idempotent
+    from apps.brokers.interfaces import BrokerAuthError
+
+    account = _alpaca_account(user)
+    anchor = BrokerOrder.objects.create(
+        broker_account=account, ticker="MRVL", side="buy",
+        quantity=Decimal("1"), order_type="market",
+        status=BrokerOrder.STATUS_CONFIRMED,
+        idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
+        group_id=uuid4(), leg_role=BrokerOrder.LEG_ENTRY,
+    )
+    child = BrokerOrder.objects.create(
+        broker_account=account, ticker="MRVL", side="sell",
+        quantity=Decimal("1"), order_type="limit", limit_price=Decimal("100"),
+        status=BrokerOrder.STATUS_CONFIRMED,
+        idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
+        parent_order=anchor, group_id=anchor.group_id,
+        leg_role=BrokerOrder.LEG_TAKE_PROFIT,
+    )
+
+    with pytest.raises(BrokerAuthError):
+        submit_bracket_idempotent(
+            anchor=anchor, broker=_AuthFailSubmitBroker(BrokerAuthError("401")),
+        )
+
+    anchor.refresh_from_db()
+    child.refresh_from_db()
+    # The whole group is walked back to confirmed/unsubmitted — not rejected.
+    assert anchor.status == BrokerOrder.STATUS_CONFIRMED
+    assert child.status == BrokerOrder.STATUS_CONFIRMED
+    assert anchor.idempotency_state == BrokerOrder.IDEM_UNSUBMITTED
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
+
+
+# ---------------------------------------------------------------------------
+# Issue 2: the post-confirm pipeline flips needs_reauth DURABLY — the flip must
+# survive the atomic rollback a mid-pipeline 401 triggers.
+# ---------------------------------------------------------------------------
+
+
+def test_run_post_confirm_pipeline_flags_needs_reauth_durably(user, monkeypatch):
+    from apps.brokers import reconcile as reconcile_mod
+    from apps.brokers.interfaces import BrokerAuthError
+    from apps.brokers.reconcile import run_post_confirm_pipeline
+
+    account = _alpaca_account(user)
+    order = _submitted_order(account)   # open + parent-less → poll will fetch it
+
+    stub = _AuthFailBroker(BrokerAuthError("401"))
+    # ingest gets the stub directly; poll/reconcile build theirs via get_broker.
+    monkeypatch.setattr(reconcile_mod, "get_broker", lambda _a: stub)
+
+    # Swallows by contract (best-effort); the 401 from poll rolls back the
+    # atomic, reverting the in-pipeline flip — the durable re-flag is what's
+    # under test.
+    run_post_confirm_pipeline(order, stub)
+
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
