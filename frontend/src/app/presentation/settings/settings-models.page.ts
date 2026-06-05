@@ -671,23 +671,31 @@ export class SettingsModelsPage implements OnInit {
     if (modelId) next[tier] = modelId; else delete next[tier];
     this.tierDefaults.set(next);
   }
-  visibleTierModels(tier: string): ModelEntry[] {
+  /** Scope the catalog to a tier/preset menu (∪ discovered Ollama), always
+   *  re-including `currentId` if it falls outside the menu (stale selection).
+   *  Shared by the per-agent and per-tier selects. Empty menu → full catalog. */
+  private _scopeToMenu(menu: string[], currentId: string): ModelEntry[] {
     const all = this.store.models();
-    const menu = this.tierMenus()[tier] ?? [];
     if (!menu.length) return all;
-    const set = new Set(menu);
-    const out = all.filter((m) => set.has(m.id) || m.provider === 'ollama');
-    const cur = this.tierDefault(tier);
-    if (cur && !out.some((m) => m.id === cur)) {
-      const stale = all.find((m) => m.id === cur);
+    const menuSet = new Set(menu);
+    const out = all.filter((m) => menuSet.has(m.id) || m.provider === 'ollama');
+    if (currentId && !out.some((m) => m.id === currentId)) {
+      const stale = all.find((m) => m.id === currentId);
       if (stale) out.push(stale);
     }
     return out;
   }
+  /** Catalog display name for a model id, falling back to the id. */
+  private _modelName(id: string): string {
+    return this.store.models().find((m) => m.id === id)?.display_name ?? id;
+  }
+
+  visibleTierModels(tier: string): ModelEntry[] {
+    return this._scopeToMenu(this.tierMenus()[tier] ?? [], this.tierDefault(tier));
+  }
   tierDefaultLabel(tier: string): string {
     const id = this.tierDefault(tier);
-    if (!id) return '— system default —';
-    return this.store.models().find((m) => m.id === id)?.display_name ?? id;
+    return id ? this._modelName(id) : '— system default —';
   }
   tierDefaultEst(tier: string): number {
     const id = this.tierDefault(tier);
@@ -718,7 +726,7 @@ export class SettingsModelsPage implements OnInit {
   tierMembers(tier: string): string[] { return this.tierEdits()[tier]?.members ?? []; }
   tierDefaultModel(tier: string): string { return this.tierEdits()[tier]?.default_model ?? ''; }
   memberLabel(mid: string): string {
-    return this.store.models().find((m) => m.id === mid)?.display_name ?? mid;
+    return this._modelName(mid);
   }
   addableModels(tier: string): ModelEntry[] {
     const members = new Set(this.tierMembers(tier));
@@ -804,18 +812,8 @@ export class SettingsModelsPage implements OnInit {
    *   renders empty before loadPresetOverrides() resolves
    */
   visiblePerAgentModels(a: string): ModelEntry[] {
-    const all = this.store.models();
-    if (this.showAllPerAgent()) return all;
-    const menu = this.presetMenu();
-    if (!menu.length) return all;
-    const menuSet = new Set(menu);
-    const out = all.filter((m) => menuSet.has(m.id) || m.provider === 'ollama');
-    const saved = this.agentDefault(a);
-    if (saved && !out.some((m) => m.id === saved)) {
-      const stale = all.find((m) => m.id === saved);
-      if (stale) out.push(stale);
-    }
-    return out;
+    if (this.showAllPerAgent()) return this.store.models();
+    return this._scopeToMenu(this.presetMenu(), this.agentDefault(a));
   }
 
   fetchOpenRouter(): void {
@@ -859,20 +857,11 @@ export class SettingsModelsPage implements OnInit {
 
   resolvedDefault(a: string): string {
     const override = this.agentDefault(a);
-    if (override) {
-      const m = this.store.models().find((x) => x.id === override);
-      return (m?.display_name ?? override) + ' (override)';
-    }
+    if (override) return this._modelName(override) + ' (override)';
     const fromPreset = this.presetOverrides()[a];
-    if (fromPreset) {
-      const m = this.store.models().find((x) => x.id === fromPreset);
-      return m?.display_name ?? fromPreset;
-    }
+    if (fromPreset) return this._modelName(fromPreset);
     const sysDefault = this.store.agents().find((x) => x.id === a)?.default_model;
-    if (sysDefault) {
-      const m = this.store.models().find((x) => x.id === sysDefault);
-      return (m?.display_name ?? sysDefault) + ' (system)';
-    }
+    if (sysDefault) return this._modelName(sysDefault) + ' (system)';
     return '—';
   }
 

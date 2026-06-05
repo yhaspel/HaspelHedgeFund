@@ -9,7 +9,10 @@ This module is imported by seed.py, so it must not import Django models.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
+
+log = logging.getLogger(__name__)
 
 # --- dev: OpenRouter :free slugs only. sync_tier_models() drops any that
 #     come back non-free (budget guard). Curated to LIVE, NON-REASONING routes:
@@ -126,6 +129,9 @@ def tier_menu(preset: str) -> list[str]:
             .values_list("model_id", "model__is_active")
         )
     except Exception:
+        # Degrade to the baseline (cold-start / DB-down), but surface a genuine
+        # bug rather than swallow it silently.
+        log.warning("tier_menu(%r): DB read failed, using baseline", preset, exc_info=True)
         return _default_menu(preset)
     if not rows:
         return _default_menu(preset)
@@ -188,6 +194,12 @@ def sanitize_overrides(
             .values_list("id", flat=True)
         )
     except Exception:
+        # On the run-dispatch path: never crash, but log so a real bug here
+        # (not just DB-down) is discoverable rather than silently no-op'd.
+        log.warning(
+            "sanitize_overrides(%r): DB read failed, passing through",
+            preset, exc_info=True,
+        )
         return overrides
     dead = catalog_ids - active
     if not dead:
