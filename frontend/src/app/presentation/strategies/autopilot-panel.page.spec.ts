@@ -14,7 +14,8 @@ type Cmp = any;
 function ap(overrides: Partial<Autopilot> = {}): Autopilot {
   return {
     strategy_id: 7, is_enabled: false, state: 'active',
-    cron_expression: '30 16 * * 5', timezone: 'America/New_York',
+    cron_expression: '30 16 * * 5', cron_description: 'At 04:30 PM, only on Friday',
+    timezone: 'America/New_York',
     is_market_aware: true, broker_account_id: 3, model_preset: 'frugal',
     cost_ceiling_usd: null, on_breach: 'degrade', target_vol_pct: '10',
     dd_soft_cut_pct: '5', dd_hard_halt_pct: '7.5', max_orders_per_day: 30,
