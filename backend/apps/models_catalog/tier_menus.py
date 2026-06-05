@@ -96,14 +96,125 @@ FRUGAL_PRICE_CEILING_IN = Decimal("1.00")
 FRUGAL_PRICE_CEILING_OUT = Decimal("5.00")
 
 
-def tier_menu(preset: str) -> list[str]:
-    """Return the ordered list of ModelEntry ids for a preset's menu.
-
-    dev/frugal resolve to "openrouter:"-prefixed allowlist ids;
-    the other three return their static list. Unknown preset -> [].
-    """
+def _default_menu(preset: str) -> list[str]:
+    """The baseline menu from the DEFAULT_* constants — used as the cold-start
+    fallback when a tier has no DB membership yet (or the DB is unreachable
+    pre-migrate). dev/frugal resolve to "openrouter:"-prefixed allowlist ids; the
+    others return their static list. Unknown preset -> []."""
     if preset == "dev":
         return [f"openrouter:{s}" for s in DEV_TIER_SLUGS]
     if preset == "frugal":
         return [f"openrouter:{s}" for s in FRUGAL_TIER_SLUGS]
     return list(STATIC_TIER_MENUS.get(preset, []))
+
+
+def tier_menu(preset: str) -> list[str]:
+    """Ordered ModelEntry ids for a preset's menu.
+
+    Reads the DB `TierMembership` for the tier, filtered to ACTIVE models — so a
+    deactivated/delisted model auto-drops from every menu (the core resilience
+    behavior). Falls back to the baseline constants only when the tier is
+    UNSEEDED (no membership rows) or the DB is unavailable. A seeded tier whose
+    members are all inactive returns [] (honest), not the stale baseline.
+    Unknown preset -> [].
+    """
+    try:
+        from .models import TierMembership
+        rows = list(
+            TierMembership.objects.filter(tier_id=preset)
+            .order_by("ordering", "model_id")
+            .values_list("model_id", "model__is_active")
+        )
+    except Exception:
+        return _default_menu(preset)
+    if not rows:
+        return _default_menu(preset)
+    return [mid for mid, active in rows if active]
+
+
+def tier_default(preset: str) -> str | None:
+    """The tier's default model id — the resilience fallback target.
+
+    `TierConfig.default_model` when it's still active, else the first active menu
+    member, else None.
+    """
+    try:
+        from .models import TierConfig
+        tc = (
+            TierConfig.objects.filter(tier_name=preset)
+            .select_related("default_model")
+            .first()
+        )
+    except Exception:
+        tc = None
+    if tc and tc.default_model_id and tc.default_model and tc.default_model.is_active:
+        return tc.default_model_id
+    menu = tier_menu(preset)
+    return menu[0] if menu else None
+
+
+def sanitize_overrides(
+    preset: str | None,
+    overrides: dict[str, str],
+    *,
+    fallback: str | None = None,
+) -> dict[str, str]:
+    """Rewrite any override pointing at an INACTIVE catalog model to the tier's
+    default (or `fallback`), leaving active picks untouched.
+
+    This degrades a delisted/deactivated curated slug to a live model at
+    SELECTION time — complementing the runtime self-heal — WITHOUT collapsing the
+    persona spread: only entries whose model is inactive move, every still-active
+    persona keeps its distinct model. `ollama:` ids are exempt (no ModelEntry row
+    by design). If nothing live can be found to fall back to, the map is returned
+    unchanged (the runtime L1-L3 self-heal remains the last net).
+    """
+    if not overrides:
+        return overrides
+    catalog_ids = {
+        str(m) for m in overrides.values() if not str(m).startswith("ollama:")
+    }
+    if not catalog_ids:
+        return overrides
+    # Check the fallback's activity in the SAME query so we never rewrite a dead
+    # pick to an equally-dead user/operator default.
+    check_ids = set(catalog_ids)
+    if fallback and not str(fallback).startswith("ollama:"):
+        check_ids.add(str(fallback))
+    try:
+        from .models import ModelEntry
+        active = set(
+            ModelEntry.objects.filter(id__in=check_ids, is_active=True)
+            .values_list("id", flat=True)
+        )
+    except Exception:
+        return overrides
+    dead = catalog_ids - active
+    if not dead:
+        return overrides
+    # Honor an explicit fallback only if it is itself active; otherwise fall
+    # through to the tier default (which tier_default guarantees is active).
+    target = fallback if (fallback and fallback in active) else tier_default(preset or "")
+    if not target or target in dead:
+        return overrides
+    return {
+        agent: (target if str(mid) in dead else mid)
+        for agent, mid in overrides.items()
+    }
+
+
+def anchor_non_personas(
+    preset: str | None,
+    overrides: dict[str, str],
+    tier_choice: str | None,
+) -> dict[str, str]:
+    """Set every NON-persona role to `tier_choice` (the per-tier default),
+    leaving the personas' spread intact. No-op for 'hybrid' (whose non-persona
+    roles are intentionally local/Sonnet) or when `tier_choice` is falsy."""
+    if not tier_choice or preset == "hybrid":
+        return overrides
+    from .presets import PERSONA_AGENTS
+    return {
+        agent: (mid if agent in PERSONA_AGENTS else tier_choice)
+        for agent, mid in overrides.items()
+    }

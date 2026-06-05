@@ -184,9 +184,11 @@ def test_missing_upstream_slug_is_deactivated_not_deleted() -> None:
             is_active=True,
         ),
     )
+    # A NON-empty catalog that simply omits the target slug (an empty catalog is
+    # now treated as a failed fetch — see the floor guard in sync_tier_models).
     with patch(
         "apps.models_catalog.verification.fetch_openrouter_catalog",
-        return_value={},
+        return_value=_fake_catalog([_free(DEV_TIER_SLUGS[1])]),
     ):
         result = sync_tier_models()
     assert mid in result.deactivated

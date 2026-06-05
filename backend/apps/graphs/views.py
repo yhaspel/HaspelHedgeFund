@@ -13,8 +13,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.models_catalog.presets import HYBRID_LOCAL_FALLBACK, PRESETS
-from apps.models_catalog.tier_menus import tier_menu
+from apps.models_catalog.presets import PRESETS
+from apps.models_catalog.tier_menus import tier_default, tier_menu
 
 from .models import AgentGraph, AgentGraphVersion
 from .registry import ALL_AGENTS, SCHEMA_VERSION
@@ -81,32 +81,20 @@ _TIER_LABELS = {
 }
 
 
-def _tier_default(preset: str, menu: list[str]) -> str | None:
-    """The single representative model a tier applies to every node — the
-    preset's persona wildcard (e.g. frugal→qwen3.6-27b, dev→gpt-oss-120b:free),
-    falling back to the menu's first entry."""
-    rules = PRESETS.get(preset, {})
-    default = rules.get("*persona*") or rules.get("*")
-    if default == "<local-tier-a>":
-        default = HYBRID_LOCAL_FALLBACK
-    if not default:
-        default = menu[0] if menu else None
-    return default
-
-
 def _tiers_payload() -> list[dict]:
     """For the editor's bulk tier switcher: each tier's curated model menu +
-    the default model applied to all nodes when the tier is picked."""
+    the default model applied to all nodes when the tier is picked. Both come
+    from the DB-backed tier config (active-only membership; the operator-set /
+    seeded TierConfig.default_model), via tier_menus.tier_menu/tier_default."""
     out = []
     for name in _TIER_ORDER:
         if name not in PRESETS:
             continue
-        menu = tier_menu(name)
         out.append({
             "name": name,
             "label": _TIER_LABELS.get(name, name.title()),
-            "default_model": _tier_default(name, menu),
-            "models": menu,
+            "default_model": tier_default(name),
+            "models": tier_menu(name),
         })
     return out
 

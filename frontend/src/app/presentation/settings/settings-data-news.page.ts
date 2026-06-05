@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -46,6 +46,22 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             </p>
 
             <div class="field">
+              <label class="lbl flex items-center justify-between" for="news-show-all-models">
+                <span>Show all models</span>
+                <input id="news-show-all-models" type="checkbox"
+                       [ngModel]="showAllModels()"
+                       (ngModelChange)="showAllModels.set($event)"
+                       name="news_show_all_models"
+                       data-test="news-show-all-models" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Off = the frugal Llama/Qwen default. On = pick any catalogued
+                model below, including frontier and 🧠 reasoning models (higher
+                per-headline cost).
+              </p>
+            </div>
+
+            <div class="field">
               <label class="lbl flex items-center justify-between" for="news-sentiment-enabled">
                 <span>Sentiment analysis</span>
                 <input id="news-sentiment-enabled" type="checkbox"
@@ -66,15 +82,17 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       name="news_sentiment_model"
                       [disabled]="!newsForm.sentiment_enabled"
                       data-test="news-sentiment-model">
-                @for (m of newsStore.sentimentChoices(); track m.id) {
+                @for (m of sentimentOptions(); track m.id) {
                   <option [value]="m.id">
-                    {{ m.display_name }} ·
+                    {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
                     {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
                   </option>
                 }
               </select>
               <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
-                Restricted to the Llama and Qwen families for cost discipline.
+                {{ showAllModels()
+                    ? 'Full catalogue — 🧠 marks reasoning models.'
+                    : 'Frugal Llama/Qwen models for cost discipline.' }}
               </p>
             </div>
 
@@ -99,9 +117,9 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       name="news_translation_model"
                       [disabled]="!newsForm.translation_enabled"
                       data-test="news-translation-model">
-                @for (m of newsStore.translationChoices(); track m.id) {
+                @for (m of translationOptions(); track m.id) {
                   <option [value]="m.id">
-                    {{ m.display_name }} ·
+                    {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
                     {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
                   </option>
                 }
@@ -115,9 +133,9 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       name="news_translation_fallback"
                       [disabled]="!newsForm.translation_enabled"
                       data-test="news-translation-fallback">
-                @for (m of newsStore.translationChoices(); track m.id) {
+                @for (m of translationOptions(); track m.id) {
                   <option [value]="m.id">
-                    {{ m.display_name }} ·
+                    {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
                     {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
                   </option>
                 }
@@ -269,6 +287,18 @@ export class SettingsDataNewsPage implements OnInit {
   savingNews = signal(false);
   newsMsg = signal<string | null>(null);
 
+  /** When off, the pickers show only the frugal default subset. */
+  showAllModels = signal(false);
+
+  readonly sentimentOptions = computed(() => {
+    const all = this.newsStore.sentimentChoices();
+    return this.showAllModels() ? all : all.filter((m) => m.frugal);
+  });
+  readonly translationOptions = computed(() => {
+    const all = this.newsStore.translationChoices();
+    return this.showAllModels() ? all : all.filter((m) => m.frugal);
+  });
+
   // ---- Portfolio mark cadence -----------------------------------------
   readonly cadenceOptions: { value: MarkCadence; label: string; help: string }[] = [
     {
@@ -308,6 +338,21 @@ export class SettingsDataNewsPage implements OnInit {
       next: (r) => {
         this.newsForm = { ...r.preferences };
         this.savedNews = { ...r.preferences };
+        // If any saved pick is outside the frugal subset, reveal the full list
+        // so its <select> shows the current value instead of rendering blank.
+        const frugalIds = new Set(
+          [...r.sentiment_model_choices, ...r.translation_model_choices]
+            .filter((c) => c.frugal)
+            .map((c) => c.id),
+        );
+        const picked = [
+          r.preferences.sentiment_model,
+          r.preferences.translation_model,
+          r.preferences.translation_fallback_model,
+        ];
+        if (picked.some((id) => id && !frugalIds.has(id))) {
+          this.showAllModels.set(true);
+        }
       },
       error: () => { /* ignore — defaults are fine */ },
     });

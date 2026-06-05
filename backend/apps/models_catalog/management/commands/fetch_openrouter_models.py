@@ -57,12 +57,15 @@ class Command(BaseCommand):
                         f"  ! openrouter:{entry['slug']} excluded — {entry['reason']}"
                     )
                 )
+            for mid in result.swept:
+                self.stdout.write(f"  ⌫ {mid} (retired — missing upstream)")
             self.stdout.write("")
             summary = (
                 f"synced={len(result.synced)} "
                 f"created={len(result.created)} "
                 f"deactivated={len(result.deactivated)} "
                 f"excluded={len(result.excluded)} "
+                f"swept={len(result.swept)} "
                 f"dry_run={opts['dry_run']}"
             )
             failed = bool(result.deactivated or result.excluded)

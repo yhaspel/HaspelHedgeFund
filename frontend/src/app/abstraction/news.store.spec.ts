@@ -27,6 +27,8 @@ const PREFS_RESPONSE: NewsPreferencesResponse = {
       display_name: 'Qwen3 235B',
       price_in_per_mtok: 0.071,
       price_out_per_mtok: 0.1,
+      supports_reasoning: true,
+      frugal: true,
     },
   ],
 };

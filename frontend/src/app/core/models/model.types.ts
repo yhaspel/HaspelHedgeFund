@@ -51,6 +51,8 @@ export interface FetchModelsResponse {
   created: string[];
   deactivated: string[];
   excluded: FetchModelsExcluded[];
+  /** Broad-sweep retirements: non-allowlist OpenRouter rows that vanished upstream. */
+  swept?: string[];
   fetched_at: string | null;
   models: ModelEntry[];
 }
@@ -79,6 +81,33 @@ export interface ModelPreferences {
   preset: string;
   per_agent_defaults: Record<string, string>;
   cost_ceiling_per_run_usd: string | number | null;
+  /** {tier: model_id} — the user's default model per price tier. Wire field name
+   *  must match the backend serializer (UserModelPreferences.per_tier_defaults). */
+  per_tier_defaults?: Record<string, string>;
+}
+
+export interface TierMember {
+  model_id: string;
+  ordering: number;
+  role: string;
+  display_name: string;
+  supports_reasoning: boolean;
+  is_active: boolean;
+}
+
+export interface TierConfig {
+  tier_name: string;
+  default_model: string | null;
+  is_free_only: boolean;
+  price_ceiling_in: string | null;
+  price_ceiling_out: string | null;
+  allow_reasoning: boolean;
+  is_live_synced: boolean;
+  members: TierMember[];
+}
+
+export interface TierConfigResponse {
+  tiers: TierConfig[];
 }
 
 export interface ProviderKeyStatus {
@@ -94,6 +123,10 @@ export interface ProviderKeyStatus {
 
 export const PRESET_NAMES = ['dev', 'research', 'quality', 'frugal', 'hybrid'] as const;
 export type PresetName = (typeof PRESET_NAMES)[number];
+
+// Price tiers the user can set a default model for (hybrid resolves its
+// orchestration tier dynamically from local models, so it's excluded).
+export const USER_TIER_DEFAULT_PRESETS = ['dev', 'frugal', 'research', 'quality'] as const;
 
 export const AGENT_DISPLAY: Record<string, string> = {
   buffett: 'Buffett', munger: 'Munger', graham: 'Graham', wood: 'Wood',

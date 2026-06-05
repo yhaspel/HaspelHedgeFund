@@ -35,6 +35,7 @@ from apps.data.providers.factory import (
     get_ownership_provider,
 )
 from apps.models_catalog.presets import PRESETS, expand_preset
+from apps.models_catalog.tier_menus import anchor_non_personas, sanitize_overrides
 from hedgefund_agents.graphs.council import build_council_graph, build_sector_council_graph
 from hedgefund_agents.screener.screener_agent import ScreenerAbort, run_screener
 from hedgefund_agents.screener.sector_features import macro_regime_vector, run_sector_screener
@@ -192,13 +193,19 @@ def _resolve_model_overrides(
     falls through to the env default — otherwise dev strategies created before
     this guard would keep resolving to the frontier `hybrid` map.
     """
+    # Explicit dispatch-modal overrides are already validated active at the API
+    # boundary (validate_model_overrides), so they pass through verbatim.
     if overrides:
         return dict(overrides)
     default_preset = getattr(settings, "LLM_DEFAULT_PRESET", "hybrid")
+    user_prefs = getattr(strategy.user, "model_prefs", None)
+    # Saved per-agent picks layer ON TOP of the preset+per-tier base (a PARTIAL
+    # map must not drop the other roles to the registry default). A transient
+    # dispatch-modal preset (explicit `preset`) ignores saved per-agent prefs.
+    per_agent: dict[str, str] = {}
     if preset is None:
-        user_prefs = getattr(strategy.user, "model_prefs", None)
         if user_prefs and user_prefs.per_agent_defaults:
-            return dict(user_prefs.per_agent_defaults)
+            per_agent = dict(user_prefs.per_agent_defaults)
         preset = strategy.model_preset or default_preset
         if preset == "hybrid" and default_preset != "hybrid":
             preset = default_preset
@@ -223,7 +230,30 @@ def _resolve_model_overrides(
             ) or next((m["id"] for m in discovered), None)
 
     preset_map = expand_preset(preset, local_tier_a=local_a)
-    return preset_map or {}
+    if not preset_map:
+        # No preset recipe (unknown preset) — fall back to the user's explicit
+        # per-agent picks alone.
+        return sanitize_overrides(preset, per_agent) if per_agent else {}
+    # The per-tier default anchors the non-persona (analytical + orchestration)
+    # roles; personas keep the spread. Skipped for hybrid, whose non-persona
+    # roles are intentionally local/Sonnet (anchoring would defeat it).
+    tier_choice = _user_tier_default(strategy.user, preset) if preset != "hybrid" else None
+    preset_map = anchor_non_personas(preset, preset_map, tier_choice)
+    # Saved per-agent picks win over the preset/per-tier base.
+    if per_agent:
+        preset_map = {**preset_map, **per_agent}
+    # Sanitize: a deactivated pick (delisted upstream) degrades to the tier
+    # default instead of reaching the run as a dead id — only inactive entries
+    # move, the persona spread is kept.
+    return sanitize_overrides(preset, preset_map, fallback=tier_choice or None)
+
+
+def _user_tier_default(user, preset: str | None) -> str | None:
+    """The user's saved default model for `preset`'s tier, if any."""
+    prefs = getattr(user, "model_prefs", None)
+    if prefs and isinstance(prefs.per_tier_defaults, dict):
+        return prefs.per_tier_defaults.get(preset)
+    return None
 
 
 def _active_members(strategy: PortfolioStrategy, as_of: date_cls) -> list[tuple[str, str]]:

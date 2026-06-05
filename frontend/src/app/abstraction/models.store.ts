@@ -9,6 +9,8 @@ import {
   ModelPreferences,
   PresetResponse,
   ProviderKeyStatus,
+  TierConfig,
+  TierConfigResponse,
   VerifyPricingResponse,
 } from '../core/models/model.types';
 
@@ -29,12 +31,15 @@ export class ModelsStore {
   private readonly _presets = signal<string[]>([]);
   private readonly _prefs = signal<ModelPreferences | null>(null);
   private readonly _keys = signal<ProviderKeyStatus | null>(null);
+  // Operator-only tier config — lazy-loaded (only staff can GET /tiers/).
+  private readonly _tierConfigs = signal<TierConfig[]>([]);
 
   readonly models = this._models.asReadonly();
   readonly agents = this._agents.asReadonly();
   readonly presets = this._presets.asReadonly();
   readonly prefs = this._prefs.asReadonly();
   readonly keys = this._keys.asReadonly();
+  readonly tierConfigs = this._tierConfigs.asReadonly();
 
   readonly defaultsMap = computed<Record<string, string>>(() => {
     const out: Record<string, string> = {};
@@ -83,6 +88,28 @@ export class ModelsStore {
   saveKeys(body: Record<string, string>): Observable<ProviderKeyStatus> {
     return this.api.put<ProviderKeyStatus>('/me/provider-keys/', body).pipe(
       tap((r) => this._keys.set(r)),
+    );
+  }
+
+  /** Operator-only: load all tier configs. 403 for non-staff — callers should
+   *  catch and hide the editor. */
+  loadTierConfigs(): Observable<TierConfigResponse> {
+    return this.api.get<TierConfigResponse>('/tiers/').pipe(
+      tap((r) => this._tierConfigs.set(r.tiers)),
+    );
+  }
+
+  /** Operator-only: replace one tier's members and/or default in a single PUT. */
+  saveTierConfig(
+    tier: string,
+    body: { members?: string[]; default_model?: string | null },
+  ): Observable<TierConfig> {
+    return this.api.put<TierConfig>(`/tiers/${tier}/`, body).pipe(
+      tap((updated) =>
+        this._tierConfigs.update((rows) =>
+          rows.map((t) => (t.tier_name === tier ? updated : t)),
+        ),
+      ),
     );
   }
 

@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from .tier_menus import DEV_TIER_SLUGS, FRUGAL_TIER_SLUGS
+from .tier_menus import (
+    DEV_TIER_SLUGS,
+    FRUGAL_PRICE_CEILING_IN,
+    FRUGAL_PRICE_CEILING_OUT,
+    FRUGAL_TIER_SLUGS,
+    STATIC_TIER_MENUS,
+)
 
 _FETCHED_IDS = {f"openrouter:{s}" for s in (*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS)}
 
@@ -155,3 +161,80 @@ def seed_models(sender, **kwargs):
             ModelEntry.objects.get_or_create(id=spec["id"], defaults=spec)
         else:
             ModelEntry.objects.update_or_create(id=spec["id"], defaults=spec)
+    # Tier config is seeded AFTER the catalog so its FKs/membership resolve. Runs
+    # on every post_migrate; idempotent + cold-start-guarded (see seed_tiers).
+    seed_tiers(sender, **kwargs)
+
+
+# Per-tier policy + default for the DB-backed TierConfig/TierMembership, seeded
+# byte-identically from the tier_menus DEFAULT_* constants + the PRESETS persona-
+# wildcard defaults (the same values graphs.views._tier_default produced). This
+# is the baseline; operators edit the DB rows afterward and the seed never
+# reverts those edits (get_or_create + cold-start membership guard).
+_TIER_SEED: dict[str, dict] = {
+    "dev": dict(
+        default_model="openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        is_free_only=True, price_ceiling_in=None, price_ceiling_out=None,
+        allow_reasoning=False, is_live_synced=True,
+        members=[f"openrouter:{s}" for s in DEV_TIER_SLUGS],
+    ),
+    "frugal": dict(
+        default_model="openrouter:meta-llama/llama-3.3-70b-instruct",
+        is_free_only=False,
+        price_ceiling_in=FRUGAL_PRICE_CEILING_IN,
+        price_ceiling_out=FRUGAL_PRICE_CEILING_OUT,
+        allow_reasoning=False, is_live_synced=True,
+        members=[f"openrouter:{s}" for s in FRUGAL_TIER_SLUGS],
+    ),
+    "research": dict(
+        default_model="anthropic:claude-sonnet-4-6",
+        is_free_only=False, price_ceiling_in=None, price_ceiling_out=None,
+        allow_reasoning=True, is_live_synced=False,
+        members=list(STATIC_TIER_MENUS["research"]),
+    ),
+    "quality": dict(
+        default_model="anthropic:claude-opus-4-7",
+        is_free_only=False, price_ceiling_in=None, price_ceiling_out=None,
+        allow_reasoning=True, is_live_synced=False,
+        members=list(STATIC_TIER_MENUS["quality"]),
+    ),
+    "hybrid": dict(
+        default_model="anthropic:claude-haiku-4-5-20251001",
+        is_free_only=False, price_ceiling_in=None, price_ceiling_out=None,
+        allow_reasoning=False, is_live_synced=False,
+        members=list(STATIC_TIER_MENUS["hybrid"]),
+    ),
+}
+
+
+def seed_tiers(sender=None, **kwargs):
+    """Seed TierConfig + TierMembership from the baseline (idempotent).
+
+    Membership is seeded ONLY when the TierConfig row is first created (true cold
+    start), keyed off get_or_create's `created` flag — NOT off "has zero members"
+    — so an operator who deliberately empties a tier (PUT members:[]) is not
+    silently re-populated on the next post_migrate. Skips ids without a
+    ModelEntry row defensively.
+    """
+    from .models import ModelEntry, TierConfig, TierMembership
+    for tier_name, spec in _TIER_SEED.items():
+        default_obj = ModelEntry.objects.filter(id=spec["default_model"]).first()
+        tc, created = TierConfig.objects.get_or_create(
+            tier_name=tier_name,
+            defaults=dict(
+                default_model=default_obj,
+                is_free_only=spec["is_free_only"],
+                price_ceiling_in=spec["price_ceiling_in"],
+                price_ceiling_out=spec["price_ceiling_out"],
+                allow_reasoning=spec["allow_reasoning"],
+                is_live_synced=spec["is_live_synced"],
+            ),
+        )
+        if created:
+            for ordering, mid in enumerate(spec["members"]):
+                model_obj = ModelEntry.objects.filter(id=mid).first()
+                if model_obj is None:
+                    continue
+                TierMembership.objects.create(
+                    tier=tc, model=model_obj, ordering=ordering
+                )

@@ -7,6 +7,7 @@ scheduled run's pre-flight estimate is consistent with the rest of the app.
 from __future__ import annotations
 
 from apps.models_catalog.presets import PERSONA_AGENTS, PRESETS, expand_preset
+from apps.models_catalog.tier_menus import anchor_non_personas, sanitize_overrides
 from apps.portfolios.tasks import PER_AGENT_TOKEN_ESTIMATES
 
 # Cheapest-last. Degradation walks toward the end of this list. "dev" (free
@@ -51,9 +52,18 @@ def resolve_overrides(user, preset: str, explicit_overrides: dict | None) -> dic
     """Per-agent ``{agent: model_id}`` map for a scheduled run: expand the preset
     (resolving ``<local-tier-a>``) then layer any explicit per-agent overrides."""
     base = expand_preset(preset, local_tier_a=_resolve_local_tier_a(user, preset))
+    # Mirror dispatch (_resolve_model_overrides): anchor non-persona roles to the
+    # user's per-tier default so the estimate matches what will actually run.
+    prefs = getattr(user, "model_prefs", None)
+    tier_choice = None
+    if preset != "hybrid" and prefs and isinstance(prefs.per_tier_defaults, dict):
+        tier_choice = prefs.per_tier_defaults.get(preset)
+    base = anchor_non_personas(preset, base, tier_choice)
     if explicit_overrides:
         base = {**base, **explicit_overrides}
-    return base
+    # Degrade any deactivated pick to the tier default so the estimate matches
+    # what dispatch will actually run (which is likewise sanitized).
+    return sanitize_overrides(preset, base, fallback=tier_choice or None)
 
 
 def _agents_for(personas: list[str] | None) -> list[str]:

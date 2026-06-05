@@ -12,6 +12,7 @@ intercept the call here.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -28,6 +29,8 @@ from .tier_menus import (
     FRUGAL_TIER_SLUGS,
 )
 
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class SyncResult:
@@ -35,6 +38,11 @@ class SyncResult:
     created: list[str] = field(default_factory=list)
     deactivated: list[str] = field(default_factory=list)
     excluded: list[dict] = field(default_factory=list)
+    # Broad-sweep retirements: active OpenRouter rows OUTSIDE the dev/frugal
+    # allowlist that vanished upstream. Kept separate from `deactivated` (a
+    # curated slug dying — a re-curation alert) because a ghost retiring is
+    # routine cleanup, not a curation problem.
+    swept: list[str] = field(default_factory=list)
     fetched_at: datetime | None = None
 
     def as_dict(self) -> dict:
@@ -43,6 +51,7 @@ class SyncResult:
             "created": list(self.created),
             "deactivated": list(self.deactivated),
             "excluded": list(self.excluded),
+            "swept": list(self.swept),
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
@@ -94,18 +103,39 @@ def _guard_violation(slug: str, fields: dict) -> str | None:
     return None
 
 
+def _deactivate(row: ModelEntry, now: datetime, note: str) -> None:
+    """Mark a row inactive (never hard-delete) with an audit note + timestamp."""
+    row.is_active = False
+    row.last_verified_at = now
+    row.last_verified_note = note
+    row.save(update_fields=["is_active", "last_verified_at", "last_verified_note"])
+
+
 def sync_tier_models(
     *,
     http: httpx.Client | None = None,
     dry_run: bool = False,
 ) -> SyncResult:
-    """Fetch the live OpenRouter catalog and refresh ModelEntry rows for the
-    dev + frugal allowlist slugs. Pure metadata sync — never touches presets
-    or static-tier rows. Aborts before any DB write if the fetch fails.
+    """Fetch the live OpenRouter catalog, refresh the dev + frugal allowlist
+    rows, and reconcile the rest of the OpenRouter catalog.
+
+    Two passes: (1) the curated dev/frugal allowlist gets pricing/metadata
+    refreshed and tier-guard violations excluded; (2) a broad sweep deactivates
+    ANY active OpenRouter row that has vanished upstream (the stale-ghost class).
+    Pure metadata sync — never touches presets or Anthropic rows. Aborts before
+    any DB write if the fetch fails.
     """
     catalog = verification.fetch_openrouter_catalog(http=http)
     now = timezone.now()
     result = SyncResult(fetched_at=now)
+
+    # Floor guard: a 200 with an empty/degenerate `data` array (partial response,
+    # contract change) would otherwise deactivate EVERY active OpenRouter row —
+    # both the allowlist pass and the broad sweep. Treat an empty catalog as a
+    # failed fetch and make no writes.
+    if not catalog:
+        log.warning("sync_tier_models: empty OpenRouter catalog — skipping (no writes)")
+        return result
 
     allowlist = list({*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS})
     # Stable order for reporting.
@@ -120,14 +150,10 @@ def sync_tier_models(
             # Missing upstream — deactivate (never hard-delete).
             if existing and existing.is_active:
                 if not dry_run:
-                    existing.is_active = False
-                    existing.last_verified_at = now
-                    existing.last_verified_note = (
-                        f"slug {slug!r} not in OpenRouter /api/v1/models response"
+                    _deactivate(
+                        existing, now,
+                        f"slug {slug!r} not in OpenRouter /api/v1/models response",
                     )
-                    existing.save(update_fields=[
-                        "is_active", "last_verified_at", "last_verified_note",
-                    ])
                 result.deactivated.append(mid)
             continue
 
@@ -137,12 +163,7 @@ def sync_tier_models(
             result.excluded.append({"slug": slug, "reason": violation})
             if existing and existing.is_active:
                 if not dry_run:
-                    existing.is_active = False
-                    existing.last_verified_at = now
-                    existing.last_verified_note = f"excluded: {violation}"
-                    existing.save(update_fields=[
-                        "is_active", "last_verified_at", "last_verified_note",
-                    ])
+                    _deactivate(existing, now, f"excluded: {violation}")
             continue
 
         # Healthy — upsert. Don't clobber `notes` (user-editable).
@@ -158,5 +179,21 @@ def sync_tier_models(
         result.synced.append(mid)
         if created:
             result.created.append(mid)
+
+    # Broad reconcile sweep: deactivate ANY active OpenRouter row that has
+    # vanished upstream — not just the dev/frugal allowlist. Auto-retires the
+    # stale-ghost class (a delisted research/quality reasoning model, or a
+    # vestigial seed row) without a hand-written migration. Strictly
+    # provider="openrouter": Anthropic models aren't in this catalog and must
+    # never be deactivated by it. Never hard-delete.
+    handled = {f"openrouter:{s}" for s in allowlist}
+    for row in ModelEntry.objects.filter(is_active=True, provider="openrouter"):
+        if row.id in handled:
+            continue
+        slug = row.id.removeprefix("openrouter:")
+        if slug not in catalog:
+            if not dry_run:
+                _deactivate(row, now, "missing upstream (broad reconcile sweep)")
+            result.swept.append(row.id)
 
     return result

@@ -665,44 +665,38 @@ def _serialize_prefs(prefs: UserNewsPreferences) -> dict:
     }
 
 
-def _serialize_translation_choices() -> list[dict]:
-    from .market_news_translation import frugal_translation_models
+def _serialize_model_choice(m, frugal_ids: set[str]) -> dict:
+    """One News model-picker option. ``frugal`` marks the cheap default subset;
+    ``supports_reasoning`` drives the 🧠 icon in the UI."""
+    return {
+        "id": m.id,
+        "display_name": m.display_name,
+        "price_in_per_mtok": (
+            float(m.price_in_per_mtok) if m.price_in_per_mtok is not None else None
+        ),
+        "price_out_per_mtok": (
+            float(m.price_out_per_mtok) if m.price_out_per_mtok is not None else None
+        ),
+        "supports_reasoning": m.supports_reasoning,
+        "frugal": m.id in frugal_ids,
+    }
 
-    return [
-        {
-            "id": m.id,
-            "display_name": m.display_name,
-            "price_in_per_mtok": (
-                float(m.price_in_per_mtok) if m.price_in_per_mtok is not None else None
-            ),
-            "price_out_per_mtok": (
-                float(m.price_out_per_mtok)
-                if m.price_out_per_mtok is not None
-                else None
-            ),
-        }
-        for m in frugal_translation_models()
-    ]
+
+def _serialize_translation_choices() -> list[dict]:
+    from .market_news_translation import (
+        all_translation_models,
+        frugal_translation_models,
+    )
+
+    frugal_ids = {m.id for m in frugal_translation_models()}
+    return [_serialize_model_choice(m, frugal_ids) for m in all_translation_models()]
 
 
 def _serialize_sentiment_choices() -> list[dict]:
-    from .market_news_sentiment import frugal_sentiment_models
+    from .market_news_sentiment import all_sentiment_models, frugal_sentiment_models
 
-    return [
-        {
-            "id": m.id,
-            "display_name": m.display_name,
-            "price_in_per_mtok": (
-                float(m.price_in_per_mtok) if m.price_in_per_mtok is not None else None
-            ),
-            "price_out_per_mtok": (
-                float(m.price_out_per_mtok)
-                if m.price_out_per_mtok is not None
-                else None
-            ),
-        }
-        for m in frugal_sentiment_models()
-    ]
+    frugal_ids = {m.id for m in frugal_sentiment_models()}
+    return [_serialize_model_choice(m, frugal_ids) for m in all_sentiment_models()]
 
 
 class NewsPreferencesView(APIView):
@@ -757,8 +751,8 @@ class NewsPreferencesView(APIView):
                 return Response(
                     {
                         "detail": (
-                            "Sentiment model is restricted to Llama and Qwen "
-                            "models. Pick one from sentiment_model_choices."
+                            "Unknown sentiment model. Pick one from "
+                            "sentiment_model_choices."
                         )
                     },
                     status=400,
@@ -775,8 +769,7 @@ class NewsPreferencesView(APIView):
                     return Response(
                         {
                             "detail": (
-                                "Translation model is restricted to Llama and "
-                                "Qwen models. Pick one from "
+                                "Unknown translation model. Pick one from "
                                 "translation_model_choices."
                             )
                         },

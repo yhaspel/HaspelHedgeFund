@@ -26,6 +26,7 @@ from apps.data.market_news_rank import (
 from apps.data.market_news_sentiment import (
     MarketNewsSentimentBatch,
     NewsSentimentItem,
+    all_sentiment_models,
     classify,
     frugal_sentiment_models,
     is_allowed_sentiment_model,
@@ -435,6 +436,7 @@ def sentiment_models(db):
         id="openrouter:qwen/qwen3.6-27b", provider="openrouter",
         display_name="Qwen3 27B", tier="hosted_open",
         is_active=True, price_in_per_mtok=Decimal("0.15"),
+        supports_reasoning=True,
     )
     ModelEntry.objects.create(
         id="openrouter:meta-llama/llama-3.3-70b-instruct", provider="openrouter",
@@ -445,6 +447,7 @@ def sentiment_models(db):
         id="openrouter:deepseek/deepseek-r1", provider="openrouter",
         display_name="DeepSeek R1", tier="hosted_open",
         is_active=True, price_in_per_mtok=Decimal("0.55"),
+        supports_reasoning=True,
     )
     ModelEntry.objects.create(
         id="anthropic:claude-haiku-4-5-20251001", provider="anthropic",
@@ -454,6 +457,7 @@ def sentiment_models(db):
 
 
 def test_frugal_sentiment_models_filters_to_llama_qwen(sentiment_models) -> None:
+    """The *frugal default* stays the cheap Llama/Qwen hosted_open subset."""
     ids = [m.id for m in frugal_sentiment_models()]
     assert "openrouter:qwen/qwen3.6-27b" in ids
     assert "openrouter:meta-llama/llama-3.3-70b-instruct" in ids
@@ -461,10 +465,24 @@ def test_frugal_sentiment_models_filters_to_llama_qwen(sentiment_models) -> None
     assert "anthropic:claude-haiku-4-5-20251001" not in ids
 
 
+def test_all_sentiment_models_is_full_active_catalog(sentiment_models) -> None:
+    """The opt-in "Show all" pool spans every active model, frugal or not."""
+    ids = {m.id for m in all_sentiment_models()}
+    assert ids == {
+        "openrouter:qwen/qwen3.6-27b",
+        "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "openrouter:deepseek/deepseek-r1",
+        "anthropic:claude-haiku-4-5-20251001",
+    }
+
+
 def test_is_allowed_sentiment_model(sentiment_models) -> None:
+    """Any active catalogued model is selectable (opt-in show-all); an
+    uncatalogued id is rejected."""
     assert is_allowed_sentiment_model("openrouter:qwen/qwen3.6-27b")
-    assert not is_allowed_sentiment_model("openrouter:deepseek/deepseek-r1")
-    assert not is_allowed_sentiment_model("anthropic:claude-haiku-4-5-20251001")
+    assert is_allowed_sentiment_model("openrouter:deepseek/deepseek-r1")
+    assert is_allowed_sentiment_model("anthropic:claude-haiku-4-5-20251001")
+    assert not is_allowed_sentiment_model("openrouter:made-up/not-in-catalog")
 
 
 @pytest.mark.django_db
@@ -576,13 +594,48 @@ def test_news_preferences_auto_create(auth_client, user, sentiment_models) -> No
 
 
 @pytest.mark.django_db
-def test_news_preferences_rejects_haiku(auth_client, user, sentiment_models) -> None:
+def test_news_preferences_accepts_nonfrugal_via_show_all(
+    auth_client, user, sentiment_models
+) -> None:
+    """Opt-in: a non-frugal catalogued model (Haiku) is now selectable."""
     resp = auth_client.put(
         "/api/news/preferences/",
         {"sentiment_model": "anthropic:claude-haiku-4-5-20251001"},
         format="json",
     )
+    assert resp.status_code == 200
+    assert resp.json()["preferences"]["sentiment_model"] == (
+        "anthropic:claude-haiku-4-5-20251001"
+    )
+
+
+@pytest.mark.django_db
+def test_news_preferences_rejects_uncatalogued_model(
+    auth_client, user, sentiment_models
+) -> None:
+    resp = auth_client.put(
+        "/api/news/preferences/",
+        {"sentiment_model": "openrouter:made-up/not-in-catalog"},
+        format="json",
+    )
     assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_sentiment_choices_carry_flags_and_full_catalog(
+    auth_client, user, sentiment_models
+) -> None:
+    """Choices span the full catalog and carry supports_reasoning + frugal,
+    so the UI can default to frugal and render the 🧠 icon."""
+    body = auth_client.get("/api/news/preferences/").json()
+    by_id = {c["id"]: c for c in body["sentiment_model_choices"]}
+    # Non-frugal model (Haiku) is present in the full pool.
+    assert "anthropic:claude-haiku-4-5-20251001" in by_id
+    assert by_id["anthropic:claude-haiku-4-5-20251001"]["frugal"] is False
+    # Frugal Qwen is flagged frugal + reasoning.
+    qwen = by_id["openrouter:qwen/qwen3.6-27b"]
+    assert qwen["frugal"] is True
+    assert qwen["supports_reasoning"] is True
 
 
 @pytest.mark.django_db

@@ -28,15 +28,24 @@ DEFAULT_TRANSLATION_FALLBACK_MODEL = "openrouter:meta-llama/llama-3.3-70b-instru
 # --- Allow-list (shared with sentiment — one source of truth) ---
 
 def frugal_translation_models() -> list:
-    """The SAME Llama/Qwen ``hosted_open`` allow-list the sentiment picker uses
-    — delegate to it so the two never drift."""
+    """The SAME Llama/Qwen ``hosted_open`` frugal-default list the sentiment
+    picker uses — delegate to it so the two never drift."""
     from .market_news_sentiment import frugal_sentiment_models
 
     return frugal_sentiment_models()
 
 
+def all_translation_models() -> list:
+    """The SAME full-catalog "Show all models" pool sentiment uses."""
+    from .market_news_sentiment import all_sentiment_models
+
+    return all_sentiment_models()
+
+
 def is_allowed_translation_model(model_id: str) -> bool:
-    return any(m.id == model_id for m in frugal_translation_models())
+    from .market_news_sentiment import is_allowed_sentiment_model
+
+    return is_allowed_sentiment_model(model_id)
 
 
 # --- Pydantic schema ---

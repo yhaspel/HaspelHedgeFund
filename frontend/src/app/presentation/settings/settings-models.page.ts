@@ -2,6 +2,7 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { SettingsTabsComponent } from './settings-tabs.component';
 import { ModelsStore } from '../../abstraction/models.store';
@@ -11,6 +12,8 @@ import {
   ModelEntry,
   ModelTier,
   PRESET_NAMES,
+  TierConfig,
+  USER_TIER_DEFAULT_PRESETS,
   estimateAgentCost,
   estimateRunCost,
 } from '../../core/models/model.types';
@@ -185,6 +188,42 @@ type TierFilter = 'all' | ModelTier;
           </div>
         </section>
 
+        <!-- Default model per tier -->
+        <section class="card">
+          <div class="card-hd"><h2 class="title">Default model per tier</h2></div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
+              Pick a default per price tier. It anchors the analytical &amp; orchestration
+              agents for that tier and is the resilience fallback when a model is retired —
+              personas still spread across the tier's menu. Saved with the button above.
+            </p>
+            <div class="agent-grid">
+              @for (t of tierDefaultPresets; track t) {
+                <div class="agent-row">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="tier-pill">{{ t }}</span>
+                  </div>
+                  <div class="mono text-[11.5px] truncate"
+                       [style.color]="tierDefault(t) ? 'var(--text-2)' : 'var(--text-3)'">
+                    {{ tierDefaultLabel(t) }}@if (tierDefault(t)) { · {{ fmtUsd(tierDefaultEst(t)) }}}
+                  </div>
+                  <select class="input sans agent-select"
+                    [ngModel]="tierDefault(t)"
+                    (ngModelChange)="setTierDefault(t, $event)"
+                    [attr.data-test]="'tier-default-' + t">
+                    <option value="">— use system tier default —</option>
+                    @for (m of visibleTierModels(t); track m.id) {
+                      <option [value]="m.id" [disabled]="!m.available">
+                        {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                      </option>
+                    }
+                  </select>
+                </div>
+              }
+            </div>
+          </div>
+        </section>
+
         <!-- Available models -->
         <section class="card">
           <div class="card-hd flex items-center justify-between flex-wrap gap-2">
@@ -287,6 +326,75 @@ type TierFilter = 'all' | ModelTier;
             </table>
           </div>
         </section>
+
+        <!-- Tier membership (operator-only; hidden unless GET /tiers/ succeeds) -->
+        @if (tierEditorEnabled()) {
+          <details class="card">
+            <summary class="card-hd op-summary">
+              <h2 class="title">Tier membership <span class="op-badge">operator</span></h2>
+            </summary>
+            <div class="card-bd flex flex-col gap-4">
+              <p class="text-[11.5px] text-text-3 m-0">
+                Global configuration — affects all users. Curate which models populate each
+                tier's menu and set the tier's default. Guards (no reasoning on cheap tiers,
+                dev free-only, frugal ceiling) are enforced server-side.
+              </p>
+              @for (tc of store.tierConfigs(); track tc.tier_name) {
+                <div class="op-tier">
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="tier-pill">{{ tc.tier_name }}</span>
+                    @if (tc.allow_reasoning) { <span class="badge-reasoning">🧠 allowed</span> }
+                    @if (tc.is_free_only) { <span class="badge-free">FREE only</span> }
+                  </div>
+                  <div class="op-members">
+                    @for (mid of tierMembers(tc.tier_name); track mid) {
+                      <span class="op-chip">
+                        {{ memberLabel(mid) }}
+                        <button type="button" class="op-x"
+                          (click)="removeMember(tc.tier_name, mid)"
+                          [attr.aria-label]="'Remove ' + mid">×</button>
+                      </span>
+                    }
+                    @if (tierMembers(tc.tier_name).length === 0) {
+                      <span class="text-text-3 text-[11.5px]">No members.</span>
+                    }
+                  </div>
+                  <div class="op-controls">
+                    <select class="input sans agent-select" [ngModel]="''"
+                      (ngModelChange)="addMember(tc.tier_name, $event)"
+                      [attr.data-test]="'op-add-' + tc.tier_name">
+                      <option value="">+ add model…</option>
+                      @for (m of addableModels(tc.tier_name); track m.id) {
+                        <option [value]="m.id">{{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}</option>
+                      }
+                    </select>
+                    <select class="input sans agent-select"
+                      [ngModel]="tierDefaultModel(tc.tier_name)"
+                      (ngModelChange)="setTierDefaultModel(tc.tier_name, $event)"
+                      [attr.data-test]="'op-default-' + tc.tier_name">
+                      <option value="">— no default —</option>
+                      @for (mid of tierMembers(tc.tier_name); track mid) {
+                        <option [value]="mid">default: {{ memberLabel(mid) }}</option>
+                      }
+                    </select>
+                    <button type="button" class="btn sm primary"
+                      (click)="saveTier(tc.tier_name)"
+                      [disabled]="!isTierDirty(tc.tier_name) || tierSaving() === tc.tier_name"
+                      [attr.data-test]="'op-save-' + tc.tier_name">
+                      {{ tierSaving() === tc.tier_name ? 'Saving…' : (isTierDirty(tc.tier_name) ? 'Save' : 'Saved') }}
+                    </button>
+                  </div>
+                  @if (tierMsg()[tc.tier_name]) {
+                    <p class="text-[11px] m-0 mt-1"
+                       [style.color]="tierErr()[tc.tier_name] ? 'var(--acc-short-fg)' : 'var(--acc-long-fg)'">
+                      {{ tierMsg()[tc.tier_name] }}
+                    </p>
+                  }
+                </div>
+              }
+            </div>
+          </details>
+        }
       </div>
     </hf-app-shell>
   `,
@@ -431,6 +539,49 @@ type TierFilter = 'all' | ModelTier;
       .save-btn { height: 32px; justify-content: center; }
       .save-btn--wide { align-self: flex-start; min-width: 200px; }
 
+      .op-summary { cursor: pointer; list-style: none; }
+      .op-summary::-webkit-details-marker { display: none; }
+      .op-badge {
+        margin-left: 8px;
+        padding: 1px 6px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border-radius: 4px;
+        color: var(--acc-short-fg);
+        background: var(--acc-short-soft, #fdecea);
+        vertical-align: middle;
+      }
+      .op-tier { border-top: 1px solid var(--border); padding-top: 12px; }
+      .op-members { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+      .op-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11.5px;
+        padding: 2px 6px;
+        border: 1px solid var(--border-2);
+        border-radius: 4px;
+        background: var(--surface-2);
+      }
+      .op-x {
+        border: none;
+        background: none;
+        color: var(--text-3);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0 2px;
+      }
+      .op-x:hover { color: var(--acc-short-fg); }
+      .op-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
       @media (max-width: 860px) {
         .two-col { grid-template-columns: 1fr; }
         .agent-grid { grid-template-columns: 1fr; }
@@ -460,8 +611,24 @@ export class SettingsModelsPage implements OnInit {
   private savedPreset = 'research';
   private savedCeiling: number | null = 5;
 
+  // Per-tier USER default (saved with the prefs Save button).
+  readonly tierDefaultPresets = USER_TIER_DEFAULT_PRESETS;
+  tierMenus = signal<Record<string, string[]>>({});
+  tierDefaults = signal<Record<string, string>>({});
+  private savedTierDefaults = '{}';
+
+  // Operator tier-membership editor (lazy; hidden unless GET /tiers/ succeeds).
+  tierEditorEnabled = signal(false);
+  private tierEdits = signal<Record<string, { members: string[]; default_model: string }>>({});
+  private savedTierEdits: Record<string, string> = {};
+  tierSaving = signal<string | null>(null);
+  tierMsg = signal<Record<string, string>>({});
+  tierErr = signal<Record<string, boolean>>({});
+
   isPrefsDirty(): boolean {
-    return this.preset !== this.savedPreset || this.ceiling !== this.savedCeiling;
+    return this.preset !== this.savedPreset
+      || this.ceiling !== this.savedCeiling
+      || JSON.stringify(this.tierDefaults()) !== this.savedTierDefaults;
   }
 
   ngOnInit(): void {
@@ -478,7 +645,134 @@ export class SettingsModelsPage implements OnInit {
         const allSame = vals.length > 0 && vals.every((v) => v === vals[0]);
         this.globalDefault = allSame ? (vals[0] as string) : '';
       }
+      this.tierDefaults.set({ ...(this.store.prefs()?.per_tier_defaults ?? {}) });
+      this.savedTierDefaults = JSON.stringify(this.tierDefaults());
       this.loadPresetOverrides();
+      this.loadTierMenus();
+      this.loadTierEditor();
+    });
+  }
+
+  // ---- Per-tier USER default --------------------------------------------
+  private loadTierMenus(): void {
+    const reqs = Object.fromEntries(
+      this.tierDefaultPresets.map((t) => [t, this.store.fetchPreset(t)]),
+    );
+    forkJoin(reqs).subscribe((res: Record<string, { menu?: string[] }>) => {
+      const menus: Record<string, string[]> = {};
+      for (const t of this.tierDefaultPresets) menus[t] = res[t].menu ?? [];
+      this.tierMenus.set(menus);
+    });
+  }
+
+  tierDefault(tier: string): string { return this.tierDefaults()[tier] ?? ''; }
+  setTierDefault(tier: string, modelId: string): void {
+    const next = { ...this.tierDefaults() };
+    if (modelId) next[tier] = modelId; else delete next[tier];
+    this.tierDefaults.set(next);
+  }
+  visibleTierModels(tier: string): ModelEntry[] {
+    const all = this.store.models();
+    const menu = this.tierMenus()[tier] ?? [];
+    if (!menu.length) return all;
+    const set = new Set(menu);
+    const out = all.filter((m) => set.has(m.id) || m.provider === 'ollama');
+    const cur = this.tierDefault(tier);
+    if (cur && !out.some((m) => m.id === cur)) {
+      const stale = all.find((m) => m.id === cur);
+      if (stale) out.push(stale);
+    }
+    return out;
+  }
+  tierDefaultLabel(tier: string): string {
+    const id = this.tierDefault(tier);
+    if (!id) return '— system default —';
+    return this.store.models().find((m) => m.id === id)?.display_name ?? id;
+  }
+  tierDefaultEst(tier: string): number {
+    const id = this.tierDefault(tier);
+    return id ? estimateAgentCost('portfolio_manager', id, this.store.models()) : 0;
+  }
+
+  // ---- Operator tier-membership editor ----------------------------------
+  private loadTierEditor(): void {
+    this.store.loadTierConfigs().subscribe({
+      next: (r) => {
+        const edits: Record<string, { members: string[]; default_model: string }> = {};
+        const saved: Record<string, string> = {};
+        for (const tc of r.tiers) {
+          const e = {
+            members: tc.members.map((m) => m.model_id),
+            default_model: tc.default_model ?? '',
+          };
+          edits[tc.tier_name] = e;
+          saved[tc.tier_name] = JSON.stringify(e);
+        }
+        this.tierEdits.set(edits);
+        this.savedTierEdits = saved;
+        this.tierEditorEnabled.set(true);
+      },
+      error: () => this.tierEditorEnabled.set(false),  // 403 for non-staff → hide
+    });
+  }
+  tierMembers(tier: string): string[] { return this.tierEdits()[tier]?.members ?? []; }
+  tierDefaultModel(tier: string): string { return this.tierEdits()[tier]?.default_model ?? ''; }
+  memberLabel(mid: string): string {
+    return this.store.models().find((m) => m.id === mid)?.display_name ?? mid;
+  }
+  addableModels(tier: string): ModelEntry[] {
+    const members = new Set(this.tierMembers(tier));
+    return this.store.models().filter((m) => !members.has(m.id));
+  }
+  private mutateTier(
+    tier: string,
+    fn: (e: { members: string[]; default_model: string }) => void,
+  ): void {
+    const cur = this.tierEdits()[tier] ?? { members: [], default_model: '' };
+    const next = { members: [...cur.members], default_model: cur.default_model };
+    fn(next);
+    this.tierEdits.set({ ...this.tierEdits(), [tier]: next });
+  }
+  addMember(tier: string, mid: string): void {
+    if (!mid) return;
+    this.mutateTier(tier, (e) => { if (!e.members.includes(mid)) e.members.push(mid); });
+  }
+  removeMember(tier: string, mid: string): void {
+    this.mutateTier(tier, (e) => {
+      e.members = e.members.filter((x) => x !== mid);
+      if (e.default_model === mid) e.default_model = '';
+    });
+  }
+  setTierDefaultModel(tier: string, mid: string): void {
+    this.mutateTier(tier, (e) => { e.default_model = mid; });
+  }
+  isTierDirty(tier: string): boolean {
+    return JSON.stringify(this.tierEdits()[tier]) !== (this.savedTierEdits[tier] ?? '');
+  }
+  saveTier(tier: string): void {
+    const e = this.tierEdits()[tier];
+    if (!e) return;
+    this.tierSaving.set(tier);
+    this.store.saveTierConfig(tier, {
+      members: e.members,
+      default_model: e.default_model || null,
+    }).subscribe({
+      next: (updated) => {
+        this.tierSaving.set(null);
+        const saved = {
+          members: updated.members.map((m) => m.model_id),
+          default_model: updated.default_model ?? '',
+        };
+        this.tierEdits.set({ ...this.tierEdits(), [tier]: saved });
+        this.savedTierEdits = { ...this.savedTierEdits, [tier]: JSON.stringify(saved) };
+        this.tierMsg.set({ ...this.tierMsg(), [tier]: 'Saved.' });
+        this.tierErr.set({ ...this.tierErr(), [tier]: false });
+      },
+      error: (err) => {
+        this.tierSaving.set(null);
+        this.tierMsg.set({ ...this.tierMsg(), [tier]: err?.error?.detail || 'Save failed.' });
+        this.tierErr.set({ ...this.tierErr(), [tier]: true });
+      },
     });
   }
 
@@ -542,6 +836,10 @@ export class SettingsModelsPage implements OnInit {
             `excluded ${r.excluded.length} (${r.excluded.map((e) => `${e.slug}: ${e.reason}`).join('; ')})`,
           );
         }
+        if (r.swept?.length) {
+          parts.push(`retired ${r.swept.length} (${r.swept.join(', ')})`);
+        }
+        // deactivated/excluded = curation problems (alert); swept = routine cleanup.
         this.fetchHasIssues.set(
           (r.deactivated?.length ?? 0) + (r.excluded?.length ?? 0) > 0,
         );
@@ -604,12 +902,14 @@ export class SettingsModelsPage implements OnInit {
     this.store.savePrefs({
       preset: this.preset,
       cost_ceiling_per_run_usd: this.ceiling,
+      per_tier_defaults: this.tierDefaults(),
     }).subscribe({
       next: () => {
         this.savingPrefs.set(false);
         this.prefsMsg.set('Saved.');
         this.savedPreset = this.preset;
         this.savedCeiling = this.ceiling;
+        this.savedTierDefaults = JSON.stringify(this.tierDefaults());
       },
       error: () => { this.savingPrefs.set(false); this.prefsMsg.set('Failed to save'); },
     });
@@ -628,7 +928,13 @@ export class SettingsModelsPage implements OnInit {
   }
   private effectiveModel(a: string): string | undefined {
     const perAgent = this.store.prefs()?.per_agent_defaults ?? {};
-    return perAgent[a] ?? this.presetOverrides()[a]
+    if (perAgent[a]) return perAgent[a];
+    // The per-tier user default anchors non-persona roles (mirrors the backend
+    // resolution order: per-agent > per-tier > preset recipe > system default).
+    const group = this.store.agents().find((x) => x.id === a)?.group;
+    const tierDef = this.tierDefaults()[this.preset];
+    if (tierDef && group && group !== 'persona') return tierDef;
+    return this.presetOverrides()[a]
       ?? this.store.agents().find((x) => x.id === a)?.default_model;
   }
   estRunCost(): number {

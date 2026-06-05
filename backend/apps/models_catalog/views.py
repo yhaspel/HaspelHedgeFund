@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.db import transaction
+from rest_framework.permissions import IsAdminUser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,7 +9,13 @@ from rest_framework.views import APIView
 from hedgefund_agents.registry import DEFAULT_MODELS
 
 from .fetching import sync_tier_models
-from .models import ModelEntry, ProviderKey, UserModelPreferences
+from .models import (
+    ModelEntry,
+    ProviderKey,
+    TierConfig,
+    TierMembership,
+    UserModelPreferences,
+)
 from .ollama_discovery import discover_ollama_models
 from .presets import ALL_AGENTS, PRESETS, expand_preset
 from .serializers import (
@@ -232,3 +240,151 @@ class MyProviderKeysView(APIView):
         from apps.data.providers.factory import _reset_caches_for_tests
         _reset_caches_for_tests()
         return Response(ProviderKeyStatusSerializer(pk).data)
+
+
+def _tier_payload(tc: TierConfig) -> dict:
+    members = tc.members.select_related("model").order_by("ordering", "model_id")
+    return {
+        "tier_name": tc.tier_name,
+        "default_model": tc.default_model_id,
+        "is_free_only": tc.is_free_only,
+        "price_ceiling_in": (
+            str(tc.price_ceiling_in) if tc.price_ceiling_in is not None else None
+        ),
+        "price_ceiling_out": (
+            str(tc.price_ceiling_out) if tc.price_ceiling_out is not None else None
+        ),
+        "allow_reasoning": tc.allow_reasoning,
+        "is_live_synced": tc.is_live_synced,
+        "members": [
+            {
+                "model_id": m.model_id,
+                "ordering": m.ordering,
+                "role": m.role,
+                "display_name": m.model.display_name,
+                "supports_reasoning": m.model.supports_reasoning,
+                "is_active": m.model.is_active,
+            }
+            for m in members
+        ],
+    }
+
+
+def _validate_tier_members(tc: TierConfig, members: list[str]) -> str | None:
+    """Operator edits get the SAME guards the curation philosophy + sync enforce:
+    no reasoning model on a non-reasoning tier, dev free-only, frugal price
+    ceiling. Returns an error string or None."""
+    if not members:
+        return None
+    rows = {
+        m.id: m
+        for m in ModelEntry.objects.filter(id__in=members, is_active=True)
+    }
+    for mid in members:
+        m = rows.get(mid)
+        if m is None:
+            return f"{mid!r} is not an active catalog model"
+        if not tc.allow_reasoning and m.supports_reasoning:
+            return (
+                f"{mid!r} is a reasoning model; tier {tc.tier_name!r} does not "
+                f"allow reasoning models"
+            )
+        if tc.is_free_only and not m.is_free:
+            return f"{mid!r} is not free; tier {tc.tier_name!r} is free-only"
+        if (
+            tc.price_ceiling_in is not None
+            and m.price_in_per_mtok is not None
+            and m.price_in_per_mtok > tc.price_ceiling_in
+        ) or (
+            tc.price_ceiling_out is not None
+            and m.price_out_per_mtok is not None
+            and m.price_out_per_mtok > tc.price_ceiling_out
+        ):
+            return f"{mid!r} pricing exceeds tier {tc.tier_name!r} ceiling"
+    return None
+
+
+class TierConfigView(APIView):
+    """Operator-only tier curation (membership + default per tier).
+
+    GET  /api/tiers/          → all tiers.
+    GET  /api/tiers/<name>/   → one tier.
+    PUT  /api/tiers/<name>/   → replace one tier's members and/or default.
+
+    Membership edits are guarded by the same policy the sync enforces (no
+    reasoning on a non-reasoning tier, dev free-only, frugal ceiling) so an
+    operator can't break the curation invariants. The 403 for non-staff is what
+    the frontend uses to hide the editor.
+    """
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request: Request, name: str | None = None) -> Response:
+        if name:
+            tc = TierConfig.objects.filter(tier_name=name).first()
+            if tc is None:
+                return Response({"detail": f"unknown tier {name!r}"}, status=404)
+            return Response(_tier_payload(tc))
+        return Response(
+            {"tiers": [_tier_payload(tc) for tc in TierConfig.objects.all()]}
+        )
+
+    @transaction.atomic
+    def put(self, request: Request, name: str | None = None) -> Response:
+        if not name:
+            return Response({"detail": "tier name required"}, status=400)
+        tc = TierConfig.objects.filter(tier_name=name).first()
+        if tc is None:
+            return Response({"detail": f"unknown tier {name!r}"}, status=404)
+
+        # Validate EVERYTHING before any write — a returned 4xx commits the
+        # transaction (only a raise rolls back), so partial writes must be
+        # impossible by construction.
+        members = request.data.get("members", None)
+        has_members = members is not None
+        if has_members:
+            if not isinstance(members, list):
+                return Response(
+                    {"detail": "members must be a list of model ids"}, status=400
+                )
+            err = _validate_tier_members(tc, members)
+            if err:
+                return Response({"detail": err}, status=400)
+
+        set_default = "default_model" in request.data
+        dm = request.data.get("default_model") if set_default else None
+        if set_default and dm not in (None, ""):
+            if not ModelEntry.objects.filter(id=dm, is_active=True).exists():
+                return Response(
+                    {"detail": f"default_model {dm!r} is not an active model"},
+                    status=400,
+                )
+            # The default must belong to the FINAL member set (the new list if
+            # provided, else the current membership).
+            member_ids = set(members) if has_members else set(
+                TierMembership.objects.filter(tier=tc).values_list("model_id", flat=True)
+            )
+            if dm not in member_ids:
+                return Response(
+                    {"detail": "default_model must be a member of the tier"},
+                    status=400,
+                )
+
+        # --- all validation passed; apply ---
+        if has_members:
+            TierMembership.objects.filter(tier=tc).delete()
+            for ordering, mid in enumerate(members):
+                TierMembership.objects.create(tier=tc, model_id=mid, ordering=ordering)
+        if set_default:
+            tc.default_model_id = dm if dm not in (None, "") else None
+            tc.save(update_fields=["default_model"])
+        # A members-only edit can orphan the (unchanged) default; clear it if it
+        # is no longer a member so the tier default is always a selectable member.
+        if tc.default_model_id and not TierMembership.objects.filter(
+            tier=tc, model_id=tc.default_model_id
+        ).exists():
+            tc.default_model = None
+            tc.save(update_fields=["default_model"])
+
+        tc.refresh_from_db()
+        return Response(_tier_payload(tc))

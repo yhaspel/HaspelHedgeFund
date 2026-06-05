@@ -91,6 +91,11 @@ class UserModelPreferences(models.Model):
     )
     preset = models.CharField(max_length=16, default="research")
     per_agent_defaults = models.JSONField(default=dict, blank=True)
+    # {tier_name: model_id} — the user's default model per price tier. Anchors the
+    # non-persona (analytical + orchestration) roles for that tier and is the
+    # resilience fallback when a pick is deactivated; personas keep the preset's
+    # spread. Layers below per_agent_defaults, above the operator TierConfig default.
+    per_tier_defaults = models.JSONField(default=dict, blank=True)
     cost_ceiling_per_run_usd = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True, default=Decimal("5.0")
     )
@@ -98,3 +103,62 @@ class UserModelPreferences(models.Model):
 
     def __str__(self) -> str:
         return f"prefs u={self.user_id} preset={self.preset}"
+
+
+class TierConfig(models.Model):
+    """Operator-editable per-tier policy + default model.
+
+    `tier_name` matches a preset name (dev/frugal/research/quality/hybrid). Rows
+    are seeded byte-identically from the `tier_menus.DEFAULT_*` constants by
+    `seed.seed_tiers()`; those constants remain the cold-start fallback. This is
+    the source of truth for a tier's default model, price guard, and whether the
+    live OpenRouter sync refreshes its membership.
+    """
+
+    tier_name = models.SlugField(primary_key=True, max_length=32)
+    # SET_NULL is the resilience anchor: if the chosen default is later
+    # deactivated/deleted, the FK nulls and resolution falls through to the next
+    # active menu member rather than dangling on a dead slug.
+    default_model = models.ForeignKey(
+        ModelEntry, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    is_free_only = models.BooleanField(default=False)
+    price_ceiling_in = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True
+    )
+    price_ceiling_out = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True
+    )
+    allow_reasoning = models.BooleanField(default=False)
+    # True for dev/frugal: sync_tier_models() refreshes these tiers' membership
+    # pricing from live OpenRouter and deactivates vanished slugs.
+    is_live_synced = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.tier_name
+
+
+class TierMembership(models.Model):
+    """Which models populate a tier's menu, in display order.
+
+    The resolution layer (`tier_menus.tier_menu`) filters these to
+    `model.is_active=True`, so a deactivated model auto-drops from every menu.
+    `role` is reserved for a future DB-driven persona spread (unused today).
+    """
+
+    tier = models.ForeignKey(
+        TierConfig, on_delete=models.CASCADE, related_name="members"
+    )
+    model = models.ForeignKey(
+        ModelEntry, on_delete=models.CASCADE, related_name="tier_memberships"
+    )
+    ordering = models.IntegerField(default=0)
+    role = models.CharField(max_length=24, blank=True, default="")
+
+    class Meta:
+        unique_together = ("tier", "model")
+        ordering = ["ordering", "model_id"]
+
+    def __str__(self) -> str:
+        return f"{self.tier_id}:{self.model_id}"

@@ -47,11 +47,12 @@ class MarketNewsSentimentBatch(BaseModel):
 # --- Allow-list ---
 
 def frugal_sentiment_models() -> list:
-    """Llama + Qwen family models only — the frugal sentiment allow-list.
+    """Llama + Qwen family ``hosted_open`` models — the *frugal default* list.
 
     Derived (not hard-coded) from the seeded catalog so newly added Llama
-    or Qwen entries appear automatically. Excludes DeepSeek-R1 (reasoning
-    model) and Haiku (``fast_cheap`` tier).
+    or Qwen entries appear automatically. This is the cheap default the News
+    pickers show until the user opts into "Show all models"; the broader pool
+    is :func:`all_sentiment_models`.
     """
     from apps.models_catalog.models import ModelEntry
 
@@ -62,8 +63,25 @@ def frugal_sentiment_models() -> list:
     )
 
 
+def all_sentiment_models() -> list:
+    """The full active catalog — the opt-in "Show all models" pool.
+
+    Includes frontier and 🧠 reasoning models. The frugal set is a subset;
+    callers flag membership so the UI can default to frugal and let the user
+    reveal the rest.
+    """
+    from apps.models_catalog.models import ModelEntry
+
+    return list(
+        ModelEntry.objects.filter(is_active=True).order_by("price_in_per_mtok")
+    )
+
+
 def is_allowed_sentiment_model(model_id: str) -> bool:
-    return any(m.id == model_id for m in frugal_sentiment_models())
+    """Any active catalogued model is selectable (frugal default + opt-in)."""
+    from apps.models_catalog.models import ModelEntry
+
+    return ModelEntry.objects.filter(is_active=True, id=model_id).exists()
 
 
 # --- The classifier ---

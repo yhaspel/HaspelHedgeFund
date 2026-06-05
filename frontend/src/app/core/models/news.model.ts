@@ -59,6 +59,10 @@ export interface SentimentModelChoice {
   display_name: string;
   price_in_per_mtok: number | null;
   price_out_per_mtok: number | null;
+  /** Dedicated reasoning model — rendered with a 🧠 prefix. */
+  supports_reasoning: boolean;
+  /** In the cheap Llama/Qwen default subset; shown before "Show all models". */
+  frugal: boolean;
 }
 
 export interface NewsPreferencesResponse {

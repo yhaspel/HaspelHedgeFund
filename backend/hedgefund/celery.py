@@ -80,6 +80,15 @@ app.conf.beat_schedule = {
         "task": "apps.leaderboard.tasks.recompute_leaderboards",
         "schedule": crontab(minute=0, hour=7),  # 07:00 UTC daily
     },
+    # Daily model-catalog reconcile: sync the dev/frugal allowlist, broad-sweep
+    # deactivate any OpenRouter row that vanished upstream (the stale-ghost
+    # class), and audit pricing drift on every active row — the automatic
+    # replacement for the manual Fetch/Verify buttons, keeping the catalog
+    # resilient to OpenRouter churn without a deploy.
+    "reconcile-model-catalog": {
+        "task": "apps.models_catalog.tasks.reconcile_model_catalog",
+        "schedule": crontab(minute=45, hour=6),  # 06:45 UTC daily
+    },
     # P4: quarterly 13F bulk ingest, a few days after the 45-day deadline
     # (SEC publishes the data sets following mid-Feb/May/Aug/Nov).
     "ingest-13f-datasets": {
