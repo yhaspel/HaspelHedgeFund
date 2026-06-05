@@ -87,7 +87,7 @@ import {
               >
                 @for (m of visibleModels(a); track m.id) {
                   <option [value]="m.id" [disabled]="!m.available">
-                    {{ m.display_name }} · {{ m.tier }} ·
+                    {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }} ·
                     $ {{ estimate(a, m.id).toFixed(4) }}
                     {{ m.available ? '' : ' (no key)' }}
                   </option>

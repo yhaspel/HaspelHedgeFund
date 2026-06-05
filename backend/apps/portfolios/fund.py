@@ -20,6 +20,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from apps.schedules.triggers import describe_cron
+
 from .models import AutonomousFund, AutopilotRun, StrategyAutopilot
 
 log = logging.getLogger(__name__)
@@ -141,6 +143,7 @@ def fund_overview(fund: AutonomousFund) -> dict:
             "peak_equity": str(ap.peak_equity_usd) if (ap and ap.peak_equity_usd) else None,
             "rolling_sharpe": _sharpe(rets[-13:]) if len(rets) >= 2 else None,
             "next_run_at": ap.next_run_at.isoformat() if (ap and ap.next_run_at) else None,
+            "cron_description": describe_cron(ap.cron_expression) if ap else None,
         })
     # Recommendation (NOT auto-reallocation — paper accounts can't share cash).
     recs = []
@@ -159,6 +162,11 @@ def fund_overview(fund: AutonomousFund) -> dict:
         "fund_id": fund.id,
         "name": fund.name,
         "state": fund.state,
+        # "active" only means "not halted" — a fund can be active with every
+        # account disabled (nothing trades). is_live is the "actually running"
+        # signal: not halted AND ≥1 account enabled. (Drives the dashboard banner.)
+        "is_live": fund.state == AutonomousFund.STATE_ACTIVE
+        and any(p["is_enabled"] for p in per_account),
         "aggregate_nav": str(agg_nav),
         "peak_equity": str(fund.peak_equity_usd) if fund.peak_equity_usd else None,
         "fund_dd_halt_pct": str(fund.fund_dd_halt_pct),

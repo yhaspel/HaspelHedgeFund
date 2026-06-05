@@ -43,20 +43,41 @@ FRUGAL_TIER_SLUGS: list[str] = [
     "deepseek/deepseek-v4-flash",
 ]
 
+# --- reasoning models — a curated OpenRouter allowlist of dedicated
+#     chain-of-thought routes (per openrouter._REASONING_SLUGS). Offered in the
+#     research/quality menus only, for users who want reasoning depth on the
+#     ANALYTICAL roles. They are NEVER wired as a decision-role default: the
+#     personas/PM/RM/CIO path stays Anthropic-anchored because reasoning models
+#     can reasoning-exhaust to empty content (the qwen3.6-27b hang, runs 236/237
+#     — see test_preset_invariants). Unlike DEV/FRUGAL these are NOT refreshed by
+#     sync_tier_models(); they're statically priced in seed.py and kept fresh by
+#     `verify_openrouter_pricing` (verify_models audits every active OpenRouter
+#     row), which is what the §9.15 freshness invariant requires.
+REASONING_TIER_SLUGS: list[str] = [
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",  # free reasoning
+    "deepseek/deepseek-v4-pro",                            # flagship reasoning
+    "z-ai/glm-5.1",                                        # mid reasoning
+]
+
+_REASONING_MENU_IDS = [f"openrouter:{s}" for s in REASONING_TIER_SLUGS]
+
 # --- static menus for the Anthropic-anchored tiers (decision #4). These
 #     reference existing ModelEntry ids; not fetched. Any "openrouter:" id
-#     listed here MUST also be in DEV/FRUGAL_TIER_SLUGS so the sync keeps
-#     its pricing fresh (see the static-menu invariant in §9.15).
+#     listed here MUST be in a curated allowlist whose pricing stays fresh —
+#     DEV/FRUGAL_TIER_SLUGS (live sync) or REASONING_TIER_SLUGS (verify_models)
+#     — see the static-menu invariant in §9.15.
 STATIC_TIER_MENUS: dict[str, list[str]] = {
     "research": [
         "anthropic:claude-sonnet-4-6",
         "anthropic:claude-haiku-4-5-20251001",
         "anthropic:claude-opus-4-7",
+        *_REASONING_MENU_IDS,
     ],
     "quality": [
         "anthropic:claude-opus-4-7",
         "anthropic:claude-sonnet-4-6",
         "anthropic:claude-haiku-4-5-20251001",
+        *_REASONING_MENU_IDS,
     ],
     "hybrid": [
         "anthropic:claude-sonnet-4-6",

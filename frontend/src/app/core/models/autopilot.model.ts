@@ -18,6 +18,7 @@ export interface Autopilot {
   is_enabled: boolean;
   state: 'active' | 'soft_cut' | 'halted';
   cron_expression: string;
+  cron_description: string;
   timezone: string;
   is_market_aware: boolean;
   broker_account_id: number | null;
@@ -64,6 +65,7 @@ export interface FundAccountCard {
   peak_equity: string | null;
   rolling_sharpe: number | null;
   next_run_at: string | null;
+  cron_description: string | null;
 }
 
 export interface FundCorrelation {
@@ -78,6 +80,7 @@ export interface FundOverview {
   fund_id: number;
   name: string;
   state: 'active' | 'halted';
+  is_live: boolean;
   aggregate_nav: string;
   peak_equity: string | null;
   fund_dd_halt_pct: string;

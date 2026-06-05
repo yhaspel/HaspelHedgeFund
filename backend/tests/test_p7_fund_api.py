@@ -179,6 +179,45 @@ def test_disable_and_resume(client, user):
     assert ap.state == StrategyAutopilot.STATE_ACTIVE
 
 
+def test_cron_edit_reschedules_enabled_autopilot(client, user):
+    """Editing the cron on an already-enabled autopilot must recompute
+    next_run_at — otherwise the new cadence persists but the next fire still
+    points at the old schedule (regression: PUT skipped reschedule())."""
+    s = _strategy(user)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    ap = StrategyAutopilot.objects.create(
+        strategy=s, broker_account=acc, is_enabled=True,
+        cron_expression="30 16 * * 5",            # Fridays 16:30
+    )
+    ap.reschedule()
+    ap.save()
+    before = ap.next_run_at
+    assert before is not None
+    r = client.put(
+        f"/api/strategies/{s.id}/autopilot/",
+        {"cron_expression": "0 9 * * 1-5"},        # weekdays 09:00
+        format="json",
+    )
+    assert r.status_code == 200
+    ap.refresh_from_db()
+    assert ap.cron_expression == "0 9 * * 1-5"
+    assert ap.next_run_at is not None
+    assert ap.next_run_at != before                # rescheduled, not stale
+    assert r.json()["autopilot"]["cron_description"]  # human-readable present
+
+
+def test_put_rejects_invalid_cron(client, user):
+    s = _strategy(user)
+    StrategyAutopilot.objects.create(strategy=s)
+    r = client.put(
+        f"/api/strategies/{s.id}/autopilot/",
+        {"cron_expression": "not a cron"}, format="json",
+    )
+    assert r.status_code == 400
+    assert "cron_expression" in r.json()["detail"]
+
+
 def test_executed_returns_broker_book(client, user):
     s = _strategy(user)
     acc = _account(user)
@@ -211,6 +250,20 @@ def test_fund_overview_aggregates_and_suppresses_correlation(user):
     assert Decimal(out["aggregate_nav"]) == Decimal("300000")     # 3 × $100k demo books
     assert out["correlation"]["available"] is False               # cold start
     assert out["correlation"]["reason"] == "insufficient_data"
+
+
+def test_fund_overview_is_live_tracks_enablement(user):
+    """is_live = not halted AND ≥1 account enabled. A fund stays 'active' (not
+    halted) even with every account disabled, but is_live must read False."""
+    fund = _fund_of_three(user)                       # all 3 enabled
+    assert fund_layer.fund_overview(fund)["is_live"] is True
+    StrategyAutopilot.objects.filter(
+        strategy__in=fund.strategies.all(),
+    ).update(is_enabled=False)
+    out = fund_layer.fund_overview(fund)
+    assert out["state"] == "active"                   # still not halted
+    assert out["is_live"] is False                    # but nothing trades
+    assert all("cron_description" in p for p in out["per_account"])
 
 
 def test_fund_halt_halts_all_then_resume(user):

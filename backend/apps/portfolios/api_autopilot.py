@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
 from apps.models_catalog.presets import PRESETS
+from apps.schedules.triggers import describe_cron, is_valid_cron
 
 from .models import AutopilotRun, PortfolioStrategy, StrategyAutopilot
 from .validation import validation_status
@@ -29,6 +30,7 @@ def _autopilot_dict(ap: StrategyAutopilot) -> dict:
         "is_enabled": ap.is_enabled,
         "state": ap.state,
         "cron_expression": ap.cron_expression,
+        "cron_description": describe_cron(ap.cron_expression),
         "timezone": ap.timezone,
         "is_market_aware": ap.is_market_aware,
         "broker_account_id": ap.broker_account_id,
@@ -92,6 +94,11 @@ class StrategyAutopilotView(APIView):
                 status=400,
             )
 
+        # Cron must be parseable — an invalid expression would clear next_run_at
+        # on reschedule (below) and the autopilot would silently never fire.
+        if "cron_expression" in data and not is_valid_cron(data["cron_expression"]):
+            return Response({"detail": "invalid cron_expression"}, status=400)
+
         for f in _STR_FIELDS:
             if f in data:
                 setattr(ap, f, data[f])
@@ -110,6 +117,11 @@ class StrategyAutopilotView(APIView):
         # is_enabled can only be set true through the validated enable path.
         if data.get("is_enabled") and not ap.is_enabled:
             return self._enable(ap, strategy)
+        # A cadence edit on a live autopilot must recompute the next fire time —
+        # otherwise next_run_at keeps pointing at the old schedule until the next
+        # natural fire (or a resume). Mirrors _enable/Resume, which already do this.
+        if ap.is_enabled and any(f in data for f in ("cron_expression", "timezone")):
+            ap.reschedule()
         ap.save()
         return Response({"autopilot": _autopilot_dict(ap)})
 

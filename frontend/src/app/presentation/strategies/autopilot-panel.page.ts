@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FundStore } from '../../abstraction/fund.store';
 import { Autopilot } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
@@ -12,7 +12,7 @@ import { AppShellComponent } from '../shared/app-shell.component';
 @Component({
   selector: 'hf-autopilot-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund', link: '/fund' }, { label: 'Autopilot' }]">
       <div class="page-head">
@@ -70,7 +70,9 @@ import { AppShellComponent } from '../shared/app-shell.component';
         <section class="card">
           <h2>Guardrails</h2>
           <div class="grid">
-            <label>Cron <input [(ngModel)]="form.cron_expression" /></label>
+            <label>Cron <input [(ngModel)]="form.cron_expression" />
+              <small class="hint" *ngIf="a.cron_description">{{ a.cron_description }} · {{ a.timezone }}</small>
+            </label>
             <label>Model preset
               <select [(ngModel)]="form.model_preset">
                 <option value="dev">dev</option>
@@ -79,6 +81,9 @@ import { AppShellComponent } from '../shared/app-shell.component';
                 <option value="research">research</option>
                 <option value="quality">quality</option>
               </select>
+              <small class="hint">Governs autonomous runs for this account only — independent of your
+                <a routerLink="/settings/models">Settings → Models</a> defaults
+                (those apply to manual runs &amp; the questionnaire).</small>
             </label>
             <label>Target vol % <input type="number" [(ngModel)]="form.target_vol_pct" /></label>
             <label>Soft cut % <input type="number" [(ngModel)]="form.dd_soft_cut_pct" /></label>
@@ -104,6 +109,8 @@ import { AppShellComponent } from '../shared/app-shell.component';
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
     .grid label { display: flex; flex-direction: column; font-size: 12px; color: var(--text-2); gap: 3px; }
     .grid label.chk { flex-direction: row; align-items: center; gap: 6px; }
+    .grid label .hint { color: var(--text-3); font-size: 11px; font-weight: 400; }
+    .grid label .hint a { text-decoration: underline; }
     .muted { color: var(--text-3); }
   `],
 })

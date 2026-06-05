@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { SettingsTabsComponent } from './settings-tabs.component';
 import { ModelsStore } from '../../abstraction/models.store';
@@ -33,7 +34,7 @@ type TierFilter = 'all' | ModelTier;
 @Component({
   selector: 'hf-settings-models',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, SettingsTabsComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, SettingsTabsComponent],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Settings' }, { label: 'Models' }]">
       <div class="page-head">
@@ -50,6 +51,11 @@ type TierFilter = 'all' | ModelTier;
         <section class="card">
           <div class="card-hd"><h2 class="title">Defaults &amp; cost ceiling</h2></div>
           <div class="card-bd flex flex-col gap-4">
+            <p class="text-[11.5px] text-text-3 m-0">
+              These apply to manual runs &amp; the questionnaire. <b>Autonomous Fund</b> runs use a
+              per-account preset set on each strategy’s
+              <a class="underline" routerLink="/fund">Autopilot page</a> — they don’t inherit the settings here.
+            </p>
             <!-- Preset picker (card-based; bound to the same preset model) -->
             <div class="field">
               <span class="lbl">Preset · used when no global default is set</span>
@@ -74,7 +80,7 @@ type TierFilter = 'all' | ModelTier;
                   <option value="">— use preset per-agent rules —</option>
                   @for (m of store.models(); track m.id) {
                     <option [value]="m.id" [disabled]="!m.available">
-                      {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                      {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
                     </option>
                   }
                 </select>
@@ -167,7 +173,7 @@ type TierFilter = 'all' | ModelTier;
                         <option value="">— use preset default —</option>
                         @for (m of visiblePerAgentModels(a); track m.id) {
                           <option [value]="m.id" [disabled]="!m.available">
-                            {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                            {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
                           </option>
                         }
                       </select>
@@ -232,6 +238,10 @@ type TierFilter = 'all' | ModelTier;
                       {{ m.display_name }}
                       @if (isFree(m)) {
                         <span class="badge-free" data-test="badge-free">FREE</span>
+                      }
+                      @if (m.supports_reasoning) {
+                        <span class="badge-reasoning" data-test="badge-reasoning"
+                              title="Reasoning model — spends tokens on hidden chain-of-thought">🧠 reasoning</span>
                       }
                     </td>
                     <td>{{ m.provider }}</td>
@@ -403,6 +413,18 @@ type TierFilter = 'all' | ModelTier;
         border-radius: 4px;
         background: var(--acc-long-soft, #e6f4ea);
         color: var(--acc-long-fg, #1b5e20);
+        vertical-align: middle;
+      }
+      .badge-reasoning {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        border-radius: 4px;
+        background: var(--acc-info-soft, #e7eefc);
+        color: var(--acc-info-fg, #1a3e8c);
         vertical-align: middle;
       }
       .btn-xs { height: 22px; padding: 0 8px; font-size: 11px; }

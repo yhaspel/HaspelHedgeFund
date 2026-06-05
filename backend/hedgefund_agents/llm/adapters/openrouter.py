@@ -37,7 +37,30 @@ RETRY_AFTER_CAP_SECONDS = 8.0
 # effort steers tokens toward the visible answer. Gated by slug so non-reasoning
 # routes (e.g. the prod Llama-3.3-70B analytical default) never get an extra
 # `reasoning` param that some providers reject with a 400.
-_REASONING_SLUGS = ("gpt-oss", "o1", "o3", "deepseek-r1", "qwen3")
+#
+# Fragments are matched as substrings, so they MUST be specific enough not to
+# catch a non-reasoning sibling: "deepseek-v4-pro" (NOT "deepseek-v4", which
+# would wrongly flag the frugal workhorse deepseek-v4-flash) and
+# "nemotron-3-nano-omni" (NOT "nemotron", which would flag the frugal
+# nemotron-3-nano-30b-a3b). This tuple is the single source of truth for what
+# counts as a reasoning model: it drives the effort cap here, the catalog's
+# ModelEntry.supports_reasoning flag (seed + the §reasoning seed invariant), and
+# the "no reasoning model on a decision role / cheap-tier menu" guards in
+# tests/test_preset_invariants.py.
+_REASONING_SLUGS = (
+    "gpt-oss", "o1", "o3", "deepseek-r1", "qwen3",
+    "deepseek-v4-pro", "glm-5.1", "nemotron-3-nano-omni",
+)
+
+
+def is_reasoning_slug(model_id: str) -> bool:
+    """True if `model_id` names a dedicated reasoning model (per _REASONING_SLUGS).
+
+    Accepts a bare slug ("deepseek/deepseek-r1") or a provider-qualified
+    ModelEntry id ("openrouter:deepseek/deepseek-r1") — the provider prefix
+    carries no reasoning fragments, so the substring test is unaffected.
+    """
+    return any(tag in model_id.lower() for tag in _REASONING_SLUGS)
 
 # Same-price-tier fallback when a model STILL returns empty content. Free slugs
 # fall back to another free slug so we never silently escalate cost.
@@ -433,7 +456,7 @@ class OpenRouterClient:
         # retry-without-it fallback.
         if json_object:
             body["response_format"] = {"type": "json_object"}
-        if any(tag in model.lower() for tag in _REASONING_SLUGS):
+        if is_reasoning_slug(model):
             body["reasoning"] = {"effort": "low"}
         return body
 

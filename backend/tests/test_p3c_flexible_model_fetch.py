@@ -22,6 +22,7 @@ from apps.models_catalog.models import ModelEntry
 from apps.models_catalog.tier_menus import (
     DEV_TIER_SLUGS,
     FRUGAL_TIER_SLUGS,
+    REASONING_TIER_SLUGS,
     STATIC_TIER_MENUS,
     tier_menu,
 )
@@ -433,15 +434,22 @@ def test_seed_models_does_not_clobber_fetched_row() -> None:
 # --- §9.15 — static-menu freshness + Anthropic isolation ---------------
 
 
-def test_static_menu_openrouter_ids_are_in_dev_or_frugal_allowlist() -> None:
-    dev_frugal = {f"openrouter:{s}" for s in (*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS)}
+def test_static_menu_openrouter_ids_are_in_a_curated_allowlist() -> None:
+    # Every OpenRouter id surfaced in a static menu must belong to a curated
+    # allowlist whose pricing is kept fresh: DEV/FRUGAL (live sync_tier_models)
+    # or REASONING (verify_models / verify_openrouter_pricing, which audits every
+    # active OpenRouter row). Otherwise its catalog pricing would silently rot.
+    allow = {
+        f"openrouter:{s}"
+        for s in (*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS, *REASONING_TIER_SLUGS)
+    }
     for preset, menu in STATIC_TIER_MENUS.items():
         for mid in menu:
             if mid.startswith("openrouter:"):
-                assert mid in dev_frugal, (
+                assert mid in allow, (
                     f"static-menu OpenRouter id {mid!r} (preset {preset!r}) "
-                    f"is not in DEV_TIER_SLUGS ∪ FRUGAL_TIER_SLUGS — "
-                    f"sync_tier_models would never refresh its pricing"
+                    f"is not in DEV ∪ FRUGAL ∪ REASONING allowlists — "
+                    f"its pricing would never be refreshed"
                 )
 
 

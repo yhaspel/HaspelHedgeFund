@@ -304,9 +304,10 @@ export class QuestionnairePage implements OnInit {
       const hasKey = status === 'set';
       const disabled = !hasKey && m.id !== DEFAULT_MODEL_ID && provider !== 'ollama';
       const suffix = disabled ? ' (no key)' : '';
+      const reasoning = m.supports_reasoning ? '🧠 ' : '';
       return {
         id: m.id,
-        label: `${m.display_name ?? m.id} · ${m.tier ?? 'tier?'}${suffix}`,
+        label: `${reasoning}${m.display_name ?? m.id} · ${m.tier ?? 'tier?'}${suffix}`,
         disabled,
       };
     });

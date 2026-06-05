@@ -27,6 +27,7 @@ function _row(id: string, opts: Record<string, unknown> = {}): any {
     supports_caching: false,
     supports_structured_output: true,
     supports_long_context: true,
+    supports_reasoning: opts['supports_reasoning'] ?? false,
     price_in_per_mtok: opts['price_in_per_mtok'] ?? '0',
     price_out_per_mtok: opts['price_out_per_mtok'] ?? '0',
     notes: '',
@@ -186,5 +187,41 @@ describe('hf-model-panel · tier-scoped dropdowns (P3-C §7.1)', () => {
     // No applyPreset call → tierMenu() is [].
     const visible = fixture.componentInstance.panel.visibleModels('buffett').map((m) => m.id);
     expect(visible).toEqual(FULL_CATALOG.map((m) => m.id));
+  });
+});
+
+describe('hf-model-panel · reasoning marker', () => {
+  let store: StubModelsStore;
+
+  beforeEach(async () => {
+    store = new StubModelsStore();
+    store.models.set([
+      _row('openrouter:deepseek/deepseek-v4-pro', {
+        display_name: 'DeepSeek V4 Pro', supports_reasoning: true,
+      }),
+      _row('openrouter:meta-llama/llama-3.3-70b-instruct', {
+        display_name: 'Llama 3.3 70B',
+      }),
+    ]);
+    await TestBed.configureTestingModule({
+      imports: [HarnessComponent],
+      providers: [{ provide: ModelsStore, useValue: store }],
+    }).compileComponents();
+  });
+
+  it('prefixes 🧠 on reasoning models and leaves others unmarked', () => {
+    const fixture = TestBed.createComponent(HarnessComponent);
+    fixture.detectChanges();
+    fixture.componentInstance.panel.expanded.set(true);
+    fixture.componentInstance.panel.showAll.set(true);
+    fixture.detectChanges();
+
+    const options: HTMLOptionElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('option'),
+    );
+    const reasoning = options.find((o) => o.value === 'openrouter:deepseek/deepseek-v4-pro');
+    const plain = options.find((o) => o.value === 'openrouter:meta-llama/llama-3.3-70b-instruct');
+    expect(reasoning?.textContent).toContain('🧠');
+    expect(plain?.textContent).not.toContain('🧠');
   });
 });

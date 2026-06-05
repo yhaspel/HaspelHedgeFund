@@ -37,6 +37,11 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
 
       <p class="disclaimer">Educational use only — not investment advice. Paper trading only.</p>
 
+      <div class="banner-warn" *ngIf="notLive()">
+        ⚠ This fund is <b>active</b> but no strategies are enabled — nothing will trade
+        until you enable at least one on a strategy’s Autopilot page.
+      </div>
+
       <ng-container *ngIf="fund() as f; else noFund">
         <!-- Aggregate panel -->
         <section class="card agg">
@@ -70,7 +75,14 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
             <div class="acct-kind">{{ a.kind }}</div>
             <div class="acct-row"><span>NAV</span><b>{{ a.nav ? (+a.nav | currency: 'USD' : 'symbol' : '1.0-0') : '—' }}</b></div>
             <div class="acct-row"><span>Rolling Sharpe</span><b>{{ a.rolling_sharpe !== null ? (a.rolling_sharpe | number: '1.2-2') : '—' }}</b></div>
+            <div class="acct-row" *ngIf="a.cron_description"><span>Schedule</span><b class="sched" [title]="a.cron_description">{{ a.cron_description }}</b></div>
             <div class="acct-row"><span>Next run</span><b>{{ a.next_run_at ? (a.next_run_at | date: 'EEE HH:mm') : '—' }}</b></div>
+            <div class="acct-actions" *ngIf="a.is_enabled">
+              <button class="btn btn-sm" (click)="runNow(a.strategy_id)" [disabled]="runningId() === a.strategy_id">
+                {{ runningId() === a.strategy_id ? 'Queuing…' : 'Run now' }}
+              </button>
+              <span class="queued" *ngIf="queuedId() === a.strategy_id">Cycle queued ✓</span>
+            </div>
           </div>
         </section>
 
@@ -124,6 +136,11 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
     .acct-name { font-weight: 600; }
     .acct-kind { color: var(--text-3); font-size: 12px; margin: 2px 0 8px; }
     .acct-row { display: flex; justify-content: space-between; padding: 3px 0; border-top: 1px solid var(--border); }
+    .acct-row .sched { font-size: 11px; font-weight: 500; text-align: right; max-width: 60%; }
+    .acct-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .btn-sm { padding: 2px 10px; font-size: 12px; }
+    .acct-actions .queued { color: var(--acc-long-fg); font-size: 12px; }
+    .banner-warn { border: 1px solid var(--acc-short-fg); border-radius: 6px; padding: 8px 12px; margin: 0 0 14px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--acc-short-fg) 8%, transparent); }
     table.corr { border-collapse: collapse; }
     table.corr th, table.corr td { padding: 6px 12px; text-align: center; border: 1px solid var(--border); }
     table.corr td.lo { color: var(--acc-long-fg); }
@@ -137,11 +154,20 @@ export class FundDashboardPage implements OnInit {
   readonly fund = this.store.fund;
   readonly loading = signal(true);
   readonly busy = signal(false);
+  readonly runningId = signal<number | null>(null);
+  readonly queuedId = signal<number | null>(null);
 
   readonly cols = computed(() => {
     const f: FundOverview | null = this.fund();
     const m = f?.correlation?.matrix;
     return m ? Object.keys(m) : [];
+  });
+
+  // "active" only means "not halted" — flag the case where the fund is active
+  // but every account is disabled, so nothing is actually trading.
+  readonly notLive = computed(() => {
+    const f = this.fund();
+    return !!f && f.state === 'active' && !f.is_live;
   });
 
   ngOnInit(): void {
@@ -157,5 +183,14 @@ export class FundDashboardPage implements OnInit {
   resumeFund(): void {
     this.busy.set(true);
     this.store.resumeFund().subscribe({ next: () => this.busy.set(false), error: () => this.busy.set(false) });
+  }
+
+  runNow(strategyId: number): void {
+    this.runningId.set(strategyId);
+    this.queuedId.set(null);
+    this.store.runNow(strategyId).subscribe({
+      next: () => { this.runningId.set(null); this.queuedId.set(strategyId); },
+      error: () => this.runningId.set(null),
+    });
   }
 }

@@ -16,12 +16,14 @@ from __future__ import annotations
 import pytest
 
 from apps.models_catalog.presets import PERSONA_AGENTS, PRESETS, expand_preset
+from apps.models_catalog.seed import CANONICAL_MODELS
 from apps.models_catalog.tier_menus import (
     DEV_TIER_SLUGS,
     FRUGAL_TIER_SLUGS,
+    REASONING_TIER_SLUGS,
     STATIC_TIER_MENUS,
 )
-from hedgefund_agents.llm.adapters.openrouter import _REASONING_SLUGS
+from hedgefund_agents.llm.adapters.openrouter import _REASONING_SLUGS, is_reasoning_slug
 
 # Roles where a reasoning model's empty-content failure mode hurts most: the
 # personas that vote and the risk/PM/CIO synthesis that decides.
@@ -84,6 +86,38 @@ def test_dev_and_frugal_menus_are_disjoint() -> None:
     catalog sync builds rows from both lists with different free/paid pricing."""
     overlap = set(DEV_TIER_SLUGS) & set(FRUGAL_TIER_SLUGS)
     assert not overlap, f"dev and frugal menus overlap on: {sorted(overlap)}"
+
+
+def test_seed_supports_reasoning_matches_heuristic() -> None:
+    """Every seeded ModelEntry's `supports_reasoning` flag must agree with the
+    canonical `_REASONING_SLUGS` heuristic (via is_reasoning_slug). This keeps
+    ONE source of truth behind the UI's reasoning marker, the adapter's effort
+    cap, and the decision-role guard: move a slug in/out of reasoning and this
+    goes red until the seed flag is updated to match."""
+    for spec in CANONICAL_MODELS:
+        flag = bool(spec.get("supports_reasoning", False))
+        assert flag == is_reasoning_slug(spec["id"]), (
+            f"seed row {spec['id']!r}: supports_reasoning={flag} but "
+            f"is_reasoning_slug={is_reasoning_slug(spec['id'])} — keep them in sync"
+        )
+
+
+def test_reasoning_tier_slugs_are_reasoning() -> None:
+    for s in REASONING_TIER_SLUGS:
+        assert _is_reasoning(s), f"{s!r} is in REASONING_TIER_SLUGS but isn't reasoning"
+
+
+def test_reasoning_models_are_offered_only_in_premium_menus() -> None:
+    """The curated reasoning models are selectable in research/quality, and must
+    never leak into the cheap-tier (dev/frugal) menus that feed decision roles."""
+    reasoning_ids = {f"openrouter:{s}" for s in REASONING_TIER_SLUGS}
+    for preset in ("research", "quality"):
+        menu = set(STATIC_TIER_MENUS[preset])
+        assert reasoning_ids <= menu, (
+            f"{preset!r} menu is missing reasoning ids: {sorted(reasoning_ids - menu)}"
+        )
+    cheap = {f"openrouter:{s}" for s in (*DEV_TIER_SLUGS, *FRUGAL_TIER_SLUGS)}
+    assert not (reasoning_ids & cheap), "reasoning models leaked into dev/frugal menus"
 
 
 def test_blocked_fallback_is_free_vetted_and_non_reasoning() -> None:

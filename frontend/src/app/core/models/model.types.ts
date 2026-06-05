@@ -9,6 +9,8 @@ export interface ModelEntry {
   supports_caching: boolean;
   supports_structured_output: boolean;
   supports_long_context: boolean;
+  /** Dedicated reasoning / chain-of-thought model — marked with 🧠 in selects. */
+  supports_reasoning: boolean;
   price_in_per_mtok: string | number | null;
   price_out_per_mtok: string | number | null;
   notes: string;

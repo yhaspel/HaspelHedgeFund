@@ -13,7 +13,8 @@ class ModelEntrySerializer(serializers.ModelSerializer):
         fields = (
             "id", "provider", "display_name", "tier",
             "context_window", "supports_caching", "supports_structured_output",
-            "supports_long_context", "price_in_per_mtok", "price_out_per_mtok",
+            "supports_long_context", "supports_reasoning",
+            "price_in_per_mtok", "price_out_per_mtok",
             "notes", "is_free", "last_verified_at", "last_verified_note",
         )
 

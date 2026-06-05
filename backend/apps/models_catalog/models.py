@@ -23,6 +23,12 @@ class ModelEntry(models.Model):
     supports_caching = models.BooleanField(default=False)
     supports_structured_output = models.BooleanField(default=True)
     supports_long_context = models.BooleanField(default=False)
+    # Dedicated reasoning / chain-of-thought model (per the adapter's
+    # _REASONING_SLUGS heuristic). Surfaced in the model-selection UI so an
+    # operator can tell at a glance which routes spend tokens on hidden
+    # thinking. These stay off the dev/frugal menus and decision-role defaults
+    # (empty-content/hang risk) — see tests/test_preset_invariants.py.
+    supports_reasoning = models.BooleanField(default=False)
     price_in_per_mtok = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True
     )
