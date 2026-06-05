@@ -231,7 +231,7 @@ interface DecisionRow {
 
         <section class="card">
           <div class="card-hd"><h2 class="title">Useful contrarians</h2></div>
-          <p class="sub" style="margin: -4px 0 10px">
+          <p class="sub tight">
             Personas ranked by how often they were right <em>when they went
             against the run's majority signal</em> — the contrarians worth
             weighting up. Hit rate over disagreement cases only.
@@ -408,7 +408,7 @@ interface DecisionRow {
                 captured forward-only, so the chart fills in as new cycles run.
               </p>
             } @else {
-              <p class="sub" style="margin: -4px 0 10px">
+              <p class="sub tight">
                 Cumulative return of the live (council) book vs the council-free
                 deterministic baseline. The gap is what the council added.
               </p>
@@ -419,7 +419,7 @@ interface DecisionRow {
 
         <section class="card">
           <div class="card-hd"><h2 class="title">Flavor benchmarks</h2></div>
-          <p class="sub" style="margin: -4px 0 10px">
+          <p class="sub tight">
             Median across your own strategies of each flavor (single-tenant).
           </p>
           @if (flavors().length === 0) {
@@ -469,6 +469,7 @@ interface DecisionRow {
     `
       .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
       .sub { color: var(--text-3); font-size: 12.5px; margin-top: 4px; max-width: 640px; }
+      .sub.tight { margin: -4px 0 10px; }
       .head-right { display:flex; gap:8px; align-items:center; }
       .sel { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
       .sel.sm { padding:4px 8px; font-size:12px; }

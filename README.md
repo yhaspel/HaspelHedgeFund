@@ -67,6 +67,32 @@ Run tests:
 cd backend && uv run pytest
 ```
 
+## Autonomous Fund (paper, educational)
+
+Provision the 3-account autonomous paper fund (see `development-plans/completed-dev-phases/phase-07-ultimate-hedgefund.md`):
+
+```bash
+# Reads the ALPACA_PAPER_{1,2,3}_* triples + ALPACA_FUND_OWNER_EMAIL from .env.
+uv run python manage.py bootstrap_autonomous_fund
+
+# Demo/educational shortcut — also seed a passing validation backtest per
+# strategy so each account's autopilot is enable-able out of the box:
+uv run python manage.py bootstrap_autonomous_fund --broker mock --no-verify --seed-validation-backtest
+```
+
+Each strategy's autopilot stays **disabled** until it passes the §9 validation gate
+(a `DONE` walk-forward backtest with positive out-of-sample Sharpe). On the Autonomous
+Fund page, use **Set up → Run validation backtest** on a card, or seed demo backtests
+for an existing fund:
+
+```bash
+uv run python manage.py seed_validation_backtests --user me@example.com
+```
+
+> The seed writes a clearly-labelled `[seed]` backtest (it does **not** run the LLM
+> engine) and is opt-in — `DONE` backtests are protected history, so it is never
+> auto-run during a normal bootstrap.
+
 ## Run frontend without Docker (optional)
 
 Requires Node 22 LTS and `pnpm`.

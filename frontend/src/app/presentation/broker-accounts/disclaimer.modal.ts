@@ -17,7 +17,7 @@ import { LiveDisclaimer } from '../../core/models/broker.model';
   imports: [CommonModule, ModalComponent],
   template: `
     <hf-modal titleId="disclaimer-title" [dismissOnOverlay]="false" (closed)="closed.emit()">
-      <div class="card" style="max-width:540px" (click)="$event.stopPropagation()">
+      <div class="card max-w-[540px]" (click)="$event.stopPropagation()">
         <div class="card-hd">
           <h2 class="title" id="disclaimer-title">
             Live-trading disclaimer · version {{ disclaimer?.version }}

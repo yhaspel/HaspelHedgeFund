@@ -88,7 +88,9 @@ type TierFilter = 'all' | ModelTier;
                   }
                 </select>
                 <p id="global-default-note" class="text-[11.5px] text-text-3 m-0 mt-1">
-                  Sets the same model for every agent. Clear to fall back to the preset rules.
+                  <b>Scope:</b> your manual runs &amp; the questionnaire only — sets the same model for every agent.
+                  Autopilot / Autonomous Fund runs ignore this (each account uses its own preset, shown on the
+                  <a class="underline" routerLink="/fund">Autopilot page</a>). Clear to fall back to the preset's per-agent rules.
                 </p>
               </div>
 
@@ -127,6 +129,46 @@ type TierFilter = 'all' | ModelTier;
             </button>
             @if (prefsMsg()) {
               <p role="status" aria-live="polite" class="text-[11.5px] text-[var(--acc-long-fg)] m-0">{{ prefsMsg() }}</p>
+            }
+          </div>
+        </section>
+
+        <!-- Default model per tier (sits next to the global default; autosaves) -->
+        <section class="card">
+          <div class="card-hd"><h2 class="title">Default model per tier</h2></div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <p class="text-[11.5px] text-text-3 m-0">
+              A finer-grained default than the global one above: pick a model per price tier.
+              It anchors that tier's analytical &amp; orchestration agents and is the resilience
+              fallback when a model is retired — personas still spread across the tier's menu.
+              <b>Saves automatically</b> (same as the per-agent picks below).
+            </p>
+            <div class="agent-grid">
+              @for (t of tierDefaultPresets; track t) {
+                <div class="agent-row">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="tier-pill">{{ t }}</span>
+                  </div>
+                  <div class="mono text-[11.5px] truncate"
+                       [style.color]="tierDefault(t) ? 'var(--text-2)' : 'var(--text-3)'">
+                    {{ tierDefaultLabel(t) }}@if (tierDefault(t)) { · {{ fmtUsd(tierDefaultEst(t)) }}}
+                  </div>
+                  <select class="input sans agent-select"
+                    [ngModel]="tierDefault(t)"
+                    (ngModelChange)="setTierDefault(t, $event)"
+                    [attr.data-test]="'tier-default-' + t">
+                    <option value="">— use system tier default —</option>
+                    @for (m of visibleTierModels(t); track m.id) {
+                      <option [value]="m.id" [disabled]="!m.available">
+                        {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                      </option>
+                    }
+                  </select>
+                </div>
+              }
+            </div>
+            @if (tierSavedMsg()) {
+              <p role="status" aria-live="polite" class="text-[11.5px] text-[var(--acc-long-fg)] m-0">{{ tierSavedMsg() }}</p>
             }
           </div>
         </section>
@@ -185,42 +227,6 @@ type TierFilter = 'all' | ModelTier;
                 </div>
               </div>
             }
-          </div>
-        </section>
-
-        <!-- Default model per tier -->
-        <section class="card">
-          <div class="card-hd"><h2 class="title">Default model per tier</h2></div>
-          <div class="card-bd flex flex-col gap-3.5">
-            <p class="text-[11.5px] text-text-3 m-0">
-              Pick a default per price tier. It anchors the analytical &amp; orchestration
-              agents for that tier and is the resilience fallback when a model is retired —
-              personas still spread across the tier's menu. Saved with the button above.
-            </p>
-            <div class="agent-grid">
-              @for (t of tierDefaultPresets; track t) {
-                <div class="agent-row">
-                  <div class="flex items-center gap-1.5 min-w-0">
-                    <span class="tier-pill">{{ t }}</span>
-                  </div>
-                  <div class="mono text-[11.5px] truncate"
-                       [style.color]="tierDefault(t) ? 'var(--text-2)' : 'var(--text-3)'">
-                    {{ tierDefaultLabel(t) }}@if (tierDefault(t)) { · {{ fmtUsd(tierDefaultEst(t)) }}}
-                  </div>
-                  <select class="input sans agent-select"
-                    [ngModel]="tierDefault(t)"
-                    (ngModelChange)="setTierDefault(t, $event)"
-                    [attr.data-test]="'tier-default-' + t">
-                    <option value="">— use system tier default —</option>
-                    @for (m of visibleTierModels(t); track m.id) {
-                      <option [value]="m.id" [disabled]="!m.available">
-                        {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
-                      </option>
-                    }
-                  </select>
-                </div>
-              }
-            </div>
           </div>
         </section>
 
@@ -615,7 +621,6 @@ export class SettingsModelsPage implements OnInit {
   readonly tierDefaultPresets = USER_TIER_DEFAULT_PRESETS;
   tierMenus = signal<Record<string, string[]>>({});
   tierDefaults = signal<Record<string, string>>({});
-  private savedTierDefaults = '{}';
 
   // Operator tier-membership editor (lazy; hidden unless GET /tiers/ succeeds).
   tierEditorEnabled = signal(false);
@@ -627,8 +632,7 @@ export class SettingsModelsPage implements OnInit {
 
   isPrefsDirty(): boolean {
     return this.preset !== this.savedPreset
-      || this.ceiling !== this.savedCeiling
-      || JSON.stringify(this.tierDefaults()) !== this.savedTierDefaults;
+      || this.ceiling !== this.savedCeiling;
   }
 
   ngOnInit(): void {
@@ -646,7 +650,6 @@ export class SettingsModelsPage implements OnInit {
         this.globalDefault = allSame ? (vals[0] as string) : '';
       }
       this.tierDefaults.set({ ...(this.store.prefs()?.per_tier_defaults ?? {}) });
-      this.savedTierDefaults = JSON.stringify(this.tierDefaults());
       this.loadPresetOverrides();
       this.loadTierMenus();
       this.loadTierEditor();
@@ -666,10 +669,18 @@ export class SettingsModelsPage implements OnInit {
   }
 
   tierDefault(tier: string): string { return this.tierDefaults()[tier] ?? ''; }
+  tierSavedMsg = signal<string | null>(null);
   setTierDefault(tier: string, modelId: string): void {
     const next = { ...this.tierDefaults() };
     if (modelId) next[tier] = modelId; else delete next[tier];
     this.tierDefaults.set(next);
+    // Autosave — consistent with the per-agent picks below (previously this only
+    // updated local state and was silently lost unless the far-away prefs Save
+    // button was clicked).
+    this.store.savePrefs({ per_tier_defaults: next }).subscribe({
+      next: () => this.tierSavedMsg.set('Per-tier default saved.'),
+      error: () => this.tierSavedMsg.set('Failed to save — try again.'),
+    });
   }
   /** Scope the catalog to a tier/preset menu (∪ discovered Ollama), always
    *  re-including `currentId` if it falls outside the menu (stale selection).
@@ -891,14 +902,12 @@ export class SettingsModelsPage implements OnInit {
     this.store.savePrefs({
       preset: this.preset,
       cost_ceiling_per_run_usd: this.ceiling,
-      per_tier_defaults: this.tierDefaults(),
     }).subscribe({
       next: () => {
         this.savingPrefs.set(false);
         this.prefsMsg.set('Saved.');
         this.savedPreset = this.preset;
         this.savedCeiling = this.ceiling;
-        this.savedTierDefaults = JSON.stringify(this.tierDefaults());
       },
       error: () => { this.savingPrefs.set(false); this.prefsMsg.set('Failed to save'); },
     });

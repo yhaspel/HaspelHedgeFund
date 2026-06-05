@@ -37,7 +37,7 @@ import { PersonaEvolutionSettings as EvolutionSettings } from '../../core/models
           <div class="card-hd flex items-center justify-between">
             <h2 class="title">Persona evolution</h2>
             @if (evoSettings()?.cost_cap_reached_at) {
-              <span class="pill" style="background: var(--acc-short-soft); color: var(--acc-short-fg);" data-test="evo-cap-reached">
+              <span class="pill bg-[var(--acc-short-soft)] text-[color:var(--acc-short-fg)]" data-test="evo-cap-reached">
                 <span class="dot"></span>monthly cost cap reached
               </span>
             }
@@ -101,7 +101,7 @@ import { PersonaEvolutionSettings as EvolutionSettings } from '../../core/models
                   <option value="">— Llama 3.3 70B (recommended) —</option>
                   @for (m of evoModelChoices(); track m.id) {
                     <option [value]="m.id" [disabled]="!m.available">
-                      {{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
+                      {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} · {{ m.tier }}{{ m.available ? '' : ' (no key)' }}
                     </option>
                   }
                 </select>
@@ -177,8 +177,7 @@ import { PersonaEvolutionSettings as EvolutionSettings } from '../../core/models
                     </td>
                     <td>
                       @if (p.current_cycle_started_at) {
-                        <span class="pill"
-                              style="background: var(--acc-info-soft); color: var(--acc-info-fg);"
+                        <span class="pill bg-[var(--acc-info-soft)] text-[color:var(--acc-info-fg)]"
                               [attr.data-test-status]="p.persona_name">
                           <span class="dot"></span>running…
                         </span>
@@ -224,7 +223,7 @@ import { PersonaEvolutionSettings as EvolutionSettings } from '../../core/models
                                 <b>seq {{ r.seq }}</b> · {{ r.as_of_date }} ·
                                 {{ r.char_count }} chars
                                 @if (r.over_budget) {
-                                  <span class="badge-free" style="background: var(--acc-short-soft); color: var(--acc-short-fg);">truncated</span>
+                                  <span class="badge-free over">truncated</span>
                                 }
                                 @if (!r.material_change) {
                                   <span class="badge-free">no-change</span>
@@ -286,6 +285,7 @@ import { PersonaEvolutionSettings as EvolutionSettings } from '../../core/models
         color: var(--acc-long-fg, #1b5e20);
         vertical-align: middle;
       }
+      .badge-free.over { background: var(--acc-short-soft); color: var(--acc-short-fg); }
       .btn-xs { height: 22px; padding: 0 8px; font-size: 11px; }
       .rev-block {
         padding: 8px 4px 8px 4px;

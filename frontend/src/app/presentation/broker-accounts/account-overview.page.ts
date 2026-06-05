@@ -52,7 +52,7 @@ type OrderType = BrokerOrderType;
             </p>
             <p class="text-[11.5px] text-text-3 mt-1 flex items-center gap-1.5">
               <span>Order quantity default:</span>
-              <select class="input mono" style="width:auto;padding:2px 6px"
+              <select class="input mono w-auto py-0.5 px-1.5"
                       [value]="o.account.default_quantity_mode"
                       (change)="setDefaultQuantityMode($any($event.target).value)"
                       data-test="account-qty-mode">

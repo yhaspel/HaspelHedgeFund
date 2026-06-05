@@ -220,7 +220,7 @@ export class GraphEditorPage implements OnInit {
     if (!tier) return [];
     return tier.models.map((id) => {
       const m = this.modelsStore.models().find((x) => x.id === id);
-      return { id, label: m ? m.display_name : id };
+      return { id, label: m ? `${m.supports_reasoning ? '🧠 ' : ''}${m.display_name}` : id };
     });
   });
 

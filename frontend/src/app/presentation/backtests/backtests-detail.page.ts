@@ -37,8 +37,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             <span class="pill"><span class="dot"></span>Run cost · $ {{ (bt.total_cost_usd || 0) | number: '1.2-2' }}</span>
             <a class="btn" [routerLink]="['/backtests', bt.id, 'compare']">Compare…</a>
             @if (bt.status === 'running' || bt.status === 'queued') {
-              <button type="button" class="btn"
-                style="color: var(--acc-short-fg); border-color: var(--acc-short-soft);"
+              <button type="button" class="btn text-[color:var(--acc-short-fg)] border-[color:var(--acc-short-soft)]"
                 [disabled]="cancelling"
                 (click)="cancelRun(bt.id)"
                 data-test="cancel-backtest">

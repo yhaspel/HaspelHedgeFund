@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.graphs.models import AgentGraphVersion
+from apps.portfolios.models import PortfolioStrategy
 
 from .models import Backtest, BacktestFold, BacktestMetrics
 
@@ -87,6 +88,13 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
         source="graph_version", required=False, allow_null=True,
         queryset=AgentGraphVersion.objects.all(),
     )
+    # P7 §9: optional strategy this backtest validates. When set, completing the
+    # backtest unlocks that strategy's autopilot enable gate (validation.py reads
+    # the strategy's latest DONE backtest). Ownership is enforced in validate().
+    strategy_id = serializers.PrimaryKeyRelatedField(
+        source="strategy", required=False, allow_null=True,
+        queryset=PortfolioStrategy.objects.all(),
+    )
 
     class Meta:
         model = Backtest
@@ -96,6 +104,7 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             "rebalance_frequency", "is_window_days", "oos_window_days", "step_days",
             "search_space", "n_candidates", "is_objective", "rng_seed", "baseline",
             "max_budget_usd", "disable_cio", "status", "graph_version_id",
+            "strategy_id",
         )
         read_only_fields = ("id", "status")
 
@@ -107,6 +116,13 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs["end_date"] <= attrs["start_date"]:
             raise serializers.ValidationError("end_date must be after start_date")
+        # A strategy link may only point at the caller's own strategy (never leak
+        # or attach across users).
+        strategy = attrs.get("strategy")
+        if strategy is not None:
+            user = getattr(self.context.get("request"), "user", None)
+            if user is None or strategy.user_id != getattr(user, "id", None):
+                raise serializers.ValidationError({"strategy_id": "strategy not found"})
         if attrs.get("is_window_days", 252) < 126:
             raise serializers.ValidationError("is_window_days must be >= 126 (6 months)")
         master_days = (attrs["end_date"] - attrs["start_date"]).days

@@ -66,6 +66,10 @@ export interface FundAccountCard {
   rolling_sharpe: number | null;
   next_run_at: string | null;
   cron_description: string | null;
+  // P7 — why an account isn't live + the one next step (drives the card CTA).
+  validation_passed: boolean;
+  can_enable: boolean;
+  setup_hint: string | null;
 }
 
 export interface FundCorrelation {

@@ -21,7 +21,7 @@ const NOTIONAL_THRESHOLD = 1000;
   imports: [CommonModule, DecimalPipe, FormsModule, ModalComponent],
   template: `
     <hf-modal titleId="order-confirm-title" (closed)="onCancel()">
-      <div class="card" style="max-width:480px" (click)="$event.stopPropagation()">
+      <div class="card max-w-[480px]" (click)="$event.stopPropagation()">
         <div class="card-hd">
           <h2 class="title" id="order-confirm-title">Confirm and submit order</h2>
         </div>

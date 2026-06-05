@@ -172,7 +172,7 @@ const DOW_NAMES: Record<number, string> = {
                 }
               </select>
               @if (f.graph_version_id) {
-                <span class="muted" style="font-size:11px">Models &amp; personas come from this graph; the preset still sets the cost tier.</span>
+                <span class="muted text-[11px]">Models &amp; personas come from this graph; the preset still sets the cost tier.</span>
               }
             </label>
             <label>Cost ceiling (USD / run)

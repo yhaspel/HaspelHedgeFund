@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { GraphsStore } from '../../abstraction/graphs.store';
@@ -24,6 +24,21 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
           <h1 class="mt-1.5">New walk-forward backtest</h1>
         </div>
       </div>
+
+      @if (strategyId()) {
+        <div class="card validation-context" role="note">
+          <div class="card-bd flex items-start gap-2.5">
+            <span aria-hidden="true">🔒</span>
+            <p class="m-0 text-xs leading-[18px]">
+              <strong>Autopilot validation run.</strong>
+              This backtest is linked to your strategy — once it completes with a
+              positive out-of-sample Sharpe and drawdown within the hard-halt limit,
+              the strategy's <strong>Enable autopilot</strong> toggle unlocks.
+              <a [routerLink]="['/strategies', strategyId(), 'autopilot']">Back to Autopilot</a>
+            </p>
+          </div>
+        </div>
+      }
 
       <form (ngSubmit)="submit()" class="max-w-[760px] flex flex-col gap-[18px]"
             [attr.aria-describedby]="error() ? 'bt-form-error' : null">
@@ -264,6 +279,11 @@ export class BacktestsNewPage implements OnInit {
   readonly modelsStore = inject(ModelsStore);
   readonly graphs = inject(GraphsStore);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+
+  // P7 §9: when arriving from a strategy's Autopilot page (?strategy=<id>), link
+  // the backtest to that strategy so completing it unlocks the enable gate.
+  readonly strategyId = signal<number | null>(null);
 
   graphVersionId = signal<number | null>(null);
   graphOptions = computed(() =>
@@ -342,6 +362,11 @@ export class BacktestsNewPage implements OnInit {
   error = signal<string | null>(null);
 
   ngOnInit(): void {
+    const sid = Number(this.route.snapshot.queryParamMap.get('strategy'));
+    if (Number.isFinite(sid) && sid > 0) {
+      this.strategyId.set(sid);
+      this.name = 'Validation WF ' + new Date().toISOString().slice(0, 10);
+    }
     this.store.loadDefaultUniverse().subscribe();
     this.modelsStore.loadAll().subscribe();
     this.graphs.loadGraphs().subscribe();
@@ -414,6 +439,7 @@ export class BacktestsNewPage implements OnInit {
       personas: gv ? [] : Array.from(this.selectedPersonas),
       disable_cio: !this.includeCio,
       graph_version_id: gv,
+      strategy_id: this.strategyId(),
     }).subscribe({
       next: (bt) => this.router.navigate(['/backtests', bt.id]),
       error: (e) => {

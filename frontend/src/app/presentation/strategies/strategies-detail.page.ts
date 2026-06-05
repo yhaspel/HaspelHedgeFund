@@ -1269,7 +1269,11 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     const all = this.models.models();
     return t.models.map((id) => {
       const m = all.find((x) => x.id === id);
-      return { id, label: m ? `${m.display_name} · ${m.tier}` : id, available: m ? m.available : true };
+      return {
+        id,
+        label: m ? `${m.supports_reasoning ? '🧠 ' : ''}${m.display_name} · ${m.tier}` : id,
+        available: m ? m.available : true,
+      };
     });
   }
 
@@ -1282,12 +1286,16 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     const base = tier
       ? all.filter((m) => tier.models.includes(m.id) || m.provider === 'ollama')
       : all;
-    const out = base.map((m) => ({ id: m.id, label: `${m.display_name} · ${m.tier}`, available: m.available }));
+    const out = base.map((m) => ({
+      id: m.id,
+      label: `${m.supports_reasoning ? '🧠 ' : ''}${m.display_name} · ${m.tier}`,
+      available: m.available,
+    }));
     const cur = this.cycleOverrides()[agent];
     if (cur && !out.some((o) => o.id === cur)) {
       const stale = all.find((m) => m.id === cur);
       out.push(stale
-        ? { id: cur, label: `${stale.display_name} · ${stale.tier}`, available: stale.available }
+        ? { id: cur, label: `${stale.supports_reasoning ? '🧠 ' : ''}${stale.display_name} · ${stale.tier}`, available: stale.available }
         : { id: cur, label: cur, available: true });
     }
     return out;

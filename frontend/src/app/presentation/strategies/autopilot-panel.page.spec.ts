@@ -6,6 +6,7 @@ import { ActivatedRoute } from '@angular/router';
 
 import { AutopilotPanelPage } from './autopilot-panel.page';
 import { FundStore } from '../../abstraction/fund.store';
+import { ModelsStore } from '../../abstraction/models.store';
 import { Autopilot } from '../../core/models/autopilot.model';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,9 +41,15 @@ function setup(autopilot: Autopilot): Cmp {
     saveAutopilot: () => of({ autopilot }),
   } as unknown as FundStore;
   const route = { snapshot: { paramMap: { get: () => '7' } } } as unknown as ActivatedRoute;
+  const modelsStore = {
+    models: signal([]).asReadonly(),
+    loadModels: () => of({ models: [] }),
+    fetchPreset: () => of({ preset: 'frugal', overrides: {}, menu: [] }),
+  } as unknown as ModelsStore;
   TestBed.configureTestingModule({
     providers: [
       { provide: FundStore, useValue: store },
+      { provide: ModelsStore, useValue: modelsStore },
       { provide: ActivatedRoute, useValue: route },
     ],
   });
@@ -68,5 +75,34 @@ describe('AutopilotPanelPage', () => {
     const cmp = setup(ap({ is_enabled: true }));
     cmp.runNow();
     expect(cmp.notice()).toContain('queued');
+  });
+
+  it('parses an existing weekly cron into the friendly builder', () => {
+    const cmp = setup(ap());                    // cron 30 16 * * 5
+    expect(cmp.scheduleMode).toBe('simple');
+    expect(cmp.schedFreq).toBe('weekly');
+    expect(cmp.schedDays).toEqual([5]);
+    expect(cmp.schedTime).toBe('16:30');
+  });
+
+  it('rebuilds the cron from weekday toggles + time', () => {
+    const cmp = setup(ap());
+    cmp.schedTime = '09:30';
+    cmp.toggleDay(1);                           // add Monday → Mon + Fri
+    expect(cmp.form.cron_expression).toBe('30 9 * * 1,5');
+  });
+
+  it('builds daily and monthly crons', () => {
+    const cmp = setup(ap());
+    cmp.schedTime = '17:00';
+    cmp.schedFreq = 'daily'; cmp.syncCron();
+    expect(cmp.form.cron_expression).toBe('0 17 * * *');
+    cmp.schedFreq = 'monthly'; cmp.schedDom = 15; cmp.syncCron();
+    expect(cmp.form.cron_expression).toBe('0 17 15 * *');
+  });
+
+  it('falls back to the advanced cron view when the expression is too complex', () => {
+    const cmp = setup(ap({ cron_expression: '*/15 9-16 * * 1-5' }));
+    expect(cmp.scheduleMode).toBe('advanced');
   });
 });

@@ -84,6 +84,9 @@ export interface CreateBacktestRequest {
   disable_cio?: boolean;
   // P4c: backtest on a saved agent-graph version (its models + personas win).
   graph_version_id?: number | null;
+  // P7 §9: link this backtest to a strategy so completing it unlocks that
+  // strategy's autopilot enable gate.
+  strategy_id?: number | null;
 }
 
 export interface EstimateRequest {

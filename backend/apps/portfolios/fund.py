@@ -23,10 +23,45 @@ from django.utils import timezone
 from apps.schedules.triggers import describe_cron
 
 from .models import AutonomousFund, AutopilotRun, StrategyAutopilot
+from .validation import validation_status
 
 log = logging.getLogger(__name__)
 
 MIN_CORRELATION_SAMPLE = 8  # weekly returns; below this the 3×3 matrix is noise.
+
+
+def _account_setup(strategy, ap) -> dict:
+    """Why an account is (not) live + the single next step, so the fund cards
+    can be honest instead of showing a schedule that will never fire.
+
+    Returns ``{validation_passed, can_enable, setup_hint}``. ``setup_hint`` is a
+    short, action-oriented line (``None`` once enabled). ``can_enable`` is True
+    only when the §9 gate passes AND a paper broker link exists AND it isn't
+    already on — i.e. one click on the Autopilot page away from trading.
+    """
+    from apps.brokers.models import StrategyBrokerLink
+
+    if ap is not None and ap.is_enabled:
+        return {"validation_passed": True, "can_enable": False, "setup_hint": None}
+
+    passed = bool(validation_status(strategy).get("passed"))
+    has_link = StrategyBrokerLink.objects.filter(
+        strategy=strategy, is_active=True
+    ).exists()
+
+    if ap is None:
+        hint = "Open Autopilot to set this account up."
+    elif not passed:
+        hint = "Run a validation backtest to unlock the enable toggle."
+    elif not has_link:
+        hint = "Connect a paper broker account to enable."
+    else:
+        hint = "Validated — open Autopilot and enable."
+    return {
+        "validation_passed": passed,
+        "can_enable": ap is not None and passed and has_link,
+        "setup_hint": hint,
+    }
 
 
 def account_equity(strategy) -> Decimal | None:
@@ -144,6 +179,8 @@ def fund_overview(fund: AutonomousFund) -> dict:
             "rolling_sharpe": _sharpe(rets[-13:]) if len(rets) >= 2 else None,
             "next_run_at": ap.next_run_at.isoformat() if (ap and ap.next_run_at) else None,
             "cron_description": describe_cron(ap.cron_expression) if ap else None,
+            # Why it's not live + the one next step (drives the card CTA/reason).
+            **_account_setup(s, ap),
         })
     # Recommendation (NOT auto-reallocation — paper accounts can't share cash).
     recs = []

@@ -44,7 +44,7 @@ export interface InspectorSelection {
             >
               <option value="">Default ({{ shortName(sel.defaultModelKey) }})</option>
               @for (m of options(); track m.id) {
-                <option [value]="m.id" [disabled]="!m.available">{{ m.display_name }}</option>
+                <option [value]="m.id" [disabled]="!m.available">{{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }}</option>
               }
             </select>
           </label>

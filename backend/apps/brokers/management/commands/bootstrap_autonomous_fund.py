@@ -114,6 +114,11 @@ class Command(BaseCommand):
             "--no-verify", action="store_true",
             help="Skip the broker get_account() credential check (no network).",
         )
+        parser.add_argument(
+            "--seed-validation-backtest", action="store_true",
+            help="Also seed a passing demo validation backtest per strategy so the "
+                 "autopilots are enable-able out of the box (educational/paper).",
+        )
 
     def handle(self, *args, **opts):
         owner = self._resolve_owner(opts["user"])
@@ -162,6 +167,22 @@ class Command(BaseCommand):
             f"AutonomousFund #{fund.id} '{fund.name}' over "
             f"{fund.strategies.count()} strategies (owner {owner.email})."
         ))
+
+        if opts.get("seed_validation_backtest"):
+            from apps.backtests.seed import seed_validation_backtest
+
+            seeded_bt = 0
+            for strategy in seeded_strategies:
+                bt = seed_validation_backtest(strategy)
+                if bt is not None:
+                    seeded_bt += 1
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  seeded validation backtest #{bt.id} for '{strategy.name}'"
+                    ))
+            self.stdout.write(self.style.SUCCESS(
+                f"Seeded {seeded_bt} validation backtest(s) — each strategy's "
+                "Autopilot enable toggle is now unlocked."
+            ))
 
     # --- resolution -------------------------------------------------------
     def _resolve_owner(self, user_arg: str):
