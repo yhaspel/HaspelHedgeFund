@@ -166,7 +166,10 @@
   --surface-3: var(--n-200);
   --text: var(--n-900);
   --text-2: var(--n-700);
-  --text-3: var(--n-600);
+  /* HHF-14: --n-600 (#8a93a0) only reaches ~3:1 on light surfaces — below AA for
+     11–13px metadata. Darken --text-3 to a neutral grey that clears 4.5:1 on
+     bg/surface/surface-2 while staying in the cool-grey palette. */
+  --text-3: #646b78;
   --text-inv: #ffffff;
   --border: #e6e2d6;
   --border-2: var(--n-400);

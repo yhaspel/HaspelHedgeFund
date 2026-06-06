@@ -217,7 +217,7 @@ import { PopoverComponent } from '../shared/popover.component';
         <hf-modal titleId="edit-position-title" (closed)="cancelEdit()">
           <div class="card edit-modal" (click)="$event.stopPropagation()">
             <div class="card-hd">
-              <h2 class="title" id="edit-position-title">Edit position · {{ pos.ticker }}</h2>
+              <h2 class="title" id="edit-position-title">Edit position · <hf-ticker [ticker]="pos.ticker"></hf-ticker></h2>
               <div class="actions">
                 <button class="icon-btn" (click)="cancelEdit()" aria-label="Close">
                   <svg width="16" height="16" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
@@ -261,11 +261,11 @@ import { PopoverComponent } from '../shared/popover.component';
         <hf-modal titleId="confirm-close-title" (closed)="onCancelClose()">
           <div class="card max-w-[440px] w-full">
             <div class="card-hd">
-              <h2 class="title" id="confirm-close-title">Close {{ pc.ticker }}?</h2>
+              <h2 class="title" id="confirm-close-title">Close <hf-ticker [ticker]="pc.ticker"></hf-ticker>?</h2>
             </div>
             <div class="p-4 flex flex-col gap-2">
               <p class="m-0 text-xs text-text">
-                Close {{ pc.ticker }} at the latest mark — this realises P&amp;L
+                Close <hf-ticker [ticker]="pc.ticker"></hf-ticker> at the latest mark — this realises P&amp;L
                 and writes a position-close entry to the ledger.
               </p>
               <p class="m-0 text-[11.5px] text-text-3">

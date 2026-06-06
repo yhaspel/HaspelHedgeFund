@@ -10,6 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../shared/modal.component';
+import { TickerComponent } from '../shared/ticker.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import {
   BrokerAccount,
@@ -56,7 +57,7 @@ type TicketKind =
 @Component({
   selector: 'hf-broker-order-ticket-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, TickerComponent],
   template: `
     <hf-modal titleId="broker-ticket-title" (closed)="onCancel()">
       <div class="card max-w-[460px]" (click)="$event.stopPropagation()">
@@ -65,7 +66,7 @@ type TicketKind =
         </div>
         <div class="p-3.5">
           <div class="text-xs text-text-2">
-            <span class="font-medium mono">{{ decision.side }} {{ decision.ticker }}</span>
+            <span class="font-medium mono">{{ decision.side }} <hf-ticker [ticker]="decision.ticker"></hf-ticker></span>
             — choose an account and quantity, then review &amp; submit.
           </div>
 

@@ -206,8 +206,12 @@ import { PopoverComponent } from '../shared/popover.component';
     .banner-link { text-decoration: underline; color: var(--acc-info-fg); }
     table.corr { border-collapse: collapse; }
     table.corr th, table.corr td { padding: 6px 12px; text-align: center; border: 1px solid var(--border); }
-    table.corr td.lo { color: var(--acc-long-fg); }
-    table.corr td.hi { color: var(--acc-short-fg); font-weight: 600; }
+    table.corr td.lo { color: var(--acc-long-fg); background: var(--acc-long-soft); }
+    table.corr td.hi { color: var(--acc-short-fg); font-weight: 600; background: var(--acc-short-soft); }
+    /* HHF-14: don't signal diversification risk by colour alone — a fill tint
+       plus a glyph keeps the low/high read for colour-blind users. */
+    table.corr td.lo::after { content: ' ▾'; }
+    table.corr td.hi::after { content: ' ▲'; }
     .btn-danger { color: var(--acc-short-fg); border-color: var(--acc-short-fg); }
   `],
 })

@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { KpiTileComponent } from '../shared/kpi-tile.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { TickerComponent } from '../shared/ticker.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import {
@@ -30,6 +31,7 @@ type OrderType = BrokerOrderType;
   imports: [
     CommonModule, DatePipe, DecimalPipe, RouterLink,
     AppShellComponent, KpiTileComponent, EmptyStateComponent,
+    TickerComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[
@@ -126,7 +128,7 @@ type OrderType = BrokerOrderType;
               <tbody>
                 @for (p of o.portfolio.positions; track p.ticker) {
                   <tr [attr.data-test]="'position-' + p.ticker">
-                    <td class="font-medium">{{ p.ticker }}</td>
+                    <td class="font-medium"><hf-ticker [ticker]="p.ticker"></hf-ticker></td>
                     <td class="text-right mono">{{ +p.quantity | number: '1.0-6' }}</td>
                     <td class="text-right mono">{{ +p.avg_cost | number: '1.2-4' }}</td>
                     <td>
@@ -179,7 +181,7 @@ type OrderType = BrokerOrderType;
               <tbody>
                 @for (ord of working(); track ord.id) {
                   <tr [attr.data-test]="'order-row-' + ord.id">
-                    <td class="font-medium">{{ ord.ticker }}</td>
+                    <td class="font-medium"><hf-ticker [ticker]="ord.ticker"></hf-ticker></td>
                     <td>
                       <span class="pill" [class.ok]="ord.side === 'buy'"
                             [class.err]="ord.side === 'sell'">
@@ -224,7 +226,7 @@ type OrderType = BrokerOrderType;
                 @for (f of o.recent_fills; track f.id) {
                   <tr [attr.data-test]="'fill-row-' + f.id">
                     <td class="text-[11.5px] text-text-3">{{ f.filled_at | date:'short' }}</td>
-                    <td class="font-medium">{{ f.ticker }}</td>
+                    <td class="font-medium"><hf-ticker [ticker]="f.ticker"></hf-ticker></td>
                     <td>
                       <span class="pill" [class.ok]="f.side === 'buy'"
                             [class.err]="f.side === 'sell'">
@@ -367,7 +369,7 @@ type OrderType = BrokerOrderType;
       <div class="modal-overlay" (click)="protectOpen.set(null)">
         <div class="card order-modal" (click)="$event.stopPropagation()"
              role="dialog" aria-label="Attach protection" data-test="protect-modal">
-          <div class="card-hd"><h2 class="title">Attach protection · {{ pos.ticker }}</h2></div>
+          <div class="card-hd"><h2 class="title">Attach protection · <hf-ticker [ticker]="pos.ticker"></hf-ticker></h2></div>
           <div class="p-3.5 space-y-3">
             <p class="text-[11.5px] text-text-3 m-0">
               Sized to the current position ({{ +pos.quantity | number: '1.0-6' }} shares).

@@ -10,8 +10,10 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { ApiClient } from '../../core/api/api-client';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
+import { TickerComponent } from '../shared/ticker.component';
 
 interface WatchlistMeta {
   id: number;
@@ -36,7 +38,7 @@ interface ListDetail {
 @Component({
   selector: 'hf-watchlists-manager-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Watchlists' }]">
@@ -99,11 +101,12 @@ interface ListDetail {
           } @else {
             <div class="tbl-scroll">
               <table class="tbl">
-                <thead><tr><th>Ticker</th><th class="r">Price</th><th class="r">Δ%</th><th></th></tr></thead>
+                <thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th></th></tr></thead>
                 <tbody>
                   @for (t of detail()!.items; track t.id) {
                     <tr>
-                      <td>{{ t.ticker }}</td>
+                      <td><hf-ticker [ticker]="t.ticker" [disablePopover]="true"></hf-ticker></td>
+                      <td class="name">{{ nameFor(t.ticker) }}</td>
                       <td class="r">{{ t.price ?? '—' }}</td>
                       <td class="r" [class.up]="(t.change_pct ?? 0) > 0" [class.dn]="(t.change_pct ?? 0) < 0">
                         {{ t.change_pct !== null && t.change_pct !== undefined ? (t.change_pct + '%') : '—' }}
@@ -141,6 +144,7 @@ interface ListDetail {
       .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
       .alert { padding:10px 14px; background: var(--acc-short-soft); color: var(--acc-short-fg); border-radius: var(--r-6); margin:0 0 12px; }
       .tbl .r { text-align:right; } .tbl .up { color: var(--acc-long-fg); } .tbl .dn { color: var(--acc-short-fg); }
+      .tbl .name { color: var(--text-3); font-size:12.5px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     `,
   ],
 })
@@ -148,6 +152,7 @@ export class WatchlistsManagerPage implements OnInit {
   private readonly api = inject(ApiClient);
   private readonly router = inject(Router);
   private readonly confirm = inject(ConfirmService);
+  readonly tickerProfiles = inject(TickerProfileStore);
 
   readonly lists = signal<WatchlistMeta[]>([]);
   readonly selectedId = signal<number | null>(null);
@@ -175,7 +180,17 @@ export class WatchlistsManagerPage implements OnInit {
 
   select(id: number): void {
     this.selectedId.set(id);
-    this.api.get<ListDetail>(`/watchlists/${id}/`).subscribe((d) => this.detail.set(d));
+    this.api.get<ListDetail>(`/watchlists/${id}/`).subscribe((d) => {
+      this.detail.set(d);
+      const tickers = [...new Set((d.items ?? []).map((t) => t.ticker))];
+      if (tickers.length) this.tickerProfiles.fetchNames(tickers).subscribe();
+    });
+  }
+
+  nameFor(ticker: string): string {
+    // _bump is read so OnPush re-renders when the batch identity fetch resolves.
+    void this.tickerProfiles._bump();
+    return this.tickerProfiles.name(ticker) || '—';
   }
 
   createList(): void {

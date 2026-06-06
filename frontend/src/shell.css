@@ -357,7 +357,9 @@ input[type='checkbox']:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
+  /* 24px so pills used as buttons (e.g. the disabled-state info pill) meet the
+     WCAG 2.5.8 ≥24×24 target; inline-flex keeps the label centred. */
+  height: 24px;
   padding: 0 8px;
   border-radius: var(--r-4);
   background: var(--surface-2);

@@ -10,6 +10,7 @@ import {
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../shared/modal.component';
+import { TickerComponent } from '../shared/ticker.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount, BrokerOrderRow } from '../../core/models/broker.model';
 
@@ -18,7 +19,7 @@ const NOTIONAL_THRESHOLD = 1000;
 @Component({
   selector: 'hf-order-confirm-modal',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, FormsModule, ModalComponent],
+  imports: [CommonModule, DecimalPipe, FormsModule, ModalComponent, TickerComponent],
   template: `
     <hf-modal titleId="order-confirm-title" (closed)="onCancel()">
       <div class="card max-w-[480px]" (click)="$event.stopPropagation()">
@@ -28,7 +29,7 @@ const NOTIONAL_THRESHOLD = 1000;
         <div class="p-3.5">
           @if (order) {
             <div class="text-xs text-text-2">
-              <span class="font-medium">{{ order.side }} {{ order.quantity }} {{ order.ticker }}</span>
+              <span class="font-medium">{{ order.side }} {{ order.quantity }} <hf-ticker [ticker]="order.ticker"></hf-ticker></span>
               · {{ order.order_type }}
               @if (order.limit_price) {
                 · limit {{ '$' + (+order.limit_price | number:'1.2-4') }}

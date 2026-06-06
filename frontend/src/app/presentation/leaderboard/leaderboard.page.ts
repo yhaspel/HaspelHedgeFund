@@ -25,7 +25,9 @@ import {
 } from 'chart.js';
 
 import { ApiClient } from '../../core/api/api-client';
+import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { TickerComponent } from '../shared/ticker.component';
 import { ENTRY_ANIMATION, baseLegend, readChartTheme } from '../shared/chart-defaults';
 
 Chart.register(
@@ -100,7 +102,7 @@ interface DecisionRow {
 @Component({
   selector: 'hf-leaderboard-page',
   standalone: true,
-  imports: [CommonModule, AppShellComponent],
+  imports: [CommonModule, AppShellComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Leaderboard' }]">
@@ -292,6 +294,7 @@ interface DecisionRow {
                   <tr>
                     <th>Run</th>
                     <th>Ticker</th>
+                    <th>Name</th>
                     <th>As of</th>
                     <th>Signal</th>
                     <th class="r">Conf</th>
@@ -302,7 +305,8 @@ interface DecisionRow {
                   @for (d of decisions(); track d.run_id) {
                     <tr class="clk" (click)="openRun(d.run_id)">
                       <td>#{{ d.run_id }}</td>
-                      <td>{{ d.ticker }}</td>
+                      <td><hf-ticker [ticker]="d.ticker" [disablePopover]="true"></hf-ticker></td>
+                      <td class="muted name-cell">{{ nameFor(d.ticker) }}</td>
                       <td class="muted">{{ d.as_of_date }}</td>
                       <td>{{ d.signal }}</td>
                       <td class="r">{{ d.confidence ?? '—' }}</td>
@@ -483,12 +487,14 @@ interface DecisionRow {
       .tbl .muted { color: var(--text-3); }
       .tbl .clk { cursor: pointer; }
       .tbl .clk:hover { background: var(--surface-2); }
+      .tbl .name-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chart-wrap { height: 260px; position: relative; }
     `,
   ],
 })
 export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
   private readonly api = inject(ApiClient);
+  protected readonly tickerProfiles = inject(TickerProfileStore);
 
   @ViewChild('councilAlphaChart', { static: false })
   councilCanvas?: ElementRef<HTMLCanvasElement>;
@@ -581,7 +587,18 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
       .get<{ decisions: DecisionRow[] }>(
         `/leaderboard/agents/${agent}/decisions/?window=${this.window()}`,
       )
-      .subscribe((r) => this.decisions.set(r.decisions ?? []));
+      .subscribe((r) => {
+        const rows = r.decisions ?? [];
+        this.decisions.set(rows);
+        const tickers = [...new Set(rows.map((d) => d.ticker))];
+        if (tickers.length) this.tickerProfiles.fetchNames(tickers).subscribe();
+      });
+  }
+
+  nameFor(ticker: string): string {
+    // _bump is read for reactivity within Angular's CD pass.
+    void this.tickerProfiles._bump();
+    return this.tickerProfiles.name(ticker) || '—';
   }
 
   openStrategyDrill(s: StrategyRow): void {

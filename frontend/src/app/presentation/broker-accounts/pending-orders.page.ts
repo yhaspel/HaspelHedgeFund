@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { OrderConfirmModalComponent } from './order-confirm.modal';
+import { TickerComponent } from '../shared/ticker.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import {
   BrokerAccount,
@@ -21,6 +22,7 @@ import {
   imports: [
     CommonModule, DecimalPipe, RouterLink,
     AppShellComponent, EmptyStateComponent, OrderConfirmModalComponent,
+    TickerComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[
@@ -70,7 +72,7 @@ import {
                     }
                   </td>
                   <td class="font-medium">
-                    {{ ord.ticker }}
+                    <hf-ticker [ticker]="ord.ticker"></hf-ticker>
                     @if (ord.legs.length) {
                       <span class="pill ml-1.5 text-[10px]"
                             [attr.data-test]="'group-kind-' + ord.id">
