@@ -180,7 +180,7 @@ import { MarketNewsItem } from '../../core/models/news.model';
       }
       .pause-btn:focus-visible {
         outline: none;
-        box-shadow: inset 0 0 0 2px var(--focus-ring-color, #4f8cff);
+        box-shadow: inset 0 0 0 2px var(--acc-info);
       }
       .track-wrap {
         flex: 1 1 0;

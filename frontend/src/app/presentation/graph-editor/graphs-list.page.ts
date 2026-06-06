@@ -109,7 +109,7 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
       .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border, #2a3142); }
       .btn.sm { padding: 5px 10px; font-size: 12px; }
       .btn.ghost { background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); }
-      .btn.primary { background: var(--accent, #5b8cff); color: #fff; border-color: var(--accent, #5b8cff); }
+      .btn.primary { background: var(--acc-info); color: #fff; border-color: var(--acc-info); }
       .btn:disabled { opacity: .45; cursor: not-allowed; }
       .muted { color: var(--text-dim, #93a0b5); font-size: 13px; }
       .err { color: #f08a8a; font-size: 12px; }

@@ -22,6 +22,21 @@ repos:
       - id: prettier
         files: ^frontend/.*\.(ts|js|html|css|json|md)$
 
+  - repo: local
+    hooks:
+      - id: frontend-inline-styles
+        name: frontend inline-style gate
+        entry: bash -c 'cd frontend && pnpm check:inline-styles'
+        language: system
+        files: ^frontend/src/.*\.(ts|html)$
+        pass_filenames: false
+      - id: frontend-tokens
+        name: frontend phantom-token gate
+        entry: bash -c 'cd frontend && pnpm check:tokens'
+        language: system
+        files: ^frontend/src/.*\.(ts|css|html)$
+        pass_filenames: false
+
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.4.0
     hooks:

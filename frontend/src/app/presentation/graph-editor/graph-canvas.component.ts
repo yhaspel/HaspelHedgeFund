@@ -135,7 +135,7 @@ const CENTER_Y = 300;
       .node { position: absolute; border-radius: 9px; border: 1px solid var(--border, #2a3142);
               background: var(--surface, #151b26); box-shadow: 0 1px 3px rgba(0,0,0,.4);
               user-select: none; cursor: grab; overflow: visible; }
-      .node.selected { border-color: var(--accent, #5b8cff); box-shadow: 0 0 0 2px var(--accent, #5b8cff); }
+      .node.selected { border-color: var(--acc-info); box-shadow: 0 0 0 2px var(--acc-info); }
       .node.locked { cursor: pointer; opacity: .96; }
       .node.structural { background: transparent; border-style: dashed; display: flex;
                          align-items: center; justify-content: center; font-size: 11px;

@@ -106,7 +106,7 @@ interface DiffRow {
       .muted { color: var(--text-dim, #93a0b5); font-size: 12px; }
       .vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
       .vlist li { border: 1px solid var(--border, #2a3142); border-radius: 8px; padding: 8px 10px; }
-      .vlist li.current { border-color: var(--accent, #5b8cff); }
+      .vlist li.current { border-color: var(--acc-info); }
       .vmeta { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text, #e6ebf5); }
       .vstatus { font-size: 10px; color: #f08a8a; } .vstatus.ok { color: #5fd6a6; }
       .vdate { margin-left: auto; font-size: 10.5px; color: var(--text-dim, #93a0b5); }

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { FundStore } from '../../abstraction/fund.store';
 import { FundOverview } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 
 // P7 §14 — the headline fund view: 3 account cards + aggregate panel +
@@ -147,10 +148,13 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
   `,
   styles: [`
     .disclaimer { color: var(--text-3); font-size: 12px; margin: 4px 0 14px; }
-    .agg { display: flex; gap: 32px; }
+    .agg { display: flex; gap: 32px; padding: 16px; }
+    /* These section cards hold content directly (no .card-bd), so the shell .card gives no inner padding — restore it. */
+    .card:not(.agg):not(.acct) { padding: 16px; }
     .kpi-label { color: var(--text-3); font-size: 12px; }
     .kpi-value { font-size: 22px; font-weight: 600; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; }
+    .acct { padding: 14px; }
     .acct-head { display: flex; justify-content: space-between; align-items: center; }
     .acct-name { font-weight: 600; }
     .acct-kind { color: var(--text-3); font-size: 12px; margin: 2px 0 8px; }
@@ -163,8 +167,8 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
     .acct-row .muted { color: var(--text-3); font-weight: 500; font-size: 11px; }
     .acct-setup { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
     .acct-setup .setup-hint { color: var(--text-3); font-size: 11.5px; margin: 0; line-height: 1.4; }
-    .banner-warn { border: 1px solid var(--acc-short-fg); border-radius: 6px; padding: 8px 12px; margin: 0 0 14px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--acc-short-fg) 8%, transparent); }
-    .banner-link { text-decoration: underline; color: var(--text-1); }
+    .banner-warn { border: 1px solid var(--acc-short); border-radius: 6px; padding: 8px 12px; margin: 0 0 14px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--acc-short-fg) 8%, transparent); }
+    .banner-link { text-decoration: underline; color: var(--acc-info-fg); }
     table.corr { border-collapse: collapse; }
     table.corr th, table.corr td { padding: 6px 12px; text-align: center; border: 1px solid var(--border); }
     table.corr td.lo { color: var(--acc-long-fg); }
@@ -175,6 +179,7 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
 })
 export class FundDashboardPage implements OnInit {
   private readonly store = inject(FundStore);
+  private readonly confirm = inject(ConfirmService);
   readonly fund = this.store.fund;
   readonly loading = signal(true);
   readonly busy = signal(false);
@@ -207,8 +212,16 @@ export class FundDashboardPage implements OnInit {
     this.store.loadFund().subscribe({ next: () => this.loading.set(false), error: () => this.loading.set(false) });
   }
 
-  halt(): void {
-    if (!confirm('Halt all 3 accounts? This stops every autopilot at once.')) return;
+  async halt(): Promise<void> {
+    const n = this.fund()?.per_account.length ?? 0;
+    const ok = await this.confirm.ask({
+      title: n ? `Halt all ${n} accounts?` : 'Halt the fund?',
+      body: 'Every autopilot stops immediately. Open positions are unaffected — nothing new will trade until you clear the halt.',
+      confirmLabel: 'Halt fund',
+      danger: true,
+      requireText: 'HALT',
+    });
+    if (!ok) return;
     this.busy.set(true);
     this.store.haltFund().subscribe({ next: () => this.busy.set(false), error: () => this.busy.set(false) });
   }

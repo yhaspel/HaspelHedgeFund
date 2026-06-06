@@ -127,16 +127,16 @@ interface ListDetail {
       .sub { color: var(--text-3); font-size:12.5px; margin-top:4px; max-width:640px; }
       .list-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
       .chip { padding:6px 12px; border-radius:16px; background: var(--surface-2); color: var(--text-2); border:1px solid var(--border); cursor:pointer; font-size:13px; }
-      .chip.active { background: var(--accent-soft); color: var(--accent-fg); border-color: var(--accent); }
+      .chip.active { background: var(--acc-info-soft); color: var(--acc-info-fg); border-color: var(--acc-info); }
       .chip.add { border-style:dashed; color: var(--text-3); }
       .chip .cnt { margin-left:6px; font-size:11px; color: var(--text-3); }
-      .chip .def { margin-left:4px; color: var(--accent); }
+      .chip .def { margin-left:4px; color: var(--acc-info); }
       .new-inline { display:inline-flex; gap:6px; align-items:center; }
-      .new-inline input { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      .new-inline input { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .card { margin-bottom:16px; }
       .hd-actions { display:flex; gap:6px; }
       .add-row { display:flex; gap:8px; margin:8px 0 14px; }
-      .add-row input { flex:1; padding:8px 12px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      .add-row input { flex:1; padding:8px 12px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
       .alert { padding:10px 14px; background: var(--acc-short-soft); color: var(--acc-short-fg); border-radius: var(--r-6); margin:0 0 12px; }
       .tbl .r { text-align:right; } .tbl .up { color: var(--acc-long-fg); } .tbl .dn { color: var(--acc-short-fg); }

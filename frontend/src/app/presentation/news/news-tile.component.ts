@@ -80,7 +80,7 @@ import { languageName } from './language-name';
         transition: border-color 80ms ease, transform 80ms ease, box-shadow 80ms ease;
       }
       .tile:hover {
-        border-color: var(--border-1);
+        border-color: var(--border-2);
         box-shadow: var(--shadow-1);
       }
       .tile:focus-visible {

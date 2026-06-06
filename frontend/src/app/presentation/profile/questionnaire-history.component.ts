@@ -69,7 +69,7 @@ import { QuestionnaireHistoryItem } from '../../core/models/investor-profile.mod
         padding: 1px 6px;
         background: var(--surface-2);
         color: var(--text-2);
-        border-radius: var(--r-3);
+        border-radius: var(--r-4);
         text-align: center;
       }
       .pill.tuned { background: var(--acc-info-soft); color: var(--text); }

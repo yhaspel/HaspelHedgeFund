@@ -7,7 +7,8 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "check:inline-styles": "node scripts/check-inline-styles.mjs"
+    "check:inline-styles": "node scripts/check-inline-styles.mjs",
+    "check:tokens": "node scripts/check-tokens.mjs"
   },
   "private": true,
   "packageManager": "pnpm@11.1.2",

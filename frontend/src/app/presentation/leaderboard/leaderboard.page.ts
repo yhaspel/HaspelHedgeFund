@@ -471,15 +471,15 @@ interface DecisionRow {
       .sub { color: var(--text-3); font-size: 12.5px; margin-top: 4px; max-width: 640px; }
       .sub.tight { margin: -4px 0 10px; }
       .head-right { display:flex; gap:8px; align-items:center; }
-      .sel { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      .sel { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .sel.sm { padding:4px 8px; font-size:12px; }
       .card-hd { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-      .tbl .pos { color: var(--pos, #22c55e); }
-      .tbl .neg { color: var(--neg, #ef4444); }
+      .tbl .pos { color: var(--acc-long-fg); }
+      .tbl .neg { color: var(--acc-short-fg); }
       .tbl .micro { font-size:10.5px; color: var(--text-3); margin-top:2px; white-space:nowrap; }
       .tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border); }
       .tab { padding:8px 14px; background:none; border:none; color: var(--text-3); cursor:pointer; border-bottom:2px solid transparent; }
-      .tab.active { color: var(--text-1); border-bottom-color: var(--accent); }
+      .tab.active { color: var(--text); border-bottom-color: var(--acc-info); }
       .card { margin-bottom: 16px; }
       .empty { color: var(--text-3); font-size: 13px; padding: 8px 2px; }
       .badge { font-size:10px; padding:1px 6px; border-radius:8px; background: var(--surface-3); color: var(--text-3); margin-left:6px; }

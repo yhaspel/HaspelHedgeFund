@@ -62,7 +62,7 @@ import { GraphRegistry, NodeSpec } from '../../core/models/graph.model';
               border-radius: 8px; border: 1px solid var(--border, #2a3142);
               background: var(--surface, #151b26); color: var(--text, #e6ebf5);
               font-size: 12.5px; cursor: grab; text-align: left; }
-      .chip:hover:not(:disabled) { border-color: var(--accent, #5b8cff); }
+      .chip:hover:not(:disabled) { border-color: var(--acc-info); }
       .chip.used { opacity: .4; cursor: default; text-decoration: line-through; }
       .chip .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
       .chip.analytical .dot { background: #4ec3a5; }

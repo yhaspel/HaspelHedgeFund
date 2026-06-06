@@ -115,7 +115,7 @@ interface Channel {
       .card { margin-bottom:16px; }
       .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
       label { display:flex; flex-direction:column; gap:4px; font-size:12px; color: var(--text-3); }
-      input, select { padding:7px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      input, select { padding:7px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .form-actions { margin-top:14px; }
       .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
       .note { padding:10px 14px; background: var(--acc-long-soft); color: var(--acc-long-fg); border-radius: var(--r-6); margin:0 0 12px; }

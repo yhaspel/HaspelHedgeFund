@@ -318,7 +318,7 @@ const DOW_NAMES: Record<number, string> = {
       .card { margin-bottom:16px; }
       .form .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
       .form label { display:flex; flex-direction:column; gap:4px; font-size:12px; color: var(--text-3); }
-      .form input, .form select { padding:7px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-1); border:1px solid var(--border); }
+      .form input, .form select { padding:7px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .form .chk { flex-direction:row; align-items:center; gap:8px; }
       .form .span2 { grid-column: 1 / -1; }
       .hint { color: var(--text-3); font-weight:400; opacity:.8; }
@@ -326,17 +326,17 @@ const DOW_NAMES: Record<number, string> = {
       .dow-label { font-size:12px; color: var(--text-3); }
       .dow-grid { display:flex; flex-wrap:wrap; gap:6px; }
       .dow-chk { flex-direction:row !important; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border); border-radius:14px; cursor:pointer; font-size:12px; color: var(--text-2); }
-      .dow-chk.sel { background: var(--accent-soft); color: var(--accent-fg); border-color: var(--accent); }
+      .dow-chk.sel { background: var(--acc-info-soft); color: var(--acc-info-fg); border-color: var(--acc-info); }
       .cron-fields { display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:8px; }
       .cron-preview { display:flex; align-items:center; gap:10px; padding:8px 12px; background: var(--surface-2); border-radius: var(--r-6); }
-      .cron-summary { font-size:13px; color: var(--text-1); font-weight:500; }
+      .cron-summary { font-size:13px; color: var(--text); font-weight:500; }
       .cron-raw { font-size:11px; color: var(--text-3); background: var(--surface-3); padding:2px 6px; border-radius:4px; }
       .form-actions { margin-top:14px; }
       .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
       .alert { padding:10px 14px; background: var(--acc-short-soft); color: var(--acc-short-fg); border-radius: var(--r-6); margin:0 0 12px; }
       .tbl .r { text-align:right; } .tbl .muted { color: var(--text-3); }
       .tbl tr.paused td { opacity:.6; }
-      .tbl .cron-h { font-size:12.5px; color: var(--text-1); }
+      .tbl .cron-h { font-size:12.5px; color: var(--text); }
       .tbl .cron-raw { font-size:10.5px; color: var(--text-3); }
       .actions { display:flex; gap:6px; flex-wrap:wrap; }
       .pill { font-size:11px; padding:2px 9px; border-radius:10px; background: var(--surface-3); color: var(--text-3); }

@@ -298,7 +298,7 @@ import { TuneBandsChange, TuneBandsComponent } from './tune-bands.component';
         font-size: 10px;
         text-transform: uppercase;
         padding: 1px 6px;
-        border-radius: var(--r-3);
+        border-radius: var(--r-4);
         background: var(--surface-2);
       }
       .fit-strong { background: var(--acc-long-soft); color: var(--acc-long-fg); }
