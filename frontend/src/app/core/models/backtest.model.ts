@@ -113,6 +113,19 @@ export interface EstimateResponse {
   by_agent: { agent: string; model: string; per_call_usd: number; total_usd: number }[];
 }
 
+// phase-09a — GET /strategies/<id>/backtest-defaults/: a cheap-but-complete
+// validation-run config the New Backtest page pre-fills from the strategy.
+export interface StrategyBacktestDefaults {
+  strategy_id: number;
+  name: string;
+  universe: string[];
+  personas: string[];
+  include_cio: boolean;
+  rebalance_frequency: 'daily' | 'weekly' | 'monthly';
+  starting_cash: number;
+  kind: string;
+}
+
 export interface EquityPoint {
   date: string;
   portfolio_value: number;

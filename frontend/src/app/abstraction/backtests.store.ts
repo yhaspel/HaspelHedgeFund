@@ -9,6 +9,7 @@ import {
   EquityPoint,
   EstimateRequest,
   EstimateResponse,
+  StrategyBacktestDefaults,
 } from '../core/models/backtest.model';
 
 @Injectable({ providedIn: 'root' })
@@ -47,6 +48,14 @@ export class BacktestsStore {
 
   estimate(body: EstimateRequest): Observable<EstimateResponse> {
     return this.api.post<EstimateResponse>('/backtests/estimate/', body);
+  }
+
+  // phase-09a — the strategy-derived validation-run config the New Backtest page
+  // pre-fills when arriving from a fund card (?strategy=<id>).
+  strategyDefaults(strategyId: number): Observable<StrategyBacktestDefaults> {
+    return this.api.get<StrategyBacktestDefaults>(
+      `/strategies/${strategyId}/backtest-defaults/`,
+    );
   }
 
   cancel(id: number): Observable<{ id: number; status: string }> {

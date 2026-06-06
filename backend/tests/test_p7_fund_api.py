@@ -252,6 +252,26 @@ def test_fund_overview_aggregates_and_suppresses_correlation(user):
     assert out["correlation"]["reason"] == "insufficient_data"
 
 
+def test_fund_overview_exposes_has_backtest(user):
+    """phase-09a §8.2 — each card carries has_backtest (Run vs Re-run verb):
+    False with no linked backtest, True once one exists (any status)."""
+    fund = _fund_of_three(user)
+    out = fund_layer.fund_overview(fund)
+    assert all(p["has_backtest"] is False for p in out["per_account"])
+
+    # Link a backtest (even a non-DONE one) to the first strategy.
+    first = fund.strategies.order_by("id").first()
+    Backtest.objects.create(
+        user=user, strategy=first, name="bt",
+        start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 1, 1),
+        status=Backtest.QUEUED,
+    )
+    out2 = fund_layer.fund_overview(fund)
+    by_id = {p["strategy_id"]: p for p in out2["per_account"]}
+    assert by_id[first.id]["has_backtest"] is True
+    assert sum(1 for p in out2["per_account"] if p["has_backtest"]) == 1
+
+
 def test_fund_overview_is_live_tracks_enablement(user):
     """is_live = not halted AND ≥1 account enabled. A fund stays 'active' (not
     halted) even with every account disabled, but is_live must read False."""

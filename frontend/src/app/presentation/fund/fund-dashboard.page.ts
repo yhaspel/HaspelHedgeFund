@@ -126,6 +126,14 @@ import { PopoverComponent } from '../shared/popover.component';
                 {{ a.can_enable ? 'Review & enable →' : 'Set up →' }}
               </a>
             </div>
+            <!-- phase-09a — always-visible validation-backtest launcher (verb from
+                 has_backtest); routes to the prefilled New Backtest page. -->
+            <div class="acct-bt">
+              <a class="btn btn-sm" [routerLink]="['/backtests/new']"
+                 [queryParams]="{ strategy: a.strategy_id }">
+                {{ a.has_backtest ? 'Re-run backtest →' : 'Run backtest →' }}
+              </a>
+            </div>
           </div>
         </section>
 
@@ -202,6 +210,7 @@ import { PopoverComponent } from '../shared/popover.component';
     .acct-row .muted { color: var(--text-3); font-weight: 500; font-size: 11px; }
     .acct-setup { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
     .acct-setup .setup-hint { color: var(--text-3); font-size: 11.5px; margin: 0; line-height: 1.4; }
+    .acct-bt { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
     .banner-warn { border: 1px solid var(--acc-short); border-radius: 6px; padding: 8px 12px; margin: 0 0 14px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--acc-short-fg) 8%, transparent); }
     .banner-link { text-decoration: underline; color: var(--acc-info-fg); }
     table.corr { border-collapse: collapse; }

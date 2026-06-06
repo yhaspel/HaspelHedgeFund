@@ -13,6 +13,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from hedgefund_agents.personas import ALL_PERSONAS as BACKEND_PERSONAS
+
 from .borrow import StubBorrowProvider
 from .models import (
     Portfolio,
@@ -31,7 +33,12 @@ from .serializers import (
     UniverseMembershipSerializer,
     UniverseSerializer,
 )
-from .tasks import daily_long_short_cycle, dispatch_approved_cycle, estimate_cycle
+from .tasks import (
+    _active_members,
+    daily_long_short_cycle,
+    dispatch_approved_cycle,
+    estimate_cycle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +301,41 @@ class StrategyEstimateView(APIView):
         return Response(
             estimate_cycle(strategy, override_preset=preset, override_models=overrides)
         )
+
+
+def _primary_persona(s: PortfolioStrategy) -> str:
+    """The strategy's first registry-valid persona, else ``buffett``. Always
+    returns exactly one — an empty list would make the backtest engine expand to
+    all 8 personas (see phase-09a §2)."""
+    registry = set(BACKEND_PERSONAS)
+    valid = [p for p in (s.personas or []) if p in registry]
+    return valid[0] if valid else "buffett"
+
+
+class StrategyBacktestDefaultsView(APIView):
+    """phase-09a §5 — a cheap-but-complete validation-run config derived from the
+    strategy, for the New Backtest page to pre-fill. Read-only; owner-scoped."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, pk: int) -> Response:
+        try:
+            s = PortfolioStrategy.objects.select_related("portfolio").get(
+                pk=pk, user=request.user,
+            )
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        members = _active_members(s, timezone.localdate())
+        return Response({
+            "strategy_id": s.id,
+            "name": f"Validation WF {timezone.localdate().isoformat()}",
+            "universe": sorted({t for t, _sector in members}),  # full set, no trim, deduped
+            "personas": [_primary_persona(s)],
+            "include_cio": True,
+            "rebalance_frequency": "monthly",
+            "starting_cash": float(s.portfolio.cash_balance),
+            "kind": s.kind,
+        })
 
 
 class StrategyRunNowView(APIView):

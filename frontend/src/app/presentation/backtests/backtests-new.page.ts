@@ -366,6 +366,20 @@ export class BacktestsNewPage implements OnInit {
     if (Number.isFinite(sid) && sid > 0) {
       this.strategyId.set(sid);
       this.name = 'Validation WF ' + new Date().toISOString().slice(0, 10);
+      // phase-09a — pre-fill a cheap-but-complete validation config from the
+      // strategy: full universe, one persona, CIO on, monthly rebalance, the
+      // book's cash. On error, keep the static defaults so the page stays usable.
+      this.store.strategyDefaults(sid).subscribe({
+        next: (d) => {
+          if (d.universe?.length) this.universeStr = d.universe.join(', ');
+          this.selectedPersonas = new Set(d.personas?.length ? d.personas : ['buffett']);
+          this.includeCio = d.include_cio;
+          this.rebalance = d.rebalance_frequency;     // monthly — the cost lever
+          if (d.starting_cash != null) this.startingCash = d.starting_cash;  // 0 is valid (fully-invested book)
+          if (d.name) this.name = d.name;
+        },
+        error: () => { /* keep static defaults — page stays usable */ },
+      });
     }
     this.store.loadDefaultUniverse().subscribe();
     this.modelsStore.loadAll().subscribe();

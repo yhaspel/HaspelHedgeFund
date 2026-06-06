@@ -70,6 +70,8 @@ export interface FundAccountCard {
   validation_passed: boolean;
   can_enable: boolean;
   setup_hint: string | null;
+  // phase-09a — a linked backtest exists (any status) → Re-run vs Run verb.
+  has_backtest: boolean;
 }
 
 export interface FundCorrelation {

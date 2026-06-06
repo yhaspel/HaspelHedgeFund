@@ -18,7 +18,7 @@ function overview(overrides: Partial<FundOverview> = {}): FundOverview {
       { strategy_id: 1, name: 'Multi-Factor', kind: 'long_short', state: 'active',
         is_enabled: true, nav: '100000', peak_equity: '100000', rolling_sharpe: 0.8,
         next_run_at: '2026-06-05T20:30:00Z', cron_description: 'At 04:30 PM, only on Friday',
-        validation_passed: true, can_enable: false, setup_hint: null },
+        validation_passed: true, can_enable: false, setup_hint: null, has_backtest: true },
     ],
     correlation: { available: false, reason: 'insufficient_data', min_sample: 8 },
     recommendations: [],

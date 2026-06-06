@@ -158,6 +158,10 @@ def correlation_matrix(strategies) -> dict:
 
 def fund_overview(fund: AutonomousFund) -> dict:
     """The 3-account rollup for ``/api/fund/``."""
+    # Local import — portfolios → backtests would otherwise be a cycle (mirrors
+    # validation.py). phase-09a §6.3: drives the card's Run/Re-run verb.
+    from apps.backtests.models import Backtest
+
     strategies = list(fund.strategies.select_related("autopilot").all())
     per_account = []
     agg_nav = Decimal("0")
@@ -179,6 +183,9 @@ def fund_overview(fund: AutonomousFund) -> dict:
             "rolling_sharpe": _sharpe(rets[-13:]) if len(rets) >= 2 else None,
             "next_run_at": ap.next_run_at.isoformat() if (ap and ap.next_run_at) else None,
             "cron_description": describe_cron(ap.cron_expression) if ap else None,
+            # Run vs Re-run verb. Any linked backtest (any status) counts — distinct
+            # from validation_passed, which gates the §9 enable toggle.
+            "has_backtest": Backtest.objects.filter(strategy=s).exists(),
             # Why it's not live + the one next step (drives the card CTA/reason).
             **_account_setup(s, ap),
         })
