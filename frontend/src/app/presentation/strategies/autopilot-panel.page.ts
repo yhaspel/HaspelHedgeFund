@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FundStore } from '../../abstraction/fund.store';
 import { ModelsStore } from '../../abstraction/models.store';
-import { Autopilot } from '../../core/models/autopilot.model';
+import { Autopilot, AutopilotRunRow } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { PopoverComponent } from '../shared/popover.component';
 
@@ -191,6 +191,72 @@ import { PopoverComponent } from '../shared/popover.component';
           <button class="btn" (click)="save()" [disabled]="busy() || !scheduleValid()">Save changes</button>
         </section>
       </ng-container>
+
+      <!-- Run history + executed book live OUTSIDE the ap() block so they render
+           even when a strategy has no autopilot row (history returns {runs:[]};
+           the executed endpoint is independent of autopilot config). -->
+      <section class="card">
+        <h2>Run history</h2>
+        <p class="muted" *ngIf="runs().length === 0">
+          No autopilot runs yet. Hit “Run now” above or wait for the next scheduled fire.
+        </p>
+        <table class="tbl" *ngIf="runs().length">
+          <thead><tr>
+            <th scope="col">Fired</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="right">Orders</th>
+            <th scope="col">Decision</th>
+            <th scope="col">Guardrails</th>
+          </tr></thead>
+          <tbody>
+            <tr *ngFor="let r of runs()">
+              <td class="mono">{{ r.fire_time | date: 'MMM d, HH:mm' }}</td>
+              <td><span class="pill"
+                    [class.ok]="r.status === 'submitted'"
+                    [class.info]="r.status === 'pending' || r.status === 'running'"
+                    [class.warn]="r.status === 'skipped'"
+                    [class.err]="r.status === 'halted' || r.status === 'failed'"
+                  ><span class="dot"></span>{{ r.status }}</span>
+                  <span class="muted" *ngIf="r.error"> · {{ r.error }}</span></td>
+              <td class="num">{{ r.n_orders }}</td>
+              <td class="muted">{{ decisionSummary(r) }}</td>
+              <td class="muted">{{ guardrailSummary(r) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted" *ngIf="runs().length === 50">Showing the 50 most recent fires.</p>
+        <a class="text-[var(--acc-info-fg)]" [routerLink]="['/strategies', strategyId]">Open strategy cycles &amp; runs →</a>
+      </section>
+
+      <section class="card">
+        <h2>Executed book</h2>
+        <p class="muted" *ngIf="bookError()">Could not load the executed book.</p>
+        <ng-container *ngIf="!bookError() && book() as b">
+          <p class="muted" *ngIf="!b.linked">No broker account linked to this strategy.</p>
+          <ng-container *ngIf="b.linked">
+            <div class="controls">
+              <span class="pill info"><span class="dot"></span>{{ b.connection_status }}</span>
+              <span class="muted">{{ b.account_label }}</span>
+              <span class="next">Cash $ {{ b.cash }} · NAV $ {{ b.nav }}</span>
+            </div>
+            <p class="muted" *ngIf="!b.positions?.length">No open positions.</p>
+            <table class="tbl" *ngIf="b.positions?.length">
+              <thead><tr>
+                <th scope="col">Ticker</th>
+                <th scope="col" class="right">Qty</th>
+                <th scope="col" class="right">Avg cost</th>
+              </tr></thead>
+              <tbody>
+                <tr *ngFor="let p of b.positions">
+                  <td class="mono">{{ p.ticker }}</td>
+                  <td class="num">{{ p.quantity }}</td>
+                  <td class="num">$ {{ p.avg_cost }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </ng-container>
+        </ng-container>
+      </section>
     </hf-app-shell>
   `,
   styles: [`
@@ -257,6 +323,9 @@ export class AutopilotPanelPage implements OnInit {
   private readonly models = inject(ModelsStore);
   private readonly route = inject(ActivatedRoute);
   readonly ap = this.store.autopilot;
+  readonly runs = this.store.history;       // AutopilotRunRow[]
+  readonly book = this.store.executed;      // ExecutedBook | null
+  readonly bookError = signal(false);
   readonly busy = signal(false);
   readonly notice = signal<string | null>(null);
   strategyId = 0;
@@ -312,6 +381,18 @@ export class AutopilotPanelPage implements OnInit {
         this.refreshCouncil(a.model_preset);
       }
     });
+    this.loadAudit();
+  }
+
+  // Read-only fetch of the run history + executed broker book. The history
+  // empty state covers its error path; the executed card uses bookError to
+  // distinguish a real fetch failure from the pre-fetch frame (both null).
+  private loadAudit(): void {
+    this.store.loadHistory(this.strategyId).subscribe({ error: () => {} });
+    this.store.loadExecuted(this.strategyId).subscribe({
+      next: () => this.bookError.set(false),
+      error: () => this.bookError.set(true),
+    });
   }
 
   // Resolve the preset → per-agent model map and group it by model so the user
@@ -352,11 +433,15 @@ export class AutopilotPanelPage implements OnInit {
     return slug.split('/').pop() ?? slug;
   }
 
-  private run(obs: { subscribe: (h: { next: () => void; error: (e: unknown) => void }) => void }, msg: string): void {
+  private run(
+    obs: { subscribe: (h: { next: () => void; error: (e: unknown) => void }) => void },
+    msg: string,
+    after?: () => void,
+  ): void {
     this.busy.set(true);
     this.notice.set(null);
     obs.subscribe({
-      next: () => { this.busy.set(false); this.notice.set(msg); },
+      next: () => { this.busy.set(false); this.notice.set(msg); after?.(); },
       error: (e: unknown) => { this.busy.set(false); this.notice.set(this.errMsg(e)); },
     });
   }
@@ -366,10 +451,37 @@ export class AutopilotPanelPage implements OnInit {
     return err?.error?.detail ?? 'Request failed.';
   }
 
+  // Compact, total-defensive one-line summaries of the run-control audit. Both
+  // branch ONLY on producer keys verified against the backend (autopilot.py /
+  // tasks_autopilot.py / autopilot_risk.py); any missing key renders '—'.
+  decisionSummary(r: AutopilotRunRow): string {
+    const d = r.submit_decision ?? {};
+    if (r.status === 'submitted') {
+      const base = `${String(d['submitted'])}/${String(d['orders'])} submitted`;
+      return d['market_closed'] ? `${base} · market closed` : base;
+    }
+    const reason = d['skipped'] ?? d['halted'] ?? d['skipped_all'];
+    return reason == null ? '—' : String(reason);
+  }
+
+  guardrailSummary(r: AutopilotRunRow): string {
+    const g = r.guardrail_actions ?? {};
+    // Guard the INNER keys: evaluate_drawdown can return {skipped:"no equity"}
+    // (no drawdown_pct/state) which still reaches guardrail_actions.drawdown.
+    const dd = g['drawdown'] as Record<string, unknown> | undefined;
+    if (dd && dd['drawdown_pct'] != null && dd['state']) {
+      return `dd ${String(dd['drawdown_pct'])}% · ${String(dd['state'])}`;
+    }
+    if (g['soft_cut_gross_scale'] != null) return `gross ×${String(g['soft_cut_gross_scale'])}`;
+    if (g['sector_caps'] != null) return 'sector caps';
+    if (g['liquidity_capped'] != null) return 'liquidity capped';
+    return '—';
+  }
+
   enable(): void { this.run(this.store.enable(this.strategyId), 'Autopilot enabled.'); }
   disable(): void { this.run(this.store.disable(this.strategyId), 'Autopilot disabled.'); }
   resume(): void { this.run(this.store.resume(this.strategyId), 'Un-halted — re-checks drawdown on the next tick.'); }
-  runNow(): void { this.run(this.store.runNow(this.strategyId), 'Cycle queued.'); }
+  runNow(): void { this.run(this.store.runNow(this.strategyId), 'Cycle queued.', () => this.loadAudit()); }
   save(): void { this.run(this.store.saveAutopilot(this.strategyId, this.form), 'Saved.'); }
 
   // Copy for the disabled-state pill tooltip: why it's off + the one next step.

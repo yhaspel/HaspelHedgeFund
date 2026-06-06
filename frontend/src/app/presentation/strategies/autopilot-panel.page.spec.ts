@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { of } from 'rxjs';
@@ -7,10 +7,14 @@ import { ActivatedRoute } from '@angular/router';
 import { AutopilotPanelPage } from './autopilot-panel.page';
 import { FundStore } from '../../abstraction/fund.store';
 import { ModelsStore } from '../../abstraction/models.store';
-import { Autopilot } from '../../core/models/autopilot.model';
+import { Autopilot, AutopilotRunRow, ExecutedBook } from '../../core/models/autopilot.model';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cmp = any;
+
+// Spies from the most recent setup() — read by the audit-wiring tests (AP-02/06).
+let lastLoadHistory: ReturnType<typeof vi.fn>;
+let lastLoadExecuted: ReturnType<typeof vi.fn>;
 
 function ap(overrides: Partial<Autopilot> = {}): Autopilot {
   return {
@@ -30,15 +34,26 @@ function ap(overrides: Partial<Autopilot> = {}): Autopilot {
   };
 }
 
-function setup(autopilot: Autopilot): Cmp {
+function setup(
+  autopilot: Autopilot,
+  opts: { history?: AutopilotRunRow[]; executed?: ExecutedBook | null } = {},
+): Cmp {
+  // The panel binds store.history / store.executed (not the loadHistory return),
+  // so seed the signals directly with the rows a given test needs.
+  lastLoadHistory = vi.fn(() => of({ runs: [] }));
+  lastLoadExecuted = vi.fn(() => of({ linked: false, positions: [], nav: null }));
   const store = {
     autopilot: signal<Autopilot | null>(autopilot).asReadonly(),
+    history: signal<AutopilotRunRow[]>(opts.history ?? []).asReadonly(),
+    executed: signal<ExecutedBook | null>(opts.executed ?? null).asReadonly(),
     loadAutopilot: () => of({ autopilot }),
     enable: () => of({ autopilot }),
     disable: () => of({ autopilot }),
     resume: () => of({ autopilot }),
     runNow: () => of({}),
     saveAutopilot: () => of({ autopilot }),
+    loadHistory: lastLoadHistory,
+    loadExecuted: lastLoadExecuted,
   } as unknown as FundStore;
   const route = { snapshot: { paramMap: { get: () => '7' } } } as unknown as ActivatedRoute;
   const modelsStore = {
@@ -104,5 +119,60 @@ describe('AutopilotPanelPage', () => {
   it('falls back to the advanced cron view when the expression is too complex', () => {
     const cmp = setup(ap({ cron_expression: '*/15 9-16 * * 1-5' }));
     expect(cmp.scheduleMode).toBe('advanced');
+  });
+
+  // AP-02 — ngOnInit fetches the run-control audit (both endpoints, once, by id).
+  it('fetches the audit on init', () => {
+    setup(ap());
+    expect(lastLoadHistory).toHaveBeenCalledTimes(1);
+    expect(lastLoadHistory).toHaveBeenCalledWith(7);
+    expect(lastLoadExecuted).toHaveBeenCalledTimes(1);
+    expect(lastLoadExecuted).toHaveBeenCalledWith(7);
+  });
+
+  // AP-03 — the runs binding mirrors the store.history signal.
+  it('renders the seeded run-history rows', () => {
+    const rows = [
+      { id: 1, fire_time: '2026-06-06T16:30:00Z', status: 'submitted', target_id: null,
+        n_orders: 3, submit_decision: {}, guardrail_actions: {}, error: '' },
+      { id: 2, fire_time: '2026-06-05T16:30:00Z', status: 'skipped', target_id: null,
+        n_orders: 0, submit_decision: {}, guardrail_actions: {}, error: '' },
+    ] as AutopilotRunRow[];
+    const cmp = setup(ap(), { history: rows });
+    expect(cmp.runs().length).toBe(2);
+  });
+
+  // AP-04 — defensive summary helpers (verified producer keys, §2.4).
+  it('summarises decisions and guardrails defensively', () => {
+    const cmp = setup(ap());
+    const row = (o: Partial<AutopilotRunRow>) => o as AutopilotRunRow;
+
+    expect(cmp.decisionSummary(row({}))).toBe('—');
+    expect(cmp.decisionSummary(row({ status: 'submitted', submit_decision: { submitted: 2, orders: 3 } }))).toBe('2/3 submitted');
+    expect(cmp.decisionSummary(row({ status: 'submitted', submit_decision: { submitted: 0, orders: 3, market_closed: true } }))).toBe('0/3 submitted · market closed');
+    expect(cmp.decisionSummary(row({ status: 'halted', submit_decision: { halted: 'drawdown' } }))).toBe('drawdown');
+
+    expect(cmp.guardrailSummary(row({}))).toBe('—');
+    expect(cmp.guardrailSummary(row({ guardrail_actions: { drawdown: { drawdown_pct: 6.2, state: 'soft_cut' } } }))).toBe('dd 6.2% · soft_cut');
+    // partial-shape guard: {skipped:"no equity"} has no drawdown_pct/state.
+    expect(cmp.guardrailSummary(row({ guardrail_actions: { drawdown: { skipped: 'no equity' } } }))).toBe('—');
+    // 0 is a valid pct, not falsy-dropped.
+    expect(cmp.guardrailSummary(row({ guardrail_actions: { drawdown: { drawdown_pct: 0, state: 'active' } } }))).toBe('dd 0% · active');
+  });
+
+  // AP-05 — the executed signal exposes the unlinked book without crashing.
+  it('exposes the unlinked executed book', () => {
+    const cmp = setup(ap(), { executed: { linked: false, positions: [], nav: null } as unknown as ExecutedBook });
+    expect(cmp.book().linked).toBe(false);
+    expect(cmp.bookError()).toBe(false);
+  });
+
+  // AP-06 — Run now refreshes the audit (loadHistory fires again) + keeps the notice.
+  it('refreshes the audit after run-now', () => {
+    const cmp = setup(ap({ is_enabled: true }));
+    expect(lastLoadHistory).toHaveBeenCalledTimes(1);   // ngOnInit
+    cmp.runNow();
+    expect(lastLoadHistory).toHaveBeenCalledTimes(2);   // + the post-run-now refresh
+    expect(cmp.notice()).toContain('queued');
   });
 });
