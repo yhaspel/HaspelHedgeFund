@@ -76,7 +76,7 @@ authorize URL.
 - **Live execution is gated.** TradeStation in this codebase ships with
   `supports_live=False` — the live OAuth path is built and tested but
   live order entry is disabled until protective-bracket orders ship
-  (see development-plans/phase-03a-6).
+  (see development-plans/deferred-03a/phase-03a-6).
 - **Refresh tokens.** TradeStation refresh tokens are long-lived but
   can be revoked or rotated. The wizard's *Reconnect TradeStation*
   banner handles re-auth in one click; no data is lost.

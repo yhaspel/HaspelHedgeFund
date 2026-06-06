@@ -1,10 +1,9 @@
 # TradeStation Setup
 
-> [!NOTE]
-> **Not enabled yet.** Connecting a TradeStation account is not available in the
-> app today — its tile in the connect wizard is marked *"ships in a later
-> release."* This guide documents the developer-app setup so you are ready when
-> it lands. To connect a broker right now, see *Connect a Broker Account*
+> [!NOTE] > **Not enabled yet.** Connecting a TradeStation account is not available in the
+> app today — its tile in the connect wizard is marked _"ships in a later
+> release."_ This guide documents the developer-app setup so you are ready when
+> it lands. To connect a broker right now, see _Connect a Broker Account_
 > (Alpaca paper, or the built-in Demo broker).
 
 To connect a TradeStation account (paper or live) you need a TradeStation
@@ -35,7 +34,7 @@ credentials. Accept the API terms.
 
 Portal → **My Apps** → **Create App**.
 
-- **Name** — anything (e.g. *AIHedgeFund local*).
+- **Name** — anything (e.g. _AIHedgeFund local_).
 - **Redirect URI** — must match `TRADESTATION_REDIRECT_URI` exactly.
   - Local dev default: `http://localhost:8811/api/broker-accounts/oauth/callback/`
   - Production: `https://<your-host>/api/broker-accounts/oauth/callback/`
@@ -48,8 +47,8 @@ Portal → **My Apps** → **Create App**.
 ### 4. Submit for approval
 
 TradeStation manually reviews app submissions. Turnaround is typically
-1–5 business days. They may email asking what the app does — *"personal
-algorithmic trading assistant; SIM-only at this stage"* is fine.
+1–5 business days. They may email asking what the app does — _"personal
+algorithmic trading assistant; SIM-only at this stage"_ is fine.
 
 ### 5. Copy your credentials
 
@@ -66,8 +65,8 @@ TRADESTATION_CLIENT_SECRET=...
 TRADESTATION_REDIRECT_URI=http://localhost:8811/api/broker-accounts/oauth/callback/
 ```
 
-Restart Django. The connect-wizard's *Step 1 — Developer app configured*
-will flip green and *Step 2* will hand back a real TradeStation
+Restart Django. The connect-wizard's _Step 1 — Developer app configured_
+will flip green and _Step 2_ will hand back a real TradeStation
 authorize URL.
 
 ## Caveats
@@ -83,23 +82,23 @@ authorize URL.
 - **Live execution is gated.** TradeStation in this codebase ships with
   `supports_live=False` — the live OAuth path is built and tested but
   live order entry is disabled until protective-bracket orders ship
-  (see development-plans/phase-03a-6).
+  (see development-plans/deferred-03a/phase-03a-6).
 - **Refresh tokens.** TradeStation refresh tokens are long-lived but
-  can be revoked or rotated. The wizard's *Reconnect TradeStation*
+  can be revoked or rotated. The wizard's _Reconnect TradeStation_
   banner handles re-auth in one click; no data is lost.
 
 ## Troubleshooting
 
-- *Step 1 says "not configured":* the backend doesn't see the env vars
+- _Step 1 says "not configured":_ the backend doesn't see the env vars
   — restart Django after exporting them and confirm with
   `curl http://localhost:8811/api/broker-accounts/tradestation/runtime-config/`
   (expect `{"configured": true}`).
-- *Authorize URL returns "invalid redirect_uri":* the URI you registered
+- _Authorize URL returns "invalid redirect_uri":_ the URI you registered
   on the developer portal does not exactly match
   `TRADESTATION_REDIRECT_URI`. Paths and trailing slashes count.
-- *Callback "invalid or expired OAuth state":* the user took longer
-  than 10 minutes between clicking *Authorize* and completing consent.
+- _Callback "invalid or expired OAuth state":_ the user took longer
+  than 10 minutes between clicking _Authorize_ and completing consent.
   Restart the connect flow.
-- *"no refresh token on file — reconnect TradeStation":* the
+- _"no refresh token on file — reconnect TradeStation":_ the
   `offline_access` scope was not granted (or was later revoked). Use
-  the *Reconnect* banner; the new handshake re-requests the scope.
+  the _Reconnect_ banner; the new handshake re-requests the scope.
