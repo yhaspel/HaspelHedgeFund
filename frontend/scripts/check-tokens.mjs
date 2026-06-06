@@ -44,6 +44,7 @@ const DENYLIST = [
   { pattern: /--border-1(?![a-z0-9-])/g, use: '--border-2 / --border-strong' },
   { pattern: /--r-3(?![a-z0-9-])/g, use: '--r-4 (radius scale: 2/4/6/8/12/full)' },
   { pattern: /--focus-ring-color(?![a-z0-9-])/g, use: '--acc-info (or the --focus-ring token)' },
+  { pattern: /--text-dim(?![a-z0-9-])/g, use: '--text-3' },
 ];
 
 function walk(dir, out) {

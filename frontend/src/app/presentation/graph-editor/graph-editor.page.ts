@@ -166,7 +166,7 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
       .gname { font-size: 15px; color: var(--text, #e6ebf5); }
       .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
       .pill.ok { background: #163a2c; color: #5fd6a6; } .pill.bad { background: #3a1b1b; color: #f08a8a; }
-      .saved, .draft { font-size: 11px; color: var(--text-dim, #93a0b5); }
+      .saved, .draft { font-size: 11px; color: var(--text-3); }
       .draft button { margin-left: 4px; background: none; border: none; color: #5b8cff; cursor: pointer; font-size: 11px; }
       .tb-right { display: flex; gap: 8px; align-items: center; }
       .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border, #2a3142); }
@@ -179,11 +179,11 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
                   margin-bottom: 8px; border: 1px solid var(--border, #2a3142); border-radius: 9px;
                   background: var(--surface, #151b26); }
       .tier-lbl { font-size: 12px; font-weight: 600; color: var(--text, #e6ebf5); }
-      .tier-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim, #93a0b5); }
+      .tier-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
       .tier-field select { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border, #2a3142);
                            background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); font-size: 12px; }
       .tier-field select:disabled { opacity: .5; }
-      .tier-hint { font-size: 10.5px; color: var(--text-dim, #93a0b5); margin-left: auto; }
+      .tier-hint { font-size: 10.5px; color: var(--text-3); margin-left: auto; }
       .panes { flex: 1; display: grid; grid-template-columns: 210px 1fr 270px; gap: 10px; min-height: 0; position: relative; }
       .rail { border: 1px solid var(--border, #2a3142); border-radius: 10px; background: var(--surface, #151b26); overflow: hidden; }
       .canvas-wrap { position: relative; min-width: 0; }

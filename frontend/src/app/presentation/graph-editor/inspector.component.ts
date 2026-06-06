@@ -79,7 +79,7 @@ export interface InspectorSelection {
   styles: [
     `
       .inspector { padding: 14px; }
-      .inspector.empty { color: var(--text-dim, #93a0b5); font-size: 12.5px; }
+      .inspector.empty { color: var(--text-3); font-size: 12.5px; }
       .ins-hd { margin-bottom: 12px; }
       .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
               padding: 2px 7px; border-radius: 999px; color: #fff; }
@@ -87,11 +87,11 @@ export interface InspectorSelection {
       .kind-risk, .kind-cio, .kind-portfolio { background: #c47f2f; }
       h3 { margin: 8px 0 0; font-size: 15px; color: var(--text, #e6ebf5); }
       .fld { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
-      .lbl { font-size: 11px; color: var(--text-dim, #93a0b5); }
+      .lbl { font-size: 11px; color: var(--text-3); }
       select { width: 100%; padding: 7px 8px; border-radius: 7px;
                border: 1px solid var(--border, #2a3142); background: var(--surface-2, #0e1117);
                color: var(--text, #e6ebf5); font-size: 12.5px; }
-      .note { font-size: 11.5px; color: var(--text-dim, #93a0b5); line-height: 1.45; margin: 10px 0 0; }
+      .note { font-size: 11.5px; color: var(--text-3); line-height: 1.45; margin: 10px 0 0; }
       .note.macro { border-left: 2px solid #f0a23b; padding-left: 8px; }
       .note.locked { border-left: 2px solid #c47f2f; padding-left: 8px; }
       .del { margin-top: 16px; width: 100%; padding: 8px; border-radius: 7px;

@@ -91,9 +91,9 @@ interface DiffRow {
                 padding: 14px; overflow-y: auto; box-shadow: -4px 0 16px rgba(0,0,0,.4); }
       .hd { display: flex; justify-content: space-between; align-items: center; }
       h3 { margin: 0; font-size: 14px; color: var(--text, #e6ebf5); }
-      .x { background: none; border: none; color: var(--text-dim, #93a0b5); cursor: pointer; font-size: 14px; }
+      .x { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 14px; }
       .diff-ctl { display: flex; gap: 10px; margin: 12px 0 8px; }
-      .diff-ctl label { font-size: 11px; color: var(--text-dim, #93a0b5); display: flex; flex-direction: column; gap: 3px; }
+      .diff-ctl label { font-size: 11px; color: var(--text-3); display: flex; flex-direction: column; gap: 3px; }
       .diff-ctl select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #2a3142);
                          background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); }
       .diff { background: var(--surface-2, #0e1117); border-radius: 8px; padding: 8px; margin-bottom: 12px; }
@@ -103,14 +103,14 @@ interface DiffRow {
       .drow.removed .tag { background: #3a1b1b; color: #f08a8a; }
       .drow.model .tag, .drow.tail .tag { background: #2e2410; color: #e8c06a; }
       .dl { color: var(--text, #e6ebf5); }
-      .muted { color: var(--text-dim, #93a0b5); font-size: 12px; }
+      .muted { color: var(--text-3); font-size: 12px; }
       .vlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
       .vlist li { border: 1px solid var(--border, #2a3142); border-radius: 8px; padding: 8px 10px; }
       .vlist li.current { border-color: var(--acc-info); }
       .vmeta { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text, #e6ebf5); }
       .vstatus { font-size: 10px; color: #f08a8a; } .vstatus.ok { color: #5fd6a6; }
-      .vdate { margin-left: auto; font-size: 10.5px; color: var(--text-dim, #93a0b5); }
-      .vnotes { font-size: 11px; color: var(--text-dim, #93a0b5); margin: 5px 0; }
+      .vdate { margin-left: auto; font-size: 10.5px; color: var(--text-3); }
+      .vnotes { font-size: 11px; color: var(--text-3); margin: 5px 0; }
       .load { margin-top: 4px; background: var(--surface-2, #0e1117); border: 1px solid var(--border, #2a3142);
               color: var(--text, #e6ebf5); border-radius: 6px; padding: 5px 9px; font-size: 11.5px; cursor: pointer; }
     `,

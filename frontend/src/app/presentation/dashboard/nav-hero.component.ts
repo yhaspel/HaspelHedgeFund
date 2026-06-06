@@ -23,12 +23,12 @@ import { PortfolioOverview } from '../../core/models/portfolio.model';
           <div class="nav-val mono">{{ compact(p.total_value) }}</div>
           <div class="nav-pnl">
             <span class="pnl mono" [class.up]="num(p.unrealized_pnl) > 0" [class.down]="num(p.unrealized_pnl) < 0">
-              {{ signed(p.unrealized_pnl) }}
+              <span class="dir" aria-hidden="true">{{ dir(p.unrealized_pnl) }}</span>{{ signed(p.unrealized_pnl) }}
             </span>
             <span class="lbl">unrealized</span>
             <span class="sep" aria-hidden="true">·</span>
             <span class="pnl mono" [class.up]="num(p.realized_pnl) > 0" [class.down]="num(p.realized_pnl) < 0">
-              {{ signed(p.realized_pnl) }}
+              <span class="dir" aria-hidden="true">{{ dir(p.realized_pnl) }}</span>{{ signed(p.realized_pnl) }}
             </span>
             <span class="lbl">realized</span>
           </div>
@@ -75,6 +75,7 @@ import { PortfolioOverview } from '../../core/models/portfolio.model';
         font-size: 12px;
       }
       .nav-pnl .pnl { font-size: 13px; color: var(--text-2); }
+      .nav-pnl .pnl .dir { font-size: 9px; margin-right: 3px; }
       .nav-pnl .pnl.up { color: var(--acc-long-fg); }
       .nav-pnl .pnl.down { color: var(--acc-short-fg); }
       .nav-pnl .lbl { color: var(--text-3); font-size: 11px; }
@@ -124,5 +125,11 @@ export class NavHeroComponent {
     const n = this.num(v);
     const s = n >= 0 ? '+' : '-';
     return `${s}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  }
+
+  /** Colour-independent direction cue (decorative; the signed value carries the data). */
+  dir(v: string | null | undefined): string {
+    const n = this.num(v);
+    return n > 0 ? '▲' : n < 0 ? '▼' : '—';
   }
 }

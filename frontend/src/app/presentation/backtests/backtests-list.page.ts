@@ -56,6 +56,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                   <td class="num"
                     [style.color]="bt.deflation !== null && bt.deflation < 0.3 ? 'var(--acc-short-fg)' : bt.deflation !== null && bt.deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
                     {{ bt.deflation !== null ? (bt.deflation | number:'1.2-2') : '—' }}
+                    @if(bt.deflation !== null){<span aria-hidden="true"> {{ bt.deflation < 0.3 ? '⚠' : bt.deflation < 0.5 ? '•' : '✓' }}</span>}
                   </td>
                   <td class="right whitespace-nowrap">
                     @if (canDelete(bt.status)) {

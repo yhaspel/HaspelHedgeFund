@@ -139,7 +139,7 @@ const CENTER_Y = 300;
       .node.locked { cursor: pointer; opacity: .96; }
       .node.structural { background: transparent; border-style: dashed; display: flex;
                          align-items: center; justify-content: center; font-size: 11px;
-                         color: var(--text-dim, #93a0b5); cursor: default; }
+                         color: var(--text-3); cursor: default; }
       .node.persona .dot { background: #b07cff; }
       .node.analytical .dot { background: #4ec3a5; }
       .node.tail .dot { background: #f0a23b; }
@@ -149,7 +149,7 @@ const CENTER_Y = 300;
       .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
       .lock { margin-left: auto; font-size: 11px; }
       .node-bd { padding: 0 10px 8px; }
-      .model { font-size: 10.5px; color: var(--text-dim, #93a0b5); white-space: nowrap;
+      .model { font-size: 10.5px; color: var(--text-3); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; display: block; }
       .model.det { font-style: italic; }
       .port { position: absolute; width: 9px; height: 9px; border-radius: 50%;
@@ -162,7 +162,7 @@ const CENTER_Y = 300;
       .zoom-ctl button { width: 24px; height: 24px; border-radius: 5px; border: none;
                          background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5);
                          cursor: pointer; font-size: 14px; }
-      .zlbl { font-size: 11px; color: var(--text-dim, #93a0b5); min-width: 34px; text-align: center; }
+      .zlbl { font-size: 11px; color: var(--text-3); min-width: 34px; text-align: center; }
     `,
   ],
 })

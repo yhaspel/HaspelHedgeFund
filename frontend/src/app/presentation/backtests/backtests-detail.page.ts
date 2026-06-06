@@ -114,6 +114,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
               <div class="v"
                 [style.color]="m.sharpe_deflation < 0.3 ? 'var(--acc-short-fg)' : m.sharpe_deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
                 {{ m.sharpe_deflation | number: '1.2-2' }}
+                <span aria-hidden="true"> {{ m.sharpe_deflation < 0.3 ? '⚠' : m.sharpe_deflation < 0.5 ? '•' : '✓' }}</span>
               </div>
               @if (m.sharpe_deflation < 0.3) {
                 <div class="d text-[var(--acc-short-fg)]">⚠ Strong overfitting suspected</div>

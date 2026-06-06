@@ -56,7 +56,7 @@ import { GraphRegistry, NodeSpec } from '../../core/models/graph.model';
     `
       .palette { padding: 12px; overflow-y: auto; height: 100%; }
       h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-           color: var(--text-dim, #93a0b5); margin: 12px 0 6px; }
+           color: var(--text-3); margin: 12px 0 6px; }
       .group { display: flex; flex-direction: column; gap: 6px; }
       .chip { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
               border-radius: 8px; border: 1px solid var(--border, #2a3142);
@@ -67,7 +67,7 @@ import { GraphRegistry, NodeSpec } from '../../core/models/graph.model';
       .chip .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
       .chip.analytical .dot { background: #4ec3a5; }
       .chip.persona .dot { background: #b07cff; }
-      .hint { font-size: 11px; color: var(--text-dim, #93a0b5); margin-top: 14px; line-height: 1.4; }
+      .hint { font-size: 11px; color: var(--text-3); margin-top: 14px; line-height: 1.4; }
     `,
   ],
 })

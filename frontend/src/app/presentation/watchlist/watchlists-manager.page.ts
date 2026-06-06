@@ -109,6 +109,9 @@ interface ListDetail {
                       <td class="name">{{ nameFor(t.ticker) }}</td>
                       <td class="r">{{ t.price ?? '—' }}</td>
                       <td class="r" [class.up]="(t.change_pct ?? 0) > 0" [class.dn]="(t.change_pct ?? 0) < 0">
+                        @if (t.change_pct !== null && t.change_pct !== undefined) {
+                          <span aria-hidden="true">{{ t.change_pct > 0 ? '▲' : (t.change_pct < 0 ? '▼' : '—') }}</span>
+                        }
                         {{ t.change_pct !== null && t.change_pct !== undefined ? (t.change_pct + '%') : '—' }}
                       </td>
                       <td class="r">

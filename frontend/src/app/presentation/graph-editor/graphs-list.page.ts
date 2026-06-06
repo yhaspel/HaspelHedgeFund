@@ -92,8 +92,8 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
   styles: [
     `
       .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 8px; }
-      h1 { margin: 0; font-size: 20px; } .sub { color: var(--text-dim, #93a0b5); font-size: 13px; margin: 4px 0 0; max-width: 560px; }
-      .sec { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim, #93a0b5); margin: 22px 0 10px; }
+      h1 { margin: 0; font-size: 20px; } .sub { color: var(--text-3); font-size: 13px; margin: 4px 0 0; max-width: 560px; }
+      .sec { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); margin: 22px 0 10px; }
       .card { border: 1px solid var(--border, #2a3142); border-radius: 10px; background: var(--surface, #151b26); padding: 14px; }
       .create-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
       .create-row input, .clone-row input { padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border, #2a3142);
@@ -101,8 +101,8 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
       .g-hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
       .g h3 { margin: 0; font-size: 14.5px; color: var(--text, #e6ebf5); }
-      .desc { font-size: 12px; color: var(--text-dim, #93a0b5); margin: 6px 0; line-height: 1.4; }
-      .meta { font-size: 11px; color: var(--text-dim, #93a0b5); margin: 4px 0 10px; }
+      .desc { font-size: 12px; color: var(--text-3); margin: 6px 0; line-height: 1.4; }
+      .meta { font-size: 11px; color: var(--text-3); margin: 4px 0 10px; }
       .pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #3a1b1b; color: #f08a8a; }
       .pill.ok { background: #163a2c; color: #5fd6a6; } .pill.tmpl-pill { background: #1d2740; color: #8fb0ff; }
       .g-act, .clone-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
@@ -111,7 +111,7 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
       .btn.ghost { background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); }
       .btn.primary { background: var(--acc-info); color: #fff; border-color: var(--acc-info); }
       .btn:disabled { opacity: .45; cursor: not-allowed; }
-      .muted { color: var(--text-dim, #93a0b5); font-size: 13px; }
+      .muted { color: var(--text-3); font-size: 13px; }
       .err { color: #f08a8a; font-size: 12px; }
     `,
   ],

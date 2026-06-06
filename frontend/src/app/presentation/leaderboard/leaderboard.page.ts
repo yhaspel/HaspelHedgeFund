@@ -271,7 +271,8 @@ interface DecisionRow {
                           [class.pos]="num0(a.contrarian_hit_rate) >= 0.5"
                           [class.neg]="num0(a.contrarian_hit_rate) < 0.5"
                           [title]="contrarianTip(a)"
-                          >{{ pct(a.contrarian_hit_rate) }}</span
+                          ><span aria-hidden="true">{{ num0(a.contrarian_hit_rate) >= 0.5 ? '✓' : '✗' }}</span>
+                          {{ pct(a.contrarian_hit_rate) }}</span
                         >
                       </td>
                     </tr>
