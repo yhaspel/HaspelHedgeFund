@@ -50,4 +50,12 @@ describe('FundDashboardPage', () => {
     }));
     expect(cmp.cols()).toEqual(['A', 'B']);
   });
+
+  it('hintFor falls back to the validation-gate message when setup_hint is empty', () => {
+    const cmp = setup(overview());
+    expect(cmp.hintFor({ setup_hint: null })).toContain('validation backtest');
+    expect(cmp.hintFor({ setup_hint: '   ' })).toContain('validation backtest');
+    expect(cmp.hintFor({ setup_hint: 'Validated — open Autopilot and enable.' }))
+      .toBe('Validated — open Autopilot and enable.');
+  });
 });

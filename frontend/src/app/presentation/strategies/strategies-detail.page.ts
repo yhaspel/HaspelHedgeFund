@@ -3,6 +3,7 @@ import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
@@ -1134,6 +1135,7 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   private readonly profiles = inject(TickerProfileStore);
   private readonly graphs = inject(GraphsStore);
   private readonly models = inject(ModelsStore);
+  private readonly confirm = inject(ConfirmService);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
 
   /** Flips true after the first `listCycles` call settles so the left-rail
@@ -1717,14 +1719,16 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   }
 
   // P4 WS-C: delete this strategy (gated server-side on no non-cancelled
-  // cycles + an empty book). Confirm first; navigate away on success.
+  // cycles + an empty book). Ask first; navigate away on success.
   deleting = signal(false);
-  confirmDelete(id: number, name: string): void {
+  async confirmDelete(id: number, name: string): Promise<void> {
     if (this.deleting()) return;
-    const ok = confirm(
-      `Delete strategy "${name}"? This also removes its (empty) strategy book. `
-      + 'This cannot be undone.',
-    );
+    const ok = await this.confirm.ask({
+      title: `Delete strategy "${name}"?`,
+      body: 'This also removes its (empty) strategy book. This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
     this.deleting.set(true);
     this.store.deleteStrategy(id).subscribe({

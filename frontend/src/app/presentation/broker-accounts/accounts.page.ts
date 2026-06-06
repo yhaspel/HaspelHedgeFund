@@ -2,6 +2,7 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount } from '../../core/models/broker.model';
@@ -116,6 +117,7 @@ import { BrokerAccount } from '../../core/models/broker.model';
 export class BrokerAccountsPage implements OnInit {
   private readonly store = inject(BrokerStore);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
 
   protected readonly accounts = this.store.accounts;
   protected readonly busy = this.store.busy;
@@ -132,20 +134,30 @@ export class BrokerAccountsPage implements OnInit {
     });
   }
 
-  onDisconnect(a: BrokerAccount): void {
-    if (!confirm(`Disconnect ${a.label}? Credentials will be zeroed.`)) return;
+  async onDisconnect(a: BrokerAccount): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Disconnect ${a.label}?`,
+      body: 'Credentials will be zeroed.',
+      confirmLabel: 'Disconnect',
+      danger: true,
+    });
+    if (!ok) return;
     this.store.disconnectAccount(a.id).subscribe({
       next: () => this.store.loadAccounts().subscribe(),
       error: (err) => this.error.set(err?.error?.detail ?? 'Disconnect failed.'),
     });
   }
 
-  onDelete(a: BrokerAccount): void {
-    if (!confirm(
-      `Permanently delete ${a.label}? This removes the broker account row, `
-      + `its credential, and any local orders/fills. The account at the broker `
-      + `is not affected.`,
-    )) return;
+  async onDelete(a: BrokerAccount): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Permanently delete ${a.label}?`,
+      body:
+        'This removes the broker account row, its credential, and any local '
+        + 'orders/fills. The account at the broker is not affected.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     this.store.deleteAccount(a.id).subscribe({
       next: () => this.store.loadAccounts().subscribe(),
       error: (err) => this.error.set(err?.error?.detail ?? 'Delete failed.'),

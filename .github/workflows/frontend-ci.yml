@@ -27,5 +27,6 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check:inline-styles
       - run: pnpm check:tokens
+      - run: pnpm check:no-native-dialogs
       - run: pnpm test --watch=false
       - run: pnpm build

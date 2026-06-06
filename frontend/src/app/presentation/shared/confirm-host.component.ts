@@ -1,17 +1,16 @@
 import { Component, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalComponent } from './modal.component';
-import { ConfirmOptions, ConfirmService } from './confirm.service';
+import { ConfirmService, PendingRequest } from './confirm.service';
 
 let _seq = 0;
 
 /**
  * hf-confirm — the single global host for {@link ConfirmService}.
  *
- * Mounted once at the app root. Renders the active confirm request inside
- * hf-modal (focus trap, Escape-cancels, focus-return) and settles the awaiting
- * promise on confirm/cancel. Replaces native confirm()/alert()/prompt()
- * (HHF-05 / HHF-10).
+ * Mounted once at the app root. Renders the active request inside hf-modal
+ * (focus trap, Escape-cancels, focus-return) and settles the awaiting promise.
+ * Replaces the native confirm / alert / prompt dialogs (HHF-05 / HHF-10).
  */
 @Component({
   selector: 'hf-confirm',
@@ -26,7 +25,24 @@ let _seq = 0;
           </div>
           <div class="card-bd">
             <p class="confirm-body" *ngIf="c.body">{{ c.body }}</p>
-            <div class="field confirm-type" *ngIf="c.requireText as rt">
+
+            <!-- prompt: a single text field (replaces native prompt) -->
+            <div class="field confirm-type" *ngIf="c.kind === 'prompt'">
+              <label class="lbl" [for]="inputId">{{ c.label || 'Value' }}</label>
+              <input
+                class="input sans"
+                [id]="inputId"
+                type="text"
+                autocomplete="off"
+                [placeholder]="c.placeholder || ''"
+                [value]="typed()"
+                (input)="typed.set($any($event.target).value)"
+                (keydown.enter)="accept()"
+              />
+            </div>
+
+            <!-- confirm with type-to-confirm gate (high-stakes actions) -->
+            <div class="field confirm-type" *ngIf="c.kind === 'confirm' && c.requireText as rt">
               <label class="lbl" [for]="inputId">Type “{{ rt }}” to confirm</label>
               <input
                 class="input sans"
@@ -41,7 +57,9 @@ let _seq = 0;
             </div>
           </div>
           <div class="confirm-ft">
-            <button class="btn" (click)="cancel()">{{ c.cancelLabel || 'Cancel' }}</button>
+            <button class="btn" *ngIf="c.kind !== 'notify'" (click)="cancel()">
+              {{ c.cancelLabel || 'Cancel' }}
+            </button>
             <button
               class="btn"
               [class.danger]="c.danger"
@@ -49,7 +67,7 @@ let _seq = 0;
               [disabled]="!ready(c)"
               (click)="accept()"
             >
-              {{ c.confirmLabel || 'Confirm' }}
+              {{ c.confirmLabel || (c.kind === 'notify' ? 'OK' : 'Confirm') }}
             </button>
           </div>
         </div>
@@ -87,24 +105,26 @@ export class ConfirmHostComponent {
   readonly inputId = `hf-confirm-input-${_seq}`;
 
   constructor() {
-    // Clear the "type to confirm" field whenever a new request opens.
+    // Reset the input when a new request opens; prompts seed their initial value.
     effect(() => {
-      this.svc.active();
-      this.typed.set('');
+      const c = this.svc.active();
+      this.typed.set(c && c.kind === 'prompt' ? (c.initialValue ?? '') : '');
     });
   }
 
-  ready(c: ConfirmOptions): boolean {
-    return c.requireText ? this.typed().trim() === c.requireText : true;
+  ready(c: PendingRequest): boolean {
+    if (c.kind === 'prompt') return this.typed().trim().length > 0;
+    if (c.kind === 'confirm' && c.requireText) return this.typed().trim() === c.requireText;
+    return true;
   }
 
   accept(): void {
     const c = this.svc.active();
     if (!c || !this.ready(c)) return;
-    this.svc.settle(true);
+    this.svc.accept(c.kind === 'prompt' ? this.typed().trim() : true);
   }
 
   cancel(): void {
-    this.svc.settle(false);
+    this.svc.cancel();
   }
 }

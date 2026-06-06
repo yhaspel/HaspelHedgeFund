@@ -9,6 +9,7 @@ import {
   BarController, BarElement,
 } from 'chart.js';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ENTRY_ANIMATION, baseLegend, personaColorById, readChartTheme } from '../shared/chart-defaults';
 
@@ -176,6 +177,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   readonly store = inject(BacktestsStore);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
   private equityChartInstance: Chart | null = null;
   private deflationChartInstance: Chart | null = null;
   private attributionChartInstance: Chart | null = null;
@@ -198,12 +200,19 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
 
   cancelling = false;
 
-  cancelRun(id: number): void {
-    // Native confirm — the action is reversible only by submitting a new run,
-    // so a one-tap interstitial is worth the friction. Cancellation surfaces
+  async cancelRun(id: number): Promise<void> {
+    // Interstitial dialog — the action is reversible only by submitting a new
+    // run, so a one-tap gate is worth the friction. Cancellation surfaces
     // as `status='cancelled'` on the next poll tick (3s window) and the
     // button hides itself via the @if guard above.
-    if (!window.confirm('Cancel this backtest? Work already done will be lost.')) return;
+    const ok = await this.confirm.ask({
+      title: 'Cancel this backtest?',
+      body: 'Work already done will be lost.',
+      confirmLabel: 'Cancel backtest',
+      cancelLabel: 'Keep running',
+      danger: true,
+    });
+    if (!ok) return;
     this.cancelling = true;
     this.store.cancel(id).subscribe({
       next: () => { this.cancelling = false; },
@@ -217,13 +226,19 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   canDelete(status: string): boolean {
     return DELETABLE_BACKTEST_STATUSES.has(status);
   }
-  confirmDelete(id: number, name: string): void {
+  async confirmDelete(id: number, name: string): Promise<void> {
     if (this.deleting) return;
-    if (!window.confirm(`Delete backtest "${name}"? This cannot be undone.`)) return;
+    const ok = await this.confirm.ask({
+      title: `Delete backtest "${name}"?`,
+      body: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     this.deleting = true;
     this.store.deleteBacktest(id).subscribe({
       next: () => { this.deleting = false; this.router.navigate(['/backtests']); },
-      error: () => { this.deleting = false; window.alert('Could not delete this backtest.'); },
+      error: () => { this.deleting = false; void this.confirm.notify({ title: 'Could not delete this backtest.' }); },
     });
   }
 

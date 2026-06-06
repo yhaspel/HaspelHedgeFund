@@ -11,6 +11,7 @@ import { RouterLink } from '@angular/router';
 
 import { ApiClient } from '../../core/api/api-client';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { SettingsTabsComponent } from './settings-tabs.component';
 
 interface Channel {
@@ -126,6 +127,7 @@ interface Channel {
 })
 export class SettingsNotificationsPage implements OnInit {
   private readonly api = inject(ApiClient);
+  private readonly confirm = inject(ConfirmService);
 
   readonly channels = signal<Channel[]>([]);
   readonly busy = signal(false);
@@ -189,8 +191,9 @@ export class SettingsNotificationsPage implements OnInit {
     });
   }
 
-  remove(c: Channel): void {
-    if (!confirm('Delete this channel?')) return;
+  async remove(c: Channel): Promise<void> {
+    const ok = await this.confirm.ask({ title: 'Delete this channel?', confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
     this.api.delete(`/notification-channels/${c.id}/`).subscribe(() => this.reload());
   }
 }

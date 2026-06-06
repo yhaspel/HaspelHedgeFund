@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 
@@ -76,22 +77,25 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
 })
 export class StrategiesListPage implements OnInit {
   readonly store = inject(StrategiesStore);
+  private readonly confirm = inject(ConfirmService);
   readonly deletingId = signal<number | null>(null);
   ngOnInit(): void { this.store.list().subscribe(); }
 
-  // P4 WS-C: delete a strategy with no non-cancelled cycles. Confirm first —
+  // P4 WS-C: delete a strategy with no non-cancelled cycles. Ask first —
   // this also removes the freshly-seeded strategy book.
-  confirmDelete(id: number, name: string): void {
+  async confirmDelete(id: number, name: string): Promise<void> {
     if (this.deletingId() !== null) return;
-    const ok = confirm(
-      `Delete strategy "${name}"? This also removes its (empty) strategy book. `
-      + 'This cannot be undone.',
-    );
+    const ok = await this.confirm.ask({
+      title: `Delete strategy "${name}"?`,
+      body: 'This also removes its (empty) strategy book. This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
     this.deletingId.set(id);
     this.store.deleteStrategy(id).subscribe({
       next: () => { this.deletingId.set(null); this.store.list().subscribe(); },
-      error: () => { this.deletingId.set(null); alert('Could not delete this strategy.'); },
+      error: () => { this.deletingId.set(null); void this.confirm.notify({ title: 'Could not delete this strategy.' }); },
     });
   }
 }

@@ -11,6 +11,7 @@ import { Router } from '@angular/router';
 
 import { ApiClient } from '../../core/api/api-client';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 
 interface WatchlistMeta {
   id: number;
@@ -146,6 +147,7 @@ interface ListDetail {
 export class WatchlistsManagerPage implements OnInit {
   private readonly api = inject(ApiClient);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
 
   readonly lists = signal<WatchlistMeta[]>([]);
   readonly selectedId = signal<number | null>(null);
@@ -190,10 +192,10 @@ export class WatchlistsManagerPage implements OnInit {
     });
   }
 
-  rename(): void {
+  async rename(): Promise<void> {
     const d = this.detail();
     if (!d) return;
-    const name = prompt('Rename list', d.name);
+    const name = await this.confirm.askText({ title: 'Rename list', label: 'List name', initialValue: d.name });
     if (!name) return;
     this.api.patch(`/watchlists/${d.id}/`, { name }).subscribe({
       next: () => {
@@ -204,9 +206,11 @@ export class WatchlistsManagerPage implements OnInit {
     });
   }
 
-  deleteList(): void {
+  async deleteList(): Promise<void> {
     const d = this.detail();
-    if (!d || !confirm(`Delete list "${d.name}"?`)) return;
+    if (!d) return;
+    const ok = await this.confirm.ask({ title: `Delete list "${d.name}"?`, confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
     this.api.delete(`/watchlists/${d.id}/`).subscribe(() => {
       this.selectedId.set(null);
       this.detail.set(null);

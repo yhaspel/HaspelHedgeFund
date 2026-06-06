@@ -6,6 +6,7 @@ import { FundStore } from '../../abstraction/fund.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { Autopilot } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { PopoverComponent } from '../shared/popover.component';
 
 // P7 §14 — per-strategy autopilot panel: the validation-gate checklist that
 // unlocks the enable toggle, a prominent state chip, the guardrail config, and
@@ -13,19 +14,40 @@ import { AppShellComponent } from '../shared/app-shell.component';
 @Component({
   selector: 'hf-autopilot-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, PopoverComponent],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund', link: '/fund' }, { label: 'Autopilot' }]">
       <div class="page-head">
         <div><h1>Autopilot</h1></div>
         <div class="head-actions" *ngIf="ap() as a">
+          <!-- Enabled: a plain status pill. -->
           <span
+            *ngIf="a.is_enabled"
             class="pill"
-            [class.ok]="a.state === 'active' && a.is_enabled"
+            [class.ok]="a.state === 'active'"
             [class.warn]="a.state === 'soft_cut'"
             [class.err]="a.state === 'halted'"
-            [class.info]="!a.is_enabled"
-          ><span class="dot"></span>{{ a.is_enabled ? a.state : 'disabled' }}</span>
+          ><span class="dot"></span>{{ a.state }}</span>
+          <!-- Disabled: the pill explains *why* it's off + the next step on hover / focus / tap. -->
+          <span class="pill-wrap" *ngIf="!a.is_enabled">
+            <button
+              type="button"
+              class="pill info pill-btn"
+              (mouseenter)="pop.show()"
+              (mouseleave)="pop.maybeHide()"
+              (focus)="pop.show()"
+              (blur)="pop.maybeHide()"
+              (click)="pop.toggle()"
+              [attr.aria-label]="'Disabled — ' + disabledHint(a)"
+              [attr.aria-describedby]="pop.open() ? pop.popoverId : null"
+            ><span class="dot"></span>disabled<span class="pill-q" aria-hidden="true">?</span></button>
+            <hf-popover #pop role="tooltip" placement="bottom" align="end" [dismissOnOutsideClick]="true">
+              <span class="disabled-pop">
+                <b>Why “disabled”?</b>
+                {{ disabledHint(a) }}
+              </span>
+            </hf-popover>
+          </span>
         </div>
       </div>
 
@@ -81,8 +103,8 @@ import { AppShellComponent } from '../shared/app-shell.component';
           <div class="sched-head">
             <h2>Schedule</h2>
             <div class="seg" role="group" aria-label="Schedule editor mode">
-              <button type="button" class="seg-btn" [class.on]="scheduleMode === 'simple'" (click)="setMode('simple')">Simple</button>
-              <button type="button" class="seg-btn" [class.on]="scheduleMode === 'advanced'" (click)="setMode('advanced')">Advanced (cron)</button>
+              <button type="button" class="opt" [class.on]="scheduleMode === 'simple'" (click)="setMode('simple')">Simple</button>
+              <button type="button" class="opt" [class.on]="scheduleMode === 'advanced'" (click)="setMode('advanced')">Advanced (cron)</button>
             </div>
           </div>
 
@@ -120,7 +142,7 @@ import { AppShellComponent } from '../shared/app-shell.component';
             <small class="hint">minute hour day-of-month month day-of-week — e.g. <code>30 16 * * 5</code> = Fri 16:30.</small>
           </div>
 
-          <button class="btn" (click)="save()" [disabled]="busy() || !scheduleValid()">Save schedule</button>
+          <button class="btn" (click)="save()" [disabled]="busy() || !scheduleValid()">Save changes</button>
         </section>
 
         <!-- Guardrail config -->
@@ -166,13 +188,27 @@ import { AppShellComponent } from '../shared/app-shell.component';
             </p>
           </div>
 
-          <button class="btn" (click)="save()" [disabled]="busy()">Save guardrails</button>
+          <button class="btn" (click)="save()" [disabled]="busy() || !scheduleValid()">Save changes</button>
         </section>
       </ng-container>
     </hf-app-shell>
   `,
   styles: [`
-    .disclaimer { color: var(--text-3); font-size: 12px; margin: 4px 0 14px; }
+    /* Section cards hold content directly (no .card-bd), so the shell .card has no
+       inner padding and no separation — restore comfortable padding + gaps. */
+    section.card { padding: 18px 20px; margin-bottom: 16px; }
+    section.card > h2 { margin: 0 0 14px; }
+    .pill-wrap { position: relative; display: inline-flex; }
+    button.pill-btn { font-family: inherit; line-height: 1; cursor: help; -webkit-appearance: none; appearance: none; }
+    button.pill-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .pill-btn .pill-q {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 12px; height: 12px; margin-left: 1px; border-radius: var(--r-full);
+      border: 1px solid currentColor; font-size: 8px; font-weight: 700; line-height: 1; opacity: 0.6;
+    }
+    .pill-btn:hover .pill-q, .pill-btn:focus-visible .pill-q { opacity: 1; }
+    .disabled-pop { display: block; max-width: 240px; }
+    .disabled-pop b { display: block; margin-bottom: 3px; }
     .checklist { list-style: none; padding: 0; }
     .checklist li { padding: 4px 0; }
     .checklist li .mark { display: inline-block; width: 20px; font-weight: 700; }
@@ -185,25 +221,21 @@ import { AppShellComponent } from '../shared/app-shell.component';
     .grid label.chk { flex-direction: row; align-items: center; gap: 6px; }
     .grid label .hint { color: var(--text-3); font-size: 11px; font-weight: 400; }
     .grid label .hint a { text-decoration: underline; }
-    .muted { color: var(--text-3); }
     .sched-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
     .sched-head h2 { margin: 0; }
-    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-    .seg-btn { background: var(--surface-2); color: var(--text-2); border: 0; padding: 5px 12px; font-size: 12px; cursor: pointer; }
-    .seg-btn.on { background: var(--acc-info-soft); color: var(--text); }
     .sched-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; }
     .fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
     .fld small { color: var(--text-3); font-weight: 400; }
     .fld .input { width: 160px; }
     .days { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .daychip { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); border-radius: 999px; padding: 5px 13px; font-size: 12px; cursor: pointer; transition: border-color var(--dur-fast); }
+    .daychip { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--r-full); padding: 5px 13px; font-size: 12px; cursor: pointer; transition: border-color var(--dur-fast); }
     .daychip:hover { border-color: var(--border-2); }
     .daychip.on { background: var(--acc-info-soft); color: var(--text); border-color: var(--acc-info); }
     .preview { color: var(--text-2); font-size: 12px; margin: 8px 0 12px; }
     .sched-adv { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; max-width: 380px; }
     .sched-adv .hint { color: var(--text-3); font-size: 11px; }
     .sched-adv code { font-family: var(--font-mono); }
-    .council { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+    .council { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); }
     .council-hd { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 7px; }
     .council-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
     .council-list li { display: flex; align-items: baseline; gap: 8px; font-size: 12px; flex-wrap: wrap; }
@@ -334,6 +366,13 @@ export class AutopilotPanelPage implements OnInit {
   resume(): void { this.run(this.store.resume(this.strategyId), 'Un-halted — re-checks drawdown on the next tick.'); }
   runNow(): void { this.run(this.store.runNow(this.strategyId), 'Cycle queued.'); }
   save(): void { this.run(this.store.saveAutopilot(this.strategyId, this.form), 'Saved.'); }
+
+  // Copy for the disabled-state pill tooltip: why it's off + the one next step.
+  disabledHint(a: Autopilot): string {
+    return a.validation?.passed
+      ? 'Validated — click “Enable autopilot” below.'
+      : 'Run a validation backtest to unlock the enable toggle.';
+  }
 
   // --- schedule builder helpers ---
   setMode(m: 'simple' | 'advanced'): void {

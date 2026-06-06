@@ -32,145 +32,153 @@ const THEME_KEY = 'hf.theme';
         <div class="logo">
           <img src="/icon.svg" alt="Haspel Hedge Fund" width="30" height="30" />
         </div>
-        <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
-           routerLinkActive="active" #navHome="routerLinkActive"
-           [attr.aria-current]="navHome.isActive ? 'page' : null"
-           aria-label="Dashboard"
-           (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
-           (focus)="popHome.show()" (blur)="popHome.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
-          <hf-popover #popHome placement="right" align="center" size="compact">Dashboard</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
-           [attr.aria-current]="navPort.isActive ? 'page' : null"
-           aria-label="Portfolios"
-           (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
-           (focus)="popPort.show()" (blur)="popPort.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
-          <hf-popover #popPort placement="right" align="center" size="compact">Portfolios</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
-           [attr.aria-current]="navWatch.isActive ? 'page' : null"
-           aria-label="Watchlist"
-           (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
-           (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
-          <hf-popover #popWatch placement="right" align="center" size="compact">Watchlist</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
-           [attr.aria-current]="navBrk.isActive ? 'page' : null"
-           aria-label="Broker accounts"
-           (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
-           (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
-          <hf-popover #popBrk placement="right" align="center" size="compact">Broker accounts</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/fund" routerLinkActive="active" #navFund="routerLinkActive"
-           [attr.aria-current]="navFund.isActive ? 'page' : null"
-           aria-label="Autonomous Fund"
-           (mouseenter)="popFund.show()" (mouseleave)="popFund.maybeHide()"
-           (focus)="popFund.show()" (blur)="popFund.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-shield" /></svg>
-          <hf-popover #popFund placement="right" align="center" size="compact">Autonomous Fund</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
-           routerLinkActive="active" #navRuns="routerLinkActive"
-           [attr.aria-current]="navRuns.isActive ? 'page' : null"
-           aria-label="Runs"
-           (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
-           (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
-          <hf-popover #popRuns placement="right" align="center" size="compact">Runs</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/runs/new" routerLinkActive="active" #navNewRun="routerLinkActive"
-           [attr.aria-current]="navNewRun.isActive ? 'page' : null"
-           aria-label="New run"
-           (mouseenter)="popNewRun.show()" (mouseleave)="popNewRun.maybeHide()"
-           (focus)="popNewRun.show()" (blur)="popNewRun.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-play" /></svg>
-          <hf-popover #popNewRun placement="right" align="center" size="compact">New run</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
-           [attr.aria-current]="navScreener.isActive ? 'page' : null"
-           aria-label="Screener"
-           (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
-           (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
-          <hf-popover #popScreener placement="right" align="center" size="compact">Screener</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
-           [attr.aria-current]="navBt.isActive ? 'page' : null"
-           aria-label="Backtests"
-           (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
-           (focus)="popBt.show()" (blur)="popBt.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
-          <hf-popover #popBt placement="right" align="center" size="compact">Backtests</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
-           [attr.aria-current]="navSt.isActive ? 'page' : null"
-           aria-label="Strategies"
-           (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
-           (focus)="popSt.show()" (blur)="popSt.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
-          <hf-popover #popSt placement="right" align="center" size="compact">Strategies</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/graphs" routerLinkActive="active" #navGraphs="routerLinkActive"
-           [attr.aria-current]="navGraphs.isActive ? 'page' : null"
-           aria-label="Agent graphs"
-           (mouseenter)="popGraphs.show()" (mouseleave)="popGraphs.maybeHide()"
-           (focus)="popGraphs.show()" (blur)="popGraphs.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-graph" /></svg>
-          <hf-popover #popGraphs placement="right" align="center" size="compact">Agent graphs</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
-           [attr.aria-current]="navNews.isActive ? 'page' : null"
-           aria-label="News"
-           (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
-           (focus)="popNews.show()" (blur)="popNews.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
-          <hf-popover #popNews placement="right" align="center" size="compact">News</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/schedules" routerLinkActive="active" #navSched="routerLinkActive"
-           [attr.aria-current]="navSched.isActive ? 'page' : null"
-           aria-label="Schedules"
-           (mouseenter)="popSched.show()" (mouseleave)="popSched.maybeHide()"
-           (focus)="popSched.show()" (blur)="popSched.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-bell" /></svg>
-          <hf-popover #popSched placement="right" align="center" size="compact">Schedules</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/leaderboard" routerLinkActive="active" #navLb="routerLinkActive"
-           [attr.aria-current]="navLb.isActive ? 'page' : null"
-           aria-label="Leaderboard"
-           (mouseenter)="popLb.show()" (mouseleave)="popLb.maybeHide()"
-           (focus)="popLb.show()" (blur)="popLb.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-cpu" /></svg>
-          <hf-popover #popLb placement="right" align="center" size="compact">Leaderboard</hf-popover>
-        </a>
-        <div class="spacer"></div>
-        <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
-           [attr.aria-current]="navProfile.isActive ? 'page' : null"
-           aria-label="Profile"
-           (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
-           (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
-          <hf-popover #popProfile placement="right" align="center" size="compact">Profile</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
-           [attr.aria-current]="navInfo.isActive ? 'page' : null"
-           aria-label="Guides"
-           (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
-           (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
-          <hf-popover #popInfo placement="right" align="center" size="compact">Guides</hf-popover>
-        </a>
-        <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
-           [attr.aria-current]="navSet.isActive ? 'page' : null"
-           aria-label="Settings"
-           (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
-           (focus)="popSet.show()" (blur)="popSet.maybeHide()">
-          <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
-          <hf-popover #popSet placement="right" align="center" size="compact">Settings</hf-popover>
-        </a>
+        <!-- Scrollable destination groups — scrolls on short viewports so the
+             pinned System group below never clips (HHF-02). -->
+        <div class="nav-scroll">
+          <div class="nav-group" role="group" aria-label="Trade">
+            <span class="nav-group-label" aria-hidden="true">Trade</span>
+            <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
+               routerLinkActive="active" #navHome="routerLinkActive"
+               [attr.aria-current]="navHome.isActive ? 'page' : null"
+               aria-label="Dashboard"
+               (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
+               (focus)="popHome.show()" (blur)="popHome.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
+              <hf-popover #popHome placement="right" align="center" size="compact">Dashboard</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
+               [attr.aria-current]="navPort.isActive ? 'page' : null"
+               aria-label="Portfolios"
+               (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
+               (focus)="popPort.show()" (blur)="popPort.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
+              <hf-popover #popPort placement="right" align="center" size="compact">Portfolios</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
+               [attr.aria-current]="navWatch.isActive ? 'page' : null"
+               aria-label="Watchlist"
+               (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
+               (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
+              <hf-popover #popWatch placement="right" align="center" size="compact">Watchlist</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
+               [attr.aria-current]="navBrk.isActive ? 'page' : null"
+               aria-label="Broker accounts"
+               (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
+               (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
+              <hf-popover #popBrk placement="right" align="center" size="compact">Broker accounts</hf-popover>
+            </a>
+          </div>
+          <div class="nav-group" role="group" aria-label="Research">
+            <span class="nav-group-label" aria-hidden="true">Research</span>
+            <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
+               routerLinkActive="active" #navRuns="routerLinkActive"
+               [attr.aria-current]="navRuns.isActive ? 'page' : null"
+               aria-label="Runs"
+               (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
+               (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
+              <hf-popover #popRuns placement="right" align="center" size="compact">Runs</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
+               [attr.aria-current]="navScreener.isActive ? 'page' : null"
+               aria-label="Screener"
+               (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
+               (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
+              <hf-popover #popScreener placement="right" align="center" size="compact">Screener</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
+               [attr.aria-current]="navBt.isActive ? 'page' : null"
+               aria-label="Backtests"
+               (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
+               (focus)="popBt.show()" (blur)="popBt.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
+              <hf-popover #popBt placement="right" align="center" size="compact">Backtests</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
+               [attr.aria-current]="navSt.isActive ? 'page' : null"
+               aria-label="Strategies"
+               (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
+               (focus)="popSt.show()" (blur)="popSt.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
+              <hf-popover #popSt placement="right" align="center" size="compact">Strategies</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/graphs" routerLinkActive="active" #navGraphs="routerLinkActive"
+               [attr.aria-current]="navGraphs.isActive ? 'page' : null"
+               aria-label="Agent graphs"
+               (mouseenter)="popGraphs.show()" (mouseleave)="popGraphs.maybeHide()"
+               (focus)="popGraphs.show()" (blur)="popGraphs.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-graph" /></svg>
+              <hf-popover #popGraphs placement="right" align="center" size="compact">Agent graphs</hf-popover>
+            </a>
+          </div>
+          <div class="nav-group" role="group" aria-label="Operate">
+            <span class="nav-group-label" aria-hidden="true">Operate</span>
+            <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
+               [attr.aria-current]="navNews.isActive ? 'page' : null"
+               aria-label="News"
+               (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
+               (focus)="popNews.show()" (blur)="popNews.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
+              <hf-popover #popNews placement="right" align="center" size="compact">News</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/schedules" routerLinkActive="active" #navSched="routerLinkActive"
+               [attr.aria-current]="navSched.isActive ? 'page' : null"
+               aria-label="Schedules"
+               (mouseenter)="popSched.show()" (mouseleave)="popSched.maybeHide()"
+               (focus)="popSched.show()" (blur)="popSched.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-calendar" /></svg>
+              <hf-popover #popSched placement="right" align="center" size="compact">Schedules</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/leaderboard" routerLinkActive="active" #navLb="routerLinkActive"
+               [attr.aria-current]="navLb.isActive ? 'page' : null"
+               aria-label="Leaderboard"
+               (mouseenter)="popLb.show()" (mouseleave)="popLb.maybeHide()"
+               (focus)="popLb.show()" (blur)="popLb.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-trophy" /></svg>
+              <hf-popover #popLb placement="right" align="center" size="compact">Leaderboard</hf-popover>
+            </a>
+            <a class="nav-btn" routerLink="/fund" routerLinkActive="active" #navFund="routerLinkActive"
+               [attr.aria-current]="navFund.isActive ? 'page' : null"
+               aria-label="Autonomous Fund"
+               (mouseenter)="popFund.show()" (mouseleave)="popFund.maybeHide()"
+               (focus)="popFund.show()" (blur)="popFund.maybeHide()">
+              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-shield" /></svg>
+              <hf-popover #popFund placement="right" align="center" size="compact">Autonomous Fund</hf-popover>
+            </a>
+          </div>
+        </div>
+        <!-- Pinned bottom — never scrolls off (HHF-02). -->
+        <div class="nav-group nav-system" role="group" aria-label="System">
+          <span class="nav-group-label" aria-hidden="true">System</span>
+          <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
+             [attr.aria-current]="navProfile.isActive ? 'page' : null"
+             aria-label="Profile"
+             (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
+             (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
+            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
+            <hf-popover #popProfile placement="right" align="center" size="compact">Profile</hf-popover>
+          </a>
+          <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
+             [attr.aria-current]="navInfo.isActive ? 'page' : null"
+             aria-label="Guides"
+             (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
+             (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
+            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
+            <hf-popover #popInfo placement="right" align="center" size="compact">Guides</hf-popover>
+          </a>
+          <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
+             [attr.aria-current]="navSet.isActive ? 'page' : null"
+             aria-label="Settings"
+             (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
+             (focus)="popSet.show()" (blur)="popSet.maybeHide()">
+            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
+            <hf-popover #popSet placement="right" align="center" size="compact">Settings</hf-popover>
+          </a>
+        </div>
       </nav>
       <main>
         <div class="topbar">

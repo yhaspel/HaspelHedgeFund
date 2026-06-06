@@ -63,8 +63,50 @@
   color: var(--text);
 }
 /* Sidebar nav tooltips migrated to hf-popover (WS-4.3 / DC-19). */
-.sidebar .spacer {
-  flex: 1;
+
+/* Grouped, scroll-safe nav (HHF-01/02/03). The middle region scrolls on short
+   viewports; the System group is pinned at the bottom so it never clips. */
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  /* Hide the scrollbar in the slim rail so its width never shifts the centered
+     icons off-axis from the pinned System group (classic-scrollbar platforms). */
+  scrollbar-width: none;
+}
+.nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.nav-group-label {
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 1px;
+}
+.nav-scroll .nav-group + .nav-group {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.nav-system {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
 }
 
 /* WS-3: visually-hidden — used for table headers, sr-only labels, live regions. */
@@ -1018,6 +1060,14 @@ input[type='checkbox']:focus-visible {
 }
 
 /* Util */
+.muted {
+  color: var(--text-3);
+}
+.disclaimer {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  margin: 4px 0 14px;
+}
 .hairline {
   border: 1px solid var(--border);
 }

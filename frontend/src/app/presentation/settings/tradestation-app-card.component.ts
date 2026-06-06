@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BrokerStore } from '../../abstraction/broker.store';
+import { ConfirmService } from '../shared/confirm.service';
 
 /**
  * Settings card for the user's TradeStation developer-app credentials
@@ -95,6 +96,7 @@ import { BrokerStore } from '../../abstraction/broker.store';
 })
 export class TradeStationAppCardComponent implements OnInit {
   private readonly store = inject(BrokerStore);
+  private readonly confirm = inject(ConfirmService);
 
   protected readonly loading = signal(true);
   protected readonly busy = signal(false);
@@ -157,8 +159,14 @@ export class TradeStationAppCardComponent implements OnInit {
       });
   }
 
-  clear(): void {
-    if (!confirm('Clear your TradeStation app credentials? The env fallback (if any) will be used.')) {
+  async clear(): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: 'Clear your TradeStation app credentials?',
+      body: 'The env fallback (if any) will be used.',
+      confirmLabel: 'Clear',
+      danger: true,
+    });
+    if (!ok) {
       return;
     }
     this.busy.set(true);

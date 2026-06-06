@@ -12,6 +12,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiClient } from '../../core/api/api-client';
 import { GraphsStore } from '../../abstraction/graphs.store';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 
 interface Schedule {
   id: number;
@@ -347,6 +348,7 @@ const DOW_NAMES: Record<number, string> = {
 export class SchedulesPage implements OnInit {
   private readonly api = inject(ApiClient);
   private readonly graphs = inject(GraphsStore);
+  private readonly confirm = inject(ConfirmService);
   readonly dows = DOWS;
 
   readonly graphOptions = computed(() =>
@@ -514,8 +516,13 @@ export class SchedulesPage implements OnInit {
       .subscribe(() => this.reload());
   }
 
-  remove(s: Schedule): void {
-    if (!confirm(`Delete schedule "${s.name}"?`)) return;
+  async remove(s: Schedule): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Delete schedule "${s.name}"?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     this.api.delete(`/scheduled-runs/${s.id}/`).subscribe(() => this.reload());
   }
 

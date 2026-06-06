@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { ConfirmService } from '../shared/confirm.service';
 
 const DELETABLE_BACKTEST_STATUSES = new Set([
   'cancelled', 'aborted_budget', 'aborted_partial', 'synthetic',
@@ -78,6 +79,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
 })
 export class BacktestsListPage implements OnInit {
   readonly store = inject(BacktestsStore);
+  private readonly confirm = inject(ConfirmService);
   readonly deletingId = signal<number | null>(null);
   ngOnInit(): void { this.store.listBacktests().subscribe(); }
 
@@ -87,13 +89,19 @@ export class BacktestsListPage implements OnInit {
 
   // P4 WS-D: delete a cancelled / aborted / synthetic backtest. done + failed
   // never show the button (protected audit history).
-  confirmDelete(id: number, name: string): void {
+  async confirmDelete(id: number, name: string): Promise<void> {
     if (this.deletingId() !== null) return;
-    if (!confirm(`Delete backtest "${name}"? This cannot be undone.`)) return;
+    const ok = await this.confirm.ask({
+      title: `Delete backtest "${name}"?`,
+      body: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     this.deletingId.set(id);
     this.store.deleteBacktest(id).subscribe({
       next: () => { this.deletingId.set(null); this.store.listBacktests().subscribe(); },
-      error: () => { this.deletingId.set(null); alert('Could not delete this backtest.'); },
+      error: () => { this.deletingId.set(null); void this.confirm.notify({ title: 'Could not delete this backtest.' }); },
     });
   }
 }

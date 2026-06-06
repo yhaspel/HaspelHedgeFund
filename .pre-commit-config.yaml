@@ -36,6 +36,12 @@ repos:
         language: system
         files: ^frontend/src/.*\.(ts|css|html)$
         pass_filenames: false
+      - id: frontend-no-native-dialogs
+        name: frontend native-dialog gate
+        entry: bash -c 'cd frontend && pnpm check:no-native-dialogs'
+        language: system
+        files: ^frontend/src/app/.*\.ts$
+        pass_filenames: false
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.4.0

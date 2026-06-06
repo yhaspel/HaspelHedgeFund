@@ -468,7 +468,7 @@ export class PortfolioPage implements OnInit, OnDestroy {
   }
 
   onClose(pos: PositionValuation): void {
-    // WS-4.2: native confirm() replaced with in-app modal so the prompt is
+    // WS-4.2: native confirm dialog replaced with an in-app modal so it is
     // keyboard-accessible, screen-reader-announced, and consistent with the
     // rest of the design system.
     this.confirmClose.set(pos);

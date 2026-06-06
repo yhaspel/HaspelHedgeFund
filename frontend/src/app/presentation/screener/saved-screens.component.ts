@@ -4,12 +4,14 @@ import {
   EventEmitter,
   Input,
   Output,
+  inject,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { SavedScreen } from '../../core/models/screener.model';
+import { ConfirmService } from '../shared/confirm.service';
 import { ModalComponent } from '../shared/modal.component';
 
 @Component({
@@ -131,6 +133,8 @@ export class SavedScreensComponent {
   @Output() deleted = new EventEmitter<SavedScreen>();
   @Output() saveRequested = new EventEmitter<{ name: string }>();
 
+  private readonly confirm = inject(ConfirmService);
+
   readonly openSave = signal(false);
   readonly saveError = signal<string | null>(null);
   newName = '';
@@ -150,9 +154,15 @@ export class SavedScreensComponent {
     this.openSave.set(false);
   }
 
-  deleteCurrent(): void {
+  async deleteCurrent(): Promise<void> {
     const s = this.saved.find((r) => String(r.id) === String(this.selectedId));
-    if (s && confirm(`Delete saved screen "${s.name}"?`)) {
+    if (!s) return;
+    const ok = await this.confirm.ask({
+      title: `Delete saved screen "${s.name}"?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (ok) {
       this.deleted.emit(s);
     }
   }

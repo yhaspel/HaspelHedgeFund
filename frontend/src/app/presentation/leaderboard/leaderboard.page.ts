@@ -130,7 +130,7 @@ interface DecisionRow {
         </div>
       </div>
 
-      <div class="tabs" role="tablist">
+      <div class="tabs mb-3.5" role="tablist">
         <button
           class="tab"
           [class.active]="tab() === 'agents'"
@@ -180,7 +180,7 @@ interface DecisionRow {
                       <td>
                         {{ a.agent_name }}
                         @if (a.provisional) {
-                          <span class="badge" title="Low sample — treat as provisional">prov.</span>
+                          <span class="pill ml-1.5 align-middle" title="Low sample — treat as provisional">prov.</span>
                         }
                       </td>
                       <td class="muted">{{ a.model_id || '—' }}</td>
@@ -259,7 +259,7 @@ interface DecisionRow {
                       <td>
                         {{ a.agent_name }}
                         @if (a.n_contrarian_decisions < 10) {
-                          <span class="badge" title="Fewer than 10 disagreements — provisional">prov.</span>
+                          <span class="pill ml-1.5 align-middle" title="Fewer than 10 disagreements — provisional">prov.</span>
                         }
                       </td>
                       <td class="muted">{{ a.model_id || '—' }}</td>
@@ -358,7 +358,7 @@ interface DecisionRow {
                       <td>
                         {{ s.strategy_name }}
                         @if (s.provisional) {
-                          <span class="badge" title="Fewer than 20 cycles — provisional">prov.</span>
+                          <span class="pill ml-1.5 align-middle" title="Fewer than 20 cycles — provisional">prov.</span>
                         }
                       </td>
                       <td class="muted">{{ s.flavor_display }}</td>
@@ -477,12 +477,8 @@ interface DecisionRow {
       .tbl .pos { color: var(--acc-long-fg); }
       .tbl .neg { color: var(--acc-short-fg); }
       .tbl .micro { font-size:10.5px; color: var(--text-3); margin-top:2px; white-space:nowrap; }
-      .tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border); }
-      .tab { padding:8px 14px; background:none; border:none; color: var(--text-3); cursor:pointer; border-bottom:2px solid transparent; }
-      .tab.active { color: var(--text); border-bottom-color: var(--acc-info); }
       .card { margin-bottom: 16px; }
       .empty { color: var(--text-3); font-size: 13px; padding: 8px 2px; }
-      .badge { font-size:10px; padding:1px 6px; border-radius:8px; background: var(--surface-3); color: var(--text-3); margin-left:6px; }
       .tbl .r { text-align: right; }
       .tbl .muted { color: var(--text-3); }
       .tbl .clk { cursor: pointer; }

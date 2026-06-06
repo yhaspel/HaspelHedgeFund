@@ -10,39 +10,58 @@ describe('ConfirmService', () => {
     expect(svc.active()).toBeNull();
   });
 
-  it('exposes the pending request via active() while open', () => {
-    svc.ask({ title: 'Halt all 3 accounts?', danger: true, requireText: 'HALT' });
+  it('ask(): exposes the request, resolves true on accept, clears active()', async () => {
+    const p = svc.ask({ title: 'Halt all 3 accounts?', danger: true, requireText: 'HALT' });
     const a = svc.active();
+    expect(a?.kind).toBe('confirm');
     expect(a?.title).toBe('Halt all 3 accounts?');
     expect(a?.danger).toBe(true);
     expect(a?.requireText).toBe('HALT');
-  });
-
-  it('resolves true and clears active() on settle(true)', async () => {
-    const p = svc.ask({ title: 'Confirm?' });
-    svc.settle(true);
+    svc.accept(true);
     expect(await p).toBe(true);
     expect(svc.active()).toBeNull();
   });
 
-  it('resolves false on settle(false)', async () => {
+  it('ask(): resolves false on cancel', async () => {
     const p = svc.ask({ title: 'Confirm?' });
-    svc.settle(false);
+    svc.cancel();
     expect(await p).toBe(false);
+  });
+
+  it('notify(): single-action info, resolves on accept', async () => {
+    const p = svc.notify({ title: 'Could not delete.' });
+    expect(svc.active()?.kind).toBe('notify');
+    svc.accept(true);
+    await p; // resolves void
     expect(svc.active()).toBeNull();
   });
 
-  it('cancels a still-open request (resolves false) when a new ask arrives', async () => {
-    const first = svc.ask({ title: 'First?' });
-    const second = svc.ask({ title: 'Second?' });
-    expect(await first).toBe(false);
-    expect(svc.active()?.title).toBe('Second?');
-    svc.settle(true);
-    expect(await second).toBe(true);
+  it('askText(): resolves the typed value on accept', async () => {
+    const p = svc.askText({ title: 'Rename list', initialValue: 'Old' });
+    expect(svc.active()?.kind).toBe('prompt');
+    expect(svc.active()?.initialValue).toBe('Old');
+    svc.accept('New name');
+    expect(await p).toBe('New name');
   });
 
-  it('settle() with no active request is a no-op', () => {
-    expect(() => svc.settle(true)).not.toThrow();
+  it('askText(): resolves null on cancel', async () => {
+    const p = svc.askText({ title: 'Rename list' });
+    svc.cancel();
+    expect(await p).toBeNull();
+  });
+
+  it('a new request cancels the one already open (with its cancel value)', async () => {
+    const first = svc.ask({ title: 'First?' });
+    const second = svc.askText({ title: 'Second?' });
+    expect(await first).toBe(false);
+    expect(svc.active()?.title).toBe('Second?');
+    svc.accept('x');
+    expect(await second).toBe('x');
+  });
+
+  it('accept()/cancel() with no active request are no-ops', () => {
+    expect(() => svc.accept(true)).not.toThrow();
+    expect(() => svc.cancel()).not.toThrow();
     expect(svc.active()).toBeNull();
   });
 });

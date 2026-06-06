@@ -6,13 +6,19 @@ import { BacktestsStore } from './backtests.store';
 
 /** ADR 0004: a single result row rendered in the ⌘K palette. */
 export interface PaletteResult {
-  source: 'run' | 'strategy' | 'backtest';
+  source: 'run' | 'strategy' | 'backtest' | 'action';
   label: string;
   sublabel: string;
   route: (string | number)[];
 }
 
 const MAX_RESULTS = 20;
+
+/** Static navigation actions surfaced in the palette. "New run" was demoted
+ *  from the sidebar rail (HHF-03 / §E) — ⌘K is now a primary way to reach it. */
+const ACTIONS: { label: string; sublabel: string; route: (string | number)[]; keywords: string }[] = [
+  { label: 'New run', sublabel: 'Start a new analysis run', route: ['/runs/new'], keywords: 'new run create start analysis' },
+];
 
 @Injectable({ providedIn: 'root' })
 export class CommandPaletteService {
@@ -30,6 +36,13 @@ export class CommandPaletteService {
     const q = this.query().trim().toLowerCase();
     if (!q) return [];
     const out: PaletteResult[] = [];
+
+    // Static actions first, so e.g. typing "new run" surfaces the action on top.
+    for (const a of ACTIONS) {
+      if (a.label.toLowerCase().includes(q) || a.keywords.includes(q)) {
+        out.push({ source: 'action', label: a.label, sublabel: a.sublabel, route: a.route });
+      }
+    }
 
     for (const r of this.runs.runs()) {
       const idMatch = String(r.id).includes(q);

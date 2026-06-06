@@ -8,7 +8,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "check:inline-styles": "node scripts/check-inline-styles.mjs",
-    "check:tokens": "node scripts/check-tokens.mjs"
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "check:no-native-dialogs": "node scripts/check-no-native-dialogs.mjs"
   },
   "private": true,
   "packageManager": "pnpm@11.1.2",
