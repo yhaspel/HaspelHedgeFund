@@ -44,7 +44,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
                (focus)="popHome.show()" (blur)="popHome.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
-              <hf-popover #popHome placement="right" align="center" size="compact">Dashboard</hf-popover>
+              <hf-popover #popHome placement="right" align="center" size="compact" strategy="fixed">Dashboard</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
                [attr.aria-current]="navPort.isActive ? 'page' : null"
@@ -52,7 +52,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
                (focus)="popPort.show()" (blur)="popPort.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
-              <hf-popover #popPort placement="right" align="center" size="compact">Portfolios</hf-popover>
+              <hf-popover #popPort placement="right" align="center" size="compact" strategy="fixed">Portfolios</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
                [attr.aria-current]="navWatch.isActive ? 'page' : null"
@@ -60,7 +60,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
                (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
-              <hf-popover #popWatch placement="right" align="center" size="compact">Watchlist</hf-popover>
+              <hf-popover #popWatch placement="right" align="center" size="compact" strategy="fixed">Watchlist</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
                [attr.aria-current]="navBrk.isActive ? 'page' : null"
@@ -68,7 +68,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
                (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
-              <hf-popover #popBrk placement="right" align="center" size="compact">Broker accounts</hf-popover>
+              <hf-popover #popBrk placement="right" align="center" size="compact" strategy="fixed">Broker accounts</hf-popover>
             </a>
           </div>
           <div class="nav-group" role="group" aria-label="Research">
@@ -80,7 +80,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
                (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
-              <hf-popover #popRuns placement="right" align="center" size="compact">Runs</hf-popover>
+              <hf-popover #popRuns placement="right" align="center" size="compact" strategy="fixed">Runs</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
                [attr.aria-current]="navScreener.isActive ? 'page' : null"
@@ -88,7 +88,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
                (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
-              <hf-popover #popScreener placement="right" align="center" size="compact">Screener</hf-popover>
+              <hf-popover #popScreener placement="right" align="center" size="compact" strategy="fixed">Screener</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
                [attr.aria-current]="navBt.isActive ? 'page' : null"
@@ -96,7 +96,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
                (focus)="popBt.show()" (blur)="popBt.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
-              <hf-popover #popBt placement="right" align="center" size="compact">Backtests</hf-popover>
+              <hf-popover #popBt placement="right" align="center" size="compact" strategy="fixed">Backtests</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
                [attr.aria-current]="navSt.isActive ? 'page' : null"
@@ -104,7 +104,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
                (focus)="popSt.show()" (blur)="popSt.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
-              <hf-popover #popSt placement="right" align="center" size="compact">Strategies</hf-popover>
+              <hf-popover #popSt placement="right" align="center" size="compact" strategy="fixed">Strategies</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/graphs" routerLinkActive="active" #navGraphs="routerLinkActive"
                [attr.aria-current]="navGraphs.isActive ? 'page' : null"
@@ -112,7 +112,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popGraphs.show()" (mouseleave)="popGraphs.maybeHide()"
                (focus)="popGraphs.show()" (blur)="popGraphs.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-graph" /></svg>
-              <hf-popover #popGraphs placement="right" align="center" size="compact">Agent graphs</hf-popover>
+              <hf-popover #popGraphs placement="right" align="center" size="compact" strategy="fixed">Agent graphs</hf-popover>
             </a>
           </div>
           <div class="nav-group" role="group" aria-label="Operate">
@@ -123,7 +123,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
                (focus)="popNews.show()" (blur)="popNews.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
-              <hf-popover #popNews placement="right" align="center" size="compact">News</hf-popover>
+              <hf-popover #popNews placement="right" align="center" size="compact" strategy="fixed">News</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/schedules" routerLinkActive="active" #navSched="routerLinkActive"
                [attr.aria-current]="navSched.isActive ? 'page' : null"
@@ -131,7 +131,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popSched.show()" (mouseleave)="popSched.maybeHide()"
                (focus)="popSched.show()" (blur)="popSched.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-calendar" /></svg>
-              <hf-popover #popSched placement="right" align="center" size="compact">Schedules</hf-popover>
+              <hf-popover #popSched placement="right" align="center" size="compact" strategy="fixed">Schedules</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/leaderboard" routerLinkActive="active" #navLb="routerLinkActive"
                [attr.aria-current]="navLb.isActive ? 'page' : null"
@@ -139,7 +139,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popLb.show()" (mouseleave)="popLb.maybeHide()"
                (focus)="popLb.show()" (blur)="popLb.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-trophy" /></svg>
-              <hf-popover #popLb placement="right" align="center" size="compact">Leaderboard</hf-popover>
+              <hf-popover #popLb placement="right" align="center" size="compact" strategy="fixed">Leaderboard</hf-popover>
             </a>
             <a class="nav-btn" routerLink="/fund" routerLinkActive="active" #navFund="routerLinkActive"
                [attr.aria-current]="navFund.isActive ? 'page' : null"
@@ -147,7 +147,7 @@ const THEME_KEY = 'hf.theme';
                (mouseenter)="popFund.show()" (mouseleave)="popFund.maybeHide()"
                (focus)="popFund.show()" (blur)="popFund.maybeHide()">
               <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-shield" /></svg>
-              <hf-popover #popFund placement="right" align="center" size="compact">Autonomous Fund</hf-popover>
+              <hf-popover #popFund placement="right" align="center" size="compact" strategy="fixed">Autonomous Fund</hf-popover>
             </a>
           </div>
         </div>
@@ -160,7 +160,7 @@ const THEME_KEY = 'hf.theme';
              (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
              (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
             <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
-            <hf-popover #popProfile placement="right" align="center" size="compact">Profile</hf-popover>
+            <hf-popover #popProfile placement="right" align="center" size="compact" strategy="fixed">Profile</hf-popover>
           </a>
           <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
              [attr.aria-current]="navInfo.isActive ? 'page' : null"
@@ -168,7 +168,7 @@ const THEME_KEY = 'hf.theme';
              (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
              (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
             <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
-            <hf-popover #popInfo placement="right" align="center" size="compact">Guides</hf-popover>
+            <hf-popover #popInfo placement="right" align="center" size="compact" strategy="fixed">Guides</hf-popover>
           </a>
           <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
              [attr.aria-current]="navSet.isActive ? 'page' : null"
@@ -176,7 +176,7 @@ const THEME_KEY = 'hf.theme';
              (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
              (focus)="popSet.show()" (blur)="popSet.maybeHide()">
             <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
-            <hf-popover #popSet placement="right" align="center" size="compact">Settings</hf-popover>
+            <hf-popover #popSet placement="right" align="center" size="compact" strategy="fixed">Settings</hf-popover>
           </a>
         </div>
       </nav>

@@ -56,7 +56,7 @@ import { PopoverComponent } from '../shared/popover.component';
       <ng-container *ngIf="ap() as a">
         <!-- Validation-gate checklist -->
         <section class="card">
-          <h2>Validation gate (§9)</h2>
+          <h2>Validation gate</h2>
           <ul class="checklist">
             <li *ngFor="let c of a.validation.checks" [class.ok]="c.ok" [class.bad]="!c.ok">
               <span class="mark">{{ c.ok ? '✓' : '✕' }}</span>{{ c.detail }}
@@ -197,7 +197,12 @@ import { PopoverComponent } from '../shared/popover.component';
     /* Section cards hold content directly (no .card-bd), so the shell .card has no
        inner padding and no separation — restore comfortable padding + gaps. */
     section.card { padding: 18px 20px; margin-bottom: 16px; }
-    section.card > h2 { margin: 0 0 14px; }
+    /* Section headings use the app's compact uppercase card-title treatment. */
+    section.card > h2, .sched-head h2 {
+      font-size: var(--fs-11); line-height: 16px; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--text-3); font-weight: 500;
+    }
+    section.card > h2 { margin: 0 0 12px; }
     .pill-wrap { position: relative; display: inline-flex; }
     button.pill-btn { font-family: inherit; line-height: 1; cursor: help; -webkit-appearance: none; appearance: none; }
     button.pill-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }

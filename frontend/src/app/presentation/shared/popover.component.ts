@@ -57,15 +57,18 @@ let _popoverIdSeq = 0;
         #pop
         [id]="popoverId"
         [attr.role]="role()"
-        [class.placement-top]="effectivePlacement() === 'top'"
-        [class.placement-bottom]="effectivePlacement() === 'bottom'"
-        [class.placement-left]="effectivePlacement() === 'left'"
-        [class.placement-right]="effectivePlacement() === 'right'"
-        [class.align-start]="effectiveAlign() === 'start'"
-        [class.align-end]="effectiveAlign() === 'end'"
-        [class.align-center]="effectiveAlign() === 'center'"
+        [class.fixed]="strategy() === 'fixed'"
+        [class.placement-top]="strategy() !== 'fixed' && effectivePlacement() === 'top'"
+        [class.placement-bottom]="strategy() !== 'fixed' && effectivePlacement() === 'bottom'"
+        [class.placement-left]="strategy() !== 'fixed' && effectivePlacement() === 'left'"
+        [class.placement-right]="strategy() !== 'fixed' && effectivePlacement() === 'right'"
+        [class.align-start]="strategy() !== 'fixed' && effectiveAlign() === 'start'"
+        [class.align-end]="strategy() !== 'fixed' && effectiveAlign() === 'end'"
+        [class.align-center]="strategy() !== 'fixed' && effectiveAlign() === 'center'"
         [class.surface-bare]="surface() === 'bare'"
         [class.size-compact]="size() === 'compact'"
+        [style.top.px]="strategy() === 'fixed' ? fixedTop() : null"
+        [style.left.px]="strategy() === 'fixed' ? fixedLeft() : null"
         (mouseenter)="onPopEnter()"
         (mouseleave)="onPopLeave()"
       >
@@ -100,6 +103,10 @@ let _popoverIdSeq = 0;
         white-space: pre-line;
         animation: hf-pop-fade-in 120ms var(--ease-out-ui);
       }
+      /* Fixed strategy: position against the viewport (JS sets top/left) so the
+         popover escapes any ancestor overflow clip. Placement/align classes are
+         not applied in this mode, so no calc-offsets or transforms interfere. */
+      .hf-pop.fixed { position: fixed; }
       /* The 'bare' surface lets rich content (ticker popover, glossary card)
          bring its own padding/background — hf-popover then only provides
          positioning and z-index/role wiring. */
@@ -204,6 +211,10 @@ export class PopoverComponent implements OnDestroy {
   surface = input<'card' | 'bare'>('card');
   /** Size variant — `compact` is a single-line label tooltip (no min-width, smaller padding). */
   size = input<'default' | 'compact'>('default');
+  /** Positioning strategy. `fixed` positions against the viewport (JS-set top/left)
+   *  so the popover escapes ancestor overflow clipping — e.g. the sidebar's
+   *  `.nav-scroll` (overflow-x: hidden), which otherwise clips a right-placed tip. */
+  strategy = input<'absolute' | 'fixed'>('absolute');
   /** Delay before hiding on hover-out, so the cursor can cross the gap into the popover. */
   hoverCloseDelay = input(80);
   /** Viewport edge margin used by the flip math. */
@@ -221,6 +232,9 @@ export class PopoverComponent implements OnDestroy {
   readonly open = signal(false);
   readonly effectivePlacement = signal<'top' | 'bottom' | 'left' | 'right'>('top');
   readonly effectiveAlign = signal<'start' | 'end' | 'center'>('start');
+  // Viewport coordinates for strategy="fixed" (null until measured / in absolute mode).
+  readonly fixedTop = signal<number | null>(null);
+  readonly fixedLeft = signal<number | null>(null);
 
   private readonly hostEl = inject(ElementRef<HTMLElement>);
   private readonly injector = inject(Injector);
@@ -248,7 +262,10 @@ export class PopoverComponent implements OnDestroy {
     // Measure after Angular's next render so the popover element exists and
     // we mutate placement signals outside the active CD cycle (avoids
     // NG0100 under zoneless dev-mode).
-    afterNextRender(() => this.measureAndFlip(), { injector: this.injector });
+    afterNextRender(
+      () => (this.strategy() === 'fixed' ? this.measureFixed() : this.measureAndFlip()),
+      { injector: this.injector },
+    );
   }
 
   hide(): void {
@@ -415,5 +432,59 @@ export class PopoverComponent implements OnDestroy {
       }
     }
     this.effectiveAlign.set(align);
+  }
+
+  /**
+   * Position the popover against the viewport for `strategy="fixed"`. Mirrors the
+   * placement/align of the absolute path but sets explicit top/left, and flips
+   * against the viewport — a fixed element escapes ancestor overflow clipping
+   * (e.g. the sidebar's `.nav-scroll`), so the clip-ancestor math doesn't apply.
+   */
+  private measureFixed(): void {
+    const popEl = this.popRef?.nativeElement;
+    const anchorEl = this.getAnchor();
+    if (!popEl || !anchorEl) return;
+
+    const a = anchorEl.getBoundingClientRect();
+    const p = popEl.getBoundingClientRect();
+    const gap = 8;
+    const margin = this.edgeMargin();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const fitsRight = a.right + gap + p.width + margin <= vw;
+    const fitsLeft = a.left - gap - p.width - margin >= 0;
+    const fitsAbove = a.top - gap - p.height - margin >= 0;
+    const fitsBelow = a.bottom + gap + p.height + margin <= vh;
+
+    const desired = this.placement();
+    let place: 'top' | 'bottom' | 'left' | 'right';
+    if (desired === 'right') place = fitsRight || !fitsLeft ? 'right' : 'left';
+    else if (desired === 'left') place = fitsLeft || !fitsRight ? 'left' : 'right';
+    else if (desired === 'bottom') place = fitsBelow || !fitsAbove ? 'bottom' : 'top';
+    else if (desired === 'top') place = fitsAbove || !fitsBelow ? 'top' : 'bottom';
+    else place = fitsRight ? 'right' : fitsBelow ? 'bottom' : fitsAbove ? 'top' : 'left';
+    this.effectivePlacement.set(place);
+
+    const align = this.align();
+    let top: number;
+    let left: number;
+    if (place === 'left' || place === 'right') {
+      left = place === 'right' ? a.right + gap : a.left - gap - p.width;
+      if (align === 'start') top = a.top;
+      else if (align === 'end') top = a.bottom - p.height;
+      else top = a.top + a.height / 2 - p.height / 2; // center / auto
+    } else {
+      top = place === 'bottom' ? a.bottom + gap : a.top - gap - p.height;
+      if (align === 'end') left = a.right - p.width;
+      else if (align === 'center') left = a.left + a.width / 2 - p.width / 2;
+      else left = a.left; // start / auto
+    }
+
+    // Keep the surface within the viewport.
+    left = Math.max(margin, Math.min(left, vw - p.width - margin));
+    top = Math.max(margin, Math.min(top, vh - p.height - margin));
+    this.fixedLeft.set(Math.round(left));
+    this.fixedTop.set(Math.round(top));
   }
 }
