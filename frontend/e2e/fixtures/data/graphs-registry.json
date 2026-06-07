@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "analytical": [
+    {
+      "agent_name": "fundamentals",
+      "kind": "analytical",
+      "state_key": "fundamentals",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Fundamentals"
+    },
+    {
+      "agent_name": "technicals",
+      "kind": "analytical",
+      "state_key": "technicals",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Technicals"
+    },
+    {
+      "agent_name": "valuation",
+      "kind": "analytical",
+      "state_key": "valuation",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Valuation"
+    },
+    {
+      "agent_name": "sentiment",
+      "kind": "analytical",
+      "state_key": "sentiment",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Sentiment"
+    },
+    {
+      "agent_name": "macro",
+      "kind": "analytical",
+      "state_key": "macro",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Macro"
+    },
+    {
+      "agent_name": "news_digest",
+      "kind": "analytical",
+      "state_key": "news_digest",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "News Digest"
+    }
+  ],
+  "personas": [
+    {
+      "agent_name": "buffett",
+      "kind": "persona",
+      "state_key": "buffett",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Warren Buffett"
+    },
+    {
+      "agent_name": "munger",
+      "kind": "persona",
+      "state_key": "munger",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Charlie Munger"
+    },
+    {
+      "agent_name": "graham",
+      "kind": "persona",
+      "state_key": "graham",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Benjamin Graham"
+    },
+    {
+      "agent_name": "wood",
+      "kind": "persona",
+      "state_key": "wood",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Cathie Wood"
+    },
+    {
+      "agent_name": "druckenmiller",
+      "kind": "persona",
+      "state_key": "druckenmiller",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Stanley Druckenmiller"
+    },
+    {
+      "agent_name": "burry",
+      "kind": "persona",
+      "state_key": "burry",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Michael Burry"
+    },
+    {
+      "agent_name": "damodaran",
+      "kind": "persona",
+      "state_key": "damodaran",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Aswath Damodaran"
+    },
+    {
+      "agent_name": "lynch",
+      "kind": "persona",
+      "state_key": "lynch",
+      "model_selectable": true,
+      "editable": true,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Peter Lynch"
+    }
+  ],
+  "tail": [
+    {
+      "agent_name": "risk_manager",
+      "kind": "risk",
+      "state_key": "risk",
+      "model_selectable": true,
+      "editable": false,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "Risk Manager"
+    },
+    {
+      "agent_name": "portfolio_manager",
+      "kind": "portfolio",
+      "state_key": "decision",
+      "model_selectable": false,
+      "editable": false,
+      "default_model_key": null,
+      "label": "Portfolio Manager"
+    },
+    {
+      "agent_name": "cio",
+      "kind": "cio",
+      "state_key": "cio",
+      "model_selectable": true,
+      "editable": false,
+      "default_model_key": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "label": "CIO"
+    }
+  ],
+  "structural": [
+    "entry",
+    "analytical_join",
+    "persona_join"
+  ],
+  "tiers": [
+    {
+      "name": "dev",
+      "label": "Dev (free)",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "models": [
+        "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "openrouter:deepseek/deepseek-v4-flash:free",
+        "openrouter:google/gemma-4-31b-it:free",
+        "openrouter:z-ai/glm-4.5-air:free"
+      ]
+    },
+    {
+      "name": "frugal",
+      "label": "Frugal",
+      "default_model": "openrouter:meta-llama/llama-3.3-70b-instruct",
+      "models": [
+        "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "openrouter:nvidia/nemotron-3-nano-30b-a3b",
+        "openrouter:mistralai/mistral-small-3.2-24b-instruct",
+        "openrouter:google/gemma-3-27b-it",
+        "openrouter:z-ai/glm-4-32b",
+        "openrouter:deepseek/deepseek-v4-flash"
+      ]
+    },
+    {
+      "name": "hybrid",
+      "label": "Hybrid",
+      "default_model": "anthropic:claude-haiku-4-5-20251001",
+      "models": [
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-haiku-4-5-20251001",
+        "openrouter:meta-llama/llama-3.3-70b-instruct"
+      ]
+    },
+    {
+      "name": "research",
+      "label": "Research",
+      "default_model": "anthropic:claude-sonnet-4-6",
+      "models": [
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-haiku-4-5-20251001",
+        "anthropic:claude-opus-4-7",
+        "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "openrouter:deepseek/deepseek-v4-pro",
+        "openrouter:z-ai/glm-5.1"
+      ]
+    },
+    {
+      "name": "quality",
+      "label": "Quality",
+      "default_model": "anthropic:claude-opus-4-7",
+      "models": [
+        "anthropic:claude-opus-4-7",
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-haiku-4-5-20251001",
+        "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "openrouter:deepseek/deepseek-v4-pro",
+        "openrouter:z-ai/glm-5.1"
+      ]
+    }
+  ],
+  "notes": {
+    "macro": "Shared per-date cache: this model applies on the first run for a date; later runs reuse the cached narrative.",
+    "news_digest_min_context": 32000
+  }
+}

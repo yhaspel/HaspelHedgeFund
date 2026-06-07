@@ -1,0 +1,116 @@
+[
+  {
+    "id": 7,
+    "name": "My Value only",
+    "description": "Value-investing slant \u2014 fundamentals, valuation and sentiment feeding the value personas (Buffett, Munger, Graham, Damodaran).",
+    "is_template": false,
+    "owned": true,
+    "created_at": "2026-06-02T07:15:25.453355Z",
+    "updated_at": "2026-06-02T07:20:32.322154Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 13,
+      "version": 6,
+      "validation_status": "valid",
+      "created_at": "2026-06-02T07:20:32.317257Z",
+      "notes": "",
+      "display_label": "My Value only:v6"
+    },
+    "version_count": 6
+  },
+  {
+    "id": 6,
+    "name": "My Council classic",
+    "description": "The full agent council \u2014 every analytical-tier agent and all eight investor personas. The default, mirrors the hardcoded graph.",
+    "is_template": false,
+    "owned": true,
+    "created_at": "2026-06-01T20:03:48.468149Z",
+    "updated_at": "2026-06-01T20:06:58.362053Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 7,
+      "version": 2,
+      "validation_status": "valid",
+      "created_at": "2026-06-01T20:06:58.350634Z",
+      "notes": "",
+      "display_label": "My Council classic:v2"
+    },
+    "version_count": 2
+  },
+  {
+    "id": 5,
+    "name": "Value only",
+    "description": "Value-investing slant \u2014 fundamentals, valuation and sentiment feeding the value personas (Buffett, Munger, Graham, Damodaran).",
+    "is_template": true,
+    "owned": false,
+    "created_at": "2026-06-01T19:21:30.514852Z",
+    "updated_at": "2026-06-01T19:21:30.514855Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 5,
+      "version": 1,
+      "validation_status": "valid",
+      "created_at": "2026-06-01T19:21:30.515137Z",
+      "notes": "Seeded platform template.",
+      "display_label": "Value only:v1"
+    },
+    "version_count": 1
+  },
+  {
+    "id": 4,
+    "name": "Single persona (Buffett)",
+    "description": "A lean starting point: fundamentals, technicals and valuation feeding a single Buffett persona. Add personas to taste.",
+    "is_template": true,
+    "owned": false,
+    "created_at": "2026-06-01T19:21:30.513990Z",
+    "updated_at": "2026-06-01T19:21:30.513994Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 4,
+      "version": 1,
+      "validation_status": "valid",
+      "created_at": "2026-06-01T19:21:30.514296Z",
+      "notes": "Seeded platform template.",
+      "display_label": "Single persona (Buffett):v1"
+    },
+    "version_count": 1
+  },
+  {
+    "id": 3,
+    "name": "Sector rotation",
+    "description": "ETF-friendly fan-out \u2014 technicals, macro and news only (no per-company fundamentals/valuation) \u2014 with the macro trio of personas. Mirrors the sector-rotation builder.",
+    "is_template": true,
+    "owned": false,
+    "created_at": "2026-06-01T19:21:30.513088Z",
+    "updated_at": "2026-06-01T19:21:30.513091Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 3,
+      "version": 1,
+      "validation_status": "valid",
+      "created_at": "2026-06-01T19:21:30.513398Z",
+      "notes": "Seeded platform template.",
+      "display_label": "Sector rotation:v1"
+    },
+    "version_count": 1
+  },
+  {
+    "id": 2,
+    "name": "Council classic",
+    "description": "The full agent council \u2014 every analytical-tier agent and all eight investor personas. The default, mirrors the hardcoded graph.",
+    "is_template": true,
+    "owned": false,
+    "created_at": "2026-06-01T19:21:30.511418Z",
+    "updated_at": "2026-06-01T19:21:30.511427Z",
+    "archived_at": null,
+    "latest_version": {
+      "id": 2,
+      "version": 1,
+      "validation_status": "valid",
+      "created_at": "2026-06-01T19:21:30.512111Z",
+      "notes": "Seeded platform template.",
+      "display_label": "Council classic:v1"
+    },
+    "version_count": 1
+  }
+]

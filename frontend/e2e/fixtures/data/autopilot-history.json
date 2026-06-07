@@ -1,0 +1,67 @@
+{
+  "runs": [
+    {
+      "id": 1,
+      "fire_time": "2026-06-06T05:08:50.592860+00:00",
+      "status": "submitted",
+      "target_id": 112,
+      "n_orders": 3,
+      "submit_decision": {
+        "mode": "paper",
+        "items": [
+          {
+            "side": "buy",
+            "status": "pending_open",
+            "ticker": "EEM",
+            "order_id": 54,
+            "quantity": "43.199343",
+            "client_order_id": "rbo-225"
+          },
+          {
+            "side": "buy",
+            "status": "pending_open",
+            "ticker": "TBT",
+            "order_id": 55,
+            "quantity": "83.662405",
+            "client_order_id": "rbo-226"
+          },
+          {
+            "side": "buy",
+            "status": "pending_open",
+            "ticker": "UUP",
+            "order_id": 56,
+            "quantity": "106.819727",
+            "client_order_id": "rbo-227"
+          }
+        ],
+        "orders": 3,
+        "account": 13,
+        "enabled": true,
+        "submitted": 0,
+        "pending_open": 3,
+        "market_closed": true
+      },
+      "guardrail_actions": {
+        "drawdown": {
+          "peak": "100000.00",
+          "state": "active",
+          "equity": "100000.00",
+          "transition": false,
+          "prior_state": "active",
+          "drawdown_pct": 0.0
+        },
+        "impact_bps": {
+          "EEM": 0.1,
+          "TBT": 0.6,
+          "UUP": 0.4
+        },
+        "vol_target": {
+          "scale": 0.7593,
+          "vol_target": 0.1,
+          "realized_vol": 0.1317
+        }
+      },
+      "error": ""
+    }
+  ]
+}

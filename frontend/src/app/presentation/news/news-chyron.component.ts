@@ -36,8 +36,8 @@ import { MarketNewsItem } from '../../core/models/news.model';
   template: `
     <div
       class="chyron"
-      [class.paused]="paused() || prefersReducedMotion"
-      [class.reduced-motion]="prefersReducedMotion"
+      [class.paused]="paused() || prefersReducedMotion()"
+      [class.reduced-motion]="prefersReducedMotion()"
       (mouseenter)="onEnter()"
       (mouseleave)="onLeave()"
       (focusin)="onFocusIn()"
@@ -296,7 +296,10 @@ export class NewsChyronComponent implements AfterViewInit, OnDestroy {
   copies = [0, 1];
 
   readonly paused = signal(false);
-  prefersReducedMotion = false;
+  // Signal (not a plain field): this is set in ngAfterViewInit + a matchMedia
+  // listener, and the zoneless app needs a signal for the [class] binding to
+  // react (a plain property left the reduced-motion class permanently off).
+  readonly prefersReducedMotion = signal(false);
 
   private hoverCount = 0;
   private focusCount = 0;
@@ -305,7 +308,7 @@ export class NewsChyronComponent implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     if (typeof window !== 'undefined' && 'matchMedia' in window) {
       this.motionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
-      this.prefersReducedMotion = this.motionMq.matches;
+      this.prefersReducedMotion.set(this.motionMq.matches);
       // Listen for runtime changes (browser toggling settings).
       this.motionMq.addEventListener?.('change', this.onMotionChange);
     }
@@ -316,7 +319,7 @@ export class NewsChyronComponent implements AfterViewInit, OnDestroy {
   }
 
   private onMotionChange = (e: MediaQueryListEvent): void => {
-    this.prefersReducedMotion = e.matches;
+    this.prefersReducedMotion.set(e.matches);
   };
 
   togglePaused(): void {

@@ -1,0 +1,218 @@
+[
+  {
+    "id": 371,
+    "tickers": [
+      "XLRE"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.139464Z",
+    "finished_at": "2026-06-06T15:27:29.394736Z",
+    "total_cost_usd": "0.003007",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 240,
+        "ticker": "XLRE",
+        "action": "hold",
+        "side": "sector",
+        "confidence": 67
+      }
+    ]
+  },
+  {
+    "id": 370,
+    "tickers": [
+      "IBB"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.138413Z",
+    "finished_at": "2026-06-06T15:27:14.749543Z",
+    "total_cost_usd": "0.002796",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 239,
+        "ticker": "IBB",
+        "action": "buy",
+        "side": "sector",
+        "confidence": 58
+      }
+    ]
+  },
+  {
+    "id": 369,
+    "tickers": [
+      "XLI"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.137627Z",
+    "finished_at": "2026-06-06T15:26:47.777189Z",
+    "total_cost_usd": "0.002597",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 238,
+        "ticker": "XLI",
+        "action": "buy",
+        "side": "sector",
+        "confidence": 67
+      }
+    ]
+  },
+  {
+    "id": 368,
+    "tickers": [
+      "GDX"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.136835Z",
+    "finished_at": "2026-06-06T15:26:51.495624Z",
+    "total_cost_usd": "0.002712",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 234,
+        "ticker": "GDX",
+        "action": "hold",
+        "side": "sector",
+        "confidence": 72
+      }
+    ]
+  },
+  {
+    "id": 367,
+    "tickers": [
+      "XLB"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.136038Z",
+    "finished_at": "2026-06-06T15:26:51.338668Z",
+    "total_cost_usd": "0.002503",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 232,
+        "ticker": "XLB",
+        "action": "buy",
+        "side": "sector",
+        "confidence": 58
+      }
+    ]
+  },
+  {
+    "id": 366,
+    "tickers": [
+      "XLK"
+    ],
+    "status": "done",
+    "as_of_date": "2026-06-06",
+    "created_at": "2026-06-06T05:09:27.135239Z",
+    "finished_at": "2026-06-06T15:27:01.827138Z",
+    "total_cost_usd": "0.003229",
+    "source": "strategy",
+    "portfolio_target": 114,
+    "strategy_backlink": {
+      "portfolio_target_id": 114,
+      "portfolio_target_status": "autopilot_submitted",
+      "as_of_date": "2026-06-06",
+      "strategy_id": 47,
+      "strategy_name": "Sector Rotation",
+      "strategy_kind": "sector_rotation"
+    },
+    "personas": [
+      "druckenmiller",
+      "damodaran",
+      "burry"
+    ],
+    "rerun_of": null,
+    "decisions": [
+      {
+        "id": 231,
+        "ticker": "XLK",
+        "action": "hold",
+        "side": "sector",
+        "confidence": 73
+      }
+    ]
+  }
+]

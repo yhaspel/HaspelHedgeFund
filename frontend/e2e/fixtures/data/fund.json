@@ -1,0 +1,70 @@
+{
+  "fund_id": 1,
+  "name": "Autonomous Fund",
+  "state": "active",
+  "is_live": true,
+  "aggregate_nav": "299827.56",
+  "peak_equity": "303610.52",
+  "fund_dd_halt_pct": "6.00",
+  "per_account": [
+    {
+      "strategy_id": 48,
+      "name": "Cross-Asset Trend (CTA-lite)",
+      "kind": "global_macro",
+      "state": "active",
+      "is_enabled": true,
+      "nav": "100000.00",
+      "peak_equity": "100000.00",
+      "rolling_sharpe": null,
+      "next_run_at": "2026-06-12T21:00:00+00:00",
+      "cron_description": "At 05:00 PM, only on Friday",
+      "has_backtest": true,
+      "validation_passed": true,
+      "can_enable": false,
+      "setup_hint": null
+    },
+    {
+      "strategy_id": 46,
+      "name": "Multi-Factor Long/Short Equity",
+      "kind": "long_short",
+      "state": "active",
+      "is_enabled": true,
+      "nav": "99827.56",
+      "peak_equity": "99827.56",
+      "rolling_sharpe": null,
+      "next_run_at": "2026-06-12T20:30:00+00:00",
+      "cron_description": "At 04:30 PM, only on Friday",
+      "has_backtest": true,
+      "validation_passed": true,
+      "can_enable": false,
+      "setup_hint": null
+    },
+    {
+      "strategy_id": 47,
+      "name": "Sector Rotation",
+      "kind": "sector_rotation",
+      "state": "active",
+      "is_enabled": true,
+      "nav": "100000.00",
+      "peak_equity": "100000.00",
+      "rolling_sharpe": null,
+      "next_run_at": "2026-06-12T20:45:00+00:00",
+      "cron_description": "At 04:45 PM, only on Friday",
+      "has_backtest": true,
+      "validation_passed": true,
+      "can_enable": false,
+      "setup_hint": null
+    }
+  ],
+  "correlation": {
+    "available": false,
+    "reason": "insufficient_data",
+    "min_sample": 8,
+    "have": {
+      "Cross-Asset Trend (CTA-lite)": 0,
+      "Multi-Factor Long/Short Equity": 0,
+      "Sector Rotation": 1
+    }
+  },
+  "recommendations": []
+}

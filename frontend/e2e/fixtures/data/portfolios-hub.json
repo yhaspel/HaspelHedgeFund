@@ -1,0 +1,93 @@
+{
+  "books": [
+    {
+      "kind": "manual",
+      "portfolio_id": 6,
+      "name": "Manual book",
+      "subtitle": "Hand-managed positions & cash",
+      "cash": "40058.90",
+      "market_value": "59941.1100000000",
+      "equity": "100000.0100000000",
+      "positions_count": 9,
+      "link_route": "/portfolio",
+      "status": ""
+    },
+    {
+      "kind": "broker",
+      "portfolio_id": 17,
+      "name": "Demo book",
+      "subtitle": "Demo broker (no real account) \u00b7 paper",
+      "cash": "90606.24",
+      "market_value": "8400.9100017600",
+      "equity": "99007.1500017600",
+      "positions_count": 7,
+      "link_route": "/broker-accounts/5",
+      "status": "active"
+    },
+    {
+      "kind": "broker",
+      "portfolio_id": 61,
+      "name": "multifactor-ls",
+      "subtitle": "Alpaca (paper only) \u00b7 paper",
+      "cash": "23961.10",
+      "market_value": "75982.1774500000",
+      "equity": "99943.2774500000",
+      "positions_count": 9,
+      "link_route": "/broker-accounts/11",
+      "status": "active"
+    },
+    {
+      "kind": "broker",
+      "portfolio_id": 63,
+      "name": "sector-rotation",
+      "subtitle": "Alpaca (paper only) \u00b7 paper",
+      "cash": "100000.00",
+      "market_value": "0",
+      "equity": "100000.00",
+      "positions_count": 0,
+      "link_route": "/broker-accounts/12",
+      "status": "active"
+    },
+    {
+      "kind": "broker",
+      "portfolio_id": 65,
+      "name": "trend-cta",
+      "subtitle": "Alpaca (paper only) \u00b7 paper",
+      "cash": "100000.00",
+      "market_value": "0",
+      "equity": "100000.00",
+      "positions_count": 0,
+      "link_route": "/broker-accounts/13",
+      "status": "active"
+    },
+    {
+      "kind": "strategy",
+      "portfolio_id": 56,
+      "name": "Concentrated long-only \u00b7 2026-05-31 19:58",
+      "subtitle": "Concentrated long-only",
+      "cash": "28309.40",
+      "market_value": "71690.6000000000",
+      "equity": "100000.0000000000",
+      "positions_count": 7,
+      "link_route": "/strategies/41",
+      "status": ""
+    },
+    {
+      "kind": "strategy",
+      "portfolio_id": 1,
+      "name": "Daily L/S 100/50",
+      "subtitle": "Long/Short",
+      "cash": "100000.00",
+      "market_value": "0",
+      "equity": "100000.00",
+      "positions_count": 0,
+      "link_route": "/strategies/1",
+      "status": ""
+    }
+  ],
+  "totals": {
+    "books": 7,
+    "cash": "482935.64",
+    "equity": "698950.4374517600"
+  }
+}

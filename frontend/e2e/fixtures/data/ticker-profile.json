@@ -1,0 +1,12 @@
+{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "exchange": "NASDAQ",
+  "sector": "",
+  "price": "307.34",
+  "market_cap": "4514011993040",
+  "pe_ratio": "36.885107649357536",
+  "eps": "8.332360120015895",
+  "shares_outstanding": null,
+  "as_of": "2026-06-05"
+}

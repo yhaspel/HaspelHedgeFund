@@ -2,6 +2,9 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = True
 
+# Phase 8 — `manage.py seed_e2e` is permitted under dev settings only.
+E2E_SEED_ALLOWED = True
+
 # P2n: dev keeps platform-key fallback enabled so local workflows that rely on
 # env vars (FMP_API_KEY etc.) continue to work without per-user setup.
 ALLOW_PLATFORM_DATA_KEYS = True

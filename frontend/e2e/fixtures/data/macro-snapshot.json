@@ -1,0 +1,154 @@
+{
+  "as_of_date": "2026-06-06",
+  "growth_quadrant": "recovery",
+  "inflation_regime": "high",
+  "yield_curve_state": "flat",
+  "policy_stance": "neutral",
+  "narrative": "The current macro environment is characterized by a recovery growth quadrant, high inflation regime, flat yield curve state, and neutral policy stance. This combination suggests that the economy is recovering, but inflation remains a concern, and the flat yield curve indicates a potential slowdown in the future. The neutral policy stance implies that the central bank is not taking aggressive actions to stimulate or slow down the economy. The Markov regime consensus shows a bullish trend in most sectors, which may be a sign of overconfidence in the market. Overall, this environment is likely to favor sectors that are resilient to inflation and can benefit from a recovering economy.",
+  "sector_implications": {
+    "energy": "overweight",
+    "utilities": "underweight",
+    "financials": "neutral",
+    "healthcare": "neutral",
+    "technology": "overweight",
+    "industrials": "overweight",
+    "consumer_staples": "overweight",
+    "consumer_discretionary": "underweight"
+  },
+  "series_used": {
+    "DGS2": 3.98,
+    "DGS10": 4.45,
+    "GDPC1": 24152.656,
+    "INDPRO": 102.4963,
+    "T10Y2Y": 0.42,
+    "UNRATE": 4.3,
+    "CPIAUCSL": 332.407,
+    "FEDFUNDS": 3.63
+  },
+  "markov_consensus": {
+    "vote": {
+      "bear": 0,
+      "bull": 0,
+      "sideways": 0
+    },
+    "missing": [],
+    "per_ticker": {
+      "GLD": {
+        "stale": true,
+        "state": "bear",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": -0.4
+      },
+      "QQQ": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "SPY": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "TLT": {
+        "stale": true,
+        "state": "bear",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": -0.4
+      },
+      "UUP": {
+        "stale": true,
+        "state": "bear",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": -0.4
+      },
+      "XLB": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLC": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLE": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLF": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLI": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLK": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLP": {
+        "stale": true,
+        "state": "bull",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.4
+      },
+      "XLU": {
+        "stale": true,
+        "state": "sideways",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.0
+      },
+      "XLV": {
+        "stale": true,
+        "state": "sideways",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.0
+      },
+      "XLY": {
+        "stale": true,
+        "state": "sideways",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.0
+      },
+      "XLRE": {
+        "stale": true,
+        "state": "sideways",
+        "as_of_date": "2026-05-21",
+        "persistence": 0.7,
+        "bull_minus_bear_1d": 0.0
+      }
+    },
+    "stale_count": 16,
+    "available_count": 0,
+    "consensus_state": "unavailable",
+    "consensus_strength": 0.0
+  }
+}

@@ -38,6 +38,15 @@ yarn-error.log
 testem.log
 /typings
 __screenshots__/
+# …but DO commit the Playwright visual baselines (blessed Linux baselines, §5.1).
+!/e2e/visual/__screenshots__/
+
+# Playwright E2E (Phase 8)
+/e2e-results/
+/e2e/setup/*.storageState.json
+/e2e/**/test-results/
+/blob-report/
+/test-results/
 
 # System files
 .DS_Store

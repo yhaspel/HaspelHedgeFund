@@ -1,0 +1,113 @@
+{
+  "agents": [
+    {
+      "id": "buffett",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "munger",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "graham",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "wood",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "druckenmiller",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "burry",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "damodaran",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "lynch",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "persona"
+    },
+    {
+      "id": "fundamentals",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "fast_cheap",
+      "group": "analyst"
+    },
+    {
+      "id": "technicals",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "fast_cheap",
+      "group": "analyst"
+    },
+    {
+      "id": "valuation",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "fast_cheap",
+      "group": "analyst"
+    },
+    {
+      "id": "sentiment",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "fast_cheap",
+      "group": "analyst"
+    },
+    {
+      "id": "macro",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "fast_cheap",
+      "group": "context"
+    },
+    {
+      "id": "news_digest",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "context"
+    },
+    {
+      "id": "risk_manager",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "orchestration"
+    },
+    {
+      "id": "portfolio_manager",
+      "default_model": "anthropic:claude-haiku-4-5-20251001",
+      "recommended_tier": "frontier",
+      "group": "orchestration"
+    },
+    {
+      "id": "cio",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "recommended_tier": "frontier",
+      "group": "orchestration"
+    }
+  ],
+  "presets": [
+    "dev",
+    "research",
+    "quality",
+    "frugal",
+    "hybrid"
+  ]
+}

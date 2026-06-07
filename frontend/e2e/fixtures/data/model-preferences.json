@@ -1,0 +1,24 @@
+{
+  "preset": "frugal",
+  "per_agent_defaults": {
+    "cio": "openrouter:deepseek/deepseek-v4-pro",
+    "wood": "openrouter:deepseek/deepseek-v4-pro",
+    "burry": "openrouter:deepseek/deepseek-v4-pro",
+    "lynch": "openrouter:deepseek/deepseek-v4-pro",
+    "macro": "openrouter:deepseek/deepseek-v4-pro",
+    "graham": "openrouter:deepseek/deepseek-v4-pro",
+    "munger": "openrouter:deepseek/deepseek-v4-pro",
+    "buffett": "openrouter:deepseek/deepseek-v4-pro",
+    "damodaran": "openrouter:deepseek/deepseek-v4-pro",
+    "sentiment": "openrouter:deepseek/deepseek-v4-pro",
+    "valuation": "openrouter:deepseek/deepseek-v4-pro",
+    "technicals": "openrouter:deepseek/deepseek-v4-pro",
+    "news_digest": "openrouter:deepseek/deepseek-v4-pro",
+    "fundamentals": "openrouter:deepseek/deepseek-v4-pro",
+    "risk_manager": "openrouter:deepseek/deepseek-v4-pro",
+    "druckenmiller": "openrouter:deepseek/deepseek-v4-pro",
+    "portfolio_manager": "openrouter:deepseek/deepseek-v4-pro"
+  },
+  "per_tier_defaults": {},
+  "cost_ceiling_per_run_usd": "5.0000"
+}

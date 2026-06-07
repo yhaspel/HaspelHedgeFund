@@ -1,0 +1,259 @@
+{
+  "tiers": [
+    {
+      "tier_name": "dev",
+      "default_model": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+      "is_free_only": true,
+      "price_ceiling_in": null,
+      "price_ceiling_out": null,
+      "allow_reasoning": false,
+      "is_live_synced": true,
+      "members": [
+        {
+          "model_id": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+          "ordering": 0,
+          "role": "",
+          "display_name": "NVIDIA: Nemotron 3 Super (free) (OpenRouter Free)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:deepseek/deepseek-v4-flash:free",
+          "ordering": 1,
+          "role": "",
+          "display_name": "DeepSeek: DeepSeek V4 Flash (free) (OpenRouter Free)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:google/gemma-4-31b-it:free",
+          "ordering": 2,
+          "role": "",
+          "display_name": "Google: Gemma 4 31B (free) (OpenRouter Free)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:z-ai/glm-4.5-air:free",
+          "ordering": 3,
+          "role": "",
+          "display_name": "Z.ai: GLM 4.5 Air (free) (OpenRouter Free)",
+          "supports_reasoning": false,
+          "is_active": true
+        }
+      ]
+    },
+    {
+      "tier_name": "frugal",
+      "default_model": "openrouter:meta-llama/llama-3.3-70b-instruct",
+      "is_free_only": false,
+      "price_ceiling_in": "1.0000",
+      "price_ceiling_out": "5.0000",
+      "allow_reasoning": false,
+      "is_live_synced": true,
+      "members": [
+        {
+          "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+          "ordering": 0,
+          "role": "",
+          "display_name": "Meta: Llama 3.3 70B Instruct (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
+          "ordering": 1,
+          "role": "",
+          "display_name": "NVIDIA: Nemotron 3 Nano 30B A3B (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
+          "ordering": 2,
+          "role": "",
+          "display_name": "Mistral: Mistral Small 3.2 24B (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:google/gemma-3-27b-it",
+          "ordering": 3,
+          "role": "",
+          "display_name": "Google: Gemma 3 27B (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:z-ai/glm-4-32b",
+          "ordering": 4,
+          "role": "",
+          "display_name": "Z.ai: GLM 4 32B  (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:deepseek/deepseek-v4-flash",
+          "ordering": 5,
+          "role": "",
+          "display_name": "DeepSeek V4 Flash (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        }
+      ]
+    },
+    {
+      "tier_name": "research",
+      "default_model": "anthropic:claude-sonnet-4-6",
+      "is_free_only": false,
+      "price_ceiling_in": null,
+      "price_ceiling_out": null,
+      "allow_reasoning": true,
+      "is_live_synced": false,
+      "members": [
+        {
+          "model_id": "anthropic:claude-sonnet-4-6",
+          "ordering": 0,
+          "role": "",
+          "display_name": "Claude Sonnet 4.6",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "anthropic:claude-haiku-4-5-20251001",
+          "ordering": 1,
+          "role": "",
+          "display_name": "Claude Haiku 4.5",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "anthropic:claude-opus-4-7",
+          "ordering": 2,
+          "role": "",
+          "display_name": "Claude Opus 4.7",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+          "ordering": 3,
+          "role": "",
+          "display_name": "NVIDIA Nemotron 3 Nano Omni 30B (Reasoning, OpenRouter Free)",
+          "supports_reasoning": true,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:deepseek/deepseek-v4-pro",
+          "ordering": 4,
+          "role": "",
+          "display_name": "DeepSeek V4 Pro (OpenRouter)",
+          "supports_reasoning": true,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:z-ai/glm-5.1",
+          "ordering": 5,
+          "role": "",
+          "display_name": "GLM 5.1 (OpenRouter)",
+          "supports_reasoning": true,
+          "is_active": true
+        }
+      ]
+    },
+    {
+      "tier_name": "quality",
+      "default_model": "anthropic:claude-opus-4-7",
+      "is_free_only": false,
+      "price_ceiling_in": null,
+      "price_ceiling_out": null,
+      "allow_reasoning": true,
+      "is_live_synced": false,
+      "members": [
+        {
+          "model_id": "anthropic:claude-opus-4-7",
+          "ordering": 0,
+          "role": "",
+          "display_name": "Claude Opus 4.7",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "anthropic:claude-sonnet-4-6",
+          "ordering": 1,
+          "role": "",
+          "display_name": "Claude Sonnet 4.6",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "anthropic:claude-haiku-4-5-20251001",
+          "ordering": 2,
+          "role": "",
+          "display_name": "Claude Haiku 4.5",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+          "ordering": 3,
+          "role": "",
+          "display_name": "NVIDIA Nemotron 3 Nano Omni 30B (Reasoning, OpenRouter Free)",
+          "supports_reasoning": true,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:deepseek/deepseek-v4-pro",
+          "ordering": 4,
+          "role": "",
+          "display_name": "DeepSeek V4 Pro (OpenRouter)",
+          "supports_reasoning": true,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:z-ai/glm-5.1",
+          "ordering": 5,
+          "role": "",
+          "display_name": "GLM 5.1 (OpenRouter)",
+          "supports_reasoning": true,
+          "is_active": true
+        }
+      ]
+    },
+    {
+      "tier_name": "hybrid",
+      "default_model": "anthropic:claude-haiku-4-5-20251001",
+      "is_free_only": false,
+      "price_ceiling_in": null,
+      "price_ceiling_out": null,
+      "allow_reasoning": false,
+      "is_live_synced": false,
+      "members": [
+        {
+          "model_id": "anthropic:claude-sonnet-4-6",
+          "ordering": 0,
+          "role": "",
+          "display_name": "Claude Sonnet 4.6",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "anthropic:claude-haiku-4-5-20251001",
+          "ordering": 1,
+          "role": "",
+          "display_name": "Claude Haiku 4.5",
+          "supports_reasoning": false,
+          "is_active": true
+        },
+        {
+          "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+          "ordering": 2,
+          "role": "",
+          "display_name": "Meta: Llama 3.3 70B Instruct (OpenRouter)",
+          "supports_reasoning": false,
+          "is_active": true
+        }
+      ]
+    }
+  ]
+}

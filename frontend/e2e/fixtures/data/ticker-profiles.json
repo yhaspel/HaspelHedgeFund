@@ -1,0 +1,29 @@
+{
+  "profiles": {
+    "AAPL": {
+      "name": "Apple Inc.",
+      "exchange": "NASDAQ",
+      "sector": ""
+    },
+    "MSFT": {
+      "name": "Microsoft Corporation",
+      "exchange": "NASDAQ",
+      "sector": ""
+    },
+    "NVDA": {
+      "name": "NVIDIA Corporation",
+      "exchange": "NASDAQ",
+      "sector": ""
+    },
+    "AVGO": {
+      "name": "Broadcom Inc.",
+      "exchange": "NASDAQ",
+      "sector": ""
+    },
+    "GOOGL": {
+      "name": "Alphabet Inc.",
+      "exchange": "NASDAQ",
+      "sector": ""
+    }
+  }
+}

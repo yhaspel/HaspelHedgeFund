@@ -1,0 +1,6 @@
+{
+  "window": "90d",
+  "as_of": null,
+  "note": "Single-tenant: each row aggregates your own strategies of that flavor.",
+  "rows": []
+}

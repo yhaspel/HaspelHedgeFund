@@ -154,6 +154,7 @@ type TierFilter = 'all' | ModelTier;
                     {{ tierDefaultLabel(t) }}@if (tierDefault(t)) { · {{ fmtUsd(tierDefaultEst(t)) }}}
                   </div>
                   <select class="input sans agent-select"
+                    [attr.aria-label]="'Default model for the ' + t + ' tier'"
                     [ngModel]="tierDefault(t)"
                     (ngModelChange)="setTierDefault(t, $event)"
                     [attr.data-test]="'tier-default-' + t">
@@ -807,7 +808,11 @@ export class SettingsModelsPage implements OnInit {
 
   loadPresetOverrides(): void {
     this.store.fetchPreset(this.preset).subscribe((r) => {
-      this.presetOverrides.set(r.overrides);
+      // Guard undefined: the signal is typed Record<string,string> and the
+      // cost-gauge binding (effectiveDefaults → estRunCost) indexes it during
+      // change detection; an undefined here throws and aborts the CD pass,
+      // transiently blanking the catalog (a cross-browser race — see SE-02).
+      this.presetOverrides.set(r.overrides ?? {});
       this.presetMenu.set(r.menu ?? []);
     });
   }

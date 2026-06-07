@@ -149,6 +149,15 @@ input[type='checkbox']:focus-visible {
   text-decoration-thickness: 2px;
 }
 
+/* WCAG 1.4.1 (axe link-in-text-block): a link sitting inline within a block of
+   text must carry a non-colour cue. Underline anchors in prose/text contexts —
+   excluding button-styled and nav anchors, which are distinguished by shape. */
+:where(p, li, td, th, label, .lbl, .field, .muted, .disclaimer, .nudge-banner, .banner-warn, .setup-hint, .crumbs)
+  a:not(.btn):not(.nav-btn):not([class*='btn ']):not([class$='btn']):not(.link) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Topbar */
 .topbar {
   position: sticky;

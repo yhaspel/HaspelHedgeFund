@@ -1,0 +1,84 @@
+[
+  {
+    "id": 1,
+    "name": "My Momentum Screen",
+    "asset_class": "equity",
+    "filters": {
+      "price": {
+        "min": 5
+      },
+      "adv_14d": {
+        "min": 500000
+      },
+      "market_cap": {
+        "min": 300000000
+      },
+      "momentum_3m": {
+        "min": 0.2
+      },
+      "above_50d_ma": {
+        "value": true
+      },
+      "above_200d_ma": {
+        "value": true
+      }
+    },
+    "sort": {
+      "dir": "desc",
+      "field": "momentum_3m"
+    },
+    "based_on": "momentum",
+    "created_at": "2026-05-23T04:19:32.971143Z",
+    "updated_at": "2026-05-23T04:19:32.971212Z"
+  },
+  {
+    "id": 2,
+    "name": "Screener 1",
+    "asset_class": "equity",
+    "filters": {
+      "beta": {
+        "min": 1.5
+      },
+      "rvol": {
+        "min": 3
+      },
+      "price": {
+        "min": 10
+      },
+      "sector": {
+        "values": [
+          "Technology"
+        ]
+      },
+      "adv_14d": {
+        "min": 500000
+      },
+      "country": {
+        "values": [
+          "US"
+        ]
+      },
+      "exchange": {
+        "values": [
+          "NASDAQ"
+        ]
+      },
+      "market_cap": {
+        "min": 2000000000
+      },
+      "above_50d_ma": {
+        "value": true
+      },
+      "above_200d_ma": {
+        "value": true
+      }
+    },
+    "sort": {
+      "dir": "desc",
+      "field": "momentum_3m"
+    },
+    "based_on": "momentum",
+    "created_at": "2026-05-23T04:31:24.056286Z",
+    "updated_at": "2026-05-23T04:31:24.056315Z"
+  }
+]

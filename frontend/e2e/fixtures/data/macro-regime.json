@@ -1,0 +1,30 @@
+{
+  "ticker": "SPY",
+  "as_of": "2026-06-06",
+  "snapshot": {
+    "ticker": "SPY",
+    "as_of_date": "2026-05-21",
+    "model_type": "labelled_markov",
+    "config_hash": "95f6d1cac80237d3",
+    "last_price_date": "2026-05-20",
+    "current_state": "bull",
+    "current_return": 0.04,
+    "current_state_persistence": 0.7,
+    "bull_persistence": 0.7,
+    "sideways_persistence": 0.5,
+    "bear_persistence": 0.4,
+    "bull_prob_1d": 0.7,
+    "sideways_prob_1d": 5.551115123125783e-17,
+    "bear_prob_1d": 0.3,
+    "bull_prob_5d": 0.59,
+    "sideways_prob_5d": 0.3,
+    "bear_prob_5d": 0.31,
+    "bull_minus_bear_1d": 0.4,
+    "prior_current_state": "",
+    "current_state_persistence_delta": null,
+    "bull_persistence_delta": null,
+    "bear_persistence_delta": null,
+    "state_changed_from_prior": false,
+    "stale": true
+  }
+}

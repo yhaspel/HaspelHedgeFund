@@ -8,7 +8,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DecimalPipe, NgClass } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
@@ -35,24 +35,25 @@ interface ComparePayload {
 @Component({
   selector: 'hf-backtests-compare',
   standalone: true,
-  imports: [DecimalPipe, NgClass, FormsModule, RouterLink],
+  imports: [DecimalPipe, FormsModule, RouterLink],
   template: `
-    <div class="min-h-screen bg-gray-50 p-8">
+    <div class="min-h-screen bg-bg p-8">
       <header class="flex items-center justify-between mb-6">
         <h1 class="text-2xl font-semibold">Compare backtests</h1>
-        <a routerLink="/backtests" class="text-blue-600 hover:underline">Back to list</a>
+        <a routerLink="/backtests" class="link">Back to list</a>
       </header>
 
-      <div class="bg-white p-4 rounded shadow mb-6 flex items-end gap-4">
+      <div class="card p-4 mb-6 flex items-end gap-4">
         <div class="text-sm">
-          <div class="text-gray-500">A</div>
+          <div class="text-text-3">A</div>
           <div class="font-medium">{{ data()?.a?.name || idA }}</div>
         </div>
-        <span class="text-gray-400">vs</span>
+        <span class="text-text-3">vs</span>
         <label class="text-sm">
-          <div class="text-gray-500">B</div>
+          <div class="text-text-3">B</div>
           <select [(ngModel)]="idB" (change)="load()"
-                  class="border rounded px-2 py-1 mt-1 min-w-[260px]">
+                  aria-label="Compare against backtest"
+                  class="input mt-1 min-w-[260px]">
             <option [ngValue]="null" disabled>Pick another backtest</option>
             @for (b of store.list(); track b.id) {
               @if (b.id !== idA) {
@@ -64,16 +65,16 @@ interface ComparePayload {
       </div>
 
       @if (data(); as d) {
-        <div class="bg-white p-4 rounded shadow mb-6">
+        <div class="card p-4 mb-6">
           <h3 class="text-sm font-semibold mb-2">Stitched OOS equity curves</h3>
           <div class="relative h-[320px]"><canvas #curve role="img"
             aria-label="Stitched out-of-sample equity curves for the two backtests being compared, overlaid over the same period."></canvas></div>
         </div>
 
-        <div class="bg-white p-4 rounded shadow">
+        <div class="card p-4">
           <h3 class="text-sm font-semibold mb-2">Metrics diff</h3>
           <table class="min-w-full text-sm">
-            <thead class="bg-gray-100 text-left">
+            <thead class="text-left text-text-2">
               <tr>
                 <th class="px-3 py-2">Metric</th>
                 <th class="px-3 py-2 text-right">A</th>
@@ -84,11 +85,11 @@ interface ComparePayload {
             <tbody>
               @for (m of metricsRows(d); track m.key) {
                 <tr class="border-t">
-                  <td class="px-3 py-2 text-gray-700">{{ m.label }}</td>
+                  <td class="px-3 py-2 text-text-2">{{ m.label }}</td>
                   <td class="px-3 py-2 text-right">{{ m.a | number: '1.2-2' }}{{ m.suffix }}</td>
                   <td class="px-3 py-2 text-right">{{ m.b | number: '1.2-2' }}{{ m.suffix }}</td>
                   <td class="px-3 py-2 text-right"
-                      [ngClass]="{ 'text-green-700': m.delta > 0, 'text-red-700': m.delta < 0 }">
+                      [style.color]="m.delta > 0 ? 'var(--acc-long-fg)' : (m.delta < 0 ? 'var(--acc-short-fg)' : null)">
                     {{ m.delta > 0 ? '+' : '' }}{{ m.delta | number: '1.2-2' }}{{ m.suffix }}
                   </td>
                 </tr>
@@ -97,7 +98,7 @@ interface ComparePayload {
           </table>
         </div>
       } @else {
-        <p class="text-sm text-gray-500">Pick a backtest B to compare against.</p>
+        <p class="text-sm text-text-3">Pick a backtest B to compare against.</p>
       }
     </div>
   `,

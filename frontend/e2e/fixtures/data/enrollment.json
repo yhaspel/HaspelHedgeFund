@@ -1,0 +1,74 @@
+{
+  "target_id": 107,
+  "as_of_date": "2026-06-03",
+  "portfolio": {
+    "id": 59,
+    "name": "Claude L/S (self-heal)",
+    "kind": "strategy",
+    "cash": "100000.00",
+    "positions_count": 0
+  },
+  "rows": [
+    {
+      "ticker": "CAT",
+      "side": "long",
+      "target_weight_pct": 0.03,
+      "target_notional_usd": "3000.00",
+      "suggested_quantity": "3",
+      "mark_price": "904.2800",
+      "mark_source": "mark",
+      "current_quantity": "0",
+      "current_avg_cost": null,
+      "action": "open",
+      "quantity_delta": "3",
+      "rebalance_order_id": 198,
+      "source_run_id": 249,
+      "source_decision_id": 136,
+      "warnings": []
+    },
+    {
+      "ticker": "CVX",
+      "side": "long",
+      "target_weight_pct": 0.03,
+      "target_notional_usd": "3000.00",
+      "suggested_quantity": "16",
+      "mark_price": "187.3100",
+      "mark_source": "mark",
+      "current_quantity": "0",
+      "current_avg_cost": null,
+      "action": "open",
+      "quantity_delta": "16",
+      "rebalance_order_id": 199,
+      "source_run_id": 250,
+      "source_decision_id": 138,
+      "warnings": []
+    },
+    {
+      "ticker": "MCD",
+      "side": "short",
+      "target_weight_pct": -0.03,
+      "target_notional_usd": "3000.00",
+      "suggested_quantity": "-10",
+      "mark_price": "279.8400",
+      "mark_source": "mark",
+      "current_quantity": "0",
+      "current_avg_cost": null,
+      "action": "open",
+      "quantity_delta": "-10",
+      "rebalance_order_id": 200,
+      "source_run_id": 252,
+      "source_decision_id": null,
+      "warnings": []
+    }
+  ],
+  "totals": {
+    "gross_pct": 0.09,
+    "net_pct": 0.03,
+    "n_open": 3,
+    "n_increase": 0,
+    "n_reduce": 0,
+    "n_close": 0,
+    "n_skip": 0
+  },
+  "enrolled": false
+}

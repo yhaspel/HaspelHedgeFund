@@ -1,0 +1,104 @@
+{
+  "user": {
+    "id": 1,
+    "email": "e2e@example.com",
+    "joined_at": "2026-05-15T15:16:17.199683+00:00"
+  },
+  "has_questionnaire": true,
+  "active": {
+    "id": 3,
+    "source": "questionnaire",
+    "derived_from": null,
+    "schema_version": 1,
+    "answers": {
+      "avoid": [
+        "Tobacco"
+      ],
+      "age_band": "45\u201354",
+      "patience": "A few weeks",
+      "experience": "Experienced (5\u201315 yrs)",
+      "asset_share": "10\u201340%",
+      "primary_goal": "Balanced growth",
+      "time_horizon": "15+ yrs",
+      "concentration": "Somewhere in between",
+      "decision_style": "A balanced mix",
+      "max_annual_loss": "Up to 25%",
+      "trade_frequency": "Weekly",
+      "risk_self_rating": "Moderate",
+      "drawdown_reaction": "Buy aggressively",
+      "preferred_sectors": [
+        "Technology",
+        "Financials",
+        "Energy",
+        "Consumer",
+        "Disruptive growth"
+      ]
+    },
+    "created_at": "2026-05-23T12:48:43.426923Z",
+    "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+    "analysis_status": "done",
+    "analyzed_at": "2026-05-23T12:48:55.044563Z",
+    "error_message": "",
+    "analysis": {
+      "summary": "Experienced investor seeking balanced growth with moderate risk tolerance",
+      "insights": [
+        "Prefers technology, financials, energy, consumer, and disruptive growth sectors",
+        "Has a medium-to-long term investment horizon",
+        "Willing to take moderate risks"
+      ],
+      "risk_band": "moderate",
+      "agent_brief": "Investor seeks balanced growth, avoids tobacco, and has moderate risk tolerance.",
+      "horizon_band": "long",
+      "investor_type": "Experienced Investor",
+      "patience_band": "low",
+      "key_constraints": [
+        "Avoid Tobacco",
+        "Max annual loss up to 25%"
+      ],
+      "behavioral_traits": [
+        "Patient",
+        "Growth-oriented",
+        "Experienced",
+        "Moderate risk tolerance"
+      ],
+      "recommended_strategies": [
+        {
+          "fit": "strong",
+          "kind": "long_only",
+          "rationale": "Balanced growth goal and moderate risk tolerance"
+        },
+        {
+          "fit": "good",
+          "kind": "sector_rotation",
+          "rationale": "Suitable for medium horizon and moderate risk"
+        },
+        {
+          "fit": "consider",
+          "kind": "risk_parity",
+          "rationale": "Conservative-to-moderate risk and long horizon"
+        }
+      ]
+    },
+    "profile_summary": "Experienced investor seeking balanced growth with moderate risk tolerance",
+    "agent_brief": "Investor seeks balanced growth, avoids tobacco, and has moderate risk tolerance.",
+    "investor_type": "Experienced Investor"
+  },
+  "latest": {
+    "id": 3,
+    "status": "done",
+    "source": "questionnaire",
+    "created_at": "2026-05-23T12:48:43.426923+00:00",
+    "error_message": ""
+  },
+  "state": {
+    "apply_to_runs": true,
+    "nudge_dismiss_count": 1,
+    "nudge_last_dismissed_at": "2026-05-23T06:19:06.624293Z",
+    "updated_at": "2026-05-23T06:27:56.011690Z"
+  },
+  "nudge": {
+    "due": false,
+    "form": null
+  },
+  "schema_version": 1
+}

@@ -87,7 +87,7 @@ interface PersonaCard {
                 ·
                 <a [routerLink]="['/strategies', link.strategy_id]"
                    [queryParams]="{ cycle: link.portfolio_target_id }"
-                   class="text-[var(--acc-info-fg)] no-underline">
+                   class="link">
                   open cycle →
                 </a>
               </span>

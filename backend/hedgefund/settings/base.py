@@ -160,6 +160,15 @@ LLM_DEFAULT_PRESET = os.environ.get("LLM_DEFAULT_PRESET", "hybrid")
 # falls through to DEFAULT_MODELS for missing agents) can never leak spend.
 BLOCK_ANTHROPIC = os.environ.get("BLOCK_ANTHROPIC", "0") == "1"
 
+# Phase 8 Lane-B E2E (ADR 0019). Off by default everywhere; only the dev/test
+# settings flip the seed guard on, and the nightly Lane-B job exports the stub
+# env vars. E2E_STUB_LLM short-circuits every LLM call to a deterministic stub
+# (registry.get_llm); E2E_STUB_BROKER keeps broker actions on the instant Demo
+# fill path. E2E_SEED_ALLOWED gates `manage.py seed_e2e` (refuses in prod).
+E2E_STUB_LLM = os.environ.get("E2E_STUB_LLM", "0") == "1"
+E2E_STUB_BROKER = os.environ.get("E2E_STUB_BROKER", "0") == "1"
+E2E_SEED_ALLOWED = False
+
 # Restrict every model selector in the UI to OpenRouter :free models. When True,
 # `/api/models/` marks non-free rows as `available: false` so every dropdown
 # (Settings → Models, backtest config, runs, news sentiment) auto-disables the

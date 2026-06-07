@@ -1,0 +1,66 @@
+{
+  "ticker": "AAPL",
+  "as_of": "2026-06-06",
+  "items": [
+    {
+      "published_at": "2026-06-05T08:26:42+00:00",
+      "headline": "AbbVie, Oracle, Apple And More On CNBC's 'Final Trades'",
+      "source": "benzinga.com",
+      "provider": "fmp",
+      "url": "https://www.benzinga.com/markets/equities/26/06/53024614/abbvie-oracle-apple-and-more-on-cnbcs-final-trades",
+      "summary": "",
+      "materiality_score": null,
+      "materiality_tag": ""
+    },
+    {
+      "published_at": "2026-06-05T08:00:23+00:00",
+      "headline": "What to REALLY Pay Attention to at WWDC26",
+      "source": "youtube.com",
+      "provider": "fmp",
+      "url": "https://www.youtube.com/watch?v=UjACfbyT5Y4",
+      "summary": "",
+      "materiality_score": null,
+      "materiality_tag": ""
+    },
+    {
+      "published_at": "2026-06-05T07:11:12+00:00",
+      "headline": "94% of CNET Readers Think New Apple CEO's Big Splash Will Come at WWDC",
+      "source": "cnet.com",
+      "provider": "fmp",
+      "url": "https://www.cnet.com/tech/cnet-big-guessing-game-round-1-guesses/",
+      "summary": "",
+      "materiality_score": null,
+      "materiality_tag": ""
+    },
+    {
+      "published_at": "2026-06-04T23:17:00+00:00",
+      "headline": "Iron Age Nutrition Announces Launch of \u201cSour Apple Crush\u201d Flavor in Total Hydrate Electrolyte Line",
+      "source": "globenewswire.com",
+      "provider": "fmp",
+      "url": "https://www.globenewswire.com/news-release/2026/06/05/3307178/0/en/Iron-Age-Nutrition-Announces-Launch-of-Sour-Apple-Crush-Flavor-in-Total-Hydrate-Electrolyte-Line.html",
+      "summary": "",
+      "materiality_score": null,
+      "materiality_tag": ""
+    },
+    {
+      "published_at": "2026-06-04T20:30:00+00:00",
+      "headline": "Apple's Plan for AI Dominance Rests on Fixing Its Much-Maligned Chatbot",
+      "source": "wsj.com",
+      "provider": "fmp",
+      "url": "https://www.wsj.com/tech/ai/apples-plan-for-ai-dominance-rests-on-fixing-its-much-maligned-chatbot-9f2309cb",
+      "summary": "",
+      "materiality_score": null,
+      "materiality_tag": ""
+    },
+    {
+      "published_at": "2026-06-04T15:40:14+00:00",
+      "headline": "Apple Taps Google to Prep Siri For September Revamp",
+      "source": "pymnts.com",
+      "provider": "fmp",
+      "url": "https://www.pymnts.com/apple/2026/apple-taps-google-to-prep-siri-for-september-revamp/",
+      "summary": "",
+      "materiality_score": 8.0,
+      "materiality_tag": "product_launch"
+    }
+  ]
+}

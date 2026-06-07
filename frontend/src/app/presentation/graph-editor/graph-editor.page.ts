@@ -171,7 +171,7 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
       .tb-right { display: flex; gap: 8px; align-items: center; }
       .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border, #2a3142); }
       .btn.ghost { background: var(--surface, #151b26); color: var(--text, #e6ebf5); }
-      .btn.primary { background: var(--acc-info); color: #fff; border-color: var(--acc-info); }
+      .btn.primary { background: var(--acc-long); color: #06231a; border-color: var(--acc-long); font-weight: 600; }
       .btn.primary:disabled { opacity: .45; cursor: not-allowed; }
       .save-error { background: #3a1b1b; color: #f6b3b3; padding: 8px 12px; border-radius: 8px;
                     font-size: 12.5px; margin-bottom: 8px; }

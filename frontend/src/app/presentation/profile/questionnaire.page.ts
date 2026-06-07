@@ -93,6 +93,7 @@ const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
                     } @else if (q.type === 'text') {
                       <textarea class="input ta"
                                 rows="2"
+                                [attr.aria-label]="q.label"
                                 [attr.maxlength]="q.max_len ?? 500"
                                 [value]="textValue(q.id)"
                                 (input)="setText(q.id, $any($event.target).value)"></textarea>

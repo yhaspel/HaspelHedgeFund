@@ -1,0 +1,50 @@
+[
+  {
+    "id": 12,
+    "name": "claude-selfheal-uni",
+    "description": "self-heal validation",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 6
+  },
+  {
+    "id": 3,
+    "name": "macro_etfs",
+    "description": "Curated macro-expression ETFs for global-macro strategies.",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 14
+  },
+  {
+    "id": 5,
+    "name": "p2l_smoke_uni",
+    "description": "P2l smoke test universe",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 6
+  },
+  {
+    "id": 4,
+    "name": "risk_parity_sleeves",
+    "description": "Curated multi-asset sleeves (sector ETFs + bond proxy + gold) for risk-parity strategies.",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 8
+  },
+  {
+    "id": 2,
+    "name": "sector_etfs",
+    "description": "Curated sector + thematic ETFs for sector-rotation strategies.",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 20
+  },
+  {
+    "id": 1,
+    "name": "sp500_top_200",
+    "description": "Curated ~200 large/mid-cap US equities for autonomous L/S strategies.",
+    "source": "manual",
+    "is_active": true,
+    "member_count": 182
+  }
+]

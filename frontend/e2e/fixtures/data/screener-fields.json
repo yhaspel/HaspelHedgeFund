@@ -1,0 +1,504 @@
+{
+  "fields": [
+    {
+      "id": "exchange",
+      "label": "Exchange",
+      "group": "Descriptive",
+      "kind": "enum",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [
+        "NASDAQ",
+        "NYSE",
+        "AMEX"
+      ],
+      "description": "Listing venue (NASDAQ / NYSE / AMEX). Pick one to restrict results to that exchange; leave blank for all US exchanges.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "sector",
+      "label": "Sector",
+      "group": "Descriptive",
+      "kind": "enum",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [
+        "Basic Materials",
+        "Communication Services",
+        "Consumer Cyclical",
+        "Consumer Defensive",
+        "Energy",
+        "Financial Services",
+        "Healthcare",
+        "Industrials",
+        "Real Estate",
+        "Technology",
+        "Utilities"
+      ],
+      "description": "GICS sector (one of 11 \u2014 Technology, Healthcare, \u2026). Pick one to constrain results to that sector; leave blank to screen across all sectors.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "industry",
+      "label": "Industry",
+      "group": "Descriptive",
+      "kind": "enum",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "GICS industry \u2014 narrower than sector (e.g. Semiconductors within Technology). Constrains results to a single industry.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "country",
+      "label": "Country",
+      "group": "Descriptive",
+      "kind": "enum",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [
+        "US",
+        "CA",
+        "GB",
+        "IE",
+        "BM"
+      ],
+      "description": "Country of incorporation (ISO-2 code \u2014 US, CA, GB, \u2026). Filters to companies domiciled in that country.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "market_cap",
+      "label": "Market Cap",
+      "group": "Descriptive",
+      "kind": "range",
+      "unit": "usd",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Total market value of all outstanding shares, in USD. Set min \u2265 300M to exclude small-caps, \u2265 10B for large-caps. Higher min = larger, more liquid companies.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "price",
+      "label": "Price",
+      "group": "Descriptive",
+      "kind": "range",
+      "unit": "usd",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Latest trade price per share, in USD. Set min \u2265 $5 to filter out penny stocks; set max to cap nominal price.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "volume",
+      "label": "Volume (today)",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "shares",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Today's traded volume in shares (live). Set min \u2265 1M to keep liquid names. Higher min = tighter spreads, easier fills.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "adv_14d",
+      "label": "Avg Daily Volume (14d)",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "shares",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Mean daily share volume over the last 14 completed sessions. Use as a baseline liquidity filter \u2014 set min \u2265 500k to exclude thinly-traded names.",
+      "available": true,
+      "requires": [
+        "daily_bars"
+      ]
+    },
+    {
+      "id": "rvol",
+      "label": "Relative Volume",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "ratio",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Today's volume \u00f7 14-day ADV. 1.0\u00d7 = normal, 2.0\u00d7 = double average. Set min \u2265 2 to surface unusually active stocks (news, catalyst, breakout).",
+      "available": true,
+      "requires": [
+        "daily_bars",
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "dollar_volume",
+      "label": "Dollar Volume (today)",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "usd",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Today's traded value in USD (price \u00d7 volume). Best single measure of liquidity. Set min \u2265 $20M for institutional-tradeable names.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "gap_pct",
+      "label": "Gap %",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Today's open vs yesterday's close, in percent. Positive = gap up (e.g. +4 = opened 4% higher), negative = gap down. Surfaces overnight catalysts.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "change_pct",
+      "label": "Day Change %",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Today's % move vs yesterday's close. Includes the gap and intraday drift. Use to find today's biggest movers.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "momentum_1m",
+      "label": "1-Month Return",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Price return over the last ~21 trading sessions, in percent. Captures short-term trend.",
+      "available": true,
+      "requires": [
+        "daily_bars"
+      ]
+    },
+    {
+      "id": "momentum_3m",
+      "label": "3-Month Return",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Price return over the last ~63 trading sessions, in percent. Classic momentum window \u2014 set min \u2265 20 for sustained uptrends.",
+      "available": true,
+      "requires": [
+        "daily_bars"
+      ]
+    },
+    {
+      "id": "momentum_6m",
+      "label": "6-Month Return",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Price return over the last ~126 trading sessions, in percent. Medium-term trend signal.",
+      "available": true,
+      "requires": [
+        "daily_bars"
+      ]
+    },
+    {
+      "id": "above_50d_ma",
+      "label": "Above 50-day MA",
+      "group": "Performance",
+      "kind": "bool",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Yes = current price > 50-day simple moving average (a short-term uptrend signal). No = below. Any = no filter.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "above_200d_ma",
+      "label": "Above 200-day MA",
+      "group": "Performance",
+      "kind": "bool",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Yes = current price > 200-day SMA (a long-term bull-trend signal). Combine with Above 50-day MA for a full uptrend.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "dist_52w_high",
+      "label": "% Below 52-wk High",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "How far the latest price sits below the trailing 52-week high, in percent. 0 = at the high. Set max \u2264 5 to find stocks near breakout.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "dist_52w_low",
+      "label": "% Above 52-wk Low",
+      "group": "Performance",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "How far above the trailing 52-week low, in percent. Set max \u2264 10 to find stocks near their lows.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "has_positive_catalyst",
+      "label": "Recent positive news",
+      "group": "Performance",
+      "kind": "bool",
+      "unit": "",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Yes = at least one high-materiality positive news item in the last 7 days. Surfaces names with a recent catalyst.",
+      "available": true,
+      "requires": [
+        "news_catalyst"
+      ]
+    },
+    {
+      "id": "beta",
+      "label": "Beta",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "ratio",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Volatility vs the broad market. 1.0 = moves with the market, >1 = more volatile, <1 = less. Set max < 1 for defensive, min > 1.5 for high-beta names.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "pe_ratio",
+      "label": "P/E Ratio",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "ratio",
+      "asset_classes": [
+        "equity"
+      ],
+      "enum_values": [],
+      "description": "Price \u00f7 trailing-twelve-month earnings per share. Lower = cheaper on earnings. Set max \u2264 15 for value, min \u2265 30 for growth-priced names. Negative = unprofitable.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "eps",
+      "label": "EPS",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "usd",
+      "asset_classes": [
+        "equity"
+      ],
+      "enum_values": [],
+      "description": "Earnings per share over the last 12 months, in USD. Set min > 0 to exclude unprofitable companies.",
+      "available": true,
+      "requires": [
+        "intraday_quote"
+      ]
+    },
+    {
+      "id": "dividend",
+      "label": "Dividend (annual)",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "usd",
+      "asset_classes": [
+        "equity"
+      ],
+      "enum_values": [],
+      "description": "Last annual dividend per share, in USD. Set min > 0 to filter for dividend-payers.",
+      "available": true,
+      "requires": [
+        "basic_screen"
+      ]
+    },
+    {
+      "id": "short_interest_pct",
+      "label": "Short % of Float",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "pct",
+      "asset_classes": [
+        "equity"
+      ],
+      "enum_values": [],
+      "description": "Percentage of public float sold short. High values (\u2265 20%) signal squeeze candidates. Requires a short-interest data source \u2014 not yet available.",
+      "available": false,
+      "requires": [
+        "short_interest"
+      ]
+    },
+    {
+      "id": "days_to_cover",
+      "label": "Days to Cover",
+      "group": "Fundamental",
+      "kind": "range",
+      "unit": "ratio",
+      "asset_classes": [
+        "equity"
+      ],
+      "enum_values": [],
+      "description": "Short interest \u00f7 average daily volume \u2014 how many days for shorts to cover at average volume. Requires a short-interest data source \u2014 not yet available.",
+      "available": false,
+      "requires": [
+        "short_interest"
+      ]
+    },
+    {
+      "id": "premarket_volume",
+      "label": "Premarket Volume",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "shares",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Shares traded in the premarket session (4:00\u20139:30 AM ET). Requires a premarket data source \u2014 not yet available.",
+      "available": false,
+      "requires": [
+        "premarket_volume"
+      ]
+    },
+    {
+      "id": "premarket_vol_vs_adv",
+      "label": "Premarket Vol \u00f7 14d ADV",
+      "group": "Liquidity & Volume",
+      "kind": "range",
+      "unit": "ratio",
+      "asset_classes": [
+        "equity",
+        "etf"
+      ],
+      "enum_values": [],
+      "description": "Premarket volume as a multiple of 14-day ADV. High values (> 0.3) flag pre-open catalysts. Requires a premarket data source \u2014 not yet available.",
+      "available": false,
+      "requires": [
+        "premarket_volume"
+      ]
+    }
+  ],
+  "capabilities": [
+    "basic_screen",
+    "daily_bars",
+    "intraday_quote",
+    "news_catalyst"
+  ]
+}

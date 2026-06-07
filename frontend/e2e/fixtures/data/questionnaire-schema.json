@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "about",
+      "title": "About you",
+      "questions": [
+        {
+          "id": "age_band",
+          "label": "Your age range",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Under 25",
+            "25\u201334",
+            "35\u201344",
+            "45\u201354",
+            "55\u201364",
+            "65 or older"
+          ]
+        },
+        {
+          "id": "experience",
+          "label": "How would you describe your investing experience?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "New (<1 yr)",
+            "Some (1\u20135 yrs)",
+            "Experienced (5\u201315 yrs)",
+            "Veteran (15+ yrs)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "goals",
+      "title": "Goals & horizon",
+      "questions": [
+        {
+          "id": "primary_goal",
+          "label": "Your primary goal for this money?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Preserve capital",
+            "Generate income",
+            "Balanced growth",
+            "Aggressive growth",
+            "Learning & experimentation"
+          ]
+        },
+        {
+          "id": "time_horizon",
+          "label": "When do you expect to need most of this money?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "<1 yr",
+            "1\u20133 yrs",
+            "3\u20137 yrs",
+            "7\u201315 yrs",
+            "15+ yrs"
+          ]
+        },
+        {
+          "id": "asset_share",
+          "label": "What share of your total investable savings is this?",
+          "type": "single",
+          "required": false,
+          "options": [
+            "<10%",
+            "10\u201340%",
+            "40\u201375%",
+            ">75%",
+            "Prefer not to say"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "risk",
+      "title": "Risk",
+      "questions": [
+        {
+          "id": "risk_self_rating",
+          "label": "How would you rate your appetite for risk?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Very conservative",
+            "Conservative",
+            "Moderate",
+            "Aggressive",
+            "Very aggressive"
+          ]
+        },
+        {
+          "id": "drawdown_reaction",
+          "label": "Your portfolio falls 25% in a month. What do you do?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Sell most",
+            "Sell some",
+            "Hold and wait",
+            "Buy a little more",
+            "Buy aggressively"
+          ]
+        },
+        {
+          "id": "max_annual_loss",
+          "label": "Largest one-year loss you could tolerate without losing sleep",
+          "type": "single",
+          "required": true,
+          "options": [
+            "None",
+            "Up to 10%",
+            "Up to 25%",
+            "Up to 40%",
+            "More than 40%"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "temperament",
+      "title": "Temperament & behavior",
+      "questions": [
+        {
+          "id": "patience",
+          "label": "A position is underwater but the thesis holds. How long do you hold?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "A few weeks",
+            "A few months",
+            "1\u20132 years",
+            "As long as the thesis holds"
+          ]
+        },
+        {
+          "id": "trade_frequency",
+          "label": "How often do you typically trade?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Rarely (buy & hold)",
+            "A few times a year",
+            "Monthly",
+            "Weekly",
+            "Daily"
+          ]
+        },
+        {
+          "id": "decision_style",
+          "label": "What drives your decisions most?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "Instinct & gut",
+            "Numbers & data",
+            "News & narratives",
+            "A balanced mix"
+          ]
+        },
+        {
+          "id": "concentration",
+          "label": "Which is closer to your style?",
+          "type": "single",
+          "required": true,
+          "options": [
+            "A few high-conviction names",
+            "Broad diversification",
+            "Somewhere in between"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "preferences",
+      "title": "Preferences",
+      "questions": [
+        {
+          "id": "favorite_tickers",
+          "label": "Tickers you currently hold or are watching",
+          "type": "tickers",
+          "required": false,
+          "max_select": 15,
+          "hint": "Up to 15. These will auto-add to your watchlist."
+        },
+        {
+          "id": "preferred_sectors",
+          "label": "Sectors or themes you're drawn to",
+          "type": "multi",
+          "required": false,
+          "options": [
+            "Technology",
+            "Healthcare",
+            "Financials",
+            "Energy",
+            "Consumer",
+            "Industrials",
+            "Real estate",
+            "Dividends & income",
+            "Disruptive growth",
+            "ESG",
+            "No preference"
+          ]
+        },
+        {
+          "id": "avoid",
+          "label": "Anything you prefer to avoid",
+          "type": "multi",
+          "required": false,
+          "options": [
+            "Tobacco",
+            "Weapons",
+            "Fossil fuels",
+            "Highly speculative names",
+            "Leverage / leveraged ETFs",
+            "No restrictions"
+          ]
+        },
+        {
+          "id": "avoid_notes",
+          "label": "\u2026anything else to avoid",
+          "type": "text",
+          "required": false,
+          "max_len": 200
+        },
+        {
+          "id": "free_notes",
+          "label": "Anything else the AI should know about you as an investor?",
+          "type": "text",
+          "required": false,
+          "max_len": 500
+        }
+      ]
+    }
+  ]
+}

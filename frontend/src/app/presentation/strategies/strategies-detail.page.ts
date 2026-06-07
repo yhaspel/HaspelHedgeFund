@@ -885,7 +885,9 @@ import { ModalComponent } from '../shared/modal.component';
               @if (c.sector_veto_log && c.sector_veto_log.length > 0) {
                 <details open>
                   <summary class="eyebrow cursor-pointer">
-                    Council review ({{ c.sector_veto_log.length }} ETFs · {{ sectorVetoCount(c) }} <hf-term key="veto">vetoed</hf-term>)
+                    <!-- plain text (no interactive hf-term) — a <summary> is itself
+                         interactive, so a nested button would be a11y nested-interactive. -->
+                    Council review ({{ c.sector_veto_log.length }} ETFs · {{ sectorVetoCount(c) }} vetoed)
                   </summary>
                   <ul class="mono m-0 mt-2 p-0 list-none flex flex-col gap-1.5 text-[11.5px] text-text-2">
                     @for (v of c.sector_veto_log; track v.ticker) {

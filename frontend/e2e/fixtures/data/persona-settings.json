@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "cadence": "weekly",
+  "model_id": "",
+  "web_search_enabled": true,
+  "monthly_cost_cap_usd": "2.00",
+  "cost_cap_reached_at": null,
+  "updated_at": "2026-05-25T13:34:22.274399Z",
+  "month_to_date_cost_usd": "0.002495"
+}

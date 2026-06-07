@@ -1,0 +1,141 @@
+{
+  "n_candidates": 15,
+  "per_call_usd": 0.0885,
+  "est_total_usd": 1.33,
+  "cost_ceiling_usd": 5.0,
+  "exceeds_ceiling": false,
+  "per_agent": [
+    {
+      "agent": "buffett",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "munger",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "graham",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "wood",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "druckenmiller",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "burry",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "damodaran",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "lynch",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0057
+    },
+    {
+      "agent": "fundamentals",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0037
+    },
+    {
+      "agent": "technicals",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0037
+    },
+    {
+      "agent": "valuation",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0043
+    },
+    {
+      "agent": "sentiment",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0027
+    },
+    {
+      "agent": "macro",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.003
+    },
+    {
+      "agent": "news_digest",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0078
+    },
+    {
+      "agent": "risk_manager",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.0078
+    },
+    {
+      "agent": "portfolio_manager",
+      "model": "openrouter:deepseek/deepseek-v4-pro",
+      "model_name": "DeepSeek V4 Pro (OpenRouter)",
+      "tier": "hosted_open",
+      "per_call_usd": 0.01
+    }
+  ],
+  "overrides": {
+    "sentiment": "openrouter:deepseek/deepseek-v4-pro",
+    "munger": "openrouter:deepseek/deepseek-v4-pro",
+    "burry": "openrouter:deepseek/deepseek-v4-pro",
+    "lynch": "openrouter:deepseek/deepseek-v4-pro",
+    "buffett": "openrouter:deepseek/deepseek-v4-pro",
+    "druckenmiller": "openrouter:deepseek/deepseek-v4-pro",
+    "valuation": "openrouter:deepseek/deepseek-v4-pro",
+    "news_digest": "openrouter:deepseek/deepseek-v4-pro",
+    "damodaran": "openrouter:deepseek/deepseek-v4-pro",
+    "risk_manager": "openrouter:deepseek/deepseek-v4-pro",
+    "fundamentals": "openrouter:deepseek/deepseek-v4-pro",
+    "graham": "openrouter:deepseek/deepseek-v4-pro",
+    "macro": "openrouter:deepseek/deepseek-v4-pro",
+    "technicals": "openrouter:deepseek/deepseek-v4-pro",
+    "cio": "openrouter:deepseek/deepseek-v4-pro",
+    "wood": "openrouter:deepseek/deepseek-v4-pro",
+    "portfolio_manager": "openrouter:deepseek/deepseek-v4-pro"
+  },
+  "preset": "hybrid"
+}

@@ -1,0 +1,262 @@
+name: playwright-ci
+
+# Phase 8 — Playwright E2E. Lane A (mocked) runs on every PR/push (sharded
+# chromium + axe, with visual as a non-blocking lane until Linux baselines are
+# committed). The full browser/mobile matrix + Lane B (live smoke) run nightly
+# or behind the `e2e-full` PR label. Mirrors frontend-ci.yml conventions.
+on:
+  push:
+    paths: ["frontend/**", ".github/workflows/playwright-ci.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/playwright-ci.yml"]
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "full-matrix | update-visual-baselines"
+        required: false
+        default: "full-matrix"
+
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Lane A (every PR): sharded chromium + axe -------------------------
+  lane-a:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e:routes
+      - name: Run Lane A (chromium + axe)
+        run: pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --project=axe --shard=${{ matrix.shard }}/3 --reporter=blob
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-${{ matrix.shard }}
+          path: frontend/blob-report
+          retention-days: 14
+
+  merge-report:
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'pull_request') }}
+    needs: [lane-a]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          path: frontend/all-blobs
+          pattern: blob-*
+          merge-multiple: true
+      - name: Merge into HTML + JUnit
+        run: pnpm exec playwright merge-reports --reporter html,junit ./all-blobs > merged-junit.xml || pnpm exec playwright merge-reports --reporter html ./all-blobs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: frontend/playwright-report
+          retention-days: 14
+
+  # ---- Visual regression lane — compares against the committed Linux baselines
+  # under e2e/visual/__screenshots__. Regenerate via the update-visual-baselines
+  # workflow_dispatch (review the diff) when the UI intentionally changes.
+  visual:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Visual regression (compare vs committed Linux baselines)
+        run: pnpm exec playwright test --config e2e/playwright.config.ts --project=visual
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: visual-diff
+          path: frontend/e2e-results
+          retention-days: 14
+
+  # ---- Generate Linux visual baselines on demand (commit the artifact) ---
+  update-visual-baselines:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'update-visual-baselines'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test --config e2e/playwright.config.ts --project=visual --update-snapshots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-linux
+          path: frontend/e2e/visual/__screenshots__
+          retention-days: 14
+
+  # ---- Nightly: full matrix + Lane B (live smoke) -----------------------
+  full-matrix:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'full-matrix') ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-full'))
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Cross-browser + mobile matrix (Lane A)
+        run: pnpm exec playwright test --config e2e/playwright.config.ts --project=firefox --project=webkit --project=mobile-chrome --project=mobile-safari
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: matrix-report
+          path: frontend/e2e-results
+          retention-days: 14
+
+  lane-b:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'full-matrix')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write .env for the seeded stack
+        # docker-compose's web/worker/beat declare `env_file: ../.env`, which the
+        # repo .gitignores. Synthesize a deterministic, test-only one here. The LLM
+        # and broker boundaries are stubbed (E2E_STUB_*) so seeded runs/cycles/orders
+        # complete instantly and deterministically — no frontier models, no real
+        # orders (plan §3.7). Data-provider keys are passed through from repo secrets
+        # when present; absent, data-surfaces degrade (the real-shape signal Lane B
+        # exists to catch — plan §905) while the provider-independent journeys stay green.
+        # The ALPACA_PAPER triples are dummy: bootstrap_autonomous_fund needs three to
+        # enumerate the fund's accounts, but `--broker mock` makes it keyless (creds
+        # never stored, no verify), so the values are never used for a network call.
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_DB=hedgefund
+          POSTGRES_USER=hedgefund
+          POSTGRES_PASSWORD=hedgefund
+          POSTGRES_HOST=db
+          POSTGRES_PORT=5432
+          DJANGO_ENV=dev
+          DJANGO_SECRET_KEY=ci-e2e-lane-b-secret-not-for-prod
+          DJANGO_DEBUG=0
+          DJANGO_SETTINGS_MODULE=hedgefund.settings.dev
+          DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,web
+          JWT_SIGNING_KEY=ci-e2e-lane-b-jwt-not-for-prod
+          REDIS_URL=redis://redis:6379/0
+          CELERY_BROKER_URL=redis://redis:6379/0
+          CELERY_RESULT_BACKEND=redis://redis:6379/0
+          CORS_ALLOWED_ORIGINS=http://localhost:4111
+          E2E_STUB_LLM=1
+          E2E_STUB_BROKER=1
+          EDGAR_USER_AGENT=lane-b-e2e e2e@local
+          ALPACA_FUND_OWNER_EMAIL=e2e@local
+          ALPACA_PAPER_1_NAME=E2E Paper 1
+          ALPACA_PAPER_1_KEY_ID=e2e-dummy-key-1
+          ALPACA_PAPER_1_SECRET=e2e-dummy-secret-1
+          ALPACA_PAPER_2_NAME=E2E Paper 2
+          ALPACA_PAPER_2_KEY_ID=e2e-dummy-key-2
+          ALPACA_PAPER_2_SECRET=e2e-dummy-secret-2
+          ALPACA_PAPER_3_NAME=E2E Paper 3
+          ALPACA_PAPER_3_KEY_ID=e2e-dummy-key-3
+          ALPACA_PAPER_3_SECRET=e2e-dummy-secret-3
+          EOF
+          # Optional data-provider keys — empty when the secret is unset.
+          {
+            echo "FMP_API_KEY=${{ secrets.FMP_API_KEY }}"
+            echo "FRED_API_KEY=${{ secrets.FRED_API_KEY }}"
+            echo "TIINGO_API_KEY=${{ secrets.TIINGO_API_KEY }}"
+            echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}"
+            echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
+          } >> .env
+      - name: Bring up the seeded stack
+        run: |
+          docker compose -f infra/docker-compose.yml up -d --build
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8811/api/health/ && break || sleep 5
+          done
+          # The compose `frontend` service (ng serve) compiles on first boot — wait
+          # for :4111 to answer before Playwright navigates to it.
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:4111/ >/dev/null && break || sleep 5
+          done
+      - name: Seed the E2E world
+        run: docker compose -f infra/docker-compose.yml exec -T web python manage.py seed_e2e
+      - uses: pnpm/action-setup@v4
+        with: { version: 11 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - name: Run Lane B (@smoke) against the live stack
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm exec playwright install --with-deps chromium
+          pnpm e2e:live
+        env:
+          E2E_LANE: live
+          E2E_BASE_URL: http://localhost:4111
+          # The dev build talks to an absolute apiBaseUrl (:8811); ng serve does not
+          # proxy /api, so the live login in global-setup must hit the API directly.
+          E2E_API_BASE: http://localhost:8811
+      - name: Stack logs on failure
+        if: ${{ failure() }}
+        run: docker compose -f infra/docker-compose.yml logs --tail=200 web worker
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: lane-b-report
+          path: frontend/e2e-results
+          retention-days: 14

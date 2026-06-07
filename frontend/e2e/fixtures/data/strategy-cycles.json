@@ -1,0 +1,30 @@
+[
+  {
+    "id": 112,
+    "as_of_date": "2026-06-06",
+    "status": "autopilot_submitted",
+    "gross_pct": "0.7000",
+    "net_pct": "0.7000",
+    "realised_net_pct": "0.7000",
+    "realised_portfolio_beta": "0.000",
+    "total_cost_usd": "0.0000",
+    "created_at": "2026-06-06T05:08:51.824519Z",
+    "finished_at": "2026-06-06T05:12:39.947218Z",
+    "superseded_by": null,
+    "enrolled_at": null
+  },
+  {
+    "id": 109,
+    "as_of_date": "2026-06-05",
+    "status": "done",
+    "gross_pct": "0.9397",
+    "net_pct": "0.9397",
+    "realised_net_pct": "0.9397",
+    "realised_portfolio_beta": "0.000",
+    "total_cost_usd": "0.0000",
+    "created_at": "2026-06-05T14:15:43.449081Z",
+    "finished_at": "2026-06-05T14:19:42.576986Z",
+    "superseded_by": null,
+    "enrolled_at": null
+  }
+]

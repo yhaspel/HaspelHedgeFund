@@ -1,0 +1,128 @@
+[
+  {
+    "id": 24,
+    "name": "[seed] Walk-forward validation (demo)",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "Seed validation backtest (demo \u2014 not a real engine run).",
+    "universe": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "MSFT"
+    ],
+    "start_date": "2024-06-06",
+    "end_date": "2026-06-05",
+    "created_at": "2026-06-06T03:59:51.897518Z",
+    "finished_at": "2026-06-06T03:59:51.897423Z",
+    "oos_sharpe": 0.85,
+    "total_return_pct": 18.5,
+    "deflation": 0.77
+  },
+  {
+    "id": 23,
+    "name": "[seed] Walk-forward validation (demo)",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "Seed validation backtest (demo \u2014 not a real engine run).",
+    "universe": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "MSFT"
+    ],
+    "start_date": "2024-06-06",
+    "end_date": "2026-06-05",
+    "created_at": "2026-06-06T03:59:51.895622Z",
+    "finished_at": "2026-06-06T03:59:51.895501Z",
+    "oos_sharpe": 0.85,
+    "total_return_pct": 18.5,
+    "deflation": 0.77
+  },
+  {
+    "id": 22,
+    "name": "[seed] Walk-forward validation (demo)",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "Seed validation backtest (demo \u2014 not a real engine run).",
+    "universe": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "MSFT"
+    ],
+    "start_date": "2024-06-06",
+    "end_date": "2026-06-05",
+    "created_at": "2026-06-06T03:59:51.885718Z",
+    "finished_at": "2026-06-06T03:59:51.885503Z",
+    "oos_sharpe": 0.85,
+    "total_return_pct": 18.5,
+    "deflation": 0.77
+  },
+  {
+    "id": 21,
+    "name": "P7 validation - Sector Rotation (frugal)",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "done",
+    "universe": [
+      "SPY",
+      "XLK",
+      "XLF",
+      "XLV",
+      "XLE"
+    ],
+    "start_date": "2024-10-01",
+    "end_date": "2025-05-01",
+    "created_at": "2026-06-04T16:35:39.012074Z",
+    "finished_at": "2026-06-04T16:38:42.129929Z",
+    "oos_sharpe": 0.0,
+    "total_return_pct": 0.0,
+    "deflation": 0.0
+  },
+  {
+    "id": 19,
+    "name": "WF 2026-05-24",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "done",
+    "universe": [
+      "AAPL",
+      "MSFT",
+      "GOOGL",
+      "AMZN",
+      "NVDA"
+    ],
+    "start_date": "2025-01-02",
+    "end_date": "2025-12-31",
+    "created_at": "2026-05-24T11:25:34.727766Z",
+    "finished_at": "2026-05-24T12:13:07.473113Z",
+    "oos_sharpe": 1.8286,
+    "total_return_pct": 1.2081,
+    "deflation": 0.8203
+  },
+  {
+    "id": 18,
+    "name": "WF 2026-05-24",
+    "status": "done",
+    "progress_pct": 100,
+    "progress_message": "done",
+    "universe": [
+      "AAPL",
+      "MSFT",
+      "GOOGL",
+      "AMZN",
+      "NVDA"
+    ],
+    "start_date": "2025-01-05",
+    "end_date": "2025-12-31",
+    "created_at": "2026-05-24T09:29:43.807391Z",
+    "finished_at": "2026-05-24T10:52:10.509213Z",
+    "oos_sharpe": 0.0,
+    "total_return_pct": 0.0,
+    "deflation": 0.0
+  }
+]

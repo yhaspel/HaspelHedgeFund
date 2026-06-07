@@ -31,6 +31,10 @@ def _make_client(provider: str, user_id: int | None, api_key: str, host: str) ->
 def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = None) -> LLMClient:
     """Return an LLM client honoring the user's BYO key when available.
 
+    Lane-B E2E: when ``settings.E2E_STUB_LLM`` is set (dev/test only, via
+    ``seed_e2e`` / the nightly job), every provider resolves to a deterministic
+    stub so a triggered run/cycle completes instantly with zero token spend.
+
     Resolution order:
       1. If `user_id` (or `state["user_id"]`) is given and the user has a
          `ProviderKey` row with a stored key for `provider`, use it.
@@ -39,6 +43,9 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
 
     We log only provider + key-source — never plaintext.
     """
+    if getattr(settings, "E2E_STUB_LLM", False):
+        from .llm.adapters.stub import StubLLMClient
+        return StubLLMClient()
     if user_id is None and state is not None:
         user_id = state.get("user_id")
     api_key = ""

@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
+import { environment } from '../environments/environment';
 
 export const routes: Routes = [
   {
@@ -283,5 +284,16 @@ export const routes: Routes = [
         (m) => m.InfoDetailPage,
       ),
   },
+  // Phase 8 WS-18 — dev/`ct`-only component-in-harness route (excluded from the
+  // production build via environment.ctHarness === false).
+  ...(environment.ctHarness
+    ? [
+        {
+          path: '__ct/:component',
+          loadComponent: () =>
+            import('./presentation/dev/ct-harness.page').then((m) => m.CtHarnessPage),
+        },
+      ]
+    : []),
   { path: '**', redirectTo: '' },
 ];

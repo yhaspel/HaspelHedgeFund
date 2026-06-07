@@ -1,0 +1,267 @@
+{
+  "items": [
+    {
+      "persona_name": "buffett",
+      "display_name": "Warren Buffett",
+      "firm_name": "Berkshire Hathaway",
+      "is_evolvable": true,
+      "lifecycle_note": "",
+      "search_aliases": [
+        "Berkshire",
+        "BRK",
+        "BRK.A",
+        "BRK.B"
+      ],
+      "last_cycle_at": "2026-06-01T05:30:10.930890Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 7,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "Berkshire Hathaway sold 16 positions, including Visa and Mastercard (2026-05-23). Tripled stake in Alphabet. Added Delta Air Lines and Macy's to portfolio (2026-Q1). Cash position at $397 billion (2026-05-21).",
+        "general_notes_md": "Berkshire Hathaway Energy is a reliable cash cow, performing well regardless of the economic backdrop.",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nBerkshire Hathaway sold 16 positions, including Visa and Mastercard (2026-05-23). Tripled stake in Alphabet. Added Delta Air Lines and Macy's to portfolio (2026-Q1). Cash position at $397 billion (2026-05-21).\n\nGENERAL NOTES\nBerkshire Hathaway Energy is a reliable cash cow, performing well regardless of the economic backdrop.",
+        "char_count": 311,
+        "over_budget": false,
+        "material_change": false,
+        "dropped_facts": [],
+        "source_urls": [
+          "berkshirehathaway.com",
+          "sec.gov",
+          "bloomberg.com",
+          "cnbc.com",
+          "reuters.com",
+          "fool.com",
+          "invezz.com",
+          "gurufocus.com",
+          "finbold.com",
+          "247wallst.com",
+          "seekingalpha.com",
+          "zacks.com"
+        ],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:30:10.925122Z"
+      },
+      "updated_at": "2026-06-01T05:30:10.931051Z"
+    },
+    {
+      "persona_name": "burry",
+      "display_name": "Michael Burry",
+      "firm_name": "Scion Asset Management",
+      "is_evolvable": true,
+      "lifecycle_note": "",
+      "search_aliases": [
+        "Scion",
+        "Scion Asset"
+      ],
+      "last_cycle_at": "2026-06-01T05:30:50.008537Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 8,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "Michael Burry sold CRM and ADSK (2026-05-07), remains long JD (2026-05-12), analyzed NVIDIA (2026-05-22).",
+        "general_notes_md": "Michael Burry discussed past predictions (2026-05-10), noting long common stocks except 2005-2008 big short.",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nMichael Burry sold CRM and ADSK (2026-05-07), remains long JD (2026-05-12), analyzed NVIDIA (2026-05-22).\n\nGENERAL NOTES\nMichael Burry discussed past predictions (2026-05-10), noting long common stocks except 2005-2008 big short.",
+        "char_count": 213,
+        "over_budget": false,
+        "material_change": false,
+        "dropped_facts": [],
+        "source_urls": [],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:30:50.007119Z"
+      },
+      "updated_at": "2026-06-01T05:30:50.008740Z"
+    },
+    {
+      "persona_name": "damodaran",
+      "display_name": "Aswath Damodaran",
+      "firm_name": "NYU Stern",
+      "is_evolvable": true,
+      "lifecycle_note": "academic/blogger \u2014 expect thin moves, richer notes",
+      "search_aliases": [
+        "NYU Stern",
+        "Damodaran Online",
+        "Musings on Markets"
+      ],
+      "last_cycle_at": "2026-06-01T05:31:15.384140Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 9,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "Aswath Damodaran discussed AI valuations and market resilience on May 16, 2026. He expressed concerns about catastrophic risks and published a data update on dividends and buybacks. On May 25, 2026, he posted on his blog about the current state of equity markets. In a May 28, 2026 podcast, he emphasized valuation's importance in investing. On May 30, 2026, he tweeted about the need for cautious and disciplined investing.",
+        "general_notes_md": "Aswath Damodaran recently interviewed with Scott Galloway and Ed Elson, and appeared on a podcast discussing market risks. He published a blog post on Musings on Markets about dividend policy and expressed concerns about the AI boom.",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nAswath Damodaran discussed AI valuations and market resilience on May 16, 2026. He expressed concerns about catastrophic risks and published a data update on dividends and buybacks. On May 25, 2026, he posted on his blog about the current state of equity markets. In a May 28, 2026 podcast, he emphasized valuation's importance in investing. On May 30, 2026, he tweeted about the need for cautious and disciplined investing.\n\nGENERAL NOTES\nAswath Damodaran recently interviewed with Scott Galloway and Ed Elson, and appeared on a podcast discussing market risks. He published a blog post on Musings on Markets about dividend policy and expressed concerns about the AI boom.",
+        "char_count": 657,
+        "over_budget": false,
+        "material_change": true,
+        "dropped_facts": [
+          "US equity market's implied equity risk premium is around 4.23%",
+          "held back on putting idle cash into US equities",
+          "upcoming IPOs from Anthropic, OpenAI, and SpaceX"
+        ],
+        "source_urls": [
+          "Musings on Markets blog post, May 25, 2026",
+          "Podcast interview, May 28, 2026 (source: The Investopedia Podcast)",
+          "Aswath Damodaran's Twitter account, May 30, 2026"
+        ],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:31:15.381603Z"
+      },
+      "updated_at": "2026-06-01T05:31:15.384306Z"
+    },
+    {
+      "persona_name": "druckenmiller",
+      "display_name": "Stanley Druckenmiller",
+      "firm_name": "Duquesne Family Office",
+      "is_evolvable": true,
+      "lifecycle_note": "",
+      "search_aliases": [
+        "Duquesne",
+        "Druckenmiller Foundation"
+      ],
+      "last_cycle_at": "2026-06-01T05:31:40.807455Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 10,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "Reduced exposure to tech and consumer internet names (Amazon, Alphabet) in Q1 2026. Repositioned toward commodities, Latin America, and healthcare. Increased stake in YPF Sociedad by 433% to over 3.2 million shares. Initiated new stakes in Broadcom, Intel, and Arm Holdings, reflecting a bet on the emerging AI infrastructure boom. Exited Alphabet and invested in AI hardware stocks (2026-05-30).",
+        "general_notes_md": "Stanley Druckenmiller has been making significant changes to his portfolio, including dumping his entire stake in Alphabet and investing in memory and storage stocks (Sandisk, Micron Technology, Seagate Technology) and AI hardware stocks.",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nReduced exposure to tech and consumer internet names (Amazon, Alphabet) in Q1 2026. Repositioned toward commodities, Latin America, and healthcare. Increased stake in YPF Sociedad by 433% to over 3.2 million shares. Initiated new stakes in Broadcom, Intel, and Arm Holdings, reflecting a bet on the emerging AI infrastructure boom. Exited Alphabet and invested in AI hardware stocks (2026-05-30).\n\nGENERAL NOTES\nStanley Druckenmiller has been making significant changes to his portfolio, including dumping his entire stake in Alphabet and investing in memory and storage stocks (Sandisk, Micron Technology, Seagate Technology) and AI hardware stocks.",
+        "char_count": 634,
+        "over_budget": false,
+        "material_change": true,
+        "dropped_facts": [
+          "No new information on recent activities or statements about markets in the last 7 days."
+        ],
+        "source_urls": [
+          "invezz.com",
+          "fool.com"
+        ],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:31:40.803299Z"
+      },
+      "updated_at": "2026-06-01T05:31:40.807586Z"
+    },
+    {
+      "persona_name": "graham",
+      "display_name": "Benjamin Graham",
+      "firm_name": "",
+      "is_evolvable": false,
+      "lifecycle_note": "deceased 1976 \u2014 philosophy is canon",
+      "search_aliases": [],
+      "last_cycle_at": null,
+      "last_cycle_status": "never",
+      "last_cycle_note": "",
+      "current_cycle_started_at": null,
+      "current_revision": null,
+      "updated_at": "2026-05-25T13:20:39.064579Z"
+    },
+    {
+      "persona_name": "lynch",
+      "display_name": "Peter Lynch",
+      "firm_name": "Fidelity",
+      "is_evolvable": true,
+      "lifecycle_note": "retired from active management \u2014 expect thin moves",
+      "search_aliases": [
+        "Fidelity Magellan",
+        "Magellan Fund"
+      ],
+      "last_cycle_at": "2026-06-01T05:32:18.791365Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 11,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "No recent market stance or moves found.",
+        "general_notes_md": "Peter Lynch stated in October 2025 that he has 'zero AI stocks' and doesn't understand technology enough to have an informed opinion on the market's optimism toward AI. He has been retired from active management since 1990.",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nNo recent market stance or moves found.\n\nGENERAL NOTES\nPeter Lynch stated in October 2025 that he has 'zero AI stocks' and doesn't understand technology enough to have an informed opinion on the market's optimism toward AI. He has been retired from active management since 1990.",
+        "char_count": 262,
+        "over_budget": false,
+        "material_change": false,
+        "dropped_facts": [],
+        "source_urls": [
+          "Investopedia - Peter Lynch",
+          "Bloomberg",
+          "CNBC",
+          "SEC.gov",
+          "prnewswire.com",
+          "zacks.com",
+          "businesswire.com"
+        ],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:32:18.787656Z"
+      },
+      "updated_at": "2026-06-01T05:32:18.791574Z"
+    },
+    {
+      "persona_name": "munger",
+      "display_name": "Charlie Munger",
+      "firm_name": "",
+      "is_evolvable": false,
+      "lifecycle_note": "deceased 2023 \u2014 philosophy is canon",
+      "search_aliases": [],
+      "last_cycle_at": null,
+      "last_cycle_status": "never",
+      "last_cycle_note": "",
+      "current_cycle_started_at": null,
+      "current_revision": null,
+      "updated_at": "2026-05-25T13:20:39.065538Z"
+    },
+    {
+      "persona_name": "wood",
+      "display_name": "Cathie Wood",
+      "firm_name": "ARK Invest",
+      "is_evolvable": true,
+      "lifecycle_note": "",
+      "search_aliases": [
+        "ARK",
+        "ARKK",
+        "ARKG",
+        "ARKQ",
+        "ARKW"
+      ],
+      "last_cycle_at": "2026-06-01T05:32:53.578727Z",
+      "last_cycle_status": "ok",
+      "last_cycle_note": "ok",
+      "current_cycle_started_at": null,
+      "current_revision": {
+        "id": 12,
+        "seq": 2,
+        "as_of_date": "2026-06-01",
+        "market_stance_md": "ARK Invest filed 13F report for Q1 2026, revealing new positions (2026-05-27). Cathie Wood remains bullish on innovation, particularly genomics and AI, citing Illumina and NVIDIA (2026-05-29). ARK Invest reduced cash holdings and increased leverage (2026-05-26). Published research report on autonomous vehicle sector, focusing on Tesla and Waymo (2026-05-25).",
+        "general_notes_md": "Cathie Wood discusses innovation and AI on CNBC (2026-05-29). NVIDIA partners with Microsoft, Dell, and HP for new Arm-based chip (2026-06-01).",
+        "composite_markdown": "RECENT MARKET STANCE & MOVES (as of 2026-06-01)\nARK Invest filed 13F report for Q1 2026, revealing new positions (2026-05-27). Cathie Wood remains bullish on innovation, particularly genomics and AI, citing Illumina and NVIDIA (2026-05-29). ARK Invest reduced cash holdings and increased leverage (2026-05-26). Published research report on autonomous vehicle sector, focusing on Tesla and Waymo (2026-05-25).\n\nGENERAL NOTES\nCathie Wood discusses innovation and AI on CNBC (2026-05-29). NVIDIA partners with Microsoft, Dell, and HP for new Arm-based chip (2026-06-01).",
+        "char_count": 503,
+        "over_budget": false,
+        "material_change": true,
+        "dropped_facts": [
+          "Sold $28M of AMD and TSM stocks (2026-05-18)",
+          "Bought $11.8M of Cerebras Systems (CBRS) and $6.2M of Twist Bioscience (TWST) (2026-05-22)",
+          "Cathie Wood bullish on Bitcoin (2026-05-25)"
+        ],
+        "source_urls": [
+          "SEC.gov (May 27, 2026) - ARK Investment Management LLC 13F Filing",
+          "CNBC (May 29, 2026) - Cathie Wood: We're still bullish on innovation",
+          "Bloomberg (May 26, 2026) - ARK's Wood Sees 'Compelling Valuations' as She Boosts Leverage",
+          "ARK Invest (May 25, 2026) - Autonomous Vehicles: A Research Report"
+        ],
+        "model_id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "created_at": "2026-06-01T05:32:53.576595Z"
+      },
+      "updated_at": "2026-06-01T05:32:53.578881Z"
+    }
+  ]
+}

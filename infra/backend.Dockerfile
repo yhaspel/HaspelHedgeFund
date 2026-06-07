@@ -15,7 +15,12 @@ RUN apt-get update \
 
 COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
 
-COPY backend/pyproject.toml backend/uv.lock /app/
+# Install deps from pyproject.toml. uv.lock is intentionally NOT copied: it is
+# .gitignored (absent in a fresh CI checkout) and the install below reads only
+# pyproject.toml, so COPYing it just made the image build fail in CI. (To make
+# builds reproducible against the lock instead, commit uv.lock and switch this to
+# `uv sync --frozen`.)
+COPY backend/pyproject.toml /app/
 RUN uv pip install --system --requirement pyproject.toml
 
 COPY backend/ /app/

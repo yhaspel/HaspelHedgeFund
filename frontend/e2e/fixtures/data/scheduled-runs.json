@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1,
+    "name": "Daily watchlist check",
+    "watchlist": 1,
+    "watchlist_name": "My Watchlist",
+    "personas": [],
+    "model_preset": "dev",
+    "model_overrides": {},
+    "graph_version_id": null,
+    "cron_expression": "25 9 * * 1-5",
+    "cron_description": "At 09:25 AM, Monday through Friday",
+    "timezone": "America/New_York",
+    "is_market_aware": true,
+    "cost_ceiling_usd": "2.00",
+    "on_breach": "degrade",
+    "notification_channel": null,
+    "auto_paper_submit": false,
+    "auto_submit_broker_account": null,
+    "auto_submit_account_label": "",
+    "auto_submit_draft_only": false,
+    "max_orders_per_day": 10,
+    "max_notional_per_day_usd": "10000.00",
+    "is_active": true,
+    "last_run_at": "2026-06-05T13:25:03.038046Z",
+    "next_run_at": "2026-06-08T13:25:00Z",
+    "created_at": "2026-05-30T03:15:54.198625Z",
+    "updated_at": "2026-05-30T07:11:14.767629Z"
+  }
+]

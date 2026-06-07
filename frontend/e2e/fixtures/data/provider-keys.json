@@ -1,0 +1,10 @@
+{
+  "anthropic": "set",
+  "openrouter": "unset",
+  "openai": "unset",
+  "ollama_host": "http://host.docker.internal:11434",
+  "fmp": "unset",
+  "tiingo": "unset",
+  "fred": "unset",
+  "resend": "unset"
+}

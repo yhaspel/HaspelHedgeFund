@@ -1,0 +1,50 @@
+[
+  {
+    "id": 13,
+    "version": 6,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:20:32.317257Z",
+    "notes": "",
+    "display_label": "My Value only:v6"
+  },
+  {
+    "id": 12,
+    "version": 5,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:17:47.205165Z",
+    "notes": "",
+    "display_label": "My Value only:v5"
+  },
+  {
+    "id": 11,
+    "version": 4,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:15:50.494342Z",
+    "notes": "",
+    "display_label": "My Value only:v4"
+  },
+  {
+    "id": 10,
+    "version": 3,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:15:43.890119Z",
+    "notes": "",
+    "display_label": "My Value only:v3"
+  },
+  {
+    "id": 9,
+    "version": 2,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:15:42.936703Z",
+    "notes": "",
+    "display_label": "My Value only:v2"
+  },
+  {
+    "id": 8,
+    "version": 1,
+    "validation_status": "valid",
+    "created_at": "2026-06-02T07:15:25.461121Z",
+    "notes": "Cloned from template 'Value only'.",
+    "display_label": "My Value only:v1"
+  }
+]

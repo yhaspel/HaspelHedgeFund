@@ -1,0 +1,282 @@
+[
+  {
+    "id": 66,
+    "name": "Cross-Asset Trend (CTA-lite)",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-04T16:05:34.460062Z"
+  },
+  {
+    "id": 65,
+    "name": "Broker \u00b7 Alpaca (paper only) \u00b7 trend-cta",
+    "kind": "broker",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-04T16:05:34.453612Z"
+  },
+  {
+    "id": 64,
+    "name": "Sector Rotation",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-04T16:05:34.015284Z"
+  },
+  {
+    "id": 63,
+    "name": "Broker \u00b7 Alpaca (paper only) \u00b7 sector-rotation",
+    "kind": "broker",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-04T16:05:34.008218Z"
+  },
+  {
+    "id": 62,
+    "name": "Multi-Factor Long/Short Equity",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-04T16:05:32.700443Z"
+  },
+  {
+    "id": 61,
+    "name": "Broker \u00b7 Alpaca (paper only) \u00b7 multifactor-ls",
+    "kind": "broker",
+    "cash_balance": "23961.10",
+    "created_at": "2026-06-04T16:05:32.691902Z"
+  },
+  {
+    "id": 60,
+    "name": "Claude Long-only (self-heal)",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-03T20:38:50.704354Z"
+  },
+  {
+    "id": 59,
+    "name": "Claude L/S (self-heal)",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-03T20:38:50.698271Z"
+  },
+  {
+    "id": 58,
+    "name": "Global macro (ETF expression) \u00b7 2026-06-02 21:49",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-02T18:50:14.349548Z"
+  },
+  {
+    "id": 57,
+    "name": "Short-only \u00b7 sp500_top_200 \u00b7 2026-06-02 16:36",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-02T13:38:50.733685Z"
+  },
+  {
+    "id": 56,
+    "name": "Concentrated long-only \u00b7 2026-05-31 19:58",
+    "kind": "strategy",
+    "cash_balance": "28309.40",
+    "created_at": "2026-06-01T05:28:54.226740Z"
+  },
+  {
+    "id": 55,
+    "name": "Sector / thematic ETF rotation \u00b7 sector_etfs \u00b7 2026-05-31 19:49",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.226248Z"
+  },
+  {
+    "id": 54,
+    "name": "Concentrated long-only \u00b7 2026-05-31 11:22",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.225753Z"
+  },
+  {
+    "id": 53,
+    "name": "Long/Short \u00b7 2026-05-29 16:23",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.225235Z"
+  },
+  {
+    "id": 52,
+    "name": "Long/Short \u00b7 macro_etfs \u00b7 2026-05-29 16:17",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.224698Z"
+  },
+  {
+    "id": 51,
+    "name": "Long/Short \u00b7 macro_etfs \u00b7 2026-05-25 15:46",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.224145Z"
+  },
+  {
+    "id": 50,
+    "name": "Long/Short \u00b7 2026-05-25 15:33",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.223602Z"
+  },
+  {
+    "id": 49,
+    "name": "Long-only \u00b7 2026-05-23 15:50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.223060Z"
+  },
+  {
+    "id": 48,
+    "name": "Long/Short \u00b7 macro_etfs \u00b7 2026-05-23 15:09",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.222516Z"
+  },
+  {
+    "id": 47,
+    "name": "Pairs trading (cointegration) \u00b7 2026-05-21 18:05",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.221910Z"
+  },
+  {
+    "id": 46,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.221366Z"
+  },
+  {
+    "id": 45,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.220215Z"
+  },
+  {
+    "id": 44,
+    "name": "Pairs MVP (frugal)",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.219683Z"
+  },
+  {
+    "id": 43,
+    "name": "Pairs MVP",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.219026Z"
+  },
+  {
+    "id": 42,
+    "name": "Risk Parity Test",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.218490Z"
+  },
+  {
+    "id": 41,
+    "name": "Macro Test",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.217970Z"
+  },
+  {
+    "id": 40,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.217441Z"
+  },
+  {
+    "id": 39,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.216539Z"
+  },
+  {
+    "id": 38,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.215937Z"
+  },
+  {
+    "id": 37,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.215256Z"
+  },
+  {
+    "id": 36,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.214636Z"
+  },
+  {
+    "id": 35,
+    "name": "sector rotation 1",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.213983Z"
+  },
+  {
+    "id": 34,
+    "name": "Sector Rotation Test",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.213245Z"
+  },
+  {
+    "id": 33,
+    "name": "Concentrated 7 (test)",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.212589Z"
+  },
+  {
+    "id": 32,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.211850Z"
+  },
+  {
+    "id": 31,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.210835Z"
+  },
+  {
+    "id": 30,
+    "name": "Daily L/S 100/50",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-06-01T05:28:54.207926Z"
+  },
+  {
+    "id": 17,
+    "name": "Broker \u00b7 Demo broker (no real account) \u00b7 Demo book",
+    "kind": "broker",
+    "cash_balance": "90606.24",
+    "created_at": "2026-05-23T09:41:22.051810Z"
+  },
+  {
+    "id": 6,
+    "name": "Manual Book",
+    "kind": "manual",
+    "cash_balance": "40058.90",
+    "created_at": "2026-05-22T05:31:43.115237Z"
+  },
+  {
+    "id": 1,
+    "name": "Default paper portfolio",
+    "kind": "strategy",
+    "cash_balance": "100000.00",
+    "created_at": "2026-05-19T12:55:25.031007Z"
+  }
+]

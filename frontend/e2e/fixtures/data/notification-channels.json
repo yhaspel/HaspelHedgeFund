@@ -1,0 +1,25 @@
+[
+  {
+    "id": 3,
+    "kind": "email",
+    "name": "EmailHHF",
+    "is_active": true,
+    "config_summary": {
+      "address": "e2e@example.com"
+    },
+    "created_at": "2026-05-30T19:12:54.474097Z",
+    "updated_at": "2026-05-30T19:12:54.474120Z"
+  },
+  {
+    "id": 2,
+    "kind": "telegram",
+    "name": "TelegramBotHHF",
+    "is_active": true,
+    "config_summary": {
+      "chat_id": "8776597403",
+      "bot_token": "\u2026K62I"
+    },
+    "created_at": "2026-05-30T19:10:56.376989Z",
+    "updated_at": "2026-05-30T19:10:56.377027Z"
+  }
+]

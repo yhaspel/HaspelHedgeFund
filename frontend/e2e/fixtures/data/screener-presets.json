@@ -1,0 +1,127 @@
+{
+  "presets": [
+    {
+      "id": "momentum",
+      "name": "Momentum Stocks",
+      "description": "Liquid names in a sustained uptrend: 3-month return \u2265 +20%, above both the 50- and 200-day moving averages.",
+      "asset_class": "equity",
+      "filters": {
+        "market_cap": {
+          "min": 300000000
+        },
+        "price": {
+          "min": 5
+        },
+        "adv_14d": {
+          "min": 500000
+        },
+        "momentum_3m": {
+          "min": 0.2
+        },
+        "above_50d_ma": {
+          "value": true
+        },
+        "above_200d_ma": {
+          "value": true
+        }
+      },
+      "sort": {
+        "field": "momentum_3m",
+        "dir": "desc"
+      },
+      "limit": 200,
+      "available": true,
+      "requires": []
+    },
+    {
+      "id": "gap",
+      "name": "Gap Up",
+      "description": "Stocks that opened \u2265 4% above the prior close. Switch the preset to Gap Down to flip the sign.",
+      "asset_class": "equity",
+      "filters": {
+        "price": {
+          "min": 2
+        },
+        "adv_14d": {
+          "min": 300000
+        },
+        "gap_pct": {
+          "min": 4
+        }
+      },
+      "sort": {
+        "field": "gap_pct",
+        "dir": "desc"
+      },
+      "limit": 200,
+      "available": true,
+      "requires": []
+    },
+    {
+      "id": "gap_down",
+      "name": "Gap Down",
+      "description": "Stocks that opened \u2265 4% below the prior close.",
+      "asset_class": "equity",
+      "filters": {
+        "price": {
+          "min": 2
+        },
+        "adv_14d": {
+          "min": 300000
+        },
+        "gap_pct": {
+          "max": -4
+        }
+      },
+      "sort": {
+        "field": "gap_pct",
+        "dir": "asc"
+      },
+      "limit": 200,
+      "available": true,
+      "requires": []
+    },
+    {
+      "id": "large_caps",
+      "name": "Large Caps",
+      "description": "Market cap \u2265 $10B. Includes ETFs \u2014 the simplest, cheapest screen (pure stage-1; no enrichment needed for the filter).",
+      "asset_class": "all",
+      "filters": {
+        "market_cap": {
+          "min": 10000000000
+        }
+      },
+      "sort": {
+        "field": "market_cap",
+        "dir": "desc"
+      },
+      "limit": 200,
+      "available": true,
+      "requires": []
+    },
+    {
+      "id": "stocks_in_play",
+      "name": "Stocks in Play",
+      "description": "Unusually active names worth watching: volume \u2265 1M and RVOL \u2265 2 (today's volume vs the 14-day average). Premarket-volume filtering will be added when a premarket data source is available.",
+      "asset_class": "equity",
+      "filters": {
+        "price": {
+          "min": 5
+        },
+        "volume": {
+          "min": 1000000
+        },
+        "rvol": {
+          "min": 2.0
+        }
+      },
+      "sort": {
+        "field": "rvol",
+        "dir": "desc"
+      },
+      "limit": 200,
+      "available": true,
+      "requires": []
+    }
+  ]
+}

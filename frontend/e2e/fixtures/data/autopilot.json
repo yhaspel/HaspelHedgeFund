@@ -1,0 +1,52 @@
+{
+  "autopilot": {
+    "strategy_id": 48,
+    "is_enabled": true,
+    "state": "active",
+    "cron_expression": "0 17 * * 5",
+    "cron_description": "At 05:00 PM, only on Friday",
+    "timezone": "America/New_York",
+    "is_market_aware": true,
+    "broker_account_id": 13,
+    "model_preset": "frugal",
+    "cost_ceiling_usd": null,
+    "on_breach": "degrade",
+    "target_vol_pct": "10.00",
+    "dd_soft_cut_pct": "5.00",
+    "dd_hard_halt_pct": "7.50",
+    "max_orders_per_day": 30,
+    "max_notional_per_day_usd": "50000.00",
+    "liquidity_adv_cap_pct": "5.00",
+    "short_mode": "cash",
+    "flatten_on_halt": false,
+    "peak_equity_usd": "100000.00",
+    "last_run_at": null,
+    "next_run_at": "2026-06-12T21:00:00+00:00",
+    "validation": {
+      "passed": true,
+      "checks": [
+        {
+          "key": "has_backtest",
+          "ok": true,
+          "detail": "Backtest #23"
+        },
+        {
+          "key": "positive_oos_sharpe",
+          "ok": true,
+          "detail": "OOS Sharpe 0.8500 (need > 0)"
+        },
+        {
+          "key": "drawdown_within_limit",
+          "ok": true,
+          "detail": "Backtest max DD 6.5000% (limit 7.50%)"
+        },
+        {
+          "key": "backtest_fresh",
+          "ok": true,
+          "detail": "Backtest reflects the current config."
+        }
+      ],
+      "backtest_id": 23
+    }
+  }
+}
