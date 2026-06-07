@@ -4,6 +4,7 @@ We compute the numbers in pure Python (SMA, RSI, ATR, momentum) — the
 LLM only labels the regime and assigns a directional signal. This keeps
 the LLM out of arithmetic, where it is unreliable.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -16,6 +17,16 @@ from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import TechnicalsOutput
 from ..registry import DEFAULT_MODELS, get_llm
+from ..versioning import AgentSpec, register
+
+SPEC = AgentSpec(
+    agent_name="technicals",
+    version="v1",
+    default_model="openrouter:qwen/qwen3.6-27b",
+    prompt="(technicals regime/signal labeler — see analytical/technicals.py)",
+    config={"kind": "analytical"},
+)
+register(SPEC)
 
 
 def _rsi(closes: np.ndarray, period: int = 14) -> float:
@@ -60,11 +71,18 @@ def run_technicals(state: AgentState) -> AgentState:
     bars = state["data_provider"].get_daily_bars(ticker, start, as_of, as_of=as_of)
     if len(bars) < 30:
         # Not enough data to do anything useful — return a neutral output without LLM.
-        return {"technicals": TechnicalsOutput(
-            regime="range",
-            momentum_1m=0.0, momentum_3m=0.0, momentum_6m=0.0,
-            rsi_14=50.0, atr_pct=0.0, signal="neutral", confidence=0,
-        ).model_dump()}  # type: ignore[return-value]
+        return {
+            "technicals": TechnicalsOutput(
+                regime="range",
+                momentum_1m=0.0,
+                momentum_3m=0.0,
+                momentum_6m=0.0,
+                rsi_14=50.0,
+                atr_pct=0.0,
+                signal="neutral",
+                confidence=0,
+            ).model_dump()
+        }  # type: ignore[return-value]
 
     closes = np.array([float(b.close) for b in bars])
     highs = np.array([float(b.high) for b in bars])
@@ -99,6 +117,7 @@ def run_technicals(state: AgentState) -> AgentState:
         "0-100 confidence."
     )
     from apps.backtests.cache import make_cache_ctx
+
     parsed, resp = call_structured(
         client,
         model=model,
@@ -108,9 +127,11 @@ def run_technicals(state: AgentState) -> AgentState:
         cache_ctx=make_cache_ctx(state, "technicals"),
     )
     record_llm_call(
-        run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
-            portfolio_target_id=state.get("portfolio_target_id"),
-        agent_name="technicals", resp=resp,
+        run_id=state.get("run_id"),
+        backtest_id=state.get("backtest_id"),
+        portfolio_target_id=state.get("portfolio_target_id"),
+        agent_name="technicals",
+        resp=resp,
     )
     # Trust our numeric metrics over whatever the LLM echoed.
     out = parsed.model_dump()

@@ -4,6 +4,7 @@
 Each node reads what it needs and writes its output back under a stable
 key (`fundamentals`, `technicals`, `buffett`, `decision`).
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -16,8 +17,8 @@ class AgentState(TypedDict, total=False):
     as_of_date: dt.date
     run_id: int  # FK target for LLMCall rows
     user_id: int  # owner of the run — lets agent nodes resolve per-user
-                  # provider keys (P3-C §12.6: needed so get_llm("ollama", state=state)
-                  # picks up pk.ollama_host instead of the localhost default).
+    # provider keys (P3-C §12.6: needed so get_llm("ollama", state=state)
+    # picks up pk.ollama_host instead of the localhost default).
     model_overrides: dict[str, str]
 
     # Wiring
@@ -72,6 +73,13 @@ class AgentState(TypedDict, total=False):
     theme: str
     use_llm_cache: bool  # backtests: read/write LLMResponseCache (L2)
     backtest_id: int  # for cache scoping / telemetry
+    # Snapshot of {agent_name: version} for the run, set by prime_agent_cache.
+    # MUST be declared here: StateGraph(AgentState) drops any input key absent
+    # from this schema, so an undeclared agent_versions never reaches the nodes.
+    # make_cache_ctx then resolves a blank version, every L2 cache row is stored
+    # version-less, and version-based invalidation silently breaks (the cache
+    # never busts when an agent's prompt/model/default changes).
+    agent_versions: dict[str, str]
 
     # P3-prereq-5 WS-C/WS-G: investor profile injected by execute_run (ad-hoc
     # runs always, opted-in strategy cycles). Empty dict {} ⇒ no
