@@ -56,10 +56,12 @@ class UniverseMembershipView(APIView):
         except Universe.DoesNotExist:
             return Response({"detail": "not found"}, status=404)
         members = UniverseMembership.objects.filter(universe=u).order_by("ticker")
-        return Response({
-            "universe": u.name,
-            "members": UniverseMembershipSerializer(members, many=True).data,
-        })
+        return Response(
+            {
+                "universe": u.name,
+                "members": UniverseMembershipSerializer(members, many=True).data,
+            }
+        )
 
 
 class PortfolioListCreateView(generics.ListCreateAPIView):
@@ -99,8 +101,7 @@ class PortfolioHubView(APIView):
         from apps.brokers.models import BrokerAccount
 
         broker_by_pf = {
-            ba.portfolio_id: ba
-            for ba in BrokerAccount.objects.filter(user=request.user)
+            ba.portfolio_id: ba for ba in BrokerAccount.objects.filter(user=request.user)
         }
         strat_by_pf: dict[int, PortfolioStrategy] = {}
         for st in PortfolioStrategy.objects.filter(user=request.user):
@@ -120,11 +121,7 @@ class PortfolioHubView(APIView):
             # strategy's (empty) current-holdings reference, but it shouldn't
             # clutter the hub or inflate the cash/equity totals with its default
             # notional cash. Manual and broker books always show.
-            if (
-                p.kind == Portfolio.KIND_STRATEGY
-                and not positions
-                and not p.ledger.exists()
-            ):
+            if p.kind == Portfolio.KIND_STRATEGY and not positions and not p.ledger.exists():
                 continue
             market_value = sum(
                 (pos.quantity * pos.avg_cost for pos in positions),
@@ -199,7 +196,8 @@ def _strategies_with_active_count(user):
 
     return PortfolioStrategy.objects.filter(user=user).annotate(
         targets_count_active_annotated=Count(
-            "targets", filter=~Q(targets__status="cancelled"),
+            "targets",
+            filter=~Q(targets__status="cancelled"),
         ),
     )
 
@@ -229,11 +227,14 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
         if strategy.targets.exclude(status=PortfolioTarget.CANCELLED).exists():
             logger.warning(
                 "strategy_delete_refused kind=has_active_cycles id=%s user_id=%s",
-                strategy.pk, request.user.id,
+                strategy.pk,
+                request.user.id,
             )
             return Response(
-                {"detail": "strategy has non-cancelled cycles; cancel/deactivate "
-                           "instead of deleting so history is preserved"},
+                {
+                    "detail": "strategy has non-cancelled cycles; cancel/deactivate "
+                    "instead of deleting so history is preserved"
+                },
                 status=status.HTTP_409_CONFLICT,
             )
         portfolio = strategy.portfolio
@@ -243,11 +244,15 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
             logger.warning(
                 "strategy_delete_refused kind=nonempty_portfolio id=%s "
                 "portfolio_id=%s user_id=%s",
-                strategy.pk, portfolio.pk, request.user.id,
+                strategy.pk,
+                portfolio.pk,
+                request.user.id,
             )
             return Response(
-                {"detail": "the strategy's portfolio has positions or ledger "
-                           "history; reassign or delete that portfolio first"},
+                {
+                    "detail": "the strategy's portfolio has positions or ledger "
+                    "history; reassign or delete that portfolio first"
+                },
                 status=status.HTTP_409_CONFLICT,
             )
         with transaction.atomic():
@@ -255,7 +260,9 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
             portfolio.delete()  # freshly-seeded, untouched book
         logger.info(
             "strategy_deleted id=%s portfolio_id=%s user_id=%s",
-            strategy.pk, portfolio.pk, request.user.id,
+            strategy.pk,
+            portfolio.pk,
+            request.user.id,
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -298,9 +305,7 @@ class StrategyEstimateView(APIView):
         except PortfolioStrategy.DoesNotExist:
             return Response({"detail": "not found"}, status=404)
         preset, overrides = _parse_cycle_overrides(request)
-        return Response(
-            estimate_cycle(strategy, override_preset=preset, override_models=overrides)
-        )
+        return Response(estimate_cycle(strategy, override_preset=preset, override_models=overrides))
 
 
 def _primary_persona(s: PortfolioStrategy) -> str:
@@ -321,21 +326,24 @@ class StrategyBacktestDefaultsView(APIView):
     def get(self, request: Request, pk: int) -> Response:
         try:
             s = PortfolioStrategy.objects.select_related("portfolio").get(
-                pk=pk, user=request.user,
+                pk=pk,
+                user=request.user,
             )
         except PortfolioStrategy.DoesNotExist:
             return Response({"detail": "not found"}, status=404)
         members = _active_members(s, timezone.localdate())
-        return Response({
-            "strategy_id": s.id,
-            "name": f"Validation WF {timezone.localdate().isoformat()}",
-            "universe": sorted({t for t, _sector in members}),  # full set, no trim, deduped
-            "personas": [_primary_persona(s)],
-            "include_cio": True,
-            "rebalance_frequency": "monthly",
-            "starting_cash": float(s.portfolio.cash_balance),
-            "kind": s.kind,
-        })
+        return Response(
+            {
+                "strategy_id": s.id,
+                "name": f"Validation WF {timezone.localdate().isoformat()} — {s.name}",
+                "universe": sorted({t for t, _sector in members}),  # full set, no trim, deduped
+                "personas": [_primary_persona(s)],
+                "include_cio": True,
+                "rebalance_frequency": "monthly",
+                "starting_cash": float(s.portfolio.cash_balance),
+                "kind": s.kind,
+            }
+        )
 
 
 class StrategyRunNowView(APIView):
@@ -348,8 +356,11 @@ class StrategyRunNowView(APIView):
         force = bool(request.data.get("force", False))
         preset, overrides = _parse_cycle_overrides(request)
         result = daily_long_short_cycle.delay(
-            strategy.pk, as_of, force=force,
-            override_preset=preset, override_models=overrides,
+            strategy.pk,
+            as_of,
+            force=force,
+            override_preset=preset,
+            override_models=overrides,
         )
         return Response(
             {"task_id": str(result.id), "status": "queued"},
@@ -423,7 +434,9 @@ class StrategyCycleRefreshMarkView(APIView):
         self._last_refresh_at[request.user.id] = now
         try:
             target = PortfolioTarget.objects.get(
-                pk=target_id, strategy_id=pk, strategy__user=request.user,
+                pk=target_id,
+                strategy_id=pk,
+                strategy__user=request.user,
             )
         except PortfolioTarget.DoesNotExist:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -448,7 +461,9 @@ class StrategyCycleRerunView(APIView):
     def post(self, request: Request, pk: int, target_id: int) -> Response:
         try:
             target = PortfolioTarget.objects.select_related("strategy").get(
-                pk=target_id, strategy_id=pk, strategy__user=request.user,
+                pk=target_id,
+                strategy_id=pk,
+                strategy__user=request.user,
             )
         except PortfolioTarget.DoesNotExist:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -459,8 +474,10 @@ class StrategyCycleRerunView(APIView):
             )
         if target.status == PortfolioTarget.DONE:
             return Response(
-                {"detail": "cannot rerun a done cycle; use Run now with force=true "
-                           "to re-evaluate a successful cycle"},
+                {
+                    "detail": "cannot rerun a done cycle; use Run now with force=true "
+                    "to re-evaluate a successful cycle"
+                },
                 status=status.HTTP_409_CONFLICT,
             )
         # Eligible: failed or cancelled.
@@ -472,7 +489,10 @@ class StrategyCycleRerunView(APIView):
         )
         logger.info(
             "cycle_rerun original_id=%s strategy_id=%s user_id=%s as_of=%s",
-            target.pk, target.strategy_id, request.user.id, target.as_of_date,
+            target.pk,
+            target.strategy_id,
+            request.user.id,
+            target.as_of_date,
         )
         return Response(
             {
@@ -486,6 +506,7 @@ class StrategyCycleRerunView(APIView):
 
 def _enrollment_to_dict(result) -> dict:
     """JSON-safe serialization of an EnrollmentResult (Decimals → str)."""
+
     def row_dict(r) -> dict:
         return {
             "ticker": r.ticker,
@@ -573,19 +594,17 @@ class StrategyEnrollView(APIView):
 class BorrowLookupView(APIView):
     def get(self, request: Request, ticker: str) -> Response:
         as_of_str = request.query_params.get("as_of")
-        as_of = (
-            datetime.fromisoformat(as_of_str).date()
-            if as_of_str
-            else date_cls.today()
-        )
+        as_of = datetime.fromisoformat(as_of_str).date() if as_of_str else date_cls.today()
         info = StubBorrowProvider().quote(ticker, as_of)
-        return Response({
-            "ticker": info.ticker,
-            "as_of_date": info.as_of_date.isoformat(),
-            "is_locatable": info.is_locatable,
-            "fee_pct_annual": float(info.fee_pct_annual),
-            "source": info.source,
-        })
+        return Response(
+            {
+                "ticker": info.ticker,
+                "as_of_date": info.as_of_date.isoformat(),
+                "is_locatable": info.is_locatable,
+                "fee_pct_annual": float(info.fee_pct_annual),
+                "source": info.source,
+            }
+        )
 
 
 def _normalise_subset(raw) -> list[str] | None:
@@ -613,7 +632,8 @@ class CycleApproveCouncilView(APIView):
     def _load_target(self, request: Request, pk: int, target_id: int):
         try:
             return PortfolioTarget.objects.select_related(
-                "strategy", "screener_ranking",
+                "strategy",
+                "screener_ranking",
             ).get(pk=target_id, strategy_id=pk, strategy__user=request.user)
         except PortfolioTarget.DoesNotExist:
             return None
@@ -690,8 +710,7 @@ class CycleApproveCouncilView(APIView):
             long_keys = long_subset
         if short_subset is None:
             short_keys = [
-                str(e.get("ticker", "")).upper()
-                for e in (ranking.short_candidates or [])
+                str(e.get("ticker", "")).upper() for e in (ranking.short_candidates or [])
             ]
         else:
             short_keys = short_subset
@@ -720,7 +739,9 @@ class CycleRejectView(APIView):
 
         try:
             target = PortfolioTarget.objects.select_related("strategy").get(
-                pk=target_id, strategy_id=pk, strategy__user=request.user,
+                pk=target_id,
+                strategy_id=pk,
+                strategy__user=request.user,
             )
         except PortfolioTarget.DoesNotExist:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -743,7 +764,9 @@ class CycleRejectView(APIView):
             if target.celery_task_id:
                 try:
                     celery_app.control.revoke(
-                        target.celery_task_id, terminate=True, signal="SIGTERM",
+                        target.celery_task_id,
+                        terminate=True,
+                        signal="SIGTERM",
                     )
                 except Exception:  # broker reachability issues — keep cancelling
                     pass
@@ -751,21 +774,23 @@ class CycleRejectView(APIView):
             # Mark every queued / running candidate run cancelled, revoking
             # their celery tasks too. SET_NULL on Run.portfolio_target means
             # this works even if Django couldn't load the target row first.
-            active = list(Run.objects.filter(
-                portfolio_target=target,
-                status__in=tuple(Run.ACTIVE_STATUSES),
-            ))
+            active = list(
+                Run.objects.filter(
+                    portfolio_target=target,
+                    status__in=tuple(Run.ACTIVE_STATUSES),
+                )
+            )
             for r in active:
                 if r.celery_task_id:
                     try:
                         celery_app.control.revoke(
-                            r.celery_task_id, terminate=True, signal="SIGTERM",
+                            r.celery_task_id,
+                            terminate=True,
+                            signal="SIGTERM",
                         )
                     except Exception:
                         pass
-            cancelled_count = Run.objects.filter(
-                pk__in=[r.pk for r in active]
-            ).update(
+            cancelled_count = Run.objects.filter(pk__in=[r.pk for r in active]).update(
                 status=Run.CANCELLED,
                 error_message="Cancelled because parent cycle was rejected.",
                 finished_at=timezone.now(),
@@ -776,8 +801,10 @@ class CycleRejectView(APIView):
             target.finished_at = timezone.now()
             target.save(update_fields=["status", "error_message", "finished_at"])
 
-        return Response({
-            "target_id": target.pk,
-            "status": target.status,
-            "cancelled_runs": cancelled_count,
-        })
+        return Response(
+            {
+                "target_id": target.pk,
+                "status": target.status,
+                "cancelled_runs": cancelled_count,
+            }
+        )
