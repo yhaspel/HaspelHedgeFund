@@ -168,7 +168,11 @@ class SimulatedPortfolio:
                 targets = {t: q * scale for t, q in targets.items()}
 
         # Pass 3: reductions (cash-freeing) before increases (cash-using), with a
-        # hard cash floor so a buy never borrows.
+        # cash floor at the margin allowance so leverage cannot exceed max_gross.
+        # max_gross<=1.0 → floor 0 (no borrowing, the original behavior); max_gross>1.0
+        # lets a buy borrow down to -(max_gross-1)×equity (intentional leverage).
+        cash_floor = -max(0.0, max_gross - 1.0) * equity
+
         def _delta(t: str, q: float) -> float:
             return q - self.positions.get(t, Position(ticker=t)).qty
 
@@ -179,9 +183,9 @@ class SimulatedPortfolio:
             price = fill_prices[tkr]
             delta = _delta(tkr, target_qty)
             notional = delta * price
-            if notional > 0 and self.cash - notional < 0:
-                # would borrow: clip the buy to available cash (no implicit margin)
-                delta = max(0.0, self.cash) / price
+            if notional > 0 and self.cash - notional < cash_floor:
+                # would breach the margin allowance: clip the buy to what's affordable
+                delta = max(0.0, self.cash - cash_floor) / price
                 notional = delta * price
             if abs(notional) < 1.0:  # ignore <$1 trades
                 continue

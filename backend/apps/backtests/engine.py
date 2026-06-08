@@ -201,6 +201,9 @@ DETERMINISTIC_DEFAULTS = {
     "vol_floor": 0.05,           # floor on per-leg annual vol → bounds runaway inverse-vol weights
     "vol_lookback_days": 60,     # trailing window for realized vol
     "max_leg_weight": 0.40,      # per-leg cap before gross normalization
+    "max_gross": 1.0,            # leverage cap. 1.0 = unlevered. >1.0 lets the book lever toward
+                                 # vol_target (classic risk parity levers the diversified book to
+                                 # equity-like return at low drawdown); execute() borrows to match.
 }
 
 
@@ -233,8 +236,11 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
     z2 = sum(w.values()) or 1.0
     w = {t: wi / z2 for t, wi in w.items()}
     vol_target = float(config.get("vol_target_annual", 0.15))
+    max_gross = float(config.get("max_gross", 1.0))
     port_vol = sum(w[t] * sigma[t] for t in w)  # diagonal vol proxy
-    scale = min(1.0, vol_target / port_vol) if port_vol > 0 else 1.0
+    # Scale the book toward the vol target, capped at the leverage limit. With
+    # max_gross=1.0 this is down-only (unlevered); >1.0 levers up to hit vol_target.
+    scale = min(max_gross, vol_target / port_vol) if port_vol > 0 else 1.0
     return {t: wi * scale for t, wi in w.items()}
 
 
@@ -283,7 +289,10 @@ def run_deterministic_segment(
                 apply_actions(pf, t, acts)
         if pending_orders:
             opens = fill_prices_for(day, universe)
-            fills = pf.execute(pending_orders, opens, as_of=day, hold_semantics=hold_sem)
+            fills = pf.execute(
+                pending_orders, opens, as_of=day, hold_semantics=hold_sem,
+                max_gross=float(config.get("max_gross", 1.0)),
+            )
             out.fills_by_day.append([f.__dict__ for f in fills])
             pending_orders = []
         else:

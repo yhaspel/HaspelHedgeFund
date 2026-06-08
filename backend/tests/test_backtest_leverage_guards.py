@@ -98,3 +98,29 @@ def test_step_returns_guard_on_zero_crossing() -> None:
     assert r == pytest.approx([-0.5, -1.0])
     # No sign-flipped ratio across zero.
     assert all(x >= -1.0 for x in r)
+
+
+def test_execute_allows_intentional_leverage_up_to_max_gross() -> None:
+    # max_gross>1.0 lets a buy borrow (negative cash) up to the leverage limit.
+    pf = SimulatedPortfolio(starting_cash=100_000, commission_bps=0, spread_bps=0)
+    tickers = [f"T{i}" for i in range(10)]
+    decisions = [
+        {"ticker": t, "action": "buy", "target_weight_pct": 20.0} for t in tickers
+    ]  # 200% intended gross
+    prices = {t: 100.0 for t in tickers}
+    pf.execute(decisions, fill_prices=prices, max_gross=2.0)
+    assert _gross(pf) == pytest.approx(200_000, rel=0.02)   # ~200% of equity
+    assert pf.cash == pytest.approx(-100_000, abs=1.0)      # borrowed ~100% of equity
+    assert pf.total_value == pytest.approx(100_000, abs=1.0)  # equity unchanged at entry marks
+
+
+def test_execute_caps_leverage_at_max_gross() -> None:
+    # Intended 300% gross is clamped to the 1.5x leverage limit.
+    pf = SimulatedPortfolio(starting_cash=100_000, commission_bps=0, spread_bps=0)
+    decisions = [
+        {"ticker": f"T{i}", "action": "buy", "target_weight_pct": 30.0} for i in range(10)
+    ]
+    prices = {f"T{i}": 100.0 for i in range(10)}
+    pf.execute(decisions, fill_prices=prices, max_gross=1.5)
+    assert _gross(pf) <= 150_000 + 1.0
+    assert pf.cash >= -50_000 - 1.0                          # borrowing capped at 0.5×equity
