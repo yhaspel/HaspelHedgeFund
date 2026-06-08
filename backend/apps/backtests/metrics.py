@@ -37,7 +37,12 @@ def sortino_ratio(returns: list[float], target: float = 0.0) -> float:
 
 
 def drawdown_pct(equity: list[float]) -> float:
-    """Max peak-to-trough drawdown, returned as a positive fraction (0..1)."""
+    """Max peak-to-trough drawdown, returned as a positive fraction (0..1).
+
+    A non-positive equity value means the account is wiped: that is treated as a
+    full 100% drawdown rather than letting the (peak - v)/peak term exceed 1.0,
+    which would otherwise surface as a physically-impossible >100% drawdown.
+    """
     if not equity:
         return 0.0
     peak = equity[0]
@@ -46,7 +51,8 @@ def drawdown_pct(equity: list[float]) -> float:
         if v > peak:
             peak = v
         if peak > 0:
-            dd = (peak - v) / peak
+            dd = (peak - v) / peak if v > 0 else 1.0
+            dd = min(1.0, dd)
             if dd > max_dd:
                 max_dd = dd
     return max_dd
@@ -82,6 +88,26 @@ def win_loss_ratio(returns: list[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+
+
+def _step_returns(equity: list[float]) -> list[float]:
+    """Per-step simple returns, guarded against non-positive equity.
+
+    Once equity reaches <= 0 the account is terminated: the crossing step is
+    capped at -100% and compounding stops, instead of emitting sign-flipped
+    ratios across zero (e.g. 50 -> -10 would otherwise read as -120%). For a
+    strictly-positive series this is identical to equity[i]/equity[i-1] - 1.
+    """
+    rets: list[float] = []
+    for i in range(1, len(equity)):
+        prev, cur = equity[i - 1], equity[i]
+        if prev <= 0:
+            break
+        if cur <= 0:
+            rets.append(-1.0)
+            break
+        rets.append(cur / prev - 1.0)
+    return rets
 
 
 def _stitched_oos_equity(bt) -> list[tuple]:
@@ -123,10 +149,7 @@ def stitched_oos_returns(bt) -> tuple[list, list[float]]:
     points = _stitched_oos_equity(bt)
     dates = [p[0] for p in points]
     equity = [p[1] for p in points]
-    rets = (
-        [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))]
-        if len(equity) >= 2 else []
-    )
+    rets = _step_returns(equity)
     return dates, equity, rets  # type: ignore[return-value]
 
 
@@ -161,10 +184,7 @@ def compute_stitched_metrics(bt, fold_records, agent_outputs_cache=None) -> dict
     dates_eq = _stitched_oos_equity(bt)
     dates = [p[0] for p in dates_eq]
     equity = [p[1] for p in dates_eq]
-    rets = (
-        [(equity[i] / equity[i - 1]) - 1.0 for i in range(1, len(equity))]
-        if len(equity) >= 2 else []
-    )
+    rets = _step_returns(equity)
 
     total_ret = (equity[-1] / equity[0] - 1.0) if len(equity) >= 2 else 0.0
     years = max(1e-9, len(equity) / TRADING_DAYS_PER_YEAR)

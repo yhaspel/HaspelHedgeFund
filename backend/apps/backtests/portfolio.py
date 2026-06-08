@@ -106,11 +106,12 @@ class SimulatedPortfolio:
         fill_prices: dict[str, float],
         as_of: dt.date | None = None,
         hold_semantics: str = "hold_existing",
+        max_gross: float = 1.0,
     ) -> list[Fill]:
         """Execute decisions against `fill_prices` (e.g., next day's open).
 
-        Each decision: {"ticker": str, "action": "buy"|"sell"|"hold",
-                         "target_weight_pct": float, "target_quantity": float}.
+        Each decision: {"ticker": str, "action": "buy"|"sell"|"hold"|"open_short",
+                         "target_weight_pct": float (signed), "target_quantity": float}.
 
         `hold_semantics`:
           - "hold_existing" — action="hold" skips the name (keep current target).
@@ -120,9 +121,23 @@ class SimulatedPortfolio:
         We compute target qty from current portfolio_value × target_weight%
         / fill_price (more robust than trusting upstream's target_quantity
         because the PM may have sized against a stale portfolio value).
+
+        Risk guards (leverage hardening): the PM emits per-name weights that are
+        NOT normalized to a gross budget, so this is the only aggregate control.
+          - `max_gross` caps the resulting book's gross exposure (Σ|market_value|)
+            at `max_gross × equity`; actively-targeted weights are scaled down
+            pro-rata if they would breach it. Default 1.0 = 100% gross, no leverage.
+          - cash is floored at 0: a buy is clipped to available cash rather than
+            borrowing implicitly. Reductions are executed before increases so
+            position rotations are funded by the same day's sells.
+        These guards are no-ops when the intended book is already within budget
+        (the historical case), so they do not change prior results.
         """
         self.fills_today = []
         equity = self.total_value  # snapshot before trades
+
+        # Pass 1: resolve a signed target qty for each actionable decision.
+        targets: dict[str, float] = {}
         for d in decisions:
             tkr = d["ticker"]
             action = d.get("action", "hold")
@@ -132,14 +147,43 @@ class SimulatedPortfolio:
             if action == "hold" and hold_semantics == "hold_existing":
                 continue
             target_weight = float(d.get("target_weight_pct", 0.0)) / 100.0
-            target_dollars = equity * target_weight
             if action == "sell" or (action == "hold" and hold_semantics == "target_zero"):
-                target_qty = 0.0
+                targets[tkr] = 0.0
             else:
-                target_qty = target_dollars / price
-            current = self.positions.get(tkr, Position(ticker=tkr)).qty
-            delta = target_qty - current
-            if abs(delta * price) < 1.0:  # ignore <$1 trades
+                targets[tkr] = (equity * target_weight) / price
+
+        # Pass 2: cap gross exposure of the resulting book at max_gross × equity.
+        # Positions we are not re-targeting this cycle keep their size and count
+        # against the budget.
+        if max_gross and max_gross > 0 and equity > 0:
+            held_gross = sum(
+                abs(p.qty * (fill_prices.get(t) or p.mark))
+                for t, p in self.positions.items()
+                if t not in targets and p.qty
+            )
+            target_gross = sum(abs(q * fill_prices[t]) for t, q in targets.items())
+            budget = max_gross * equity - held_gross
+            if target_gross > budget and target_gross > 0:
+                scale = max(0.0, budget) / target_gross
+                targets = {t: q * scale for t, q in targets.items()}
+
+        # Pass 3: reductions (cash-freeing) before increases (cash-using), with a
+        # hard cash floor so a buy never borrows.
+        def _delta(t: str, q: float) -> float:
+            return q - self.positions.get(t, Position(ticker=t)).qty
+
+        items = sorted(
+            targets.items(), key=lambda kv: _delta(kv[0], kv[1]) * fill_prices[kv[0]]
+        )
+        for tkr, target_qty in items:
+            price = fill_prices[tkr]
+            delta = _delta(tkr, target_qty)
+            notional = delta * price
+            if notional > 0 and self.cash - notional < 0:
+                # would borrow: clip the buy to available cash (no implicit margin)
+                delta = max(0.0, self.cash) / price
+                notional = delta * price
+            if abs(notional) < 1.0:  # ignore <$1 trades
                 continue
             fill = self._fill(tkr, delta, price)
             self.fills_today.append(fill)
