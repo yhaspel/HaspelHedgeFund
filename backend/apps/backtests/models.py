@@ -22,6 +22,16 @@ class Backtest(models.Model):
     ]
     ACTIVE_STATUSES = {QUEUED, RUNNING}
 
+    # Engine mode: how positions are sized in the walk-forward.
+    #   council     — LLM persona vote → PM aggregation (the default/legacy path)
+    #   risk_parity — deterministic inverse-vol sizing, no prime/council (free)
+    COUNCIL = "council"
+    RISK_PARITY = "risk_parity"
+    ENGINE_MODE_CHOICES = [
+        (COUNCIL, "Council (LLM vote)"),
+        (RISK_PARITY, "Deterministic risk parity"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="backtests", on_delete=models.CASCADE
     )
@@ -44,6 +54,9 @@ class Backtest(models.Model):
     starting_cash = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("100000"))
     commission_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
     spread_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
+    engine_mode = models.CharField(
+        max_length=20, choices=ENGINE_MODE_CHOICES, default=COUNCIL
+    )
     agent_graph_version = models.CharField(max_length=64, default="council-v1")
     # P4c: the immutable agent-graph version this backtest executed on. NULL ⇒
     # the hardcoded council.py. The CharField above is kept as a denormalized

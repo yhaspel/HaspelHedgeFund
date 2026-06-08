@@ -190,6 +190,124 @@ def run_segment(
 
 
 # ---------------------------------------------------------------------------
+# Deterministic (council-free) sizing — inverse-vol risk parity.
+# ---------------------------------------------------------------------------
+
+DETERMINISTIC_DEFAULTS = {
+    "vol_target_annual": 0.10,   # book scaled toward this annual vol (down-only, ≤100% gross)
+    "vol_floor": 0.05,           # floor on per-leg annual vol → bounds runaway inverse-vol weights
+    "vol_lookback_days": 60,     # trailing window for realized vol
+    "max_leg_weight": 0.40,      # per-leg cap before gross normalization
+}
+
+
+def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> dict[str, float]:
+    """Long-only inverse-volatility (risk-parity) target weights for `day`.
+
+    Each leg is sized 1/σ, normalized so Σw=1, per-leg-capped, renormalized, then
+    the whole book is scaled toward the vol target (DOWN-only: never levers above
+    100% gross). σ is trailing realized vol ending strictly before `day`
+    (point-in-time — trailing_returns_for uses date__lt=as_of). Returns {} when
+    no leg has enough history. This is a diagonal proxy (no covariance matrix
+    exists in the codebase), so it is inverse-vol, not full equal-risk-contribution.
+    """
+    from hedgefund_agents.portfolio.portfolio_manager import realized_vol_annual
+
+    floor = float(config.get("vol_floor", 0.05))
+    lookback = int(config.get("vol_lookback_days", 60))
+    sigma: dict[str, float] = {}
+    for t in universe:
+        tr = trailing_returns_for(t, day, lookback_days=lookback)
+        if len(tr) >= 20:
+            sigma[t] = max(floor, realized_vol_annual(tr))
+    if not sigma:
+        return {}
+    inv = {t: 1.0 / s for t, s in sigma.items()}
+    z = sum(inv.values())
+    w = {t: v / z for t, v in inv.items()}
+    cap = float(config.get("max_leg_weight", 0.40))
+    w = {t: min(cap, wi) for t, wi in w.items()}
+    z2 = sum(w.values()) or 1.0
+    w = {t: wi / z2 for t, wi in w.items()}
+    vol_target = float(config.get("vol_target_annual", 0.10))
+    port_vol = sum(w[t] * sigma[t] for t in w)  # diagonal vol proxy
+    scale = min(1.0, vol_target / port_vol) if port_vol > 0 else 1.0
+    return {t: wi * scale for t, wi in w.items()}
+
+
+def run_deterministic_segment(
+    *,
+    bt,
+    start: dt.date,
+    end: dt.date,
+    config: dict,
+    rebalance_dates: set[dt.date] | None = None,
+    pf: SimulatedPortfolio | None = None,
+) -> SegmentResult:
+    """Replay [start, end] with deterministic inverse-vol (risk-parity) sizing.
+
+    No LLM, no council, no agent cache — target weights come purely from trailing
+    realized vols. Mirrors run_segment's day loop (mark-to-market, corporate
+    actions, next-open execution, snapshot) but replaces the PM vote with
+    inverse_vol_weights. The engine's gross cap (SimulatedPortfolio.execute)
+    keeps gross ≤ 100%.
+
+    Pass `pf` to continue an existing portfolio across contiguous segments (the
+    walk-forward carries one book across OOS folds so it is held continuously
+    instead of liquidated-and-rebuilt every fold — the latter inflates turnover
+    ~8× and charges phantom round-trip costs a live book never pays).
+    """
+    if pf is None:
+        pf = SimulatedPortfolio(
+            starting_cash=float(bt.starting_cash),
+            commission_bps=float(bt.commission_bps),
+            spread_bps=float(bt.spread_bps),
+        )
+    universe = list(bt.universe)
+    days = trading_days(start, end, universe)
+    if not days:
+        return SegmentResult()
+
+    out = SegmentResult()
+    pending_orders: list[dict] = []
+    hold_sem = getattr(bt, "hold_semantics", "hold_existing")
+    for i, day in enumerate(days):
+        if i > 0:
+            pf.mark_to_market(close_prices_for(days[i - 1], universe))
+        for t in universe:
+            acts = actions_on(t, day)
+            if acts:
+                apply_actions(pf, t, acts)
+        if pending_orders:
+            opens = fill_prices_for(day, universe)
+            fills = pf.execute(pending_orders, opens, as_of=day, hold_semantics=hold_sem)
+            out.fills_by_day.append([f.__dict__ for f in fills])
+            pending_orders = []
+        else:
+            out.fills_by_day.append([])
+        is_rebalance = (rebalance_dates is None) or (day in rebalance_dates)
+        decisions_today: list[dict] = []
+        if is_rebalance:
+            weights = inverse_vol_weights(day=day, universe=universe, config=config)
+            for t in universe:
+                wt = weights.get(t, 0.0)
+                decisions_today.append({
+                    "ticker": t,
+                    "action": "buy" if wt > 0 else "sell",
+                    "target_weight_pct": wt * 100.0,
+                })
+            pending_orders = decisions_today
+        out.decisions_by_day.append(decisions_today)
+        out.dates.append(day)
+        out.equity.append(pf.total_value)
+        out.cash.append(pf.cash)
+        out.positions_by_day.append(pf.snapshot())
+
+    out.turnover_total = pf.turnover_total_notional
+    return out
+
+
+# ---------------------------------------------------------------------------
 
 
 def rebalance_dates_for(

@@ -19,9 +19,11 @@ from django.utils import timezone
 from hedgefund_agents.personas import ALL_PERSONAS
 
 from .engine import (
+    DETERMINISTIC_DEFAULTS,
     SegmentResult,
     prime_agent_cache,
     rebalance_dates_for,
+    run_deterministic_segment,
     run_segment,
     trading_days,
 )
@@ -107,6 +109,10 @@ def run_walkforward(bt: Backtest) -> None:
         bt.save(update_fields=["status", "error_message", "finished_at"])
         return
 
+    if bt.engine_mode == Backtest.RISK_PARITY:
+        _run_deterministic_walkforward(bt, folds)
+        return
+
     _save_progress(bt, 2, f"priming agent cache for {len(bt.universe)} tickers × master window")
 
     def progress(done: int, total: int, note: str) -> None:
@@ -185,6 +191,78 @@ def run_walkforward(bt: Backtest) -> None:
     metrics = compute_stitched_metrics(bt, fold_records, agent_outputs_cache)
     BacktestMetrics.objects.update_or_create(backtest=bt, defaults=metrics)
     compute_attribution(bt, fold_records, agent_outputs_cache, personas)
+
+    bt.status = Backtest.DONE
+    bt.finished_at = timezone.now()
+    _save_progress(bt, 100, "done")
+    bt.save(update_fields=["status", "finished_at"])
+
+
+def _run_deterministic_walkforward(bt: Backtest, folds: list[Fold]) -> None:
+    """Council-free walk-forward: deterministic inverse-vol (risk-parity) sizing.
+
+    No prime, no IS optimization, no LLM. Each fold replays its OOS window with a
+    fixed config (DETERMINISTIC_DEFAULTS overlaid with bt.search_space); is_sharpe
+    is the in-sample Sharpe of the same config, for the IS→OOS comparison. Reuses
+    the same fold/day persistence + stitched metrics as the council path.
+    """
+    from .metrics import compute_stitched_metrics, drawdown_pct, sharpe_ratio
+    from .portfolio import SimulatedPortfolio
+
+    config = {**DETERMINISTIC_DEFAULTS, **(bt.search_space or {})}
+    bt.prime_completeness = 1.0
+    bt.save(update_fields=["prime_completeness"])
+
+    def _seg(start: dt.date, end: dt.date, pf=None) -> SegmentResult:
+        days = trading_days(start, end, list(bt.universe))
+        reb = rebalance_dates_for(days, bt.rebalance_frequency)
+        return run_deterministic_segment(
+            bt=bt, start=start, end=end, config=config, rebalance_dates=reb, pf=pf
+        )
+
+    # One book carried across all OOS folds (contiguous, non-overlapping) so it is
+    # held continuously — only fold 0 establishes from cash. Without this, every
+    # fold liquidated and rebuilt, inflating turnover ~8× with phantom costs.
+    oos_pf = SimulatedPortfolio(
+        starting_cash=float(bt.starting_cash),
+        commission_bps=float(bt.commission_bps),
+        spread_bps=float(bt.spread_bps),
+    )
+
+    def _sharpe(seg: SegmentResult) -> float:
+        rets = (
+            [(seg.equity[i] / seg.equity[i - 1]) - 1.0 for i in range(1, len(seg.equity))]
+            if len(seg.equity) >= 2 else []
+        )
+        return sharpe_ratio(rets)
+
+    fold_records: list[BacktestFold] = []
+    for f_idx, fold in enumerate(folds):
+        _save_progress(
+            bt, 5 + int((f_idx + 1) / len(folds) * 90),
+            f"fold {f_idx+1}/{len(folds)}: deterministic OOS",
+        )
+        is_seg = _seg(fold.is_start, fold.is_end)
+        oos_seg = _seg(fold.oos_start, fold.oos_end, pf=oos_pf)
+        oos_ret = (oos_seg.equity[-1] / oos_seg.equity[0] - 1.0) * 100 if oos_seg.equity else 0
+        oos_dd = drawdown_pct(oos_seg.equity) * 100 if oos_seg.equity else 0
+        rec = BacktestFold.objects.create(
+            backtest=bt, fold_index=fold.index,
+            is_start=fold.is_start, is_end=fold.is_end,
+            oos_start=fold.oos_start, oos_end=fold.oos_end,
+            winning_config=config,
+            is_sharpe=Decimal(str(round(_sharpe(is_seg), 4))),
+            oos_sharpe=Decimal(str(round(_sharpe(oos_seg), 4))),
+            oos_return_pct=Decimal(str(round(oos_ret, 4))),
+            oos_max_drawdown_pct=Decimal(str(round(oos_dd, 4))),
+            candidates_scored=[],
+        )
+        _persist_segment_days(bt=bt, fold=rec, segment=BacktestDay.SEG_OOS, seg=oos_seg)
+        fold_records.append(rec)
+
+    _save_progress(bt, 96, "computing metrics")
+    metrics = compute_stitched_metrics(bt, fold_records, None)
+    BacktestMetrics.objects.update_or_create(backtest=bt, defaults=metrics)
 
     bt.status = Backtest.DONE
     bt.finished_at = timezone.now()
