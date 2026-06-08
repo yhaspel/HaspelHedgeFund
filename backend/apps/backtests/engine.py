@@ -194,7 +194,10 @@ def run_segment(
 # ---------------------------------------------------------------------------
 
 DETERMINISTIC_DEFAULTS = {
-    "vol_target_annual": 0.10,   # book scaled toward this annual vol (down-only, ≤100% gross)
+    "vol_target_annual": 0.15,   # book scaled toward this annual vol (down-only, ≤100% gross).
+                                 # 0.15 = the macro sleeve's full-investment point: a vt sweep
+                                 # (0.10→0.20) saturates here (Sharpe 1.33, +16.7%, 3.8% DD);
+                                 # below it the book is under-invested, above it never binds.
     "vol_floor": 0.05,           # floor on per-leg annual vol → bounds runaway inverse-vol weights
     "vol_lookback_days": 60,     # trailing window for realized vol
     "max_leg_weight": 0.40,      # per-leg cap before gross normalization
@@ -229,7 +232,7 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
     w = {t: min(cap, wi) for t, wi in w.items()}
     z2 = sum(w.values()) or 1.0
     w = {t: wi / z2 for t, wi in w.items()}
-    vol_target = float(config.get("vol_target_annual", 0.10))
+    vol_target = float(config.get("vol_target_annual", 0.15))
     port_vol = sum(w[t] * sigma[t] for t in w)  # diagonal vol proxy
     scale = min(1.0, vol_target / port_vol) if port_vol > 0 else 1.0
     return {t: wi * scale for t, wi in w.items()}
