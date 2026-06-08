@@ -77,6 +77,28 @@ def trailing_returns_for(
 # ---------------------------------------------------------------------------
 
 
+_NON_PERSONA_KEYS = frozenset(
+    {"risk", "valuation", "fundamentals", "technicals", "sentiment", "macro", "news_digest"}
+)
+
+
+def persona_outputs_from_cache(cached: dict, allowed=None) -> dict:
+    """Persona votes for one (ticker, day): cached agent outputs minus the
+    analytical/risk/valuation keys.
+
+    When `allowed` (the backtest's `personas`) is set, restrict to exactly those
+    personas so `Backtest.personas` actually selects the council. Without this,
+    non-selected personas still vote: prime always runs the full roster (so they
+    are present in the cache) and aggregate_personas falls back to a default
+    quality weight of 1.0 for any persona not in the candidate weight vector.
+    """
+    out = {k: v for k, v in cached.items() if k not in _NON_PERSONA_KEYS}
+    if allowed:
+        allow = set(allowed)
+        out = {k: v for k, v in out.items() if k in allow}
+    return out
+
+
 def run_segment(
     *,
     bt,
@@ -139,11 +161,9 @@ def run_segment(
                 cached = agent_outputs_cache.get((ticker, day))
                 if not cached:
                     continue
-                persona_outputs = {
-                    k: v for k, v in cached.items()
-                    if k not in ("risk", "valuation", "fundamentals", "technicals",
-                                 "sentiment", "macro", "news_digest")
-                }
+                persona_outputs = persona_outputs_from_cache(
+                    cached, getattr(bt, "personas", None)
+                )
                 tr = trailing_returns_for(
                     ticker, day, lookback_days=int(pm_config.get("vol_lookback_days", 60))
                 )
