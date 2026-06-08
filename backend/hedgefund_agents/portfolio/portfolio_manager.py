@@ -34,7 +34,14 @@ DEFAULTS = {
     "min_confidence": 0.0,        # gate; 0.0 = no gate
     "weights": None,              # None => use quality_score from registry
     "vol_target_annual": None,    # None => legacy confidence×cap sizing
-    "max_weight": 1.0,            # hard cap per name
+    "max_weight": 1.0,            # hard cap per name (legacy confidence×cap path)
+    # Per-leg cap for the inverse-vol (vol_target) path. Kept SEPARATE from
+    # max_weight because the backtest optimizer searches max_weight in
+    # [0.03,0.15] — far below a typical inverse-vol weight (vol_target/vol is
+    # ~0.3–5×) — so clamping inverse-vol sizing to max_weight pins every leg to
+    # the cap and degenerates risk parity into equal-weight-at-cap. The engine's
+    # gross-exposure cap then normalizes Σ|w| to the gross budget.
+    "vol_target_max_weight": 0.40,
     "vol_lookback_days": 60,
     "vol_floor": 0.05,
     # Sector-rotation v2: when "flavor"=="sector_rotation", screener pick
@@ -168,7 +175,11 @@ def compute_target_weight(
         vol = realized_vol_annual(trailing_returns)
         vol = max(float(cfg["vol_floor"]), vol)
         raw = float(vol_target) / vol
-        weight = min(max_weight, raw) * direction
+        # Inverse-vol sizing: cap each leg at vol_target_max_weight (NOT the
+        # small searched max_weight) and let the engine's gross cap normalize
+        # Σ|w| — otherwise every leg clips to max_weight (equal-weight-at-cap).
+        vt_cap = float(cfg.get("vol_target_max_weight", 0.40))
+        weight = min(vt_cap, raw) * direction
     else:
         if cap > 0:
             weight = min(cap, abs(signed) * cap) * direction
@@ -238,7 +249,16 @@ def aggregate(
     target_weight = compute_target_weight(
         signed, action, agg_conf, cap, cfg, trailing_returns
     )
-    target_weight = max(-float(cfg["max_weight"]), min(float(cfg["max_weight"]), target_weight))
+    # Clamp to the cap that matches the sizing path: the inverse-vol (vol_target)
+    # path uses vol_target_max_weight, the legacy confidence×cap path uses
+    # max_weight. Using max_weight for both re-clips inverse-vol sizing back to
+    # the searched [0.03,0.15] cap and defeats risk parity (see DEFAULTS).
+    clamp_cap = (
+        float(cfg.get("vol_target_max_weight", 0.40))
+        if cfg.get("vol_target_annual")
+        else float(cfg["max_weight"])
+    )
+    target_weight = max(-clamp_cap, min(clamp_cap, target_weight))
 
     current_price = float(valuation.get("current_price") or 0.0)
     target_dollars = target_weight * portfolio_value
