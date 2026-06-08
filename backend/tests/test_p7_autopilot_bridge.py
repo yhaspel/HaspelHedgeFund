@@ -1,5 +1,6 @@
 """P7 Stage A — the autonomous strategy→broker bridge, risk gate, idempotency,
 scheduler, and the byte-identical no-autopilot regression."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -47,7 +48,10 @@ def _universe():
     u = Universe.objects.create(name="p7-uni")
     for t in ("AAPL", "MSFT"):
         UniverseMembership.objects.create(
-            universe=u, ticker=t, sector="Tech", effective_from=dt.date(2020, 1, 1),
+            universe=u,
+            ticker=t,
+            sector="Tech",
+            effective_from=dt.date(2020, 1, 1),
         )
     return u
 
@@ -64,20 +68,35 @@ def _strategy(user, **kw):
     )
     defaults.update(kw)
     return PortfolioStrategy.objects.create(
-        user=user, name="S", universe=_universe(), portfolio=pf, **defaults,
+        user=user,
+        name="S",
+        universe=_universe(),
+        portfolio=pf,
+        **defaults,
     )
 
 
 def _broker_account(
-    user, *, broker="alpaca_paper", mode=BrokerAccount.MODE_PAPER,
-    cash="100000", active=True,
+    user,
+    *,
+    broker="alpaca_paper",
+    mode=BrokerAccount.MODE_PAPER,
+    cash="100000",
+    active=True,
 ):
     pf = Portfolio.objects.create(
-        user=user, kind=Portfolio.KIND_BROKER, name="bk", cash_balance=Decimal(cash),
+        user=user,
+        kind=Portfolio.KIND_BROKER,
+        name="bk",
+        cash_balance=Decimal(cash),
     )
     acc = BrokerAccount.objects.create(
-        user=user, broker=broker, mode=mode, account_id=f"{broker}-{user.id}",
-        label="L", portfolio=pf,
+        user=user,
+        broker=broker,
+        mode=mode,
+        account_id=f"{broker}-{user.id}",
+        label="L",
+        portfolio=pf,
         connection_status=(
             BrokerAccount.STATUS_ACTIVE if active else BrokerAccount.STATUS_NEEDS_REAUTH
         ),
@@ -91,22 +110,32 @@ def _linked(user, account, *, enabled=True, state=StrategyAutopilot.STATE_ACTIVE
     strategy = _strategy(user, **skw)
     StrategyBrokerLink.objects.create(strategy=strategy, broker_account=account)
     ap = StrategyAutopilot.objects.create(
-        strategy=strategy, broker_account=account, is_enabled=enabled, state=state,
+        strategy=strategy,
+        broker_account=account,
+        is_enabled=enabled,
+        state=state,
     )
     return strategy, ap
 
 
 def _done_target(strategy, weights):
     target = PortfolioTarget.objects.create(
-        strategy=strategy, as_of_date=dt.date(2026, 6, 4),
-        status=PortfolioTarget.DONE, target_weights=weights,
+        strategy=strategy,
+        as_of_date=dt.date(2026, 6, 4),
+        status=PortfolioTarget.DONE,
+        target_weights=weights,
     )
     # Finalize-style RebalanceOrders (price seed for the broker-book recompute).
     for t in weights:
         RebalanceOrder.objects.create(
-            target=target, ticker=t, side="buy",
-            quantity=Decimal("1"), limit_price=Decimal("200"),
-            reason="open", estimated_notional_usd=Decimal("200"), sequence=2,
+            target=target,
+            ticker=t,
+            side="buy",
+            quantity=Decimal("1"),
+            limit_price=Decimal("200"),
+            reason="open",
+            estimated_notional_usd=Decimal("200"),
+            sequence=2,
         )
     return target
 
@@ -126,10 +155,10 @@ def test_bridge_demo_fill_creates_and_submits(user, monkeypatch):
     orders = list(BrokerOrder.objects.filter(broker_account=account))
     assert len(orders) == 2
     for o in orders:
-        assert o.side == "buy"                                  # buy weight → broker buy
-        assert o.rebalance_order_id is not None                 # spine FK set
+        assert o.side == "buy"  # buy weight → broker buy
+        assert o.rebalance_order_id is not None  # spine FK set
         assert o.client_order_id == f"rbo-{o.rebalance_order_id}"
-        assert o.status == BrokerOrder.STATUS_FILLED            # demo fills at market
+        assert o.status == BrokerOrder.STATUS_FILLED  # demo fills at market
         assert o.avg_fill_price == Decimal("200.0000")
     target.refresh_from_db()
     assert target.status == PortfolioTarget.AUTOPILOT_SUBMITTED  # terminal, out of ACTIVE
@@ -151,9 +180,9 @@ def test_bridge_market_closed_holds_pending_open(user, monkeypatch):
     orders = list(BrokerOrder.objects.filter(broker_account=account))
     assert len(orders) == 2
     for o in orders:
-        assert o.status == BrokerOrder.STATUS_PENDING_OPEN       # held locally, not submitted
-        assert o.release_after is not None                       # release at next open
-        assert o.queued_until_open is False                      # NOT the broker-roundtripped flag
+        assert o.status == BrokerOrder.STATUS_PENDING_OPEN  # held locally, not submitted
+        assert o.release_after is not None  # release at next open
+        assert o.queued_until_open is False  # NOT the broker-roundtripped flag
         assert o.client_order_id == f"rbo-{o.rebalance_order_id}"
 
 
@@ -162,16 +191,25 @@ def test_bridge_market_closed_holds_pending_open(user, monkeypatch):
 # --------------------------------------------------------------------------
 def test_risk_check_rejects_oversized_order(user):
     account = _broker_account(user, broker="alpaca_paper")
-    strategy = _strategy(user, max_position_pct=Decimal("0.04"))   # 4% of 100k = $4k cap
+    strategy = _strategy(user, max_position_pct=Decimal("0.04"))  # 4% of 100k = $4k cap
     big = BrokerOrder.objects.create(
-        broker_account=account, ticker="AAPL", side="buy",
-        quantity=Decimal("100"), order_type="market", limit_price=Decimal("100"),
+        broker_account=account,
+        ticker="AAPL",
+        side="buy",
+        quantity=Decimal("100"),
+        order_type="market",
+        limit_price=Decimal("100"),
     )  # 100 * $100 = $10k notional >> $4k cap
     with pytest.raises(ConfirmationError) as exc:
-        gate(big, GateContext(
-            user=user, confirmation_method=BrokerOrder.CONFIRM_SCHEDULED,
-            bypass_typed=True, risk_check=autopilot_risk.make_risk_check(strategy),
-        ))
+        gate(
+            big,
+            GateContext(
+                user=user,
+                confirmation_method=BrokerOrder.CONFIRM_SCHEDULED,
+                bypass_typed=True,
+                risk_check=autopilot_risk.make_risk_check(strategy),
+            ),
+        )
     assert exc.value.code == "risk_rejected"
 
 
@@ -179,15 +217,103 @@ def test_risk_check_passes_compliant_order(user):
     account = _broker_account(user, broker="alpaca_paper")
     strategy = _strategy(user, max_position_pct=Decimal("0.04"))
     ok = BrokerOrder.objects.create(
-        broker_account=account, ticker="AAPL", side="buy",
-        quantity=Decimal("10"), order_type="market", limit_price=Decimal("100"),
+        broker_account=account,
+        ticker="AAPL",
+        side="buy",
+        quantity=Decimal("10"),
+        order_type="market",
+        limit_price=Decimal("100"),
     )  # $1k notional < $4k cap
-    gate(ok, GateContext(
-        user=user, confirmation_method=BrokerOrder.CONFIRM_SCHEDULED,
-        bypass_typed=True, risk_check=autopilot_risk.make_risk_check(strategy),
-    ))
+    gate(
+        ok,
+        GateContext(
+            user=user,
+            confirmation_method=BrokerOrder.CONFIRM_SCHEDULED,
+            bypass_typed=True,
+            risk_check=autopilot_risk.make_risk_check(strategy),
+        ),
+    )
     ok.refresh_from_db()
     assert ok.status == BrokerOrder.STATUS_CONFIRMED
+
+
+# --------------------------------------------------------------------------
+# Risk gate prices market orders at the real mark, not a $100 placeholder.
+# Regression: a 3%-cap ETF order at ~$28 was valued at $100/sh → read ~10% →
+# falsely risk_rejected, so the sector/trend sleeves deployed nothing live.
+# --------------------------------------------------------------------------
+def test_risk_check_prices_market_order_at_real_mark(user):
+    account = _broker_account(user, broker="alpaca_paper")  # $100k book
+    strategy = _strategy(user, max_position_pct=Decimal("0.03"))  # 3% = $3k cap
+    target = PortfolioTarget.objects.create(
+        strategy=strategy,
+        as_of_date=dt.date(2026, 6, 4),
+        status=PortfolioTarget.DONE,
+        target_weights={"UUP": 0.03},
+    )
+    # 106 sh × ~$28 ≈ $2,968 (within the 3% cap). At the old $100 fallback this
+    # read as $10,600 = 10.6% and was rejected.
+    rb = RebalanceOrder.objects.create(
+        target=target,
+        ticker="UUP",
+        side="buy",
+        quantity=Decimal("106"),
+        reason="open",
+        estimated_notional_usd=Decimal("2968"),
+        sequence=1,
+    )
+    order = BrokerOrder.objects.create(
+        broker_account=account,
+        ticker="UUP",
+        side="buy",
+        quantity=Decimal("106"),
+        order_type="market",
+        rebalance_order=rb,
+    )  # NB: no limit_price — a market order
+    check = autopilot_risk.make_risk_check(strategy)
+    assert check(order) == []  # priced at ~$28 → within cap
+
+    # The gate still catches a genuinely oversized market order.
+    rb_big = RebalanceOrder.objects.create(
+        target=target,
+        ticker="EEM",
+        side="buy",
+        quantity=Decimal("200"),
+        reason="open",
+        estimated_notional_usd=Decimal("5600"),
+        sequence=2,
+    )
+    big = BrokerOrder.objects.create(
+        broker_account=account,
+        ticker="EEM",
+        side="buy",
+        quantity=Decimal("200"),
+        order_type="market",
+        rebalance_order=rb_big,
+    )  # $5,600 = 5.6% > 3% cap
+    assert check(big)  # non-empty reasons → rejected
+
+
+def test_risk_check_market_order_falls_back_to_live_mark(user, monkeypatch):
+    # No limit and no rebalance row (e.g. a manual market order) → price via the
+    # live mark, not the flat placeholder.
+    from apps.portfolios import valuation
+
+    monkeypatch.setattr(
+        valuation,
+        "get_mark",
+        lambda *a, **k: type("M", (), {"price": Decimal("28")})(),
+    )
+    account = _broker_account(user, broker="alpaca_paper")
+    strategy = _strategy(user, max_position_pct=Decimal("0.03"))
+    order = BrokerOrder.objects.create(
+        broker_account=account,
+        ticker="UUP",
+        side="buy",
+        quantity=Decimal("106"),
+        order_type="market",
+    )  # 106 × $28 = $2,968 < $3k cap
+    assert autopilot_risk.make_risk_check(strategy)(order) == []
 
 
 # --------------------------------------------------------------------------
@@ -203,8 +329,12 @@ def test_link_rejects_live_account(user):
 def test_gate_still_blocks_scheduled_live(user):
     live = _broker_account(user, broker="alpaca_paper", mode=BrokerAccount.MODE_LIVE)
     order = BrokerOrder.objects.create(
-        broker_account=live, ticker="AAPL", side="buy",
-        quantity=Decimal("1"), order_type="market", limit_price=Decimal("100"),
+        broker_account=live,
+        ticker="AAPL",
+        side="buy",
+        quantity=Decimal("1"),
+        order_type="market",
+        limit_price=Decimal("100"),
     )
     with pytest.raises(ConfirmationError) as exc:
         gate(order, GateContext(user=user, confirmation_method=BrokerOrder.CONFIRM_SCHEDULED))
@@ -272,7 +402,7 @@ def test_dispatch_fires_due_autopilot(user, monkeypatch):
     assert res["dispatched"] == 1
     assert len(calls) == 1
     ap.refresh_from_db()
-    assert ap.next_run_at > timezone.now()                       # advanced
+    assert ap.next_run_at > timezone.now()  # advanced
     assert AutopilotRun.objects.filter(autopilot=ap).count() == 1
 
 
@@ -296,7 +426,7 @@ def test_dispatch_market_gate_skips_non_trading_day(user, monkeypatch):
     account = _broker_account(user, broker="mock")
     strategy, ap = _linked(user, account)
     ap.is_market_aware = True
-    ap.next_run_at = timezone.now() - dt.timedelta(minutes=1)   # due now, but not a trading day
+    ap.next_run_at = timezone.now() - dt.timedelta(minutes=1)  # due now, but not a trading day
     ap.save(update_fields=["is_market_aware", "next_run_at"])
 
     res = tasks_autopilot.dispatch_due_autopilots()

@@ -19,6 +19,7 @@ circuit-breaker, the no-trade band / turnover cost gate, and the liquidity floor
 The binding cap math is the pure-Python constructor (``construction``); nothing
 here calls an LLM.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,9 +55,7 @@ def apply_caps(
     capped = _apply_per_name_cap(weights, float(strategy.max_position_pct))
     notes: list[dict] = []
     if sector_of:
-        capped, notes = _apply_sector_cap(
-            capped, sector_of, float(strategy.max_sector_pct)
-        )
+        capped, notes = _apply_sector_cap(capped, sector_of, float(strategy.max_sector_pct))
     return capped, notes
 
 
@@ -77,9 +76,32 @@ def account_nav(account) -> Decimal:
     return nav
 
 
-def _order_price(order) -> Decimal:
+def _order_price(order, *, user=None) -> Decimal:
+    """Best available per-share price for the order's risk valuation.
+
+    A market order carries no ``limit_price``; valuing it at the flat
+    ``_FALLBACK_PRICE`` placeholder badly mis-sizes the notional for any
+    instrument not priced near it — a 3%-cap ETF order at $28 then reads as
+    ~10% and is falsely ``risk_rejected``. Prefer, in order: the explicit
+    limit, the price the order was *sized* against on its rebalance row, then
+    the live mark — only then the placeholder.
+    """
     if order.limit_price is not None:
         return Decimal(str(order.limit_price))
+    ro = getattr(order, "rebalance_order", None)
+    if ro is not None and ro.quantity and ro.estimated_notional_usd:
+        qty = abs(Decimal(str(ro.quantity)))
+        if qty > 0:
+            return abs(Decimal(str(ro.estimated_notional_usd))) / qty
+    if user is not None:
+        try:
+            from .valuation import get_mark
+
+            mark = get_mark(order.ticker, user=user)
+            if mark is not None and mark.price:
+                return Decimal(str(mark.price))
+        except Exception:  # noqa: BLE001 — pricing is best-effort; fall through
+            pass
     return _FALLBACK_PRICE
 
 
@@ -103,7 +125,7 @@ def make_risk_check(strategy):
         nav = account_nav(account)
         if nav <= 0:
             return reasons
-        price = _order_price(order)
+        price = _order_price(order, user=getattr(account, "user", None))
         pf = getattr(account, "portfolio", None)
         existing = Decimal("0")
         if pf is not None:
@@ -146,8 +168,10 @@ def realized_vol(weights: dict[str, float], as_of, user) -> float:
 
     try:
         vols = compute_vols_for(
-            list(weights.keys()), as_of,
-            window_days=VOL_WINDOW_DAYS, data_provider=_data_provider(user),
+            list(weights.keys()),
+            as_of,
+            window_days=VOL_WINDOW_DAYS,
+            data_provider=_data_provider(user),
         )
     except Exception:  # noqa: BLE001 — vol is best-effort; no scale on failure
         log.exception("realized_vol fetch failed")
@@ -169,7 +193,8 @@ def vol_target_scale(weights: dict[str, float], autopilot, as_of, user) -> tuple
         return 1.0, {"vol_target": target, "realized_vol": rv, "scale": 1.0}
     scale = min(1.0, target / rv)
     return scale, {
-        "vol_target": round(target, 4), "realized_vol": round(rv, 4),
+        "vol_target": round(target, 4),
+        "realized_vol": round(rv, 4),
         "scale": round(scale, 4),
     }
 
@@ -229,8 +254,10 @@ def evaluate_drawdown(autopilot) -> dict:
     autopilot.state = new_state
     autopilot.save(update_fields=["peak_equity_usd", "state", "updated_at"])
     return {
-        "equity": str(equity), "peak": str(peak), "drawdown_pct": round(dd_pct, 3),
-        "state": new_state, "transition": (prior_state != new_state),
+        "equity": str(equity),
+        "peak": str(peak),
+        "drawdown_pct": round(dd_pct, 3),
+        "state": new_state,
+        "transition": (prior_state != new_state),
         "prior_state": prior_state,
     }
-
