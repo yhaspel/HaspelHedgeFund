@@ -104,7 +104,7 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             "rebalance_frequency", "is_window_days", "oos_window_days", "step_days",
             "search_space", "n_candidates", "is_objective", "rng_seed", "baseline",
             "max_budget_usd", "disable_cio", "status", "graph_version_id",
-            "strategy_id",
+            "strategy_id", "engine_mode",
         )
         read_only_fields = ("id", "status")
 
@@ -123,6 +123,15 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             user = getattr(self.context.get("request"), "user", None)
             if user is None or strategy.user_id != getattr(user, "id", None):
                 raise serializers.ValidationError({"strategy_id": "strategy not found"})
+            # Deterministic strategy kinds validate on the matching backtest engine
+            # so the run models how the strategy actually trades live. Risk-parity
+            # routes to the deterministic engine + the live construct_risk_parity
+            # sizing (unless the caller pinned engine_mode explicitly).
+            if not attrs.get("engine_mode") and strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
+                attrs["engine_mode"] = Backtest.RISK_PARITY
+                ss = dict(attrs.get("search_space") or {})
+                ss.setdefault("sizing", "construct_risk_parity")
+                attrs["search_space"] = ss
         if attrs.get("is_window_days", 252) < 126:
             raise serializers.ValidationError("is_window_days must be >= 126 (6 months)")
         master_days = (attrs["end_date"] - attrs["start_date"]).days

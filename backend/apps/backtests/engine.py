@@ -221,6 +221,32 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
 
     floor = float(config.get("vol_floor", 0.05))
     lookback = int(config.get("vol_lookback_days", 60))
+
+    # Faithful-to-live mode: reuse the production deterministic constructor so the
+    # backtest sizes EXACTLY as apps.portfolios._run_risk_parity_cycle does live
+    # (inverse-vol → target_gross, per-sleeve max/min). Use this to validate a live
+    # risk_parity strategy. No vol-targeting/leverage here (the live cycle has none).
+    if config.get("sizing") == "construct_risk_parity":
+        import statistics
+
+        from apps.portfolios.construction import construct_risk_parity
+        dvols: dict[str, float] = {}
+        for t in universe:
+            tr = trailing_returns_for(t, day, lookback_days=lookback)
+            if len(tr) >= 20:
+                s = statistics.pstdev(tr)  # daily σ, matching the live cycle
+                if s > 0:
+                    dvols[t] = s
+        if not dvols:
+            return {}
+        res = construct_risk_parity(
+            [(t, "") for t in dvols], dvols,
+            target_gross_pct=float(config.get("target_gross", 1.0)),
+            per_sleeve_max_pct=float(config.get("per_sleeve_max_pct", 0.50)),
+            per_sleeve_min_pct=float(config.get("per_sleeve_min_pct", 0.02)),
+        )
+        return dict(res.target_weights)
+
     sigma: dict[str, float] = {}
     for t in universe:
         tr = trailing_returns_for(t, day, lookback_days=lookback)
