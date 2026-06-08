@@ -94,15 +94,20 @@ def submit_idempotent(
     except BrokerAuthError as exc:
         # Credentials were rejected (401/403) — the order never reached the
         # venue. Walk it back to a clean, re-submittable state (NOT rejected,
-        # which would imply the venue refused the order) and flag the account
-        # so nothing resubmits until it is re-authenticated.
+        # which would imply the venue refused the order). A 401/403 can be a
+        # transient blip on a valid key (it briefly darkened a live account
+        # mid open-burst), so confirm with a fresh probe before darkening.
+        from apps.brokers.reconcile import credentials_confirmed_dead  # lazy: avoid cycle
+
+        confirmed = credentials_confirmed_dead(order.broker_account)
         with transaction.atomic():
             BrokerOrder.objects.filter(pk=order.pk).update(
                 idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
                 status=BrokerOrder.STATUS_CONFIRMED,
                 error_message=str(exc)[:500],
             )
-            order.broker_account.flag_needs_reauth()
+            if confirmed:
+                order.broker_account.flag_needs_reauth()
         raise
     except BrokerError as exc:
         # Broker said no. Walk back to rejected so the user can decide.
@@ -258,7 +263,11 @@ def submit_bracket_idempotent(
     except BrokerAuthError as exc:
         # Credentials rejected (401/403) — the group never reached the venue.
         # Walk the whole group back to a clean, re-submittable state (NOT
-        # rejected) and flag the account so nothing resubmits until re-auth.
+        # rejected). A 401/403 can be a transient blip, so confirm with a fresh
+        # probe before darkening the account.
+        from apps.brokers.reconcile import credentials_confirmed_dead  # lazy: avoid cycle
+
+        confirmed = credentials_confirmed_dead(anchor.broker_account)
         with transaction.atomic():
             BrokerOrder.objects.filter(
                 models.Q(pk=anchor.pk) | models.Q(parent_order=anchor),
@@ -267,7 +276,8 @@ def submit_bracket_idempotent(
                 status=BrokerOrder.STATUS_CONFIRMED,
                 error_message=str(exc)[:500],
             )
-            anchor.broker_account.flag_needs_reauth()
+            if confirmed:
+                anchor.broker_account.flag_needs_reauth()
         raise
     except BrokerError as exc:
         # Broker said no. Walk the whole group back so the user can decide.

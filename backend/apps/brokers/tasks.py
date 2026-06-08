@@ -21,7 +21,11 @@ from .capabilities import AUTH_NONE, get_capabilities
 from .demo_fills import evaluate_resting_demo_orders
 from .interfaces import BrokerAuthError, BrokerError, BrokerTransientError
 from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
-from .reconcile import poll_open_orders_for_account, reconcile_account
+from .reconcile import (
+    credentials_confirmed_dead,
+    poll_open_orders_for_account,
+    reconcile_account,
+)
 
 log = logging.getLogger(__name__)
 
@@ -60,16 +64,22 @@ def poll_open_orders() -> dict:
             else:
                 summary["fills_written"] += poll_open_orders_for_account(account)
         except BrokerAuthError as exc:
-            # Credentials are rejected (401/403) — a permanent failure. Flip
-            # the account out of ACTIVE so the next cycle skips it instead of
-            # re-failing every 30s. Mirrors the IBKR needs_reauth recovery
-            # path; one concise warning replaces a full traceback per cycle.
-            account.flag_needs_reauth()
-            summary["needs_reauth"] += 1
-            log.warning(
-                "poll_open_orders: account %s rejected (%s) — "
-                "flipped to needs_reauth", acc_id, exc,
-            )
+            # A 401/403 can be a transient blip on a valid key, so confirm with
+            # a fresh probe before darkening — only genuinely-dead credentials
+            # flip out of ACTIVE so the next cycle skips the account instead of
+            # re-failing every 30s. One concise warning replaces a traceback.
+            if credentials_confirmed_dead(account):
+                account.flag_needs_reauth()
+                summary["needs_reauth"] += 1
+                log.warning(
+                    "poll_open_orders: account %s rejected (%s) — "
+                    "flipped to needs_reauth", acc_id, exc,
+                )
+            else:
+                log.warning(
+                    "poll_open_orders: account %s transient auth error (%s) — "
+                    "re-verified OK, left active", acc_id, exc,
+                )
         except Exception:  # pragma: no cover - log and continue
             log.exception("poll_open_orders failed for account %s", acc_id)
     return summary

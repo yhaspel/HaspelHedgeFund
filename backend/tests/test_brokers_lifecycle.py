@@ -1186,6 +1186,12 @@ def test_poll_open_orders_flips_to_needs_reauth_on_auth_error(user, monkeypatch)
         raise BrokerAuthError("Alpaca get_order_by_id → 401: unauthorized.")
 
     monkeypatch.setattr(tasks_mod, "poll_open_orders_for_account", _boom)
+    # Genuinely-dead creds: the confirm-before-darken probe also auth-fails.
+    from apps.brokers import reconcile as reconcile_mod
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _a: _AuthFailAccountBroker(BrokerAuthError("401")),
+    )
     summary = tasks_mod.poll_open_orders()
 
     account.refresh_from_db()
@@ -1216,6 +1222,11 @@ class _AuthFailBroker:
 
     def get_recent_fills(self, since):
         return []
+
+    def get_account(self):
+        # The confirm-before-darken probe re-reads the account; a dead key
+        # fails here too, confirming the flip.
+        raise self._exc
 
 
 def test_poll_account_reraises_auth_error_from_group_anchor(user, monkeypatch):
@@ -1257,10 +1268,11 @@ def test_poll_account_reraises_auth_error_from_group_anchor(user, monkeypatch):
     assert "422 rejected" in (anchor.error_message or "")
 
 
-def test_ingest_order_fills_flips_to_needs_reauth_on_group_auth_error(user):
+def test_ingest_order_fills_flips_to_needs_reauth_on_group_auth_error(user, monkeypatch):
     """Parity with the poll path: a 401/403 from a group anchor in the
     post-confirm ingest path flags the account for re-auth instead of
     propagating raw (the view caller only logs)."""
+    from apps.brokers import reconcile as reconcile_mod
     from apps.brokers.interfaces import BrokerAuthError
     from apps.brokers.reconcile import ingest_order_fills
 
@@ -1272,7 +1284,9 @@ def test_ingest_order_fills_flips_to_needs_reauth_on_group_auth_error(user):
         group_id=uuid4(), leg_role=BrokerOrder.LEG_ENTRY,
     )
 
-    written = ingest_order_fills(anchor, _AuthFailBroker(BrokerAuthError("401")))
+    stub = _AuthFailBroker(BrokerAuthError("401"))   # get_account also fails → dead
+    monkeypatch.setattr(reconcile_mod, "get_broker", lambda _a: stub)
+    written = ingest_order_fills(anchor, stub)
     assert written == 0
     account.refresh_from_db()
     assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
@@ -1333,7 +1347,8 @@ class _AuthFailSubmitBroker:
         raise self._exc
 
 
-def test_submit_idempotent_auth_error_flags_account_not_rejected(user):
+def test_submit_idempotent_auth_error_flags_account_not_rejected(user, monkeypatch):
+    from apps.brokers import reconcile as reconcile_mod
     from apps.brokers.idempotency import submit_idempotent
     from apps.brokers.interfaces import BrokerAuthError
 
@@ -1345,6 +1360,11 @@ def test_submit_idempotent_auth_error_flags_account_not_rejected(user):
         idempotency_state=BrokerOrder.IDEM_UNSUBMITTED,
     )
 
+    # Genuinely-dead creds: the confirm-before-darken probe also auth-fails.
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _a: _AuthFailAccountBroker(BrokerAuthError("401")),
+    )
     with pytest.raises(BrokerAuthError):
         submit_idempotent(
             order=order, broker=_AuthFailSubmitBroker(BrokerAuthError("401")),
@@ -1358,7 +1378,8 @@ def test_submit_idempotent_auth_error_flags_account_not_rejected(user):
     assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
 
 
-def test_submit_bracket_idempotent_auth_error_flags_account_not_rejected(user):
+def test_submit_bracket_idempotent_auth_error_flags_account_not_rejected(user, monkeypatch):
+    from apps.brokers import reconcile as reconcile_mod
     from apps.brokers.idempotency import submit_bracket_idempotent
     from apps.brokers.interfaces import BrokerAuthError
 
@@ -1379,6 +1400,11 @@ def test_submit_bracket_idempotent_auth_error_flags_account_not_rejected(user):
         leg_role=BrokerOrder.LEG_TAKE_PROFIT,
     )
 
+    # Genuinely-dead creds: the confirm-before-darken probe also auth-fails.
+    monkeypatch.setattr(
+        reconcile_mod, "get_broker",
+        lambda _a: _AuthFailAccountBroker(BrokerAuthError("401")),
+    )
     with pytest.raises(BrokerAuthError):
         submit_bracket_idempotent(
             anchor=anchor, broker=_AuthFailSubmitBroker(BrokerAuthError("401")),

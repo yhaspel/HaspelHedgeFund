@@ -23,7 +23,7 @@ no-op (the cycle stays ``done``).
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from django.utils import timezone
 
@@ -36,6 +36,21 @@ log = logging.getLogger(__name__)
 # RebalanceOrder 4-way side → BrokerOrder 2-way side.
 _BROKER_SIDE = {"buy": "buy", "cover": "buy", "sell": "sell", "short": "sell"}
 _FALLBACK_PRICE = 100.0
+
+
+def _venue_quantity(side: str, qty: Decimal, *, is_demo: bool) -> Decimal | None:
+    """Adjust an order quantity for venue constraints before emission.
+
+    Alpaca rejects fractional shorts ("fractional orders cannot be sold short")
+    and cannot hold a fractional short position — so on the credentialed venue a
+    short/cover (anything touching the short side) is rounded DOWN to whole
+    shares; ``None`` means the residual is < 1 share and the order is dropped.
+    Long buys/sells and the demo book keep fractional sizing.
+    """
+    if is_demo or side not in ("short", "cover"):
+        return qty
+    whole = qty.to_integral_value(rounding=ROUND_DOWN)
+    return whole if whole > 0 else None
 
 
 def _active_link(strategy):
@@ -241,11 +256,15 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
         if max_notional and (notional_today + order_notional) > max_notional:
             items.append({"ticker": ro.ticker, "skipped": "daily notional cap"})
             continue
+        venue_qty = _venue_quantity(ro.side, ro.quantity, is_demo=is_demo)
+        if venue_qty is None:
+            items.append({"ticker": ro.ticker, "skipped": "fractional short < 1 share"})
+            continue
         try:
             order = _emit_one(
                 account=account, user=user,
                 client_order_id=f"rbo-{ro.id}", ticker=ro.ticker,
-                broker_side=_BROKER_SIDE.get(ro.side, "buy"), quantity=ro.quantity,
+                broker_side=_BROKER_SIDE.get(ro.side, "buy"), quantity=venue_qty,
                 rebalance_order=ro, is_demo=is_demo,
                 market_closed=market_closed, risk_check=risk_check,
                 next_open_fn=next_open,

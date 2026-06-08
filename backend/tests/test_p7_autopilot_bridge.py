@@ -15,6 +15,7 @@ from django.utils import timezone
 from apps.brokers import demo_fills
 from apps.brokers.adapters import mock as mock_adapter
 from apps.brokers.confirmation import ConfirmationError, GateContext, gate
+from apps.brokers.interfaces import BrokerAuthError
 from apps.brokers.models import BrokerAccount, BrokerOrder, StrategyBrokerLink
 from apps.portfolios import autopilot as bridge
 from apps.portfolios import autopilot_risk, tasks_autopilot
@@ -314,6 +315,100 @@ def test_risk_check_market_order_falls_back_to_live_mark(user, monkeypatch):
         order_type="market",
     )  # 106 × $28 = $2,968 < $3k cap
     assert autopilot_risk.make_risk_check(strategy)(order) == []
+
+
+# --------------------------------------------------------------------------
+# Venue constraint: Alpaca rejects fractional shorts → round short/cover down
+# to whole shares on the credentialed path (longs + the demo book unaffected).
+# --------------------------------------------------------------------------
+def test_venue_quantity_rounds_fractional_shorts_whole():
+    q = Decimal("17.815439")
+    assert bridge._venue_quantity("short", q, is_demo=False) == Decimal("17")
+    assert bridge._venue_quantity("cover", Decimal("5.7"), is_demo=False) == Decimal("5")
+    assert bridge._venue_quantity("short", Decimal("0.42"), is_demo=False) is None  # <1 sh → drop
+    assert bridge._venue_quantity("buy", q, is_demo=False) == q      # long unchanged
+    assert bridge._venue_quantity("sell", q, is_demo=False) == q     # long unchanged
+    assert bridge._venue_quantity("short", q, is_demo=True) == q     # demo book unaffected
+
+
+# --------------------------------------------------------------------------
+# needs_reauth: a transient 401/403 must NOT darken a healthy account — confirm
+# with a fresh probe before flagging (only a second auth failure is "dead").
+# --------------------------------------------------------------------------
+def test_credentials_confirmed_dead_distinguishes_blip_from_dead(user, monkeypatch):
+    from apps.brokers import reconcile
+
+    account = _broker_account(user, broker="alpaca_paper")
+
+    class _Dead:
+        def get_account(self):
+            raise BrokerAuthError("401")
+
+    class _Live:
+        def get_account(self):
+            return object()
+
+    monkeypatch.setattr(reconcile, "get_broker", lambda a: _Dead())
+    assert reconcile.credentials_confirmed_dead(account) is True
+    monkeypatch.setattr(reconcile, "get_broker", lambda a: _Live())
+    assert reconcile.credentials_confirmed_dead(account) is False
+
+
+def test_credentials_confirmed_dead_demo_preserves_behavior(user):
+    from apps.brokers import reconcile
+
+    account = _broker_account(user, broker="mock")  # AUTH_NONE → no remote session
+    assert reconcile.credentials_confirmed_dead(account) is True
+
+
+def test_transient_submit_auth_keeps_account_active(user, monkeypatch):
+    # A 401/403 during submission whose follow-up probe SUCCEEDS is a blip — the
+    # account must stay ACTIVE so the other orders + next tick recover.
+    from apps.brokers import reconcile
+
+    monkeypatch.setattr("apps.brokers.market_calendar.is_market_open", lambda *a, **k: True)
+    account = _broker_account(user, broker="alpaca_paper")
+    strategy, ap = _linked(user, account)
+
+    class _FlakyBroker:
+        def submit_order(self, ticket):
+            raise BrokerAuthError("transient 401")
+
+        def get_account(self):           # confirmation probe succeeds → blip
+            return object()
+
+    monkeypatch.setattr(reconcile, "get_broker", lambda a: _FlakyBroker())
+    bridge.maybe_emit_and_submit(
+        _done_target(strategy, {"AAPL": 0.04}),
+        link=strategy.broker_links.first(), autopilot=ap,
+    )
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_ACTIVE
+
+
+def test_confirmed_dead_submit_auth_darkens_account(user, monkeypatch):
+    # When the follow-up probe ALSO auth-fails the credentials are genuinely
+    # dead → the account is flipped to needs_reauth (preserved behavior).
+    from apps.brokers import reconcile
+
+    monkeypatch.setattr("apps.brokers.market_calendar.is_market_open", lambda *a, **k: True)
+    account = _broker_account(user, broker="alpaca_paper")
+    strategy, ap = _linked(user, account)
+
+    class _DeadBroker:
+        def submit_order(self, ticket):
+            raise BrokerAuthError("401")
+
+        def get_account(self):           # probe ALSO auth-fails → dead
+            raise BrokerAuthError("401")
+
+    monkeypatch.setattr(reconcile, "get_broker", lambda a: _DeadBroker())
+    bridge.maybe_emit_and_submit(
+        _done_target(strategy, {"AAPL": 0.04}),
+        link=strategy.broker_links.first(), autopilot=ap,
+    )
+    account.refresh_from_db()
+    assert account.connection_status == BrokerAccount.STATUS_NEEDS_REAUTH
 
 
 # --------------------------------------------------------------------------

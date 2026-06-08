@@ -57,6 +57,30 @@ def get_broker(account: BrokerAccount) -> Broker:
     return factory(account)
 
 
+def credentials_confirmed_dead(account: BrokerAccount) -> bool:
+    """Re-probe once before darkening an account on a 401/403.
+
+    A single auth error can be a transient blip — a load-balancer / auth-service
+    hiccup under burst — on a perfectly valid key; one such blip during a
+    market-open submission burst briefly darkened a live paper account whose
+    credentials were fine. Only a SECOND auth failure from a fresh
+    ``get_account`` confirms the credentials are actually dead. A success — or
+    any non-auth/transient error — returns False, leaving the account ACTIVE for
+    the caller's normal retry/poll to recover. The demo broker has no remote
+    session, so its prior (always-darken-on-call) behavior is preserved.
+    """
+    cap = get_capabilities(account.broker)
+    if cap is not None and cap.auth_kind == AUTH_NONE:
+        return True
+    try:
+        get_broker(account).get_account()
+    except BrokerAuthError:
+        return True
+    except Exception:  # noqa: BLE001 — any non-auth failure is inconclusive
+        return False
+    return False
+
+
 # --- poll_open_orders -------------------------------------------------------
 
 
@@ -124,7 +148,8 @@ def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
         fills = adapter.get_recent_fills(order.created_at)
         return _ingest_fills_for(order, snapshot, fills)
     except BrokerAuthError:
-        order.broker_account.flag_needs_reauth()
+        if credentials_confirmed_dead(order.broker_account):
+            order.broker_account.flag_needs_reauth()
         return 0
     except BrokerError as exc:
         order.error_message = str(exc)[:500]
@@ -191,11 +216,17 @@ def run_post_confirm_pipeline(order: BrokerOrder, broker: Broker) -> None:
                 triggered_by=BrokerSyncEvent.TRIGGER_POST_ORDER,
             )
     except BrokerAuthError:
-        order.broker_account.flag_needs_reauth()
-        log.warning(
-            "post-confirm: account %s credentials rejected — flagged needs_reauth",
-            order.broker_account_id,
-        )
+        if credentials_confirmed_dead(order.broker_account):
+            order.broker_account.flag_needs_reauth()
+            log.warning(
+                "post-confirm: account %s credentials rejected — flagged needs_reauth",
+                order.broker_account_id,
+            )
+        else:
+            log.warning(
+                "post-confirm: account %s transient auth error — re-verified OK, left active",
+                order.broker_account_id,
+            )
     except Exception:  # noqa: BLE001 - best-effort; periodic reconcile retries
         log.exception("post-confirm pipeline failed (rolled back) order=%s", order.pk)
 
@@ -571,10 +602,14 @@ def reconcile_account(
     except BrokerAuthError as exc:
         # Dead credentials — flip out of ACTIVE so the next reconcile/poll
         # skips this account until the user re-authenticates (rather than
-        # silently recording a generic error every 5 min).
-        account.flag_needs_reauth()
+        # silently recording a generic error every 5 min). A single 401/403 can
+        # be a transient blip, so confirm with a fresh probe before darkening.
+        if credentials_confirmed_dead(account):
+            account.flag_needs_reauth()
+            event.error_message = f"needs_reauth — {str(exc)[:480]}"
+        else:
+            event.error_message = f"transient auth error (creds re-verified) — {str(exc)[:430]}"
         event.finished_at = timezone.now()
-        event.error_message = f"needs_reauth — {str(exc)[:480]}"
         event.save(update_fields=["finished_at", "error_message"])
         return event
     except BrokerError as exc:
