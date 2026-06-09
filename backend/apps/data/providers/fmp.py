@@ -358,22 +358,93 @@ class FmpProvider:
         resp.raise_for_status()
         payload = resp.json()
         historical: list[dict[str, Any]] = payload if isinstance(payload, list) else []
-        objs = [
-            DailyBar(
-                ticker=ticker,
-                date=dt.date.fromisoformat(row["date"]),
-                open=Decimal(str(row.get("open", 0))),
-                high=Decimal(str(row.get("high", 0))),
-                low=Decimal(str(row.get("low", 0))),
-                close=Decimal(str(row.get("close", 0))),
-                adjusted_close=Decimal(str(row.get("adjClose", row.get("close", 0)))),
-                volume=int(row.get("volume", 0) or 0),
-                source=SOURCE,
+        # The /full endpoint's adjClose mirrors raw close (split- but NOT
+        # dividend-adjusted). Source the true total-return adjusted close from the
+        # dividend-adjusted endpoint; fall back to raw close if it's unavailable.
+        try:
+            adj_map = self.get_adjusted_closes(ticker, start, end)
+        except Exception:  # noqa: BLE001 — degrade to price-only rather than fail ingest
+            adj_map = {}
+        objs = []
+        for row in historical:
+            adj = adj_map.get(str(row["date"])[:10], row.get("adjClose", row.get("close", 0)))
+            objs.append(
+                DailyBar(
+                    ticker=ticker,
+                    date=dt.date.fromisoformat(row["date"]),
+                    open=Decimal(str(row.get("open", 0))),
+                    high=Decimal(str(row.get("high", 0))),
+                    low=Decimal(str(row.get("low", 0))),
+                    close=Decimal(str(row.get("close", 0))),
+                    adjusted_close=Decimal(str(adj)),
+                    volume=int(row.get("volume", 0) or 0),
+                    source=SOURCE,
+                )
             )
-            for row in historical
-        ]
         with transaction.atomic():
             DailyBar.objects.bulk_create(objs, ignore_conflicts=True)
+
+    def get_adjusted_closes(self, ticker: str, start: dt.date, end: dt.date) -> dict[str, str]:
+        """Map of ISO-date → true dividend+split-adjusted close.
+
+        The `/historical-price-eod/full` endpoint's `adjClose` mirrors the raw
+        `close` (split-adjusted only, NOT dividend-adjusted), so total-return
+        consumers (vol/beta/pairs/leaderboard/markov) need this dedicated
+        dividend-adjusted endpoint instead.
+        """
+        resp = self._http.get(
+            f"{BASE_URL}/historical-price-eod/dividend-adjusted",
+            params={
+                "symbol": ticker, "from": start.isoformat(),
+                "to": end.isoformat(), "apikey": self.api_key,
+            },
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        rows: list[dict[str, Any]] = payload if isinstance(payload, list) else []
+        out: dict[str, str] = {}
+        for row in rows:
+            d, adj = row.get("date"), row.get("adjClose")
+            if d and adj is not None:
+                out[str(d)[:10]] = str(adj)
+        return out
+
+    def get_dividends(
+        self, ticker: str, start: dt.date, end: dt.date
+    ) -> list[tuple[dt.date, Decimal]]:
+        """Cash dividends with ex-date in [start, end] → (ex_date, per-share amount).
+
+        Hits FMP's `/dividends` endpoint (`date` = ex-date, `dividend` = as-paid
+        per-share cash). Used to populate ``CorporateAction`` so backtests credit
+        dividend cash (total-return) instead of running price-only.
+        """
+        resp = self._http.get(
+            f"{BASE_URL}/dividends", params={"symbol": ticker, "apikey": self.api_key}
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        rows: list[dict[str, Any]] = payload if isinstance(payload, list) else []
+        out: list[tuple[dt.date, Decimal]] = []
+        for row in rows:
+            raw = row.get("date")
+            if not raw:
+                continue
+            try:
+                d = dt.date.fromisoformat(str(raw)[:10])
+            except ValueError:
+                continue
+            if d < start or d > end:
+                continue
+            amt = row.get("dividend")
+            if amt in (None, "", 0, "0"):
+                continue
+            try:
+                dec = Decimal(str(amt))
+            except (ArithmeticError, ValueError):
+                continue
+            if dec > 0:
+                out.append((d, dec))
+        return out
 
     # ---- fundamentals ------------------------------------------------
 
