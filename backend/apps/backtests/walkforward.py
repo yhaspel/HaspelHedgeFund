@@ -109,7 +109,7 @@ def run_walkforward(bt: Backtest) -> None:
         bt.save(update_fields=["status", "error_message", "finished_at"])
         return
 
-    if bt.engine_mode == Backtest.RISK_PARITY:
+    if bt.engine_mode in Backtest.DETERMINISTIC_ENGINE_MODES:
         _run_deterministic_walkforward(bt, folds)
         return
 

@@ -61,12 +61,12 @@ def close_prices_for(date_: dt.date, universe: list[str]) -> dict[str, float]:
 
 
 def trailing_returns_for(
-    ticker: str, as_of: dt.date, lookback_days: int = 60
+    ticker: str, as_of: dt.date, lookback_days: int = 60, price_field: str = "close"
 ) -> list[float]:
     bars = list(
         DailyBar.objects.filter(ticker=ticker, date__lt=as_of)
         .order_by("-date")
-        .values_list("close", flat=True)[: lookback_days + 1]
+        .values_list(price_field, flat=True)[: lookback_days + 1]
     )
     bars = [float(b) for b in reversed(bars)]
     if len(bars) < 2:
@@ -270,6 +270,126 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
     return {t: wi * scale for t, wi in w.items()}
 
 
+def _cum_return(returns: list[float]) -> float:
+    """Compound a list of period returns into one cumulative total return."""
+    c = 1.0
+    for r in returns:
+        c *= 1.0 + r
+    return c - 1.0
+
+
+def tsmom_weights(*, day: dt.date, universe: list[str], config: dict) -> dict[str, float]:
+    """Time-series-momentum (trend) target weights for `day`.
+
+    Per asset: average the SIGN of the trailing cumulative return over each
+    ``momentum_lookbacks`` window (default 3/6/12 months). Long when the blended
+    sign is positive; flat otherwise (or short when ``allow_short`` — the crisis
+    sleeve). Survivors are inverse-vol weighted, gross-normalized, per-leg-capped,
+    then the book is scaled toward ``vol_target_annual`` up to ``max_gross``.
+
+    Momentum & vol read ``price_field`` (default ``adjusted_close`` → TOTAL-RETURN
+    momentum, so a bond's coupons flip its otherwise-negative price trend — see
+    the PR #50 data fix). Returns {} when no asset has enough history. Mirrors
+    ``inverse_vol_weights``' sizing tail so risk-parity and trend size identically.
+    """
+    from hedgefund_agents.portfolio.portfolio_manager import realized_vol_annual
+
+    floor = float(config.get("vol_floor", 0.05))
+    vol_lb = int(config.get("vol_lookback_days", 60))
+    mom_lbs = [int(x) for x in (config.get("momentum_lookbacks") or [63, 126, 252])]
+    allow_short = bool(config.get("allow_short", False))
+    price_field = str(config.get("price_field", "adjusted_close"))
+    max_lb = max([vol_lb, *mom_lbs])
+
+    sigma: dict[str, float] = {}
+    sign: dict[str, float] = {}
+    for t in universe:
+        tr = trailing_returns_for(t, day, lookback_days=max_lb, price_field=price_field)
+        if len(tr) < 20:
+            continue
+        signs = [1.0 if _cum_return(tr[-lb:]) > 0 else -1.0 for lb in mom_lbs if len(tr) >= lb]
+        if not signs:
+            continue
+        blended = sum(signs) / len(signs)
+        s = 1.0 if blended > 0 else (-1.0 if (blended < 0 and allow_short) else 0.0)
+        if s == 0.0:
+            continue
+        sign[t] = s
+        vw = tr[-vol_lb:] if len(tr) >= vol_lb else tr
+        sigma[t] = max(floor, realized_vol_annual(vw))
+    if not sigma:
+        return {}
+    inv = {t: sign[t] / sigma[t] for t in sigma}
+    gross = sum(abs(v) for v in inv.values()) or 1.0
+    w = {t: v / gross for t, v in inv.items()}
+    cap = float(config.get("max_leg_weight", 0.40))
+    w = {t: max(-cap, min(cap, wi)) for t, wi in w.items()}
+    z = sum(abs(v) for v in w.values()) or 1.0
+    w = {t: wi / z for t, wi in w.items()}
+    vol_target = float(config.get("vol_target_annual", 0.15))
+    max_gross = float(config.get("max_gross", 1.0))
+    port_vol = sum(abs(w[t]) * sigma[t] for t in w)  # diagonal proxy
+    scale = min(max_gross, vol_target / port_vol) if port_vol > 0 else 1.0
+    return {t: wi * scale for t, wi in w.items()}
+
+
+def xsec_momentum_weights(*, day: dt.date, universe: list[str], config: dict) -> dict[str, float]:
+    """Cross-sectional momentum (sector rotation) target weights for `day`.
+
+    Score each asset by its average trailing cumulative return over
+    ``momentum_lookbacks``; hold the top-``top_n`` survivors with a positive-
+    momentum gate (long-only), inverse-vol weighted and scaled toward
+    ``vol_target_annual`` up to ``max_gross``. Reads ``price_field`` (default
+    ``adjusted_close``). Returns {} when nothing clears the momentum>0 gate.
+    """
+    from hedgefund_agents.portfolio.portfolio_manager import realized_vol_annual
+
+    floor = float(config.get("vol_floor", 0.05))
+    vol_lb = int(config.get("vol_lookback_days", 60))
+    mom_lbs = [int(x) for x in (config.get("momentum_lookbacks") or [63, 126, 252])]
+    top_n = max(1, int(config.get("top_n", 5)))
+    price_field = str(config.get("price_field", "adjusted_close"))
+    max_lb = max([vol_lb, *mom_lbs])
+
+    scores: dict[str, float] = {}
+    sigma: dict[str, float] = {}
+    for t in universe:
+        tr = trailing_returns_for(t, day, lookback_days=max_lb, price_field=price_field)
+        if len(tr) < 20:
+            continue
+        cums = [_cum_return(tr[-lb:]) for lb in mom_lbs if len(tr) >= lb]
+        if not cums:
+            continue
+        scores[t] = sum(cums) / len(cums)
+        vw = tr[-vol_lb:] if len(tr) >= vol_lb else tr
+        sigma[t] = max(floor, realized_vol_annual(vw))
+    if not scores:
+        return {}
+    ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
+    picks = [t for t in ranked if scores[t] > 0][:top_n]
+    if not picks:
+        return {}
+    inv = {t: 1.0 / sigma[t] for t in picks}
+    z = sum(inv.values()) or 1.0
+    w = {t: inv[t] / z for t in picks}
+    vol_target = float(config.get("vol_target_annual", 0.15))
+    max_gross = float(config.get("max_gross", 1.0))
+    port_vol = sum(w[t] * sigma[t] for t in w)
+    scale = min(max_gross, vol_target / port_vol) if port_vol > 0 else 1.0
+    return {t: w[t] * scale for t in w}
+
+
+# Deterministic sizing dispatch, selected by config["sizing"]. inverse_vol and
+# construct_risk_parity both route to inverse_vol_weights (which handles the
+# construct_risk_parity sub-mode internally); trend / sector add momentum.
+_SIZERS = {
+    "inverse_vol": inverse_vol_weights,
+    "construct_risk_parity": inverse_vol_weights,
+    "tsmom": tsmom_weights,
+    "xsec_momentum": xsec_momentum_weights,
+}
+
+
 def run_deterministic_segment(
     *,
     bt,
@@ -326,7 +446,8 @@ def run_deterministic_segment(
         is_rebalance = (rebalance_dates is None) or (day in rebalance_dates)
         decisions_today: list[dict] = []
         if is_rebalance:
-            weights = inverse_vol_weights(day=day, universe=universe, config=config)
+            sizer = _SIZERS.get(config.get("sizing", "inverse_vol"), inverse_vol_weights)
+            weights = sizer(day=day, universe=universe, config=config)
             for t in universe:
                 wt = weights.get(t, 0.0)
                 decisions_today.append({

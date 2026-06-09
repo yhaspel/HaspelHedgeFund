@@ -23,14 +23,23 @@ class Backtest(models.Model):
     ACTIVE_STATUSES = {QUEUED, RUNNING}
 
     # Engine mode: how positions are sized in the walk-forward.
-    #   council     — LLM persona vote → PM aggregation (the default/legacy path)
-    #   risk_parity — deterministic inverse-vol sizing, no prime/council (free)
+    #   council         — LLM persona vote → PM aggregation (the default/legacy path)
+    #   risk_parity     — deterministic inverse-vol sizing, no prime/council (free)
+    #   trend           — deterministic time-series momentum (TSMOM), no council (free)
+    #   sector_momentum — deterministic cross-sectional momentum, no council (free)
     COUNCIL = "council"
     RISK_PARITY = "risk_parity"
+    TREND = "trend"
+    SECTOR_MOMENTUM = "sector_momentum"
     ENGINE_MODE_CHOICES = [
         (COUNCIL, "Council (LLM vote)"),
         (RISK_PARITY, "Deterministic risk parity"),
+        (TREND, "Deterministic trend (TSMOM)"),
+        (SECTOR_MOMENTUM, "Deterministic sector momentum"),
     ]
+    # Council-free engine modes routed through the deterministic walk-forward
+    # (no prime, no LLM, $0). Their sizer is picked by ``search_space["sizing"]``.
+    DETERMINISTIC_ENGINE_MODES = frozenset({RISK_PARITY, TREND, SECTOR_MOMENTUM})
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="backtests", on_delete=models.CASCADE
