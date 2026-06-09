@@ -939,3 +939,95 @@ def construct_market_neutral(
         portfolio_beta=port_beta,
         diagnostics=diagnostics,
     )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic momentum (P7c) — trend (TSMOM) + cross-sectional sector momentum.
+# The constructors are thin wrappers over the engine sizers so live ≡ backtest
+# (the backtest's run_deterministic_segment calls the SAME tsmom_weights /
+# xsec_momentum_weights). Config is built here and shared with the backtest
+# serializer. Params are PINNED canonical values (no IS optimizer — that overfit
+# the council runs); the operator tunes only leverage (target_gross_pct →
+# max_gross), the vol-estimate window, and (sector) the held count. See
+# development-plans/phase-07c-deterministic-momentum-strategies.md + ADR 0026.
+# ---------------------------------------------------------------------------
+
+MOMENTUM_LOOKBACKS = [63, 126, 252]   # 3 / 6 / 12 months
+MOMENTUM_VOL_TARGET_ANNUAL = 0.10     # recommended operating point (research §4.4)
+
+
+def _momentum_base_config(strategy) -> dict:
+    return {
+        "vol_target_annual": MOMENTUM_VOL_TARGET_ANNUAL,
+        "max_gross": float(strategy.target_gross_pct or 1.0),
+        "vol_lookback_days": int(strategy.vol_window_days or 60),
+        "momentum_lookbacks": list(MOMENTUM_LOOKBACKS),
+        "price_field": "adjusted_close",
+    }
+
+
+def trend_config(strategy) -> dict:
+    """Deterministic-trend (TSMOM) sizing config — shared by live cycle + backtest."""
+    return {**_momentum_base_config(strategy), "sizing": "tsmom", "allow_short": False}
+
+
+def sector_momentum_config(strategy) -> dict:
+    """Cross-sectional sector-momentum sizing config — shared by live cycle + backtest."""
+    return {
+        **_momentum_base_config(strategy),
+        "sizing": "xsec_momentum",
+        "top_n": int(strategy.max_etfs_held or 5),
+    }
+
+
+def _wrap_momentum_result(
+    weights: dict[str, float], members: list[tuple[str, str]],
+    current_weights: dict[str, float] | None,
+) -> RiskParityResult:
+    """Wrap an engine-sizer weight dict into the deterministic result shape the
+    autopilot cycle expects. No rebalance band — momentum rebalances fully each
+    cycle, matching the backtest (engine passes no current_weights)."""
+    group_of = {t: g for t, g in members}
+    sector_exposure: dict[str, float] = {}
+    for t, w in weights.items():
+        g = group_of.get(t, "")
+        sector_exposure[g] = sector_exposure.get(g, 0.0) + w
+    cur = current_weights or {}
+    drifts = [
+        abs(float(cur.get(t, 0.0)) - w) / max(abs(w), 1e-9)
+        for t, w in weights.items() if w != 0
+    ]
+    return RiskParityResult(
+        target_weights={t: round(w, 6) for t, w in weights.items()},
+        gross_pct=sum(abs(w) for w in weights.values()),
+        net_pct=sum(weights.values()),
+        sector_exposure=sector_exposure,
+        rejected=[],
+        within_band=False,   # no band: rebalance every cycle (live ≡ backtest)
+        max_drift=max(drifts) if drifts else 1.0,
+        diagnostics={"sizing": "momentum", "holdings": len(weights)},
+    )
+
+
+def construct_trend(
+    day, members: list[tuple[str, str]], *, config: dict,
+    current_weights: dict[str, float] | None = None,
+) -> RiskParityResult:
+    """Deterministic time-series-momentum target weights (long/flat core).
+    Wraps engine.tsmom_weights so the live book sizes EXACTLY as the backtest."""
+    from apps.backtests.engine import tsmom_weights
+
+    weights = tsmom_weights(day=day, universe=[t for t, _ in members], config=config)
+    return _wrap_momentum_result(weights, members, current_weights)
+
+
+def construct_sector_momentum(
+    day, members: list[tuple[str, str]], *, config: dict,
+    current_weights: dict[str, float] | None = None,
+) -> RiskParityResult:
+    """Deterministic cross-sectional momentum target weights (top-N long-only).
+    Wraps engine.xsec_momentum_weights so the live book sizes EXACTLY as the backtest."""
+    from apps.backtests.engine import xsec_momentum_weights
+
+    weights = xsec_momentum_weights(day=day, universe=[t for t, _ in members], config=config)
+    return _wrap_momentum_result(weights, members, current_weights)

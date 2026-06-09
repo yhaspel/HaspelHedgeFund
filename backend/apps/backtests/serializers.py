@@ -124,14 +124,27 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             if user is None or strategy.user_id != getattr(user, "id", None):
                 raise serializers.ValidationError({"strategy_id": "strategy not found"})
             # Deterministic strategy kinds validate on the matching backtest engine
-            # so the run models how the strategy actually trades live. Risk-parity
-            # routes to the deterministic engine + the live construct_risk_parity
-            # sizing (unless the caller pinned engine_mode explicitly).
-            if not attrs.get("engine_mode") and strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
-                attrs["engine_mode"] = Backtest.RISK_PARITY
-                ss = dict(attrs.get("search_space") or {})
-                ss.setdefault("sizing", "construct_risk_parity")
-                attrs["search_space"] = ss
+            # so the run models how the strategy actually trades live: each routes
+            # to the deterministic engine + the same sizing the live cycle uses
+            # (unless the caller pinned engine_mode explicitly).
+            if not attrs.get("engine_mode"):
+                if strategy.kind == PortfolioStrategy.KIND_RISK_PARITY:
+                    attrs["engine_mode"] = Backtest.RISK_PARITY
+                    ss = dict(attrs.get("search_space") or {})
+                    ss.setdefault("sizing", "construct_risk_parity")
+                    attrs["search_space"] = ss
+                elif strategy.kind == PortfolioStrategy.KIND_TREND:
+                    from apps.portfolios.construction import trend_config
+                    attrs["engine_mode"] = Backtest.TREND
+                    attrs["search_space"] = {
+                        **trend_config(strategy), **(attrs.get("search_space") or {})
+                    }
+                elif strategy.kind == PortfolioStrategy.KIND_SECTOR_MOMENTUM:
+                    from apps.portfolios.construction import sector_momentum_config
+                    attrs["engine_mode"] = Backtest.SECTOR_MOMENTUM
+                    attrs["search_space"] = {
+                        **sector_momentum_config(strategy), **(attrs.get("search_space") or {})
+                    }
         if attrs.get("is_window_days", 252) < 126:
             raise serializers.ValidationError("is_window_days must be >= 126 (6 months)")
         master_days = (attrs["end_date"] - attrs["start_date"]).days

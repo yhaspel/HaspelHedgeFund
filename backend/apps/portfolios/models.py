@@ -275,6 +275,12 @@ class PortfolioStrategy(models.Model):
     KIND_GLOBAL_MACRO = "global_macro"
     KIND_RISK_PARITY = "risk_parity"
     KIND_PAIRS = "pairs"
+    # P7c deterministic momentum kinds (no council). `trend` = time-series
+    # momentum (TSMOM); `sector_momentum` = cross-sectional momentum. They size
+    # off the momentum signal the council kinds discard, and route through the
+    # deterministic backtest engine + the ADR-0025 broker bridge.
+    KIND_TREND = "trend"
+    KIND_SECTOR_MOMENTUM = "sector_momentum"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
@@ -285,6 +291,8 @@ class PortfolioStrategy(models.Model):
         (KIND_GLOBAL_MACRO, "Global macro (ETF expression)"),
         (KIND_RISK_PARITY, "Risk-parity / multi-asset lite"),
         (KIND_PAIRS, "Pairs trading (cointegration)"),
+        (KIND_TREND, "Deterministic trend (TSMOM)"),
+        (KIND_SECTOR_MOMENTUM, "Deterministic sector momentum"),
     ]
 
     # Deterministic, council-free kinds. Their target weights are fully sized
@@ -292,7 +300,9 @@ class PortfolioStrategy(models.Model):
     # the pairs constructor), so the autopilot→broker bridge must NOT re-apply
     # vol-targeting or the equity per-name cap to them — doing so would diverge
     # the live book from the validated backtest (ADR 0025 §2).
-    DETERMINISTIC_KINDS = frozenset({KIND_RISK_PARITY, KIND_PAIRS})
+    DETERMINISTIC_KINDS = frozenset(
+        {KIND_RISK_PARITY, KIND_PAIRS, KIND_TREND, KIND_SECTOR_MOMENTUM}
+    )
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
