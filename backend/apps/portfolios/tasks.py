@@ -1299,6 +1299,138 @@ def _run_momentum_cycle(
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 
 
+def _run_news_sentiment_cycle(
+    strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]],
+    *, supersedes_target_id: int | None = None,
+) -> dict:
+    """Long-only single-name cycle sized off NEWS SENTIMENT (P7c E4), with an
+    optional bounded persona conviction overlay (``enable_council_veto``). The
+    council in a LANGUAGE role, not the sizer; ``council_alpha`` measures the
+    overlay vs the no-overlay baseline forward (news can't be backtested)."""
+    from apps.leaderboard.council_alpha import BASELINE_VERSION
+
+    from .news_sentiment import (
+        NEWS_CONVICTION_MODEL,
+        construct_news_sentiment,
+        news_conviction,
+        news_sentiment_scores,
+    )
+
+    data_provider = get_fmp_provider(user=strategy.user)
+    tickers = [t for t, _ in members]
+    sectors = {t: sec for t, sec in members}
+    top_n = int(strategy.max_positions or 15)
+    target_gross = float(strategy.target_gross_pct or 1.0)
+
+    scores = news_sentiment_scores(tickers, as_of)
+
+    # Bounded persona conviction overlay (opt-in). Over-select 2x so vetoes don't
+    # under-deploy; the constructor re-ranks by sentiment x conviction.
+    conviction: dict[str, float] | None = None
+    if bool(strategy.enable_council_veto):
+        candidates = sorted(
+            (t for t, s in scores.items() if s > 0), key=lambda t: scores[t], reverse=True
+        )[: top_n * 2]
+        if candidates:
+            conviction = news_conviction(
+                candidates, as_of, model=NEWS_CONVICTION_MODEL, user_id=strategy.user_id
+            )
+
+    result = construct_news_sentiment(
+        scores, sectors, top_n=top_n, conviction=conviction, target_gross=target_gross
+    )
+    # council_alpha baseline: the SAME signal with NO overlay (the council-free book).
+    baseline = construct_news_sentiment(
+        scores, sectors, top_n=top_n, conviction=None, target_gross=target_gross
+    )
+
+    portfolio = strategy.portfolio
+    with transaction.atomic():
+        target = _resolve_cycle_target(
+            strategy, as_of,
+            supersedes_target_id=supersedes_target_id,
+            defaults={
+                "status": "running", "target_weights": {}, "rejected_candidates": [],
+                "decisions": [], "error_message": "", "finished_at": None,
+            },
+        )
+
+    last_close: dict[str, float] = {}
+    existing = list(Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True))
+    for t in set(list(result.target_weights.keys()) + existing):
+        try:
+            bars = data_provider.get_daily_bars(
+                t, start=as_of.replace(day=1), end=as_of, as_of=as_of
+            )
+            if bars:
+                last_close[t] = float(bars[-1].close)
+        except Exception:
+            last_close[t] = 0.0
+
+    current = [
+        CurrentPosition(
+            ticker=p.ticker, quantity=float(p.quantity),
+            avg_cost=float(p.avg_cost), sector=p.sector,
+        )
+        for p in Position.objects.filter(portfolio=portfolio)
+    ]
+    portfolio_value = float(portfolio.cash_balance) + sum(
+        last_close.get(p.ticker, float(p.avg_cost)) * float(p.quantity)
+        for p in Position.objects.filter(portfolio=portfolio)
+    )
+    orders = compute_orders(
+        current, result.target_weights,
+        RebalanceConfig(
+            portfolio_value=max(1.0, portfolio_value),
+            last_close=last_close,
+            min_trade_notional_usd=float(strategy.min_trade_notional_usd),
+            max_turnover_pct=float(strategy.max_turnover_pct),
+        ),
+    )
+
+    RebalanceOrder.objects.filter(target=target).delete()
+    RebalanceOrder.objects.bulk_create([
+        RebalanceOrder(
+            target=target, ticker=o.ticker, side=o.side,
+            quantity=Decimal(str(round(o.quantity, 6))),
+            limit_price=Decimal(str(round(o.limit_price, 4))) if o.limit_price else None,
+            reason=o.reason,
+            estimated_notional_usd=Decimal(str(round(o.estimated_notional_usd, 2))),
+            sequence=o.sequence,
+        ) for o in orders
+    ])
+
+    target.target_weights = {t: round(w, 6) for t, w in result.target_weights.items()}
+    target.gross_pct = Decimal(str(round(result.gross_pct, 4)))
+    target.net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.realised_net_pct = Decimal(str(round(result.net_pct, 4)))
+    target.sector_exposure = {s: round(w, 6) for s, w in result.sector_exposure.items()}
+    target.rejected_candidates = result.rejected
+    target.beta_diagnostics = {
+        **result.diagnostics,
+        "overlay": "council" if conviction else "none",
+        "vetoed": sorted(t for t, c in (conviction or {}).items() if c == 0.0),
+    }
+    # council_alpha (E3 harness): baseline = the same news signal with NO persona
+    # overlay → the nightly leaderboard differences realised − baseline forward.
+    target.baseline_weights = {t: round(w, 6) for t, w in baseline.target_weights.items()}
+    target.baseline_version = BASELINE_VERSION
+    target.cycle_outcome = "target_created"
+    target.decisions = []
+    target.status = "done"
+    target.finished_at = timezone.now()
+    target.save()
+    _maybe_auto_enroll(target)
+    from .autopilot import _finalize_target
+
+    _finalize_target(target)
+    PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
+    return {
+        "target_id": target.pk, "orders": len(orders), "status": "done",
+        "overlay": bool(conviction),
+    }
+
+
 def _run_pairs_cycle(
     strategy: PortfolioStrategy, as_of: date_cls, members: list[tuple[str, str]],
     *, supersedes_target_id: int | None = None,
@@ -1978,6 +2110,12 @@ def daily_long_short_cycle(
         return _run_momentum_cycle(
             strategy, as_of, members, sizing=sizing,
             supersedes_target_id=supersedes_target_id,
+        )
+
+    # P7c E4: news-sentiment single-name book + bounded persona conviction overlay.
+    if strategy.kind == PortfolioStrategy.KIND_NEWS_SENTIMENT:
+        return _run_news_sentiment_cycle(
+            strategy, as_of, members, supersedes_target_id=supersedes_target_id,
         )
 
     try:

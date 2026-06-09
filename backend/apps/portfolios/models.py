@@ -281,6 +281,11 @@ class PortfolioStrategy(models.Model):
     # deterministic backtest engine + the ADR-0025 broker bridge.
     KIND_TREND = "trend"
     KIND_SECTOR_MOMENTUM = "sector_momentum"
+    # P7c Part E4: long-only single-name book sized off news sentiment (the
+    # council's language edge), with a bounded persona conviction overlay. Sizing
+    # is constructor-bound (equal-weight top-N) so it routes through the bridge
+    # like the other deterministic kinds; council_alpha measures the overlay.
+    KIND_NEWS_SENTIMENT = "news_sentiment"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
@@ -293,6 +298,7 @@ class PortfolioStrategy(models.Model):
         (KIND_PAIRS, "Pairs trading (cointegration)"),
         (KIND_TREND, "Deterministic trend (TSMOM)"),
         (KIND_SECTOR_MOMENTUM, "Deterministic sector momentum"),
+        (KIND_NEWS_SENTIMENT, "News-sentiment single-name (council overlay)"),
     ]
 
     # Deterministic, council-free kinds. Their target weights are fully sized
@@ -301,7 +307,7 @@ class PortfolioStrategy(models.Model):
     # vol-targeting or the equity per-name cap to them — doing so would diverge
     # the live book from the validated backtest (ADR 0025 §2).
     DETERMINISTIC_KINDS = frozenset(
-        {KIND_RISK_PARITY, KIND_PAIRS, KIND_TREND, KIND_SECTOR_MOMENTUM}
+        {KIND_RISK_PARITY, KIND_PAIRS, KIND_TREND, KIND_SECTOR_MOMENTUM, KIND_NEWS_SENTIMENT}
     )
 
     user = models.ForeignKey(
