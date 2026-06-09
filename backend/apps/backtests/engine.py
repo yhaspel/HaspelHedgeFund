@@ -74,6 +74,26 @@ def trailing_returns_for(
     return [(bars[i] / bars[i - 1]) - 1.0 for i in range(1, len(bars))]
 
 
+def spy_regime_scale(
+    day: dt.date, *, floor: float = 0.5, benchmark: str = "SPY",
+    window: int = 200, price_field: str = "adjusted_close",
+) -> float:
+    """Deterministic SPY-200dMA regime gate (P7c Part D; research §4.6): 1.0 when
+    the benchmark closes above its `window`-day moving average (risk-on), else
+    `floor` (de-gross). Point-in-time (strictly before `day`); fail-safe to 1.0
+    (full exposure) on insufficient history. Trend-based → orthogonal to vol-
+    targeting (a vol-based gate hurt; §4.6)."""
+    closes = list(
+        DailyBar.objects.filter(ticker=benchmark, date__lt=day)
+        .order_by("-date")
+        .values_list(price_field, flat=True)[:window]
+    )
+    if len(closes) < window:
+        return 1.0
+    vals = [float(c) for c in closes]
+    return 1.0 if vals[0] >= sum(vals) / len(vals) else float(floor)
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -245,7 +265,21 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
             per_sleeve_max_pct=float(config.get("per_sleeve_max_pct", 0.50)),
             per_sleeve_min_pct=float(config.get("per_sleeve_min_pct", 0.02)),
         )
-        return dict(res.target_weights)
+        weights = dict(res.target_weights)
+        # P7c Part D — optional leverage (deploy-faithful with the live RP cycle):
+        # scale the unlevered inverse-vol book toward rp_vol_target_annual up to
+        # rp_max_gross. Off (vt=0) ⇒ unchanged. port_vol uses the SAME daily σ the
+        # live cycle's vols carry, ×√252.
+        vt = float(config.get("rp_vol_target_annual", 0.0))
+        if vt > 0 and weights:
+            # Use the shared max_gross (also the engine's execute gross cap) so the
+            # levered book isn't clipped back at execution.
+            mg = float(config.get("max_gross", 1.0))
+            port_vol = sum(weights[t] * dvols[t] * (252 ** 0.5) for t in weights)
+            if port_vol > 0:
+                scale = min(mg, vt / port_vol)
+                weights = {t: w * scale for t, w in weights.items()}
+        return weights
 
     sigma: dict[str, float] = {}
     for t in universe:
@@ -448,6 +482,12 @@ def run_deterministic_segment(
         if is_rebalance:
             sizer = _SIZERS.get(config.get("sizing", "inverse_vol"), inverse_vol_weights)
             weights = sizer(day=day, universe=universe, config=config)
+            # P7c Part D — deterministic SPY-200dMA regime gate (de-gross in
+            # risk-off). Off by default; deploy-faithful with the live cycles.
+            if config.get("enable_spy_regime_gate") and weights:
+                rs = spy_regime_scale(day, floor=float(config.get("regime_gate_floor", 0.5)))
+                if rs != 1.0:
+                    weights = {t: w * rs for t, w in weights.items()}
             for t in universe:
                 wt = weights.get(t, 0.0)
                 decisions_today.append({

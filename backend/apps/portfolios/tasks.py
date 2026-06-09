@@ -1038,6 +1038,33 @@ def _run_risk_parity_cycle(
                         result.target_weights[t] * scale, 6,
                     )
 
+    # P7c Part D — leverage (scale the inverse-vol book toward rp_vol_target_annual
+    # up to rp_max_gross) then the SPY-200dMA regime gate (de-gross in risk-off).
+    # Applied IDENTICALLY in the construct_risk_parity backtest mode (engine.py) so
+    # the levered/gated book stays deploy-faithful. Both off by default.
+    rp_vt = float(strategy.rp_vol_target_annual or 0)
+    if rp_vt > 0 and result.target_weights:
+        mg = float(strategy.rp_max_gross or 1.0)
+        port_vol = sum(
+            result.target_weights[t] * vols.get(t, 0.0) * (252 ** 0.5)
+            for t in result.target_weights
+        )
+        if port_vol > 0:
+            lev = min(mg, rp_vt / port_vol)
+            result.target_weights = {t: w * lev for t, w in result.target_weights.items()}
+    if bool(strategy.enable_spy_regime_gate) and result.target_weights:
+        from apps.backtests.engine import spy_regime_scale
+        rs = spy_regime_scale(as_of, floor=float(strategy.regime_gate_floor))
+        if rs != 1.0:
+            result.target_weights = {t: w * rs for t, w in result.target_weights.items()}
+    if rp_vt > 0 or bool(strategy.enable_spy_regime_gate):
+        result.gross_pct = sum(abs(w) for w in result.target_weights.values())
+        result.net_pct = sum(result.target_weights.values())
+        # within_band was computed on the UNLEVERED/ungated drift; the levered or
+        # gated target differs materially, so force a rebalance (the backtest has no
+        # band) — else the band could keep skipping and the lever never applies.
+        result.within_band = False
+
     with transaction.atomic():
         target = _resolve_cycle_target(
             strategy, as_of,
@@ -1210,6 +1237,16 @@ def _run_momentum_cycle(
             as_of, members, config=sector_momentum_config(strategy),
             current_weights=current_weights or None,
         )
+
+    # P7c Part D — SPY-200dMA regime gate (de-gross in risk-off). Deploy-faithful
+    # with run_deterministic_segment's gate. Off by default.
+    if bool(strategy.enable_spy_regime_gate) and result.target_weights:
+        from apps.backtests.engine import spy_regime_scale
+        rs = spy_regime_scale(as_of, floor=float(strategy.regime_gate_floor))
+        if rs != 1.0:
+            result.target_weights = {t: w * rs for t, w in result.target_weights.items()}
+            result.gross_pct = sum(abs(w) for w in result.target_weights.values())
+            result.net_pct = sum(result.target_weights.values())
 
     with transaction.atomic():
         target = _resolve_cycle_target(

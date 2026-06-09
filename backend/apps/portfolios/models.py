@@ -394,6 +394,23 @@ class PortfolioStrategy(models.Model):
         max_digits=5, decimal_places=4, default=Decimal("0.05")
     )
     enable_council_veto = models.BooleanField(default=False)
+    # P7c Part D — risk-parity leverage. When rp_vol_target_annual > 0 the
+    # risk_parity book is scaled toward that annual vol up to rp_max_gross (the
+    # classic All-Weather move: lever the diversified low-vol book to equity-like
+    # return). Default 0 / 1.0 = unlevered (no behaviour change). Applied
+    # identically in the live cycle AND the construct_risk_parity backtest mode.
+    rp_vol_target_annual = models.DecimalField(
+        max_digits=5, decimal_places=4, default=Decimal("0.00")
+    )
+    rp_max_gross = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("1.00"))
+    # P7c Part D — deterministic SPY-200dMA regime gate (research §4.6: orthogonal
+    # to vol-targeting, beats the LLM gate). When on, the deterministic book's
+    # gross is scaled by regime_gate_floor..1.0 by SPY vs its 200-day MA (risk-off
+    # → de-gross). Default off. Applied in both the live cycle and the backtest.
+    enable_spy_regime_gate = models.BooleanField(default=False)
+    regime_gate_floor = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.500")
+    )
 
     # Pairs trading (kind=pairs) parameters.
     pair_entry_z = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("2.0"))
