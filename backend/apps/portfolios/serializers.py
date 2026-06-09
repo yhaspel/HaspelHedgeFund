@@ -203,12 +203,19 @@ class StrategySerializer(serializers.ModelSerializer):
     # strategy is deletable only when this is 0. Reads a queryset annotation
     # when present (list/detail views provide it) to avoid an N+1 count.
     targets_count_active = serializers.SerializerMethodField()
+    # P7c Part E: non-blocking roster-by-fit warnings (e.g. value personas on an
+    # ETF council kind, which abstain to near-cash). Informational only.
+    roster_warnings = serializers.SerializerMethodField()
 
     def get_targets_count_active(self, strategy) -> int:
         annotated = getattr(strategy, "targets_count_active_annotated", None)
         if annotated is not None:
             return annotated
         return strategy.targets.exclude(status="cancelled").count()
+
+    def get_roster_warnings(self, strategy) -> list[str]:
+        from .persona_fit import roster_fit_warnings
+        return roster_fit_warnings(strategy.kind, strategy.personas)
 
     class Meta:
         model = PortfolioStrategy
@@ -236,7 +243,7 @@ class StrategySerializer(serializers.ModelSerializer):
             "pair_correlation_min",
             "enable_pair_council", "pair_council_min_confidence",
             "auto_run_council", "auto_enroll_on_done",
-            "targets_count_active",
+            "targets_count_active", "roster_warnings",
             "is_active", "last_run_at", "created_at",
         )
         read_only_fields = ("last_run_at", "created_at")
