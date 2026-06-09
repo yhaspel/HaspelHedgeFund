@@ -298,6 +298,9 @@ class PortfolioStrategy(models.Model):
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=80)
+    # P7b §G: operator-set risk caveat shown on the strategy detail (e.g. a
+    # "bear-resistant, not bear-proof" disclaimer for the risk-parity sleeve).
+    risk_disclaimer = models.TextField(blank=True, default="")
     kind = models.CharField(max_length=20, choices=KIND_CHOICES, default=KIND_LONG_SHORT)
     universe = models.ForeignKey(Universe, on_delete=models.PROTECT)
     portfolio = models.ForeignKey(Portfolio, on_delete=models.PROTECT)

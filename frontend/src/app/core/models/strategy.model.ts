@@ -72,6 +72,8 @@ export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
 export interface Strategy {
   id: number;
   name: string;
+  /** P7b §G: operator-set risk caveat shown on the strategy detail. */
+  risk_disclaimer?: string;
   kind: StrategyKind;
   universe: number;
   universe_name: string;

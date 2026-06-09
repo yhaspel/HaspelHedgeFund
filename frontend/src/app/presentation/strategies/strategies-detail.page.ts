@@ -31,6 +31,11 @@ import { ModalComponent } from '../shared/modal.component';
             <hf-term key="net-exposure">Net</hf-term> {{ store.currentStrategy()?.target_net_pct }} ·
             K {{ store.currentStrategy()?.top_k_longs }}L / {{ store.currentStrategy()?.top_k_shorts }}S
           </p>
+          @if (store.currentStrategy()?.risk_disclaimer; as disc) {
+            <p class="text-xs text-text-2 mt-2 pl-2.5 border-l-2 border-solid max-w-2xl"
+               [style.borderColor]="'var(--acc-short-fg)'"
+               data-test="risk-disclaimer">{{ disc }}</p>
+          }
         </div>
         <div class="head-actions">
           <button class="btn primary" (click)="openEstimate()" [disabled]="running() || estimating()" data-test="run-now">
