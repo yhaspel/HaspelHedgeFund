@@ -151,24 +151,54 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
     guardrail: dict = {}
     as_of = target.as_of_date
 
-    # 1a. Volatility targeting — de-gross to the target vol (capped at 1.0).
+    from .models import PortfolioStrategy, StrategyAutopilot
+
+    # Deterministic kinds (risk_parity / pairs) arrive already sized to
+    # target_gross_pct and capped at their per-sleeve max/min inside their
+    # constructor, and the backtest applies no vol-target or equity-cap pass —
+    # so the bridge must NOT re-apply 1a/1c, or live would diverge from the
+    # validated backtest (ADR 0025 §2). 1b (the live-only drawdown soft-cut) and
+    # steps 2–3 (broker-book delta, risk gate, caps, paper-only) bind for ALL
+    # kinds. The submit-time risk_check (step 3) still enforces the strategy's
+    # max_position_pct — for risk_parity that is configured to the per-sleeve cap.
     weights = {t: float(w) for t, w in (target.target_weights or {}).items()}
-    scale, vol_audit = autopilot_risk.vol_target_scale(weights, autopilot, as_of, user)
-    guardrail["vol_target"] = vol_audit
-    if scale < 1.0:
-        weights = {t: w * scale for t, w in weights.items()}
+    deterministic = strategy.kind in PortfolioStrategy.DETERMINISTIC_KINDS
 
-    # 1b. Soft-cut: a −5% drawdown halves the next cycle's gross (§6.3).
-    from .models import StrategyAutopilot
+    # Defense-in-depth: a deterministic book is emitted verbatim, but the
+    # submit-gate (step 3) still enforces max_position_pct. If that is below the
+    # per-sleeve cap the constructor sizes to, every sleeve is gate-rejected and
+    # the book silently trades nothing. Part C sets max_position_pct ==
+    # per_etf_max_pct to avoid this; surface a misconfig in the run audit so it
+    # can never be a silent no-trade (ADR 0025 §3).
+    if deterministic and strategy.max_position_pct < strategy.per_etf_max_pct:
+        guardrail["cap_misconfig"] = {
+            "max_position_pct": float(strategy.max_position_pct),
+            "per_etf_max_pct": float(strategy.per_etf_max_pct),
+        }
+        log.warning(
+            "deterministic strategy=%s max_position_pct=%.4f < per_etf_max_pct=%.4f "
+            "— the submit-gate will reject over-cap sleeves (silent no-trade)",
+            strategy.pk, float(strategy.max_position_pct), float(strategy.per_etf_max_pct),
+        )
 
+    # 1a. Volatility targeting — de-gross to the target vol (capped at 1.0).
+    if not deterministic:
+        scale, vol_audit = autopilot_risk.vol_target_scale(weights, autopilot, as_of, user)
+        guardrail["vol_target"] = vol_audit
+        if scale < 1.0:
+            weights = {t: w * scale for t, w in weights.items()}
+
+    # 1b. Soft-cut: a −5% drawdown halves the next cycle's gross (§6.3). A
+    # live-only circuit-breaker with no backtest analog — binds for every kind.
     if autopilot.state == StrategyAutopilot.STATE_SOFT_CUT:
         weights = {t: w * 0.5 for t, w in weights.items()}
         guardrail["soft_cut_gross_scale"] = 0.5
 
     # 1c. Per-name / sector caps (the binding constructor math, re-applied).
-    weights, cap_notes = autopilot_risk.apply_caps(weights, strategy, sector_of=None)
-    if cap_notes:
-        guardrail["sector_caps"] = cap_notes
+    if not deterministic:
+        weights, cap_notes = autopilot_risk.apply_caps(weights, strategy, sector_of=None)
+        if cap_notes:
+            guardrail["sector_caps"] = cap_notes
 
     # 2. Recompute the rebalance against the account's REAL broker book.
     pf = account.portfolio

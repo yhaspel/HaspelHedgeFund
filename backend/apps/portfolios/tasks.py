@@ -1141,6 +1141,20 @@ def _run_risk_parity_cycle(
     target.finished_at = timezone.now()
     target.save()
     _maybe_auto_enroll(target)
+    # P7b (ADR 0025 §1): the deterministic cycle reaches the SAME terminal hook
+    # the council path uses (tasks.py:954) — for a broker-linked, enabled autopilot
+    # this converts the inverse-vol target into paper broker orders. Called
+    # UNCONDITIONALLY, even on a within_band cycle: the broker account is the book
+    # of record, so the bridge recomputes the delta against the REAL broker book.
+    # The strategy-book rebalance band is a strategy-portfolio optimization that
+    # does not gate the broker book — and the deterministic backtest rebalances to
+    # the full target each period with no band (engine.inverse_vol_weights passes no
+    # current_weights), so rebalancing the broker book every cycle is what keeps
+    # live ≡ backtest. No-op (byte-identical) for a non-autopilot run like #16.
+    from .autopilot import _finalize_target
+
+    _finalize_target(target)
+
     PortfolioStrategy.objects.filter(pk=strategy.pk).update(last_run_at=timezone.now())
     return {"target_id": target.pk, "orders": len(orders), "status": "done"}
 

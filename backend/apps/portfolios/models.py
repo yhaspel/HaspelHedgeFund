@@ -287,6 +287,13 @@ class PortfolioStrategy(models.Model):
         (KIND_PAIRS, "Pairs trading (cointegration)"),
     ]
 
+    # Deterministic, council-free kinds. Their target weights are fully sized
+    # and capped inside their constructor (``construct_risk_parity`` /
+    # the pairs constructor), so the autopilot→broker bridge must NOT re-apply
+    # vol-targeting or the equity per-name cap to them — doing so would diverge
+    # the live book from the validated backtest (ADR 0025 §2).
+    DETERMINISTIC_KINDS = frozenset({KIND_RISK_PARITY, KIND_PAIRS})
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
     )
