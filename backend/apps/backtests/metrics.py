@@ -235,24 +235,55 @@ def benchmark_curve(ticker: str, dates: list, base: float) -> list[float]:
     return out
 
 
+def _compound_blocks(rets: list[float], block: int) -> list[float]:
+    """Compound per-step returns into non-overlapping `block`-step returns
+    (trailing remainder dropped so both series block identically)."""
+    out: list[float] = []
+    for i in range(0, len(rets) - len(rets) % block, block):
+        c = 1.0
+        for r in rets[i : i + block]:
+            c *= 1.0 + r
+        out.append(c - 1.0)
+    return out
+
+
+# Engine-stored equity curves mark to the prior close, so a stitched OOS curve
+# lags same-date benchmark bars by ~one session (audit-verified: lag+1 corr
+# 0.537 vs 0.013 contemporaneous). A naive daily regression therefore collapses
+# beta to ~0 and lets alpha absorb the whole market return. Compounding into
+# 5-step blocks before regressing absorbs a ±1-session offset without assuming
+# its direction; we only block when the series is long enough for the blocked
+# estimate to be meaningful.
+_BETA_BLOCK_DAYS = 5
+_BETA_MIN_BLOCKS = 12
+
+
 def beta_alpha_ir(strat_rets: list[float], bench_rets: list[float]) -> dict | None:
     """CAPM beta / annualized alpha (pp/yr) / information ratio of the strategy
     vs the benchmark, from aligned per-step (daily) simple returns. Risk-free
-    rate 0 (consistent with sharpe_ratio)."""
+    rate 0 (consistent with sharpe_ratio). Long series are block-compounded to
+    weekly steps first (see _BETA_BLOCK_DAYS note) so the engine's ±1-session
+    curve/benchmark timestamp offset cannot zero-out beta."""
     n = min(len(strat_rets), len(bench_rets))
     if n < 2:
         return None
     s, b = strat_rets[-n:], bench_rets[-n:]
+    periods_per_year = float(TRADING_DAYS_PER_YEAR)
+    if n >= _BETA_BLOCK_DAYS * _BETA_MIN_BLOCKS:
+        s = _compound_blocks(s, _BETA_BLOCK_DAYS)
+        b = _compound_blocks(b, _BETA_BLOCK_DAYS)
+        periods_per_year = TRADING_DAYS_PER_YEAR / _BETA_BLOCK_DAYS
+        n = len(s)
     ms, mb = statistics.fmean(s), statistics.fmean(b)
     var_b = statistics.fmean([(x - mb) ** 2 for x in b])
     if var_b <= 0:
         return None
     cov = statistics.fmean([(s[i] - ms) * (b[i] - mb) for i in range(n)])
     beta = cov / var_b
-    alpha_annual_pct = (ms - beta * mb) * TRADING_DAYS_PER_YEAR * 100.0
+    alpha_annual_pct = (ms - beta * mb) * periods_per_year * 100.0
     diffs = [s[i] - b[i] for i in range(n)]
     sd = statistics.pstdev(diffs)
-    ir = (statistics.fmean(diffs) / sd) * math.sqrt(TRADING_DAYS_PER_YEAR) if sd > 0 else 0.0
+    ir = (statistics.fmean(diffs) / sd) * math.sqrt(periods_per_year) if sd > 0 else 0.0
     return {
         "beta": round(beta, 4),
         "alpha_annual_pct": round(alpha_annual_pct, 4),

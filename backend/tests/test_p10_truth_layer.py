@@ -196,6 +196,28 @@ def test_beta_alpha_ir_leveraged():
     assert out["alpha_annual_pct"] == pytest.approx(0.0, abs=1e-9)
 
 
+def test_beta_alpha_ir_survives_one_day_timestamp_offset():
+    """Engine-stored OOS curves lag benchmark bars by ~one session (mark-to-prior-
+    close), which zeroes a naive contemporaneous daily beta. The block-compounded
+    estimator must still recover most of the true exposure on a long series."""
+    import random
+
+    rng = random.Random(42)
+    bench = [rng.gauss(0.0004, 0.012) for _ in range(800)]
+    true_beta = 0.5
+    strat_aligned = [true_beta * r + rng.gauss(0.0, 0.002) for r in bench]
+    # Shift the strategy one step late vs the benchmark (the engine's offset).
+    strat_lagged = [0.0] + strat_aligned[:-1]
+
+    naive_window = 50  # below the blocking threshold → contemporaneous daily
+    naive = beta_alpha_ir(strat_lagged[:naive_window], bench[:naive_window])
+    blocked = beta_alpha_ir(strat_lagged, bench)
+
+    assert abs(naive["beta"]) < 0.2          # the failure mode: beta collapses
+    assert blocked["beta"] > 0.3             # blocked estimator recovers exposure
+    assert blocked["beta"] == pytest.approx(true_beta * 0.8, rel=0.35)
+
+
 def test_benchmark_stats_block(db, user):
     # A VARIED return pattern (constant returns leave the benchmark with ~zero
     # variance, making beta undefined); strategy ≡ benchmark → beta 1, alpha 0.
