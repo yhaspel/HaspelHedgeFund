@@ -43,6 +43,7 @@ from .views import (
     StrategyEnrollView,
     StrategyEstimateView,
     StrategyListCreateView,
+    StrategyNewsDecisionsView,
     StrategyRunNowView,
     UniverseListView,
     UniverseMembershipView,
@@ -64,6 +65,9 @@ urlpatterns = [
     path("strategies/<int:pk>/backtest-defaults/", StrategyBacktestDefaultsView.as_view(),
          name="strategy-backtest-defaults"),
     path("strategies/<int:pk>/run-now/", StrategyRunNowView.as_view(), name="strategy-run-now"),
+    # P10 §E4: news-lab name-level decision scoreboard.
+    path("strategies/<int:pk>/news-decisions/", StrategyNewsDecisionsView.as_view(),
+         name="strategy-news-decisions"),
     path("strategies/<int:pk>/cycles/", StrategyCyclesView.as_view(),
          name="strategy-cycles"),
     path("strategies/<int:pk>/cycles/<int:target_id>/", StrategyCycleDetailView.as_view(),

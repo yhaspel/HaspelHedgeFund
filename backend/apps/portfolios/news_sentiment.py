@@ -107,17 +107,24 @@ NEWS_CONVICTION_MODEL = "mistralai/mistral-small-3.2-24b-instruct"
 def news_conviction(
     tickers: list[str], as_of: dt.date, *, model: str = NEWS_CONVICTION_MODEL,
     user_id: int | None = None, lookback_days: int = 7, max_headlines: int = 8,
+    portfolio_target_id: int | None = None,
 ) -> dict[str, float]:
     """Bounded persona conviction overlay (the council in a LANGUAGE role, not the
     sizer): one frugal structured call per candidate reads its recent news → a
     conviction in [0, 1] (``keep=False`` → veto). Unscored failures / no-news fall
-    back to 0.5 (neutral). Returns {ticker: conviction}."""
+    back to 0.5 (neutral). Returns {ticker: conviction}.
+
+    P10 §E2: every call is metered via ``record_llm_call`` threaded to
+    ``portfolio_target_id`` — the scorecard's ``council_cost_usd`` was hardwired
+    to $0.00 before this, making the net-of-cost half of the council-alpha
+    verdict uncomputable."""
     import datetime as _dt
 
     from django.utils import timezone
     from pydantic import BaseModel
 
     from apps.data.models import MarketNewsItem
+    from hedgefund_agents._persist import record_llm_call
     from hedgefund_agents.llm.client import Message
     from hedgefund_agents.llm.structured import call_structured
     from hedgefund_agents.registry import get_llm
@@ -139,13 +146,20 @@ def news_conviction(
         "litigation lower conviction."
     )
     client = get_llm("openrouter", user_id=user_id)
+    # One window query, grouped in Python (symbols is a JSONField list —
+    # `__contains` is Postgres-only, and per-ticker queries were N round-trips).
+    tset = set(tickers)
+    by_ticker: dict[str, list[tuple[str, str | None]]] = {t: [] for t in tickers}
+    window = MarketNewsItem.objects.filter(
+        published_at__gte=start, published_at__lt=end,
+    ).order_by("-published_at").values_list("symbols", "headline", "sentiment")
+    for symbols, headline, sentiment in window.iterator():
+        for sym in (symbols or []):
+            if sym in tset and len(by_ticker[sym]) < max_headlines:
+                by_ticker[sym].append((headline, sentiment))
     out: dict[str, float] = {}
     for ticker in tickers:
-        heads = list(
-            MarketNewsItem.objects.filter(
-                symbols__contains=[ticker], published_at__gte=start, published_at__lt=end,
-            ).order_by("-published_at").values_list("headline", "sentiment")[:max_headlines]
-        )
+        heads = by_ticker[ticker]
         if not heads:
             out[ticker] = 0.5
             continue
@@ -153,11 +167,18 @@ def news_conviction(
             f"- [{s or '?'}] {h}" for h, s in heads
         )
         try:
-            parsed, _ = call_structured(
+            parsed, resp = call_structured(
                 client, model=model, schema=_Conviction,
                 messages=[Message("system", system), Message("user", user)],
                 max_tokens=200, temperature=0.2,
             )
+            try:
+                record_llm_call(
+                    run_id=None, agent_name="news_conviction", resp=resp,
+                    portfolio_target_id=portfolio_target_id,
+                )
+            except Exception:  # noqa: BLE001 — metering must not abort the overlay
+                pass
             out[ticker] = 0.0 if not parsed.keep else float(max(0.0, min(1.0, parsed.conviction)))
         except Exception:  # noqa: BLE001 — a bad name shouldn't abort the overlay
             out[ticker] = 0.5

@@ -227,6 +227,14 @@ EDGAR_USER_AGENT = os.environ.get(
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 
+# P10 §E3 — the news-sentiment lab's FROZEN classifier. The lab tasks always
+# classify with this model (never the user's news-page preference): swapping
+# the sentiment model mid-experiment would silently change the sleeve's signal
+# definition and invalidate the forward test. Change only between experiments.
+NEWS_LAB_SENTIMENT_MODEL = os.environ.get(
+    "NEWS_LAB_SENTIMENT_MODEL", "openrouter:qwen/qwen3.6-27b"
+)
+
 # P7 — Autonomous 3-account fund bootstrap. Each Alpaca paper account has its
 # own distinct API key/secret; NAME is a human label that becomes the
 # BrokerAccount.label + maps to a strategy. ``bootstrap_autonomous_fund`` reads

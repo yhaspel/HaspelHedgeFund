@@ -625,6 +625,28 @@ class StrategyEnrollView(APIView):
         return Response(_enrollment_to_dict(result), status=status.HTTP_201_CREATED)
 
 
+class StrategyNewsDecisionsView(APIView):
+    """P10 §E4 — GET /api/strategies/<pk>/news-decisions/ — the news-lab
+    name-level decision scoreboard (graded conviction/veto hit-rate + the §E5
+    sleeve-vs-equal-weight comparison). The numbers ADR-0027's kill criteria
+    read."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, pk: int) -> Response:
+        from apps.leaderboard.news_decisions import news_decision_scoreboard
+
+        try:
+            strategy = PortfolioStrategy.objects.get(pk=pk, user=request.user)
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        if strategy.kind != PortfolioStrategy.KIND_NEWS_SENTIMENT:
+            return Response(
+                {"detail": "decision scoring exists only for news_sentiment sleeves"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(news_decision_scoreboard(strategy))
+
+
 class BorrowLookupView(APIView):
     def get(self, request: Request, ticker: str) -> Response:
         as_of_str = request.query_params.get("as_of")

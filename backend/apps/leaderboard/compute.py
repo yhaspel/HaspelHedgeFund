@@ -21,7 +21,7 @@ from apps.backtests.metrics import drawdown_pct, sharpe_ratio, sortino_ratio
 from apps.backtests.metrics import hit_rate as hit_rate_fn
 from apps.backtests.models import BacktestMetrics
 from apps.models_catalog.presets import ANALYTICAL_AGENTS, PERSONA_AGENTS
-from apps.portfolios.cycle_mark import ensure_baseline_snapshot
+from apps.portfolios.cycle_mark import ensure_baseline_snapshot, ensure_cycle_snapshot
 from apps.portfolios.models import PortfolioStrategy, PortfolioTarget
 from apps.runs.models import AgentMessage, Run
 from hedgefund_agents.models import LLMCall
@@ -292,18 +292,47 @@ def _metrics_from_returns(rets: list[float]) -> dict | None:
     }
 
 
+def _pair_is_same_pass(t) -> bool:
+    """True when realised + baseline snapshots were stamped within the same
+    marking pass (≤ the cycle-mark freshness window apart) — i.e. against the
+    same bar availability — so their diff is a real signal, not timing noise."""
+    from apps.portfolios.cycle_mark import SNAPSHOT_FRESH_FOR_SECONDS
+
+    rs = (t.marked_snapshot or {}).get("snapshot_at")
+    bs = (t.baseline_marked_snapshot or {}).get("snapshot_at")
+    if not rs or not bs:
+        return False
+    try:
+        r_at = dt.datetime.fromisoformat(rs)
+        b_at = dt.datetime.fromisoformat(bs)
+    except (TypeError, ValueError):
+        return False
+    return abs((r_at - b_at).total_seconds()) <= SNAPSHOT_FRESH_FOR_SECONDS
+
+
 def _paired_returns(targets) -> tuple[list[float], list[float]]:
     """Realised vs council-free-baseline per-cycle returns, over the cycles
-    that captured a baseline (council-alpha is forward-only). Marks each
-    baseline book with the same forward-return machinery, then pairs by cycle.
+    that captured a baseline (council-alpha is forward-only).
+
+    P10 §E1: a pair is only read AS-IS when both snapshots were stamped in the
+    same marking pass; otherwise BOTH are force-refreshed together so they are
+    marked against identical bar availability. The old code read
+    ``t.marked_snapshot`` as-is (possibly stamped days earlier by a page view)
+    while recomputing only the baseline — on byte-identical books that produced
+    +31bp of phantom "overlay alpha" (MU priced from two different dates). The
+    regression test asserts alpha ≡ 0 for identical books.
     """
     realised: list[float] = []
     baseline: list[float] = []
     for t in targets:
         if not (t.baseline_weights or {}):
             continue
-        rv = (t.marked_snapshot or {}).get("since_as_of_pct")
-        bv = (ensure_baseline_snapshot(t) or {}).get("since_as_of_pct")
+        if _pair_is_same_pass(t):
+            rv = (t.marked_snapshot or {}).get("since_as_of_pct")
+            bv = (t.baseline_marked_snapshot or {}).get("since_as_of_pct")
+        else:
+            rv = (ensure_cycle_snapshot(t, force=True) or {}).get("since_as_of_pct")
+            bv = (ensure_baseline_snapshot(t, force=True) or {}).get("since_as_of_pct")
         if rv in (None, "", "None") or bv in (None, "", "None"):
             continue
         try:
