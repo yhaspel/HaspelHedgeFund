@@ -105,6 +105,29 @@
   gap: 4px;
   width: 100%;
 }
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 10px 0 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.nav-group-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-4);
+}
+.nav-group-toggle .chev {
+  transition: transform var(--dur-fast) var(--ease-out-ui);
+  transform: rotate(-90deg);
+}
+.nav-group-toggle .chev.open {
+  transform: rotate(0deg);
+}
 .nav-group-label {
   margin-left: 10px;
   text-align: left;

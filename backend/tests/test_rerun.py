@@ -146,9 +146,10 @@ def test_rerun_chain_renders_on_summary_and_detail(auth_client: APIClient) -> No
         rerun_resp = auth_client.post(reverse("run-rerun", args=[original.pk]))
     new_id = rerun_resp.data["id"]
 
-    # Summary (list) carries rerun_of on the child row.
+    # Summary (list) carries rerun_of on the child row. P10 §D4: the list is
+    # paginated — rows live under "results".
     listing = auth_client.get(reverse("run-list-create"))
-    rows = {r["id"]: r for r in listing.data}
+    rows = {r["id"]: r for r in listing.data["results"]}
     assert rows[new_id]["rerun_of"] == original.pk
     assert rows[original.pk]["rerun_of"] is None
 

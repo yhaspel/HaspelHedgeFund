@@ -22,6 +22,8 @@ export interface BacktestSummary {
   // P10 §B3: "price_only" rows predate the dividend fix (PR #50) and are
   // excluded as §9-gate evidence; badge them.
   data_era: 'price_only' | 'total_return';
+  // P10 §D4: soft archive — non-null = hidden from the default list.
+  archived_at: string | null;
 }
 
 // P10 §B2 — one benchmark's comparison block (vs the stitched OOS curve).

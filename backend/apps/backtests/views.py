@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from hedgefund.celery import app as celery_app
+from hedgefund.pagination import DefaultPageNumberPagination
 
 from .estimator import estimate_cost
 from .metrics import (
@@ -29,12 +30,23 @@ logger = logging.getLogger(__name__)
 
 
 class BacktestListCreateView(generics.ListCreateAPIView):
+    # P10 §D4: done/failed backtests can never be deleted (protected history),
+    # so the list is append-only — paginate at 50 and hide archived rows by
+    # default (?include_archived=1 to see them).
+    pagination_class = DefaultPageNumberPagination
+
     def get_queryset(self):
-        return (
+        qs = (
             Backtest.objects.filter(user=self.request.user)
             .select_related("metrics")
             .order_by("-created_at")
         )
+        include_archived = self.request.query_params.get("include_archived") in (
+            "1", "true", "yes",
+        )
+        if not include_archived:
+            qs = qs.filter(archived_at__isnull=True)
+        return qs
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -45,6 +57,31 @@ class BacktestListCreateView(generics.ListCreateAPIView):
         bt = serializer.save(user=self.request.user)
         async_result = run_backtest.delay(bt.id)
         Backtest.objects.filter(pk=bt.pk).update(celery_task_id=str(async_result.id or ""))
+
+
+class BacktestArchiveView(APIView):
+    """P10 §D4 — soft archive/unarchive (the graphs pattern). POST
+    /backtests/<pk>/archive/ {archived: true|false}. Any terminal status may be
+    archived; active runs must be cancelled first."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            bt = Backtest.objects.get(pk=pk, user=request.user)
+        except Backtest.DoesNotExist:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if bt.status in Backtest.ACTIVE_STATUSES:
+            return Response(
+                {"detail": f"backtest is {bt.status}; cancel it before archiving"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        archived = bool(request.data.get("archived", True))
+        bt.archived_at = timezone.now() if archived else None
+        bt.save(update_fields=["archived_at"])
+        return Response({
+            "id": bt.pk,
+            "archived_at": bt.archived_at.isoformat() if bt.archived_at else None,
+        })
 
 
 class BacktestDetailView(generics.RetrieveDestroyAPIView):

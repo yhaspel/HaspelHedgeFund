@@ -230,7 +230,17 @@ class StrategyListCreateView(generics.ListCreateAPIView):
     serializer_class = StrategySerializer
 
     def get_queryset(self):
-        return _strategies_with_active_count(self.request.user).order_by("-created_at")
+        # P10 §D1: archive semantics. is_active=False = archived — hidden from
+        # the default list (38/40 strategies can never pass the delete gate, so
+        # archive is the only viable cleanup verb). ?include_archived=1 returns
+        # everything; archiving is a normal PATCH {is_active: false}.
+        qs = _strategies_with_active_count(self.request.user)
+        include_archived = self.request.query_params.get("include_archived") in (
+            "1", "true", "yes",
+        )
+        if not include_archived:
+            qs = qs.filter(is_active=True)
+        return qs.order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

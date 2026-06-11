@@ -38,6 +38,7 @@ class BacktestListSerializer(serializers.ModelSerializer):
             "universe", "start_date", "end_date", "created_at",
             "finished_at", "oos_sharpe", "stitched_sharpe", "total_return_pct",
             "deflation", "deflation_meaningful", "engine_mode", "data_era",
+            "archived_at",
         )
 
     def _m(self, obj):

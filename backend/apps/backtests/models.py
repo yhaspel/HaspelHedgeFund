@@ -152,6 +152,13 @@ class Backtest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    # P10 §D4: soft archive (the graphs pattern — graphs/models.py). done /
+    # failed rows are protected history and can never be deleted, so without
+    # this the list is append-only forever. Archived rows are hidden from the
+    # default list (?include_archived=1 to see them) and stay §9-gate-eligible
+    # candidates only via their status/era — archiving is cosmetic, not
+    # evidential.
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self) -> str:
         return f"Backtest {self.pk} {self.name} ({self.status})"

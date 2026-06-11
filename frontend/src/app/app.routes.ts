@@ -172,7 +172,9 @@ export const routes: Routes = [
         (m) => m.GraphEditorPage,
       ),
   },
-  { path: 'settings', pathMatch: 'full', redirectTo: 'settings/models' },
+  // P10 §D5: Settings opens on General (Data & News); Models/Providers/
+  // Personas live under the "Models & advanced" group.
+  { path: 'settings', pathMatch: 'full', redirectTo: 'settings/data-news' },
   {
     path: 'settings/models',
     canActivate: [authGuard],

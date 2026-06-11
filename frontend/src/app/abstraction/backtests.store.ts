@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import {
   BacktestDetail,
@@ -26,6 +26,7 @@ export class BacktestsStore {
   private readonly api = inject(ApiClient);
 
   private readonly _list = signal<BacktestSummary[]>([]);
+  private readonly _listCount = signal(0);
   private readonly _current = signal<BacktestDetail | null>(null);
   private readonly _equity = signal<EquityPoint[]>([]);
   private readonly _equityBenchmarks = signal<string[]>([]);
@@ -35,6 +36,8 @@ export class BacktestsStore {
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
 
   readonly list = this._list.asReadonly();
+  /** P10 §D4: total rows server-side (the list is paginated at 50). */
+  readonly listCount = this._listCount.asReadonly();
   readonly current = this._current.asReadonly();
   readonly equity = this._equity.asReadonly();
   readonly equityBenchmarks = this._equityBenchmarks.asReadonly();
@@ -49,10 +52,32 @@ export class BacktestsStore {
       .pipe(tap((r) => this._defaultUniverse.set(r.universe)));
   }
 
-  listBacktests(): Observable<BacktestSummary[]> {
+  // P10 §D4: paginated ({count, results}, 50/page); archived rows hidden
+  // unless includeArchived.
+  listBacktests(opts?: { includeArchived?: boolean; page?: number }):
+    Observable<BacktestSummary[]> {
+    const params: string[] = [];
+    if (opts?.includeArchived) params.push('include_archived=1');
+    if (opts?.page && opts.page > 1) params.push(`page=${opts.page}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
     return this.api
-      .get<BacktestSummary[]>('/backtests/')
-      .pipe(tap((r) => this._list.set(Array.isArray(r) ? r : [])));
+      .get<BacktestSummary[] | { count: number; results: BacktestSummary[] }>(`/backtests/${qs}`)
+      .pipe(
+        map((r) => {
+          const rows = Array.isArray(r) ? r : (r?.results ?? []);
+          this._listCount.set(Array.isArray(r) ? rows.length : (r?.count ?? rows.length));
+          this._list.set(rows);
+          return rows;
+        }),
+      );
+  }
+
+  // P10 §D4: soft archive/unarchive (the graphs pattern) — done/failed rows
+  // can never be deleted, so archive is the declutter verb.
+  archiveBacktest(id: number, archived: boolean): Observable<{ id: number; archived_at: string | null }> {
+    return this.api.post<{ id: number; archived_at: string | null }>(
+      `/backtests/${id}/archive/`, { archived },
+    );
   }
 
   create(body: CreateBacktestRequest): Observable<BacktestSummary> {

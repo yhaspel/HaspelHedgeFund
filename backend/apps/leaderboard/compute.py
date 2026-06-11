@@ -340,7 +340,13 @@ def _council_alpha(targets, nav: float, council_cost: float) -> dict:
 def recompute_strategies(today: dt.date) -> None:
     StrategyScorecard.objects.filter(as_of=today).delete()
     by_flavor: dict[tuple, list] = {}
-    for s in PortfolioStrategy.objects.select_related("portfolio").iterator():
+    # P10 §D1: skip archived strategies — no nightly scorecard churn for dead
+    # experiments (their historical scorecard rows remain queryable).
+    for s in (
+        PortfolioStrategy.objects.filter(is_active=True)
+        .select_related("portfolio")
+        .iterator()
+    ):
         for window, days in WINDOWS_STRATEGY.items():
             cutoff = _cutoff(days, today)
             tq = PortfolioTarget.objects.filter(

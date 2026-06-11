@@ -25,7 +25,11 @@ export interface NavItem {
 export interface NavGroup {
   label: string;
   items: NavItem[];
+  /** P10 §D3: collapsed-by-default group (the council-era research surfaces). */
+  collapsible?: boolean;
 }
+
+const RESEARCH_COLLAPSED_KEY = 'hf.nav.researchCollapsed';
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -46,7 +50,10 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // P10 §D3: council-era research tooling, collapsed by default — shrinks
+    // the perceived surface without deleting capability.
     label: 'Research',
+    collapsible: true,
     items: [
       { label: 'Runs', icon: 'i-pulse', link: '/runs' },
       { label: 'Screener', icon: 'i-filter', link: '/screener' },
@@ -57,10 +64,11 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// P10 §D5: Profile folded into Settings → General (no sidebar entry; still
+// reachable via the top-bar email link and deep links).
 const SYSTEM_ITEMS: NavItem[] = [
-  { label: 'Profile', icon: 'i-user', link: '/profile' },
   { label: 'Guides', icon: 'i-info', link: '/info' },
-  { label: 'Settings', icon: 'i-settings', link: '/settings/models' },
+  { label: 'Settings', icon: 'i-settings', link: '/settings/data-news' },
 ];
 
 @Component({
@@ -90,15 +98,28 @@ const SYSTEM_ITEMS: NavItem[] = [
         <div class="nav-scroll">
           @for (g of navGroups; track g.label) {
             <div class="nav-group" role="group" [attr.aria-label]="g.label">
-              <span class="nav-group-label" aria-hidden="true">{{ g.label }}</span>
-              @for (item of g.items; track item.link) {
-                <a class="nav-btn" [routerLink]="item.link"
-                   [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
-                   routerLinkActive="active" #rla="routerLinkActive"
-                   [attr.aria-current]="rla.isActive ? 'page' : null">
-                  <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
-                  <span class="nav-label">{{ item.label }}</span>
-                </a>
+              @if (g.collapsible) {
+                <button type="button" class="nav-group-toggle"
+                        (click)="toggleResearch()"
+                        [attr.aria-expanded]="researchOpen()"
+                        [attr.aria-label]="(researchOpen() ? 'Collapse ' : 'Expand ') + g.label + ' group'">
+                  <span class="nav-group-label">{{ g.label }}</span>
+                  <svg width="10" height="10" aria-hidden="true" class="chev"
+                       [class.open]="researchOpen()"><use href="/icons.svg#i-chevron-dn" /></svg>
+                </button>
+              } @else {
+                <span class="nav-group-label" aria-hidden="true">{{ g.label }}</span>
+              }
+              @if (!g.collapsible || researchOpen()) {
+                @for (item of g.items; track item.link) {
+                  <a class="nav-btn" [routerLink]="item.link"
+                     [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
+                     routerLinkActive="active" #rla="routerLinkActive"
+                     [attr.aria-current]="rla.isActive ? 'page' : null">
+                    <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
+                    <span class="nav-label">{{ item.label }}</span>
+                  </a>
+                }
               }
             </div>
           }
@@ -254,6 +275,33 @@ export class AppShellComponent implements OnInit {
   @Input() crumbs: { label: string; link?: string }[] = [];
   readonly navGroups = NAV_GROUPS;
   readonly systemItems = SYSTEM_ITEMS;
+
+  // P10 §D3: the Research group is collapsed by default; the choice persists.
+  // Auto-expands when the current route lives inside it (active page must
+  // never be hidden).
+  readonly researchOpen = signal(this.initialResearchOpen());
+
+  toggleResearch(): void {
+    const next = !this.researchOpen();
+    this.researchOpen.set(next);
+    try {
+      localStorage.setItem(RESEARCH_COLLAPSED_KEY, next ? '0' : '1');
+    } catch {
+      // localStorage may be unavailable — degrade silently.
+    }
+  }
+
+  private initialResearchOpen(): boolean {
+    const research = NAV_GROUPS.find((g) => g.collapsible);
+    const url = typeof location !== 'undefined' ? location.pathname : '';
+    if (research?.items.some((i) => url.startsWith(i.link))) return true;
+    try {
+      return localStorage.getItem(RESEARCH_COLLAPSED_KEY) === '0';
+    } catch {
+      return false;
+    }
+  }
+
   readonly auth = inject(AuthStore);
   readonly news = inject(NewsStore);
   readonly profile = inject(InvestorProfileStore);
