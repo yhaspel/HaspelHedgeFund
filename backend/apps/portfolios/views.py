@@ -123,10 +123,23 @@ class PortfolioHubView(APIView):
             # notional cash. Manual and broker books always show.
             if p.kind == Portfolio.KIND_STRATEGY and not positions and not p.ledger.exists():
                 continue
+            # P10 §C5: mark to market (the old quantity*avg_cost cost basis
+            # understated/overstated moves). Marks are short-TTL-cached;
+            # valuation failures fall back to cost basis, flagged `marked`.
+            marked = False
             market_value = sum(
                 (pos.quantity * pos.avg_cost for pos in positions),
                 Decimal("0"),
             )
+            if positions:
+                try:
+                    from .valuation import value_portfolio
+
+                    val = value_portfolio(p)
+                    market_value = val.long_market_value + val.short_market_value
+                    marked = True
+                except Exception:  # noqa: BLE001 — cost basis is the fallback
+                    marked = False
             cash = p.cash_balance
             book = {
                 "kind": p.kind,
@@ -136,6 +149,7 @@ class PortfolioHubView(APIView):
                 "cash": str(cash),
                 "market_value": str(market_value),
                 "equity": str(cash + market_value),
+                "marked": marked,
                 "positions_count": len(positions),
                 "link_route": "",
                 "status": "",
@@ -170,11 +184,21 @@ class PortfolioHubView(APIView):
         books.sort(
             key=lambda b: (kind_order.get(b["kind"], 9), b["name"].lower()),
         )
+        # P10 §C5: headline totals = REAL capital only (broker + manual).
+        # Strategy mirrors are parallel paper notional (the same intent the
+        # broker books already hold) — summing them inflated "total equity"
+        # ~2.65×. Their subtotal is still reported separately for the toggle.
+        real = [b for b in books if b["kind"] != Portfolio.KIND_STRATEGY]
+        mirrors = [b for b in books if b["kind"] == Portfolio.KIND_STRATEGY]
         totals = {
             "books": len(books),
-            "cash": str(sum((Decimal(b["cash"]) for b in books), Decimal("0"))),
+            "cash": str(sum((Decimal(b["cash"]) for b in real), Decimal("0"))),
             "equity": str(
-                sum((Decimal(b["equity"]) for b in books), Decimal("0")),
+                sum((Decimal(b["equity"]) for b in real), Decimal("0")),
+            ),
+            "mirror_books": len(mirrors),
+            "mirror_equity": str(
+                sum((Decimal(b["equity"]) for b in mirrors), Decimal("0")),
             ),
         }
         return Response({"books": books, "totals": totals})
@@ -206,7 +230,17 @@ class StrategyListCreateView(generics.ListCreateAPIView):
     serializer_class = StrategySerializer
 
     def get_queryset(self):
-        return _strategies_with_active_count(self.request.user).order_by("-created_at")
+        # P10 §D1: archive semantics. is_active=False = archived — hidden from
+        # the default list (38/40 strategies can never pass the delete gate, so
+        # archive is the only viable cleanup verb). ?include_archived=1 returns
+        # everything; archiving is a normal PATCH {is_active: false}.
+        qs = _strategies_with_active_count(self.request.user)
+        include_archived = self.request.query_params.get("include_archived") in (
+            "1", "true", "yes",
+        )
+        if not include_archived:
+            qs = qs.filter(is_active=True)
+        return qs.order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -589,6 +623,28 @@ class StrategyEnrollView(APIView):
         except runs_bridge.EnrollmentError as exc:
             return Response({"detail": str(exc)}, status=exc.status_code)
         return Response(_enrollment_to_dict(result), status=status.HTTP_201_CREATED)
+
+
+class StrategyNewsDecisionsView(APIView):
+    """P10 §E4 — GET /api/strategies/<pk>/news-decisions/ — the news-lab
+    name-level decision scoreboard (graded conviction/veto hit-rate + the §E5
+    sleeve-vs-equal-weight comparison). The numbers ADR-0027's kill criteria
+    read."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, pk: int) -> Response:
+        from apps.leaderboard.news_decisions import news_decision_scoreboard
+
+        try:
+            strategy = PortfolioStrategy.objects.get(pk=pk, user=request.user)
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        if strategy.kind != PortfolioStrategy.KIND_NEWS_SENTIMENT:
+            return Response(
+                {"detail": "decision scoring exists only for news_sentiment sleeves"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(news_decision_scoreboard(strategy))
 
 
 class BorrowLookupView(APIView):

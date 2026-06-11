@@ -159,6 +159,8 @@ export interface PortfolioHubBook {
   cash: string;
   market_value: string;
   equity: string;
+  /** P10 §C5: true = marked to market; false = cost-basis fallback. */
+  marked: boolean;
   positions_count: number;
   /** Frontend route to that book's proper surface. */
   link_route: string;
@@ -170,7 +172,11 @@ export interface PortfolioHub {
   books: PortfolioHubBook[];
   totals: {
     books: number;
+    /** P10 §C5: real capital only (broker + manual), marked to market. */
     cash: string;
     equity: string;
+    /** Strategy paper-mirror subtotal, reported separately. */
+    mirror_books: number;
+    mirror_equity: string;
   };
 }

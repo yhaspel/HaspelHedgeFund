@@ -1,8 +1,10 @@
-"""Seed passing validation backtests so the fund's autopilots can be enabled.
+"""Seed SYNTHETIC demo backtests (P10 §B3: they no longer open the §9 gate).
 
-Educational/paper helper: writes a clearly-labelled ``[seed]`` passing backtest
-per strategy (see ``apps.backtests.seed``) so the §9 enable gate opens out of the
-box. Targets an AutonomousFund's member strategies by owner email, or a single
+Educational/paper helper: writes a clearly-labelled ``[seed]`` synthetic backtest
+per strategy (see ``apps.backtests.seed``) so demo UIs have a record to render.
+Fabricated rows are status=``synthetic`` and are NOT §9-gate evidence — run a
+real (free, deterministic) validation backtest to open the enable toggle.
+Targets an AutonomousFund's member strategies by owner email, or a single
 strategy by id. Idempotent unless ``--force``.
 
 Usage:
@@ -23,7 +25,8 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Seed passing validation backtests so autopilots can be enabled (demo/paper)."
+    help = ("Seed synthetic demo backtests (NOT §9-gate evidence — run a real "
+            "deterministic validation backtest to enable autopilots).")
 
     def add_arguments(self, parser):
         parser.add_argument("--user", default="", help="Owner email (targets fund strategies).")
@@ -63,14 +66,15 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
             self.stdout.write(self.style.SUCCESS(
-                f"  strategy #{s.id} '{s.name}': seeded backtest #{bt.id} → gate now passes."
+                f"  strategy #{s.id} '{s.name}': seeded synthetic demo backtest "
+                f"#{bt.id} (not gate evidence)."
             ))
             seeded += 1
 
         verb = "would seed" if dry else "seeded"
         self.stdout.write(self.style.SUCCESS(
-            f"Done: {verb} {seeded}, skipped {skipped}. "
-            "Open each strategy's Autopilot page to enable."
+            f"Done: {verb} {seeded}, skipped {skipped}. Seeds are synthetic demo "
+            "records — run a real validation backtest to open the §9 gate."
         ))
 
     def _resolve_strategies(self, opts) -> list[PortfolioStrategy]:

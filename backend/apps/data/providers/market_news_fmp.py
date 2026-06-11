@@ -54,12 +54,51 @@ class MarketNewsFmpProvider:
             raise RuntimeError("FMP_API_KEY is not set")
         self._http = http or httpx.Client(timeout=30.0)
 
-    def _fetch_endpoint(self, path: str, limit: int) -> list[dict]:
-        params = {"page": 0, "limit": limit, "apikey": self.api_key}
+    def _fetch_endpoint(self, path: str, limit: int, **extra) -> list[dict]:
+        params = {"page": 0, "limit": limit, "apikey": self.api_key, **extra}
         resp = self._http.get(f"{FMP_BASE}{path}", params=params)
         resp.raise_for_status()
         data = resp.json()
         return data if isinstance(data, list) else []
+
+    def fetch_for_symbols(
+        self, symbols: list[str], *, limit: int = 100,
+    ) -> list[MarketNewsItem]:
+        """P10 §E3: SYMBOL-TARGETED stock news (FMP /news/stock?symbols=…) for
+        the news-lab universe — the general stock-latest feed only skims the
+        most recent market-wide items, so a 200-name universe starves unless
+        someone browses the news page. Batched ≤50 symbols per request."""
+        retention_cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=RETENTION_DAYS)
+        out: list[MarketNewsItem] = []
+        cleaned = sorted({str(s).upper() for s in symbols if s})
+        for i in range(0, len(cleaned), 50):
+            batch = cleaned[i:i + 50]
+            rows = self._fetch_endpoint(
+                "/news/stock", limit, symbols=",".join(batch),
+            )
+            for item in rows:
+                headline = (item.get("title") or "").strip()
+                url = (item.get("url") or "").strip()
+                if not headline or not url:
+                    continue
+                pub = _parse_pub(item.get("publishedDate") or item.get("published_at") or "")
+                if pub is None or pub < retention_cutoff:
+                    continue
+                sym = item.get("symbol")
+                out.append(
+                    MarketNewsItem(
+                        provider=self.name,
+                        headline=headline[:512],
+                        summary=(item.get("text") or "")[:4000],
+                        url=url[:1000],
+                        image_url=(item.get("image") or "")[:1000],
+                        source=(item.get("site") or item.get("publisher") or "")[:128],
+                        published_at=pub,
+                        symbols=[str(sym).upper()] if sym else [],
+                        tags=[],
+                    )
+                )
+        return out
 
     def fetch_latest(self, *, limit: int = 60) -> list[MarketNewsItem]:
         """Pull both general-latest and stock-latest, map to ``MarketNewsItem``."""

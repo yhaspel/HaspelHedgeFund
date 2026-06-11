@@ -14,7 +14,18 @@ export const routes: Routes = [
       import('./presentation/auth/signup.page').then((m) => m.SignupPage),
   },
   {
+    // P10 §C1 — fund-first: the landing page IS the fund (aggregate NAV,
+    // 3 pod cards, equity history, composite). The old manual-book dashboard
+    // is demoted to /dashboard (linked from the fund page's Manual book card).
     path: '',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/fund/fund-dashboard.page').then(
+        (m) => m.FundDashboardPage,
+      ),
+  },
+  {
+    path: 'dashboard',
     canActivate: [authGuard],
     loadComponent: () =>
       import('./presentation/dashboard/dashboard.page').then(
@@ -161,7 +172,9 @@ export const routes: Routes = [
         (m) => m.GraphEditorPage,
       ),
   },
-  { path: 'settings', pathMatch: 'full', redirectTo: 'settings/models' },
+  // P10 §D5: Settings opens on General (Data & News); Models/Providers/
+  // Personas live under the "Models & advanced" group.
+  { path: 'settings', pathMatch: 'full', redirectTo: 'settings/data-news' },
   {
     path: 'settings/models',
     canActivate: [authGuard],

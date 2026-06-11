@@ -4,6 +4,7 @@ import { Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { AuthStore } from '../../abstraction/auth.store';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { FundStore } from '../../abstraction/fund.store';
 import { MacroStore } from '../../abstraction/macro.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
@@ -37,9 +38,12 @@ type SigKind = 'buy' | 'sell' | 'hold' | 'info';
     SectorHeatmapComponent,
   ],
   template: `
-    <hf-app-shell [crumbs]="[{label:'Dashboard'}]">
+    <hf-app-shell [crumbs]="[{label:'Manual dashboard'}]">
       <div class="page-head">
-        <div><h1>Dashboard</h1></div>
+        <div>
+          <div class="eyebrow">Manual book &amp; research desk</div>
+          <h1 class="mt-1.5">Manual dashboard</h1>
+        </div>
         <div class="head-actions">
           <a class="btn" routerLink="/backtests/new">
             <svg width="12" height="12"><use href="/icons.svg#i-plus" /></svg> New backtest
@@ -390,6 +394,7 @@ export class DashboardPage implements OnInit {
   readonly macro = inject(MacroStore);
   readonly strategies = inject(StrategiesStore);
   readonly portfolio = inject(PortfolioStore);
+  private readonly fundStore = inject(FundStore);
   private readonly profiles = inject(TickerProfileStore);
   private readonly router = inject(Router);
 
@@ -520,48 +525,74 @@ export class DashboardPage implements OnInit {
     this.strategies.list().subscribe({
       next: (ss) => {
         this.strategiesLoaded.set(true);
-        const recent = ss.find((s) => !!s.last_run_at) ?? ss[0];
-        if (!recent) { this.bookLoaded.set(true); return; }
-        this.strategies.listCycles(recent.id).subscribe({
-          next: (cs) => {
-            const done = cs.find((c) => c.status === 'done') ?? cs[0];
-            if (!done) { this.bookLoaded.set(true); return; }
-            this.strategies.cycleDetail(recent.id, done.id).subscribe({
-              next: (d) => {
-                const allLongs = Object.entries(d.target_weights)
-                  .filter(([, w]) => Number(w) > 0)
-                  .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
-                const allShorts = Object.entries(d.target_weights)
-                  .filter(([, w]) => Number(w) < 0)
-                  .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
-                const longPct = allLongs.reduce((a, b) => a + b.weight, 0);
-                const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
-                this.book.set({
-                  strategy_name: recent.name,
-                  strategy_id: recent.id,
-                  as_of_date: d.as_of_date,
-                  gross_pct: d.gross_pct,
-                  net_pct: d.net_pct,
-                  target_gross_pct: recent.target_gross_pct,
-                  target_net_pct: recent.target_net_pct,
-                  longPct,
-                  shortPct,
-                  netSigned: longPct - shortPct,
-                  longCount: allLongs.length,
-                  shortCount: allShorts.length,
-                  positionCount: allLongs.length + allShorts.length,
-                  longs: allLongs.sort((a, b) => b.weight - a.weight).slice(0, 5),
-                  shorts: allShorts.sort((a, b) => a.weight - b.weight).slice(0, 5),
-                });
-                this.bookLoaded.set(true);
-              },
-              error: () => this.bookLoaded.set(true),
-            });
+        // P10 §C1: the exposure widget shows a FUND member's book — not
+        // "whichever strategy ran last" (which surfaced the non-fund #56
+        // validation sleeve). Iterate fund members (most recent first) and
+        // fall back to the legacy heuristic only when no fund exists.
+        this.fundStore.loadFund().subscribe({
+          next: (f) => {
+            const memberIds = new Set((f?.per_account ?? []).map((a) => a.strategy_id));
+            const members = ss.filter((s) => memberIds.has(s.id));
+            const ordered = [
+              ...members.filter((s) => !!s.last_run_at),
+              ...members.filter((s) => !s.last_run_at),
+            ];
+            const fallback = ss.find((s) => !!s.last_run_at) ?? ss[0];
+            this.loadBookFrom(ordered.length ? ordered : (fallback ? [fallback] : []));
           },
-          error: () => this.bookLoaded.set(true),
+          error: () => {
+            const fallback = ss.find((s) => !!s.last_run_at) ?? ss[0];
+            this.loadBookFrom(fallback ? [fallback] : []);
+          },
         });
       },
       error: () => { this.strategiesLoaded.set(true); this.bookLoaded.set(true); },
+    });
+  }
+
+  /** Try each candidate strategy in order until one has a done cycle. */
+  private loadBookFrom(candidates: { id: number; name: string;
+    target_gross_pct: string; target_net_pct: string }[]): void {
+    const next = candidates[0];
+    if (!next) { this.bookLoaded.set(true); return; }
+    const rest = candidates.slice(1);
+    this.strategies.listCycles(next.id).subscribe({
+      next: (cs) => {
+        const done = cs.find((c) => c.status === 'done');
+        if (!done) { this.loadBookFrom(rest); return; }
+        this.strategies.cycleDetail(next.id, done.id).subscribe({
+          next: (d) => {
+            const allLongs = Object.entries(d.target_weights)
+              .filter(([, w]) => Number(w) > 0)
+              .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+            const allShorts = Object.entries(d.target_weights)
+              .filter(([, w]) => Number(w) < 0)
+              .map(([ticker, w]) => ({ ticker, weight: Number(w) * 100 }));
+            const longPct = allLongs.reduce((a, b) => a + b.weight, 0);
+            const shortPct = Math.abs(allShorts.reduce((a, b) => a + b.weight, 0));
+            this.book.set({
+              strategy_name: next.name,
+              strategy_id: next.id,
+              as_of_date: d.as_of_date,
+              gross_pct: d.gross_pct,
+              net_pct: d.net_pct,
+              target_gross_pct: next.target_gross_pct,
+              target_net_pct: next.target_net_pct,
+              longPct,
+              shortPct,
+              netSigned: longPct - shortPct,
+              longCount: allLongs.length,
+              shortCount: allShorts.length,
+              positionCount: allLongs.length + allShorts.length,
+              longs: allLongs.sort((a, b) => b.weight - a.weight).slice(0, 5),
+              shorts: allShorts.sort((a, b) => a.weight - b.weight).slice(0, 5),
+            });
+            this.bookLoaded.set(true);
+          },
+          error: () => this.loadBookFrom(rest),
+        });
+      },
+      error: () => this.loadBookFrom(rest),
     });
   }
 }

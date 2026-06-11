@@ -153,30 +153,190 @@ def stitched_oos_returns(bt) -> tuple[list, list[float]]:
     return dates, equity, rets  # type: ignore[return-value]
 
 
+def _tr_prices(tickers: list[str], dates: list) -> dict:
+    """{date: {ticker: total-return price}} over the window, preferring
+    ``adjusted_close`` (dividend-credited) and falling back to ``close`` for
+    rows that predate the adjusted-close backfill."""
+    rows = DailyBar.objects.filter(
+        ticker__in=tickers, date__gte=dates[0], date__lte=dates[-1]
+    ).values("ticker", "date", "close", "adjusted_close")
+    by_date: dict = {}
+    for r in rows:
+        px = r["adjusted_close"] or r["close"]
+        if px:
+            by_date.setdefault(r["date"], {})[r["ticker"]] = float(px)
+    return by_date
+
+
 def baseline_curve(bt, dates: list) -> list[float]:
-    """Equal-weighted basket of bt.universe OR SPY, normalized to bt.starting_cash."""
+    """TOTAL-RETURN equal-weighted basket of bt.universe OR SPY, normalized to
+    bt.starting_cash.
+
+    P10 §B1: chains the mean of per-ticker daily returns on ``adjusted_close``
+    — a true (daily-rebalanced) equal-weight, dividend-credited basket. The
+    previous implementation normalized the average of raw ``close`` levels,
+    which was both price-only (dividend-less, while the strategy curve has
+    credited dividends since PR #50) and Dow-style price-weighted (dominated by
+    the highest-priced ticker). Tickers missing a bar on a given day simply
+    don't contribute that day's return (carry, not liquidation).
+    """
     if not dates:
         return []
     tickers = ["SPY"] if bt.baseline == "spy" else list(bt.universe)
-    rows = DailyBar.objects.filter(
-        ticker__in=tickers, date__gte=dates[0], date__lte=dates[-1]
-    ).values("ticker", "date", "close")
-    by_date: dict = {}
-    for r in rows:
-        by_date.setdefault(r["date"], {})[r["ticker"]] = float(r["close"])
+    by_date = _tr_prices(tickers, dates)
     base = float(bt.starting_cash)
     out: list[float] = []
-    initial_avg = None
-    for d in dates:
+    last_px: dict[str, float] = {}
+    value = base
+    for i, d in enumerate(dates):
         prices = by_date.get(d, {})
-        present = [prices[t] for t in tickers if t in prices and prices[t] > 0]
-        if not present:
-            out.append(out[-1] if out else base)
+        if i > 0:
+            rets = [
+                px / last_px[t] - 1.0
+                for t, px in prices.items()
+                if last_px.get(t, 0.0) > 0 and px > 0
+            ]
+            if rets:
+                value *= 1.0 + sum(rets) / len(rets)
+        last_px.update({t: px for t, px in prices.items() if px > 0})
+        out.append(value)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# P10 §B2 — benchmark-relative truth (SPY-TR / QQQ-TR).
+# ---------------------------------------------------------------------------
+
+BENCHMARK_TICKERS = ("SPY", "QQQ")
+
+
+def benchmark_curve(ticker: str, dates: list, base: float) -> list[float]:
+    """Single-ticker total-return curve aligned to ``dates``, normalized to
+    ``base``. Missing bars carry the last price forward. Returns [] when the
+    ticker has no bars in the window (caller omits the overlay)."""
+    if not dates:
+        return []
+    by_date = _tr_prices([ticker], dates)
+    px_by_date = {d: m[ticker] for d, m in by_date.items() if ticker in m}
+    if not px_by_date:
+        return []
+    out: list[float] = []
+    anchor: float | None = None
+    last: float | None = None
+    for d in dates:
+        px = px_by_date.get(d, last)
+        if px is None:  # leading gap before the ticker's first bar
+            out.append(base)
             continue
-        avg = sum(present) / len(present)
-        if initial_avg is None:
-            initial_avg = avg
-        out.append(base * (avg / initial_avg))
+        if anchor is None:
+            anchor = px
+        last = px
+        out.append(base * (px / anchor))
+    return out
+
+
+def _compound_blocks(rets: list[float], block: int) -> list[float]:
+    """Compound per-step returns into non-overlapping `block`-step returns
+    (trailing remainder dropped so both series block identically)."""
+    out: list[float] = []
+    for i in range(0, len(rets) - len(rets) % block, block):
+        c = 1.0
+        for r in rets[i : i + block]:
+            c *= 1.0 + r
+        out.append(c - 1.0)
+    return out
+
+
+# Engine-stored equity curves mark to the prior close, so a stitched OOS curve
+# lags same-date benchmark bars by ~one session (audit-verified: lag+1 corr
+# 0.537 vs 0.013 contemporaneous). A naive daily regression therefore collapses
+# beta to ~0 and lets alpha absorb the whole market return. Compounding into
+# 5-step blocks before regressing absorbs a ±1-session offset without assuming
+# its direction; we only block when the series is long enough for the blocked
+# estimate to be meaningful.
+_BETA_BLOCK_DAYS = 5
+_BETA_MIN_BLOCKS = 12
+
+
+def beta_alpha_ir(strat_rets: list[float], bench_rets: list[float]) -> dict | None:
+    """CAPM beta / annualized alpha (pp/yr) / information ratio of the strategy
+    vs the benchmark, from aligned per-step (daily) simple returns. Risk-free
+    rate 0 (consistent with sharpe_ratio). Long series are block-compounded to
+    weekly steps first (see _BETA_BLOCK_DAYS note) so the engine's ±1-session
+    curve/benchmark timestamp offset cannot zero-out beta."""
+    n = min(len(strat_rets), len(bench_rets))
+    if n < 2:
+        return None
+    s, b = strat_rets[-n:], bench_rets[-n:]
+    periods_per_year = float(TRADING_DAYS_PER_YEAR)
+    if n >= _BETA_BLOCK_DAYS * _BETA_MIN_BLOCKS:
+        s = _compound_blocks(s, _BETA_BLOCK_DAYS)
+        b = _compound_blocks(b, _BETA_BLOCK_DAYS)
+        periods_per_year = TRADING_DAYS_PER_YEAR / _BETA_BLOCK_DAYS
+        n = len(s)
+    ms, mb = statistics.fmean(s), statistics.fmean(b)
+    var_b = statistics.fmean([(x - mb) ** 2 for x in b])
+    if var_b <= 0:
+        return None
+    cov = statistics.fmean([(s[i] - ms) * (b[i] - mb) for i in range(n)])
+    beta = cov / var_b
+    alpha_annual_pct = (ms - beta * mb) * periods_per_year * 100.0
+    diffs = [s[i] - b[i] for i in range(n)]
+    sd = statistics.pstdev(diffs)
+    ir = (statistics.fmean(diffs) / sd) * math.sqrt(periods_per_year) if sd > 0 else 0.0
+    return {
+        "beta": round(beta, 4),
+        "alpha_annual_pct": round(alpha_annual_pct, 4),
+        "information_ratio": round(ir, 4),
+    }
+
+
+def benchmark_stats(bt, dates: list, equity: list[float]) -> dict:
+    """Per-benchmark (SPY-TR / QQQ-TR) comparison block for BacktestMetrics:
+
+        {"SPY": {total_return_pct, annualized_return_pct, sharpe,
+                 max_drawdown_pct, beta, alpha_annual_pct, information_ratio},
+         "QQQ": {...}}
+
+    Benchmarks with no bar data in the window are omitted (the UI hides them).
+    All ``_pct`` values are already in percent.
+    """
+    if len(dates) < 2 or len(equity) < 2:
+        return {}
+    strat_rets = _step_returns(equity)
+    years = max(1e-9, len(equity) / TRADING_DAYS_PER_YEAR)
+    out: dict = {}
+    for ticker in BENCHMARK_TICKERS:
+        curve = benchmark_curve(ticker, dates, float(equity[0]))
+        if not curve:
+            continue
+        b_rets = _step_returns(curve)
+        total = curve[-1] / curve[0] - 1.0
+        cagr = ((1 + total) ** (1 / years) - 1) if total > -1 else -1.0
+        rel = beta_alpha_ir(strat_rets, b_rets)
+        out[ticker] = {
+            "total_return_pct": round(total * 100, 4),
+            "annualized_return_pct": round(cagr * 100, 4),
+            "sharpe": round(sharpe_ratio(b_rets), 4),
+            "max_drawdown_pct": round(drawdown_pct(curve) * 100, 4),
+            **(rel or {}),
+        }
+    return out
+
+
+def rolling_sharpe_series(
+    dates: list, equity: list[float], *, window: int = 756, step: int = 21,
+) -> list[dict]:
+    """Rolling ``window``-day (default ~3y) Sharpe of the stitched OOS curve,
+    sampled every ``step`` days — the detail-page sparkline (P10 §B2)."""
+    rets = _step_returns(equity)
+    if len(rets) < window:
+        return []
+    out: list[dict] = []
+    for end in range(window, len(rets) + 1, step):
+        sh = sharpe_ratio(rets[end - window:end])
+        # rets[j] is the return INTO dates[j+1].
+        out.append({"date": dates[end].isoformat(), "sharpe": round(sh, 4)})
     return out
 
 
@@ -232,4 +392,7 @@ def compute_stitched_metrics(bt, fold_records, agent_outputs_cache=None) -> dict
         "sharpe_deflation": Decimal(str(round(deflation, 4))),
         "oos_sharpe_std": Decimal(str(round(oos_std, 4))),
         "baseline_return_pct": Decimal(str(round(bl_ret * 100, 4))),
+        # P10 §B2: SPY-TR/QQQ-TR comparison (beta / CAPM alpha / IR). {} when
+        # benchmark bars are absent (e.g. unit-test fixtures).
+        "benchmarks": benchmark_stats(bt, dates, equity),
     }

@@ -2,32 +2,37 @@ import { test, expect } from '../../fixtures';
 
 /** WS-13 · Settings (models / providers / personas / data-news / notifications). */
 test.describe('WS-13 · Settings', () => {
-  test('SE-01 tabs route the five settings sections; /settings redirects to models', async ({
+  test('SE-01 two groups route the settings sections; /settings opens General', async ({
     page,
     settings,
   }) => {
-    // Bare /settings redirects to the Models tab.
+    // P10 §D5: bare /settings opens General (Data & News first section).
     await settings.goto();
-    await expect(page).toHaveURL(/\/settings\/models$/);
-    await expect(settings.heading()).toHaveText('Models');
+    await expect(page).toHaveURL(/\/settings\/data-news$/);
     await expect(settings.tablist()).toBeVisible();
+    await expect(settings.tabpanel('Data and News settings')).toBeVisible();
 
-    // Each tab is a routed role="tab" link; clicking navigates + flips the panel.
-    await settings.tab('Providers').click();
+    // General's sections render as a secondary row.
+    await settings.section('Notifications').click();
+    await expect(page).toHaveURL(/\/settings\/notifications$/);
+    await expect(settings.tabpanel('Notifications settings')).toBeVisible();
+
+    // The advanced group carries Models / Providers / Personas.
+    await settings.tab('Models & advanced').click();
+    await expect(page).toHaveURL(/\/settings\/models$/);
+    await expect(settings.tabpanel('Models settings')).toBeVisible();
+
+    await settings.section('Providers').click();
     await expect(page).toHaveURL(/\/settings\/providers$/);
     await expect(settings.tabpanel('Providers settings')).toBeVisible();
 
-    await settings.tab('Personas').click();
+    await settings.section('Personas').click();
     await expect(page).toHaveURL(/\/settings\/personas$/);
     await expect(settings.tabpanel('Personas settings')).toBeVisible();
 
-    await settings.tab('Data & News').click();
+    // Back to General via its group tab.
+    await settings.tab('General').click();
     await expect(page).toHaveURL(/\/settings\/data-news$/);
-    await expect(settings.tabpanel('Data and News settings')).toBeVisible();
-
-    await settings.tab('Notifications').click();
-    await expect(page).toHaveURL(/\/settings\/notifications$/);
-    await expect(settings.tabpanel('Notifications settings')).toBeVisible();
   });
 
   test('SE-02 models catalog renders + per-agent/default model selects', async ({ settings }) => {

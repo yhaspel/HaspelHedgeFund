@@ -441,6 +441,42 @@ class AlpacaPaperBroker:
             )
         return fills
 
+    # -- get_portfolio_history ---------------------------------------------
+    #
+    # P10 §C3: Alpaca's GET /v2/account/portfolio/history gives daily account
+    # equity since (near) account creation — instant NAV history without
+    # fills+bars reconstruction. Consumed by the backfill_portfolio_history
+    # management command, which upserts PortfolioSnapshot rows (flows are
+    # derived from the ledger there, not here).
+
+    def get_portfolio_history(
+        self, *, period: str = "1A", timeframe: str = "1D",
+    ) -> list[tuple[datetime, Decimal]]:
+        """Daily (timestamp, equity) points from Alpaca portfolio history.
+        Zero/None equity points (pre-funding placeholders) are dropped."""
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        _LIMITER.acquire()
+        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        try:
+            hist = self._client.get_portfolio_history(history_filter=req)
+        except Exception as exc:  # noqa: BLE001
+            _raise_translated(exc, "get_portfolio_history")
+        stamps = list(getattr(hist, "timestamp", None) or [])
+        equities = list(getattr(hist, "equity", None) or [])
+        out: list[tuple[datetime, Decimal]] = []
+        for ts, eq in zip(stamps, equities, strict=False):
+            if eq in (None, 0, 0.0):
+                continue
+            # The endpoint returns epoch SECONDS; tolerate datetimes/strings too.
+            when = (
+                datetime.fromtimestamp(ts, tz=UTC)
+                if isinstance(ts, (int, float))
+                else _to_dt(ts)
+            )
+            out.append((when, _dec(eq)))
+        return out
+
     # -- submit_order -----------------------------------------------------
 
     def _common_kwargs(self, ticket: OrderTicket) -> dict:

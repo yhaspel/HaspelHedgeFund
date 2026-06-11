@@ -18,7 +18,9 @@ export class WatchlistPage {
   }
 
   async gotoDashboard(): Promise<void> {
-    await this.page.goto('/');
+    // P10 §C1: '/' is the fund dashboard; the manual dashboard (which hosts
+    // the watchlist card) moved to /dashboard.
+    await this.page.goto('/dashboard');
   }
 
   // ---- manager page (/watchlist) ------------------------------------------

@@ -87,6 +87,11 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
 
   // ---- fund + autopilot ----------------------------------------------------
   { method: 'GET', spec: '/fund/', respond: () => json(fixture('fund')) },
+  // P10 §C2/§B5: NAV history + validated composite. Cold-start shapes (the
+  // graceful "accrues from the sweep / run a validation backtest" states) so
+  // the fund-first landing page renders without chart fixtures.
+  { method: 'GET', spec: '/fund/history/', respond: () => json({ available: false, reason: 'no snapshots yet — history accrues from the hourly sweep, or run backfill_portfolio_history', per_account: [], aggregate: { points: [], twr_pct: null }, benchmarks: [] }) },
+  { method: 'GET', spec: '/fund/composite/', respond: () => json({ available: false, reason: 'no member strategy has a total-return-era validation backtest', missing: [] }) },
   { method: 'POST', spec: '/fund/halt/', respond: () => json({ ...(fixture('fund') as object), state: 'halted', is_live: false }) },
   { method: 'POST', spec: '/fund/resume/', respond: () => json({ ...(fixture('fund') as object), state: 'active', is_live: true }) },
   { method: 'GET', spec: '/strategies/:id/autopilot/', respond: () => json(fixture('autopilot')) },
@@ -115,6 +120,8 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/backtests/:id/equity-curve/', respond: () => json(fixture('backtest-equity')) },
   { method: 'GET', spec: '/backtests/:id/deflation/', respond: () => json({ deflated_sharpe: 0.61, prob_overfit: 0.18, n_trials: 50, available: true }) },
   { method: 'POST', spec: '/backtests/:id/cancel/', respond: ({ params }) => json({ id: Number(params['id']) || 24, status: 'cancelled' }) },
+  // P10 §D4: soft archive/unarchive.
+  { method: 'POST', spec: '/backtests/:id/archive/', respond: ({ params, body }) => json({ id: Number(params['id']) || 24, archived_at: (body as { archived?: boolean })?.archived === false ? null : '2026-06-06T00:00:00Z' }) },
   { method: 'DELETE', spec: '/backtests/:id/', respond: () => ({ status: 204 }) },
 
   // ---- strategies ----------------------------------------------------------
@@ -136,6 +143,8 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/strategies/:id/enroll/:targetId/', respond: ({ params }) => json({ ...(fixture('enrollment') as object), target_id: Number(params['targetId']) || 109 }) },
   { method: 'POST', spec: '/strategies/:id/enroll/:targetId/', respond: ({ params }) => json({ ok: true, enrolled: true, target_portfolio_id: Number(params['targetId']) || 1 }) },
   { method: 'GET', spec: '/strategies/:id/backtest-defaults/', respond: () => json({ universe: ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA'], start_date: '2024-06-06', end_date: '2026-06-05', rebalance_frequency: 'weekly' }) },
+  // P10 §E4: news-lab name-level decision scoreboard (cold-start shape).
+  { method: 'GET', spec: '/strategies/:id/news-decisions/', respond: ({ params }) => json({ strategy_id: Number(params['id']) || 56, n_cycles: 0, n_graded_decisions: 0, hit_rate: null, mean_excess_pct: null, sleeve_minus_ew_mean_pct: null, n_sleeve_vs_ew_cycles: 0, cycles: [] }) },
 
   // ---- graphs --------------------------------------------------------------
   { method: 'GET', spec: '/graphs/', respond: () => json(fixture('graphs-list')) },

@@ -1,15 +1,16 @@
-"""P7 §9 — demo seed for the autopilot validation gate.
+"""P7 §9 — demo seed backtest (synthetic; does NOT open the autopilot gate).
 
-The 3-account fund ships *armed but un-enable-able*: ``bootstrap_autonomous_fund``
-creates broker links + disabled autopilots, but the §9 gate (``validation.py``)
-needs a passing walk-forward ``Backtest`` per strategy and bootstrap creates none
-— so out of the box the enable toggle can never light up.
+Historically this wrote a fabricated ``status=done`` "[seed]" backtest so the §9
+enable gate opened out of the box. P10 §B3 ended that: fabricated rows are
+``status=synthetic`` (the gate only accepts real ``done`` total-return-era
+runs), so a seed can no longer arm live trading. Existing live "[seed]" rows
+were re-statused by ``backtests/migrations/0012``.
 
-This module writes a clearly-labelled (``[seed]``) passing ``Backtest`` + metrics
-linked to a strategy so the gate opens, for educational/paper demos. It does NOT
-run the LLM walk-forward engine: it's a deterministic record, not a real result.
-Idempotent — skips a strategy that already has a qualifying backtest unless
-``force`` is set.
+The seed remains useful as a *cosmetic demo record* (something to render on the
+backtests list / fund cards). To actually open the gate, run a real validation
+backtest — the deterministic kinds (risk_parity / trend / sector_momentum) cost
+$0 and a few minutes. Idempotent — skips a strategy that already has a
+qualifying backtest unless ``force`` is set.
 """
 from __future__ import annotations
 
@@ -40,19 +41,26 @@ def _hard_halt_pct(strategy) -> Decimal:
 
 
 def seed_validation_backtest(strategy, *, force: bool = False) -> Backtest | None:
-    """Create a passing seed backtest for ``strategy`` (or return ``None`` if it
-    already has a qualifying one and ``force`` is False).
+    """Create a SYNTHETIC demo backtest for ``strategy`` (or return ``None`` if
+    it already has a qualifying real one and ``force`` is False).
 
-    Metrics are chosen to clear all four §9 checks: positive OOS Sharpe, max DD
-    strictly within the autopilot's hard-halt limit, and (via ``created_at``)
-    newer than the strategy's last config edit.
+    P10 §B3: the row is ``status=synthetic`` — clearly badged, deletable, and
+    **never** §9-gate evidence. The metric values are still shaped to read
+    sensibly in the UI (DD within the hard-halt limit etc.), but only a real
+    ``done`` total-return-era backtest can open the enable toggle.
     """
-    if not force and has_passing_backtest(strategy):
-        return None
+    if not force:
+        # Idempotency: skip when the strategy is already truly validated, or
+        # when a previous seed exists (a synthetic seed can no longer flip the
+        # gate, so the gate check alone would re-seed forever).
+        if has_passing_backtest(strategy):
+            return None
+        if Backtest.objects.filter(strategy=strategy, name=SEED_NAME).exists():
+            return None
 
     hard = _hard_halt_pct(strategy)
-    # Keep the backtest's max drawdown comfortably *within* the hard-halt limit
-    # so ``drawdown_within_limit`` passes for any reasonable guardrail config.
+    # Keep the demo max drawdown comfortably *within* the hard-halt limit so
+    # the record reads plausibly next to the strategy's guardrail config.
     max_dd = (hard - Decimal("1.0")) if hard > Decimal("1.5") else (hard / Decimal("2"))
 
     today = timezone.now().date()
@@ -63,9 +71,10 @@ def seed_validation_backtest(strategy, *, force: bool = False) -> Backtest | Non
         universe=list(_SEED_UNIVERSE),
         start_date=today - dt.timedelta(days=730),
         end_date=today - dt.timedelta(days=1),
-        status=Backtest.DONE,
+        status=Backtest.SYNTHETIC,
         progress_pct=100,
-        progress_message="Seed validation backtest (demo — not a real engine run).",
+        progress_message="Seed demo backtest (synthetic — not a real engine run; "
+                         "does not open the §9 gate).",
         finished_at=timezone.now(),
     )
     BacktestMetrics.objects.create(

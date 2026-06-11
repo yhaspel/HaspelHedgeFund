@@ -35,7 +35,20 @@ type StatusFilter = 'all' | RunStatus;
 
       <section class="card">
         <div class="card-hd gap-3 flex-wrap">
-          <h2 class="title">All runs ({{ filtered().length }})</h2>
+          <h2 class="title">
+            Runs ({{ filtered().length }}<span class="text-text-3">{{
+              runs.runsCount() > filtered().length ? ' of ' + runs.runsCount() : ''
+            }}</span>)
+          </h2>
+          <!-- P10 §D4: server defaults to the last 30 days; widen on demand. -->
+          <div role="group" aria-label="Time window" class="seg">
+            @for (opt of windowOptions; track opt.id) {
+              <button type="button" class="seg-btn"
+                [class.active]="windowFilter() === opt.id"
+                [attr.aria-pressed]="windowFilter() === opt.id"
+                (click)="setWindow(opt.id)">{{ opt.label }}</button>
+            }
+          </div>
           <div role="group" aria-label="Filter by source" class="seg ml-auto">
             @for (opt of sourceOptions; track opt.id) {
               <button type="button" class="seg-btn"
@@ -165,6 +178,18 @@ type StatusFilter = 'all' | RunStatus;
             </tbody>
           </table>
           </div>
+          <!-- P10 §D4: pager (50/page server-side). -->
+          @if (runs.runsCount() > pageSize) {
+            <div class="pager">
+              <button type="button" class="btn ghost sm" [disabled]="page() <= 1"
+                      (click)="setPage(page() - 1)">← Prev</button>
+              <span class="mono text-2xs text-text-3">
+                page {{ page() }} / {{ totalPages() }}
+              </span>
+              <button type="button" class="btn ghost sm" [disabled]="page() >= totalPages()"
+                      (click)="setPage(page() + 1)">Next →</button>
+            </div>
+          }
         }
       </section>
     </hf-app-shell>
@@ -227,6 +252,13 @@ type StatusFilter = 'all' | RunStatus;
         color: var(--text);
         box-shadow: var(--shadow-1);
       }
+      .pager {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 10px 0 4px;
+      }
     `,
   ],
 })
@@ -240,6 +272,18 @@ export class RunsListPage implements OnInit {
   readonly sourceFilter = signal<SourceFilter>('all');
   readonly statusFilter = signal<StatusFilter>('all');
   readonly searchTerm = signal('');
+  // P10 §D4: server-side time window (default 30 days) + page.
+  readonly windowFilter = signal<'30d' | 'all'>('30d');
+  readonly page = signal(1);
+  readonly pageSize = 50;
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.runs.runsCount() / this.pageSize)),
+  );
+
+  readonly windowOptions: { id: '30d' | 'all'; label: string }[] = [
+    { id: '30d', label: 'Last 30d' },
+    { id: 'all', label: 'All time' },
+  ];
 
   readonly sourceOptions: { id: SourceFilter; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -269,7 +313,16 @@ export class RunsListPage implements OnInit {
   });
 
   ngOnInit(): void {
-    this.runs.listRuns().subscribe({
+    this.reload();
+  }
+
+  private reload(): void {
+    this.loading.set(true);
+    this.runs.listRuns({
+      search: this.searchTerm() || undefined,
+      days: this.windowFilter() === 'all' ? 'all' : undefined,
+      page: this.page(),
+    }).subscribe({
       next: (rows) => {
         this.loading.set(false);
         // Lazy-prefetch names for visible tickers (cheap; deduped batch).
@@ -278,6 +331,17 @@ export class RunsListPage implements OnInit {
       },
       error: () => this.loading.set(false),
     });
+  }
+
+  setWindow(w: '30d' | 'all'): void {
+    this.windowFilter.set(w);
+    this.page.set(1);
+    this.reload();
+  }
+
+  setPage(p: number): void {
+    this.page.set(Math.max(1, Math.min(p, this.totalPages())));
+    this.reload();
   }
 
   personaCount(r: RunSummary): number {
@@ -309,11 +373,8 @@ export class RunsListPage implements OnInit {
   doSearch(term: string): void {
     const q = term.trim();
     this.searchTerm.set(q);
-    this.loading.set(true);
-    this.runs.listRuns({ search: q || undefined }).subscribe({
-      next: () => this.loading.set(false),
-      error: () => this.loading.set(false),
-    });
+    this.page.set(1);
+    this.reload();
   }
   clearSearch(input: HTMLInputElement): void {
     input.value = '';

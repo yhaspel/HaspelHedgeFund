@@ -31,7 +31,14 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
       <div class="page-head">
         <div>
           <div class="eyebrow">Walk-forward backtest</div>
-          <h1 class="mt-1.5">{{ store.current()?.name || 'Backtest' }}</h1>
+          <h1 class="mt-1.5">{{ store.current()?.name || 'Backtest' }}
+            @if (store.current()?.data_era === 'price_only') {
+              <span class="pill warn" title="Computed on pre-PR#50 price-only bars (dividends not credited) — understates returns; excluded as §9 autopilot-gate evidence."><span class="dot"></span>price-only era</span>
+            }
+            @if (store.current()?.status === 'synthetic') {
+              <span class="pill warn" title="Fabricated demo record — not a real engine run; never §9-gate evidence."><span class="dot"></span>synthetic</span>
+            }
+          </h1>
         </div>
         <div class="head-actions">
           @if (store.current(); as bt) {
@@ -93,39 +100,86 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                   {{ m.total_return_pct - m.baseline_return_pct | number: '1.2-2' }}
                 </span>
                 vs baseline {{ m.baseline_return_pct | number: '1.2-2' }}%
+                @if (m.baseline_return_pct_legacy !== null) {
+                  <span class="text-text-2" title="The baseline was recomputed as a total-return, true equal-weight basket (P10 §B1); this was the old price-only, price-weighted value.">
+                    (was {{ m.baseline_return_pct_legacy | number: '1.2-2' }}%)
+                  </span>
+                }
               </div>
             </div>
             <div class="kpi">
-              <div class="k">OOS Sharpe (mean)</div>
-              <div class="v">{{ m.mean_oos_sharpe | number: '1.2-2' }}</div>
-              <div class="d">
-                <span class="delta"
-                  [class.up]="m.mean_oos_sharpe > m.mean_is_sharpe"
-                  [class.down]="m.mean_oos_sharpe < m.mean_is_sharpe"
-                  [class.flat]="m.mean_oos_sharpe === m.mean_is_sharpe">
-                  {{ m.mean_oos_sharpe > m.mean_is_sharpe ? '▲' : m.mean_oos_sharpe < m.mean_is_sharpe ? '▼' : '—' }}
-                  {{ m.mean_oos_sharpe - m.mean_is_sharpe | number: '1.2-2' }}
-                </span>
-                vs IS {{ m.mean_is_sharpe | number: '1.2-2' }} · σ {{ m.oos_sharpe_std | number: '1.2-2' }}
+              <div class="k">OOS Sharpe (stitched)</div>
+              <div class="v">{{ m.sharpe | number: '1.2-2' }}</div>
+              <div class="d" title="The stitched number is the long-run Sharpe of the whole OOS curve; averaging 63-day fold Sharpes biases ~0.3–0.4 upward.">
+                mean of folds {{ m.mean_oos_sharpe | number: '1.2-2' }}
+                · IS {{ m.mean_is_sharpe | number: '1.2-2' }}
+                · σ {{ m.oos_sharpe_std | number: '1.2-2' }}
               </div>
             </div>
-            <div class="kpi">
-              <div class="k">Deflation (OOS / IS)</div>
-              <div class="v"
-                [style.color]="m.sharpe_deflation < 0.3 ? 'var(--acc-short-fg)' : m.sharpe_deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
-                {{ m.sharpe_deflation | number: '1.2-2' }}
-                <span aria-hidden="true"> {{ m.sharpe_deflation < 0.3 ? '⚠' : m.sharpe_deflation < 0.5 ? '•' : '✓' }}</span>
+            @if (bt.deflation_meaningful) {
+              <div class="kpi">
+                <div class="k">Deflation (OOS / IS)</div>
+                <div class="v"
+                  [style.color]="m.sharpe_deflation < 0.3 ? 'var(--acc-short-fg)' : m.sharpe_deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
+                  {{ m.sharpe_deflation | number: '1.2-2' }}
+                  <span aria-hidden="true"> {{ m.sharpe_deflation < 0.3 ? '⚠' : m.sharpe_deflation < 0.5 ? '•' : '✓' }}</span>
+                </div>
+                @if (m.sharpe_deflation < 0.3) {
+                  <div class="d text-[var(--acc-short-fg)]">⚠ Strong overfitting suspected</div>
+                }
               </div>
-              @if (m.sharpe_deflation < 0.3) {
-                <div class="d text-[var(--acc-short-fg)]">⚠ Strong overfitting suspected</div>
-              }
-            </div>
+            } @else {
+              <div class="kpi">
+                <div class="k">Deflation (OOS / IS)</div>
+                <div class="v text-text-2">n/a</div>
+                <div class="d" title="The OOS/IS ratio only guards against overfitting when an in-sample candidate search selected a config. This run replays one fixed config, so the ratio is not an overfit signal.">
+                  No candidate search (deterministic run)
+                </div>
+              </div>
+            }
             <div class="kpi">
               <div class="k">Max drawdown</div>
               <div class="v">{{ m.max_drawdown_pct | number: '1.2-2' }}%</div>
               <div class="d">Turnover ann.: {{ m.turnover_pct | number: '1.0-0' }}%</div>
             </div>
           </div>
+
+          <!-- P10 §B2: benchmark-relative truth — beta / CAPM alpha / IR vs
+               SPY-TR & QQQ-TR. Rendered only when the benchmark block exists
+               (post-recompute or fresh runs with benchmark bars). -->
+          @if (benchmarkRows(m).length) {
+            <section class="card mb-[18px]">
+              <div class="card-hd"><h2 class="title">vs benchmarks (total-return)</h2></div>
+              <table class="tbl">
+                <thead><tr>
+                  <th>Benchmark</th>
+                  <th class="right">Benchmark return</th><th class="right">Benchmark Sharpe</th>
+                  <th class="right">Benchmark max DD</th><th class="right">Beta</th>
+                  <th class="right">CAPM alpha /yr</th><th class="right">Info ratio</th>
+                </tr></thead>
+                <tbody>
+                  @for (row of benchmarkRows(m); track row.ticker) {
+                    <tr>
+                      <td class="mono">{{ row.ticker }}-TR</td>
+                      <td class="num">{{ row.b.total_return_pct | number: '1.1-1' }}%</td>
+                      <td class="num">{{ row.b.sharpe | number: '1.2-2' }}</td>
+                      <td class="num">{{ row.b.max_drawdown_pct | number: '1.1-1' }}%</td>
+                      <td class="num">{{ row.b.beta !== undefined ? (row.b.beta | number: '1.2-2') : '—' }}</td>
+                      <td class="num"
+                        [style.color]="(row.b.alpha_annual_pct ?? 0) >= 0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">
+                        {{ row.b.alpha_annual_pct !== undefined ? ((row.b.alpha_annual_pct | number: '1.2-2') + '%') : '—' }}
+                      </td>
+                      <td class="num">{{ row.b.information_ratio !== undefined ? (row.b.information_ratio | number: '1.2-2') : '—' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <div class="card-bd pt-0 text-2xs text-text-2">
+                Alpha here is CAPM alpha (return unexplained by benchmark beta), annualized.
+                A positive alpha with a raw-return gap means the edge is risk-adjusted, not absolute-return.
+              </div>
+            </section>
+          }
 
           <div class="grid grid-cols-2 gap-[18px] mb-[18px]">
             <section class="card">
@@ -139,6 +193,14 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                 aria-label="In-sample versus out-of-sample Sharpe ratio scatter, one point per walk-forward fold. Points near the diagonal indicate the in-sample edge held out of sample. Per-fold figures are in the Folds table below."></canvas></div></div>
             </section>
           </div>
+
+          @if (store.rollingSharpe().length) {
+            <section class="card mb-[18px]">
+              <div class="card-hd"><h2 class="title">Rolling 3-year Sharpe (stitched OOS)</h2></div>
+              <div class="card-bd"><div class="relative h-[160px]"><canvas #rollingChart role="img"
+                aria-label="Rolling three-year Sharpe ratio of the stitched out-of-sample curve, sampled monthly. Persistently positive values indicate the edge held across regimes."></canvas></div></div>
+            </section>
+          }
 
           <section class="card mb-[18px]">
             <div class="card-hd"><h2 class="title">Per-agent attribution (stitched OOS PnL delta)</h2></div>
@@ -182,16 +244,27 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   private equityChartInstance: Chart | null = null;
   private deflationChartInstance: Chart | null = null;
   private attributionChartInstance: Chart | null = null;
+  private rollingChartInstance: Chart | null = null;
   private viewReady = false;
 
   @ViewChild('equityChart', { static: false }) equityCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('deflationChart', { static: false }) deflationCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('attributionChart', { static: false }) attributionCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('rollingChart', { static: false }) rollingCanvas?: ElementRef<HTMLCanvasElement>;
 
   constructor() {
     effect(() => { this.store.equity(); if (this.viewReady) setTimeout(() => this.renderEquity(), 0); });
     effect(() => { this.store.deflation(); if (this.viewReady) setTimeout(() => this.renderDeflation(), 0); });
     effect(() => { this.store.current(); if (this.viewReady) setTimeout(() => this.renderAttribution(), 0); });
+    effect(() => { this.store.rollingSharpe(); if (this.viewReady) setTimeout(() => this.renderRolling(), 0); });
+  }
+
+  // P10 §B2: ordered benchmark rows from the metrics JSON ({} for old rows).
+  benchmarkRows(m: { benchmarks?: Record<string, any> }): { ticker: string; b: any }[] {
+    const bench = m?.benchmarks || {};
+    return ['SPY', 'QQQ']
+      .filter((t) => !!bench[t])
+      .map((t) => ({ ticker: t, b: bench[t] }));
   }
 
   ngOnInit(): void {
@@ -260,6 +333,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     this.equityChartInstance?.destroy();
     this.deflationChartInstance?.destroy();
     this.attributionChartInstance?.destroy();
+    this.rollingChartInstance?.destroy();
   }
 
   private renderCharts(): void {
@@ -267,6 +341,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     this.renderEquity();
     this.renderDeflation();
     this.renderAttribution();
+    this.renderRolling();
   }
 
   private renderEquity(): void {
@@ -293,6 +368,19 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
             borderColor: t.axis, borderDash: [5, 5],
             tension: 0.1, pointRadius: 0, borderWidth: 1,
           },
+          // P10 §B2: SPY-TR / QQQ-TR overlays (skipped when absent).
+          ...(points.some((p) => p.spy !== undefined) ? [{
+            label: 'SPY (TR)',
+            data: points.map((p) => p.spy ?? null),
+            borderColor: t.long, borderDash: [2, 3],
+            tension: 0.1, pointRadius: 0, borderWidth: 1,
+          }] : []),
+          ...(points.some((p) => p.qqq !== undefined) ? [{
+            label: 'QQQ (TR)',
+            data: points.map((p) => p.qqq ?? null),
+            borderColor: t.short, borderDash: [2, 3],
+            tension: 0.1, pointRadius: 0, borderWidth: 1,
+          }] : []),
         ],
       },
       options: {
@@ -334,6 +422,38 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
       },
     };
     this.deflationChartInstance = new Chart(canvas, cfg);
+  }
+
+  // P10 §B2: rolling ~3y Sharpe sparkline of the stitched OOS curve.
+  private renderRolling(): void {
+    const series = this.store.rollingSharpe();
+    const canvas = this.rollingCanvas?.nativeElement;
+    if (!canvas || series.length === 0) return;
+    this.rollingChartInstance?.destroy();
+    const t = readChartTheme();
+    const cfg: ChartConfiguration = {
+      type: 'line',
+      data: {
+        labels: series.map((p) => p.date),
+        datasets: [{
+          label: 'Rolling 3y Sharpe',
+          data: series.map((p) => p.sharpe),
+          borderColor: t.info,
+          backgroundColor: t.info + '14',
+          tension: 0.15, pointRadius: 0, borderWidth: 1.2, fill: 'origin',
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: ENTRY_ANIMATION,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false, grid: { color: t.grid } },
+          y: { grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
+        },
+      },
+    };
+    this.rollingChartInstance = new Chart(canvas, cfg);
   }
 
   private renderAttribution(): void {

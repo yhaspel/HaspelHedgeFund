@@ -7,13 +7,15 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { PopoverComponent } from '../shared/popover.component';
+import { FundCompositeComponent } from './fund-composite.component';
+import { FundHistoryComponent } from './fund-history.component';
 
 // P7 §14 — the headline fund view: 3 account cards + aggregate panel +
 // realized correlation matrix + the fund-level kill switch. Paper-only.
 @Component({
   selector: 'hf-fund-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, PopoverComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, PopoverComponent, FundCompositeComponent, FundHistoryComponent],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund' }]">
       <div class="page-head">
@@ -137,6 +139,25 @@ import { PopoverComponent } from '../shared/popover.component';
           </div>
         </section>
 
+        <!-- P10 §C2/§C4: live NAV history (TWR) vs SPY/QQQ. -->
+        <hf-fund-history />
+
+        <!-- P10 §B5: the validated composite — what the pods do TOGETHER. -->
+        <hf-fund-composite />
+
+        <!-- P10 §C1: the manual book, demoted to a secondary card. -->
+        <section class="card manual-row">
+          <div>
+            <b>Manual book &amp; research desk</b>
+            <span class="muted"> — the hand-managed paper book and council research surfaces
+              now live off the landing page.</span>
+          </div>
+          <div class="manual-actions">
+            <a class="btn btn-sm" routerLink="/portfolio">Manual book →</a>
+            <a class="btn btn-sm" routerLink="/dashboard">Manual dashboard →</a>
+          </div>
+        </section>
+
         <!-- Correlation matrix -->
         <section class="card">
           <h2>Realized cross-strategy correlation</h2>
@@ -211,6 +232,9 @@ import { PopoverComponent } from '../shared/popover.component';
     .acct-setup { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
     .acct-setup .setup-hint { color: var(--text-3); font-size: 11.5px; margin: 0; line-height: 1.4; }
     .acct-bt { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .manual-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; margin: 12px 0; font-size: 12.5px; }
+    .manual-row .muted { color: var(--text-3); }
+    .manual-actions { display: flex; gap: 8px; flex: none; }
     .banner-warn { border: 1px solid var(--acc-short); border-radius: 6px; padding: 8px 12px; margin: 0 0 14px; font-size: 13px; color: var(--text-2); background: color-mix(in srgb, var(--acc-short-fg) 8%, transparent); }
     .banner-link { text-decoration: underline; color: var(--acc-info-fg); }
     table.corr { border-collapse: collapse; }

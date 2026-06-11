@@ -1361,26 +1361,8 @@ def _run_news_sentiment_cycle(
 
     scores = news_sentiment_scores(tickers, as_of)
 
-    # Bounded persona conviction overlay (opt-in). Over-select 2x so vetoes don't
-    # under-deploy; the constructor re-ranks by sentiment x conviction.
-    conviction: dict[str, float] | None = None
-    if bool(strategy.enable_council_veto):
-        candidates = sorted(
-            (t for t, s in scores.items() if s > 0), key=lambda t: scores[t], reverse=True
-        )[: top_n * 2]
-        if candidates:
-            conviction = news_conviction(
-                candidates, as_of, model=NEWS_CONVICTION_MODEL, user_id=strategy.user_id
-            )
-
-    result = construct_news_sentiment(
-        scores, sectors, top_n=top_n, conviction=conviction, target_gross=target_gross
-    )
-    # council_alpha baseline: the SAME signal with NO overlay (the council-free book).
-    baseline = construct_news_sentiment(
-        scores, sectors, top_n=top_n, conviction=None, target_gross=target_gross
-    )
-
+    # P10 §E2: resolve the cycle target FIRST so the conviction overlay's LLM
+    # calls can be metered against it (record_llm_call → council_cost_usd).
     portfolio = strategy.portfolio
     with transaction.atomic():
         target = _resolve_cycle_target(
@@ -1391,6 +1373,35 @@ def _run_news_sentiment_cycle(
                 "decisions": [], "error_message": "", "finished_at": None,
             },
         )
+
+    # Bounded persona conviction overlay (opt-in). Over-select 2x so vetoes don't
+    # under-deploy; the constructor re-ranks by sentiment x conviction.
+    conviction: dict[str, float] | None = None
+    candidates: list[str] = []
+    if bool(strategy.enable_council_veto):
+        candidates = sorted(
+            (t for t, s in scores.items() if s > 0), key=lambda t: scores[t], reverse=True
+        )[: top_n * 2]
+        if candidates:
+            conviction = news_conviction(
+                candidates, as_of, model=NEWS_CONVICTION_MODEL,
+                user_id=strategy.user_id, portfolio_target_id=target.pk,
+            )
+
+    result = construct_news_sentiment(
+        scores, sectors, top_n=top_n, conviction=conviction, target_gross=target_gross
+    )
+    # council_alpha baseline: the SAME signal with NO overlay (the council-free book).
+    baseline = construct_news_sentiment(
+        scores, sectors, top_n=top_n, conviction=None, target_gross=target_gross
+    )
+    # P10 §E5: a SECOND, sentiment-free baseline — the same universe equal-
+    # weighted. council_alpha alone only measures the overlay increment; this
+    # book lets the nightly scorer test whether LLM sentiment itself beats a
+    # $0 deterministic basket (the kill-the-sleeve criterion, ADR-0027).
+    ew_weights = (
+        {t: round(target_gross / len(tickers), 6) for t in tickers} if tickers else {}
+    )
 
     last_close: dict[str, float] = {}
     existing = list(Position.objects.filter(portfolio=portfolio).values_list("ticker", flat=True))
@@ -1447,6 +1458,17 @@ def _run_news_sentiment_cycle(
         **result.diagnostics,
         "overlay": "council" if conviction else "none",
         "vetoed": sorted(t for t, c in (conviction or {}).items() if c == 0.0),
+        # P10 §E4: persist every per-candidate decision so the nightly scorer
+        # can grade each conviction/veto against the name's forward return vs
+        # the basket (book-level weekly diffs need years for significance;
+        # ~30 name-level decisions/cycle reach power in ~26-30 weeks).
+        "conviction": {t: round(c, 4) for t, c in (conviction or {}).items()},
+        "candidates": candidates,
+        "candidate_sentiment": {
+            t: round(scores[t], 4) for t in candidates if t in scores
+        },
+        # P10 §E5: the sentiment-free equal-weight book of the same universe.
+        "ew_baseline_weights": ew_weights,
     }
     # council_alpha (E3 harness): baseline = the same news signal with NO persona
     # overlay → the nightly leaderboard differences realised − baseline forward.
@@ -2486,9 +2508,10 @@ def dispatch_approved_cycle(
     )
 
 
-# Register the P7 autopilot tasks. They live in a sibling module
-# (`tasks_autopilot.py`), which Celery's autodiscover_tasks() — it only imports
-# each app's `tasks` module — would otherwise never load, leaving the beat
-# entries (dispatch_due_autopilots / release_pending_open_orders /
-# guardrail_sweep) rejected as "unregistered task" every cycle.
-from . import tasks_autopilot  # noqa: E402,F401
+# Register the P7 autopilot tasks + the P10 §E3 news-lab tasks. They live in
+# sibling modules (`tasks_autopilot.py` / `tasks_lab.py`), which Celery's
+# autodiscover_tasks() — it only imports each app's `tasks` module — would
+# otherwise never load, leaving their beat entries (dispatch_due_autopilots /
+# guardrail_sweep / fetch_lab_news / run_news_lab_cycles) rejected as
+# "unregistered task" every cycle.
+from . import tasks_autopilot, tasks_lab  # noqa: E402,F401

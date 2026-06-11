@@ -65,6 +65,24 @@ def _account(user, label="A", cash="100000"):
     )
 
 
+def _real_validation_backtest(strategy):
+    """A real-shaped DONE total-return-era backtest that clears the P10-hardened
+    §9 gate (positive mean-of-folds AND stitched Sharpe, DD within halt). This
+    is what seeds used to fabricate; post-§B3 only real runs open the gate."""
+    from apps.backtests.models import BacktestMetrics
+
+    bt = Backtest.objects.create(
+        user=strategy.user, strategy=strategy, name="real validation WF",
+        start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 12, 31),
+        status=Backtest.DONE,
+    )
+    BacktestMetrics.objects.create(
+        backtest=bt, mean_oos_sharpe=Decimal("0.9"), sharpe=Decimal("0.7"),
+        max_drawdown_pct=Decimal("4.0"),
+    )
+    return bt
+
+
 def _disabled_fund_of_three(user):
     fund = AutonomousFund.objects.create(owner=user, name="Autonomous Fund")
     for i in range(3):
@@ -92,7 +110,7 @@ def test_per_account_hint_points_to_backtest_when_unvalidated(user):
 def test_per_account_can_enable_when_validated_but_off(user):
     fund = _disabled_fund_of_three(user)
     s = fund.strategies.first()
-    seed_validation_backtest(s)                         # gate now passes, still disabled
+    _real_validation_backtest(s)                        # gate now passes, still disabled
     out = fund_layer.fund_overview(fund)
     card = next(p for p in out["per_account"] if p["strategy_id"] == s.id)
     assert card["validation_passed"] is True
@@ -111,48 +129,49 @@ def test_per_account_enabled_has_no_hint(user):
 
 
 # --------------------------------------------------------------------------
-# Demo seed — unlocks the §9 gate, idempotent, respects the hard-halt limit.
+# Demo seed — P10 §B3: synthetic, never §9-gate evidence, still idempotent.
 # --------------------------------------------------------------------------
-def test_seed_unlocks_validation_gate(user):
+def test_seed_is_synthetic_and_does_not_unlock_gate(user):
     s = _strategy(user)
     StrategyAutopilot.objects.create(strategy=s, dd_hard_halt_pct=Decimal("7.5"))
     assert validation_status(s)["passed"] is False
     bt = seed_validation_backtest(s)
     assert bt is not None
-    assert bt.status == Backtest.DONE
+    assert bt.status == Backtest.SYNTHETIC
     assert bt.strategy_id == s.id
-    assert validation_status(s)["passed"] is True
+    # Fabricated rows can no longer arm live trading.
+    assert validation_status(s)["passed"] is False
 
 
 def test_seed_is_idempotent(user):
     s = _strategy(user)
     StrategyAutopilot.objects.create(strategy=s)
     assert seed_validation_backtest(s) is not None
-    assert seed_validation_backtest(s) is None         # already validated → no dup
+    assert seed_validation_backtest(s) is None         # seed already exists → no dup
     assert Backtest.objects.filter(strategy=s).count() == 1
 
 
-def test_seed_dd_within_tight_hard_halt(user):
-    """A strategy with a tight hard-halt limit still gets a passing seed (max DD
-    must land strictly within the limit, whatever it is)."""
+def test_seed_dd_shaped_within_tight_hard_halt(user):
+    """The demo seed still shapes its (cosmetic) max DD within the hard-halt
+    limit so the record reads plausibly — but it never opens the gate."""
     s = _strategy(user)
     StrategyAutopilot.objects.create(strategy=s, dd_hard_halt_pct=Decimal("2.0"))
-    seed_validation_backtest(s)
-    out = validation_status(s)
-    assert out["passed"] is True
+    bt = seed_validation_backtest(s)
+    assert bt.metrics.max_drawdown_pct < Decimal("2.0")
+    assert validation_status(s)["passed"] is False
 
 
 # --------------------------------------------------------------------------
-# seed → enable → next_run_at populates (the 'no next run' complaint, end to end).
+# real backtest → enable → next_run_at populates (end to end).
 # --------------------------------------------------------------------------
-def test_seed_then_enable_populates_next_run(client, user):
+def test_real_backtest_then_enable_populates_next_run(client, user):
     s = _strategy(user)
     acc = _account(user)
     StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
     StrategyAutopilot.objects.create(
         strategy=s, broker_account=acc, dd_hard_halt_pct=Decimal("7.5"),
     )
-    seed_validation_backtest(s)
+    _real_validation_backtest(s)
     r = client.post(f"/api/strategies/{s.id}/autopilot/enable/")
     assert r.status_code == 200
     s.refresh_from_db()

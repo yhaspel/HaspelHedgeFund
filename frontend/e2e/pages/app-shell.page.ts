@@ -14,12 +14,28 @@ export class AppShellPage {
     this.main = page.locator('main');
   }
 
-  /** A sidebar destination by its accessible name (aria-label), e.g. "Runs". */
+  /** A sidebar destination by its accessible name (visible label), e.g. "Runs". */
   navLink(name: string): Locator {
     return this.nav.getByRole('link', { name, exact: true });
   }
 
+  /** P10 §D3: the Research group (Runs/Screener/Agent graphs/Leaderboard/
+   *  Schedules) is collapsed by default; expand before navigating into it. */
+  researchToggle(): Locator {
+    return this.nav.getByRole('button', { name: /Research group$/ });
+  }
+
+  async ensureResearchOpen(): Promise<void> {
+    const toggle = this.researchToggle();
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
+      await toggle.click();
+    }
+  }
+
   async navigateVia(name: string): Promise<void> {
+    if (!(await this.navLink(name).isVisible())) {
+      await this.ensureResearchOpen();
+    }
     await this.navLink(name).click();
   }
 

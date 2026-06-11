@@ -35,10 +35,18 @@ export class StrategiesStore {
   readonly currentCycle = this._currentCycle.asReadonly();
   readonly positions = this._positions.asReadonly();
 
-  list(): Observable<Strategy[]> {
-    return this.api.get<Strategy[]>('/strategies/').pipe(
+  // P10 §D1: the server hides archived (is_active=false) strategies by
+  // default; pass includeArchived to fetch everything (the list page does, so
+  // it can render the "Archived (N)" chip + client-side toggle).
+  list(opts?: { includeArchived?: boolean }): Observable<Strategy[]> {
+    const qs = opts?.includeArchived ? '?include_archived=1' : '';
+    return this.api.get<Strategy[]>(`/strategies/${qs}`).pipe(
       tap((r) => this._strategies.set(Array.isArray(r) ? r : [])),
     );
+  }
+  // P10 §D1: archive / unarchive — a plain PATCH on is_active.
+  setActive(id: number, active: boolean): Observable<Strategy> {
+    return this.api.patch<Strategy>(`/strategies/${id}/`, { is_active: active });
   }
   loadUniverses(): Observable<Universe[]> {
     return this.api.get<Universe[]>('/universes/').pipe(

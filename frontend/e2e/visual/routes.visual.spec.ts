@@ -11,7 +11,8 @@ import { NO_ANIMATIONS_CSS } from '../utils/clock';
 const ROUTES: { name: string; path: string }[] = [
   { name: 'login', path: '/login' },
   { name: 'signup', path: '/signup' },
-  { name: 'dashboard', path: '/' },
+  { name: 'fund-home', path: '/' },
+  { name: 'dashboard', path: '/dashboard' },
   { name: 'runs-list', path: '/runs' },
   { name: 'runs-new', path: '/runs/new' },
   { name: 'run-detail', path: '/runs/371' },

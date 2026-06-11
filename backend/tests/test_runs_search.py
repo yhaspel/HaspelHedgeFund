@@ -50,7 +50,8 @@ def test_search_param_filters(user, auth_client):
 
     resp = auth_client.get("/api/runs/?search=semiconductor")
     assert resp.status_code == 200
-    ids = [row["id"] for row in resp.json()]
+    # P10 §D4: the list is paginated — rows live under "results".
+    ids = [row["id"] for row in resp.json()["results"]]
     assert hit.id in ids
     assert miss.id not in ids
 
@@ -59,4 +60,6 @@ def test_no_search_returns_all(user, auth_client):
     Run.objects.create(user=user, tickers=["AAPL"], as_of_date=dt.date(2026, 5, 1), status=Run.DONE)
     resp = auth_client.get("/api/runs/")
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    body = resp.json()
+    assert body["count"] == 1
+    assert len(body["results"]) == 1

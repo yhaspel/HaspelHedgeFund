@@ -7,9 +7,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from hedgefund.celery import app as celery_app
+from hedgefund.pagination import DefaultPageNumberPagination
 
 from .estimator import estimate_cost
-from .metrics import baseline_curve, stitched_oos_returns
+from .metrics import (
+    BENCHMARK_TICKERS,
+    baseline_curve,
+    benchmark_curve,
+    rolling_sharpe_series,
+    stitched_oos_returns,
+)
 from .models import Backtest, BacktestDay
 from .serializers import (
     DEFAULT_UNIVERSE_20,
@@ -23,12 +30,23 @@ logger = logging.getLogger(__name__)
 
 
 class BacktestListCreateView(generics.ListCreateAPIView):
+    # P10 §D4: done/failed backtests can never be deleted (protected history),
+    # so the list is append-only — paginate at 50 and hide archived rows by
+    # default (?include_archived=1 to see them).
+    pagination_class = DefaultPageNumberPagination
+
     def get_queryset(self):
-        return (
+        qs = (
             Backtest.objects.filter(user=self.request.user)
             .select_related("metrics")
             .order_by("-created_at")
         )
+        include_archived = self.request.query_params.get("include_archived") in (
+            "1", "true", "yes",
+        )
+        if not include_archived:
+            qs = qs.filter(archived_at__isnull=True)
+        return qs
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -39,6 +57,31 @@ class BacktestListCreateView(generics.ListCreateAPIView):
         bt = serializer.save(user=self.request.user)
         async_result = run_backtest.delay(bt.id)
         Backtest.objects.filter(pk=bt.pk).update(celery_task_id=str(async_result.id or ""))
+
+
+class BacktestArchiveView(APIView):
+    """P10 §D4 — soft archive/unarchive (the graphs pattern). POST
+    /backtests/<pk>/archive/ {archived: true|false}. Any terminal status may be
+    archived; active runs must be cancelled first."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request, pk: int) -> Response:
+        try:
+            bt = Backtest.objects.get(pk=pk, user=request.user)
+        except Backtest.DoesNotExist:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if bt.status in Backtest.ACTIVE_STATUSES:
+            return Response(
+                {"detail": f"backtest is {bt.status}; cancel it before archiving"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        archived = bool(request.data.get("archived", True))
+        bt.archived_at = timezone.now() if archived else None
+        bt.save(update_fields=["archived_at"])
+        return Response({
+            "id": bt.pk,
+            "archived_at": bt.archived_at.isoformat() if bt.archived_at else None,
+        })
 
 
 class BacktestDetailView(generics.RetrieveDestroyAPIView):
@@ -119,6 +162,13 @@ class EquityCurveView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         dates, equity, _ = stitched_oos_returns(bt)
         baseline = baseline_curve(bt, dates)
+        # P10 §B2: SPY-TR / QQQ-TR overlays (omitted when no bars in-window)
+        # + the rolling ~3y Sharpe sparkline series.
+        base = float(equity[0]) if equity else float(bt.starting_cash)
+        bench = {
+            t: c for t in BENCHMARK_TICKERS
+            if (c := benchmark_curve(t, dates, base))
+        }
         # Tag each point with fold_index for client-side shading.
         fold_lookup = {d: fid for d, fid in BacktestDay.objects.filter(
             backtest=bt, segment=BacktestDay.SEG_OOS
@@ -129,11 +179,20 @@ class EquityCurveView(APIView):
                 "portfolio_value": round(v, 2),
                 "baseline": round(b, 2) if i < len(baseline) else None,
                 "fold_id": fold_lookup.get(d),
+                **{
+                    t.lower(): round(curve[i], 2)
+                    for t, curve in bench.items() if i < len(curve)
+                },
             }
             for i, (d, v) in enumerate(zip(dates, equity, strict=False))
             for b in [baseline[i] if i < len(baseline) else None]
         ]
-        return Response({"points": points, "baseline_kind": bt.baseline})
+        return Response({
+            "points": points,
+            "baseline_kind": bt.baseline,
+            "benchmarks": sorted(bench.keys()),
+            "rolling_sharpe": rolling_sharpe_series(dates, equity),
+        })
 
 
 class FoldsView(APIView):
@@ -166,13 +225,15 @@ class DeflationView(APIView):
             }
             for f in bt.folds.all()
         ]
+        meaningful = bt.deflation_meaningful  # P10 §B4
         return Response({
             "per_fold": per_fold,
             "mean_is_sharpe": float(m.mean_is_sharpe) if m else 0.0,
             "mean_oos_sharpe": float(m.mean_oos_sharpe) if m else 0.0,
             "sharpe_deflation": float(m.sharpe_deflation) if m else 0.0,
             "oos_sharpe_std": float(m.oos_sharpe_std) if m else 0.0,
-            "red_flag": (float(m.sharpe_deflation) < 0.3) if m else False,
+            "deflation_meaningful": meaningful,
+            "red_flag": (float(m.sharpe_deflation) < 0.3) if (m and meaningful) else False,
         })
 
 

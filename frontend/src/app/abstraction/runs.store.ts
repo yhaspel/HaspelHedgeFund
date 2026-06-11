@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import {
   CreateRunRequest,
@@ -13,11 +13,14 @@ export class RunsStore {
   private readonly api = inject(ApiClient);
 
   private readonly _runs = signal<RunSummary[]>([]);
+  private readonly _runsCount = signal(0);
   private readonly _current = signal<RunDetail | null>(null);
   private readonly _models = signal<ModelOption[]>([]);
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
 
   readonly runs = this._runs.asReadonly();
+  /** P10 §D4: total rows server-side (the list is paginated at 50). */
+  readonly runsCount = this._runsCount.asReadonly();
   readonly currentRun = this._current.asReadonly();
   readonly models = this._models.asReadonly();
   readonly isPolling = computed(() => this.pollHandle !== null);
@@ -28,10 +31,14 @@ export class RunsStore {
     );
   }
 
+  // P10 §D4: the endpoint is paginated ({count, results}, page size 50) and
+  // defaults to the last 30 days. `days: 'all'` widens to everything.
   listRuns(opts?: {
     source?: 'all' | 'adhoc' | 'strategy';
     portfolioTarget?: number;
     search?: string;
+    days?: number | 'all';
+    page?: number;
   }): Observable<RunSummary[]> {
     const params: string[] = [];
     if (opts?.source && opts.source !== 'all') {
@@ -43,10 +50,23 @@ export class RunsStore {
     if (opts?.search) {
       params.push(`search=${encodeURIComponent(opts.search)}`);
     }
+    if (opts?.days !== undefined) {
+      params.push(`days=${opts.days}`);
+    }
+    if (opts?.page && opts.page > 1) {
+      params.push(`page=${opts.page}`);
+    }
     const qs = params.length ? `?${params.join('&')}` : '';
-    return this.api.get<RunSummary[]>(`/runs/${qs}`).pipe(
-      tap((r) => this._runs.set(Array.isArray(r) ? r : [])),
-    );
+    return this.api
+      .get<RunSummary[] | { count: number; results: RunSummary[] }>(`/runs/${qs}`)
+      .pipe(
+        map((r) => {
+          const rows = Array.isArray(r) ? r : (r?.results ?? []);
+          this._runsCount.set(Array.isArray(r) ? rows.length : (r?.count ?? rows.length));
+          this._runs.set(rows);
+          return rows;
+        }),
+      );
   }
 
   submitRun(body: CreateRunRequest): Observable<RunSummary> {

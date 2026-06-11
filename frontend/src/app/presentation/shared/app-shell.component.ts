@@ -13,6 +13,64 @@ import { PopoverComponent } from './popover.component';
 type Theme = 'light' | 'dark';
 const THEME_KEY = 'hf.theme';
 
+// P10 §C1/§D3 — the sidebar config. Fund-first ordering: the product (the
+// autonomous fund) is the first destination; council-era research surfaces
+// live in a "Research" group (collapsed by default — §D3).
+export interface NavItem {
+  label: string;
+  icon: string;
+  link: string;
+  exact?: boolean;
+}
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
+  /** P10 §D3: collapsed-by-default group (the council-era research surfaces). */
+  collapsible?: boolean;
+}
+
+const RESEARCH_COLLAPSED_KEY = 'hf.nav.researchCollapsed';
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Fund',
+    items: [
+      { label: 'Autonomous Fund', icon: 'i-shield', link: '/', exact: true },
+      { label: 'Portfolios', icon: 'i-wallet', link: '/portfolios' },
+      { label: 'Broker accounts', icon: 'i-link', link: '/broker-accounts' },
+      { label: 'Watchlist', icon: 'i-eye', link: '/watchlist' },
+    ],
+  },
+  {
+    label: 'Desk',
+    items: [
+      { label: 'Strategies', icon: 'i-layers', link: '/strategies' },
+      { label: 'Backtests', icon: 'i-beaker', link: '/backtests' },
+      { label: 'News', icon: 'i-news', link: '/news' },
+    ],
+  },
+  {
+    // P10 §D3: council-era research tooling, collapsed by default — shrinks
+    // the perceived surface without deleting capability.
+    label: 'Research',
+    collapsible: true,
+    items: [
+      { label: 'Runs', icon: 'i-pulse', link: '/runs' },
+      { label: 'Screener', icon: 'i-filter', link: '/screener' },
+      { label: 'Agent graphs', icon: 'i-graph', link: '/graphs' },
+      { label: 'Leaderboard', icon: 'i-trophy', link: '/leaderboard' },
+      { label: 'Schedules', icon: 'i-calendar', link: '/schedules' },
+    ],
+  },
+];
+
+// P10 §D5: Profile folded into Settings → General (no sidebar entry; still
+// reachable via the top-bar email link and deep links).
+const SYSTEM_ITEMS: NavItem[] = [
+  { label: 'Guides', icon: 'i-info', link: '/info' },
+  { label: 'Settings', icon: 'i-settings', link: '/settings/data-news' },
+];
+
 @Component({
   selector: 'hf-app-shell',
   standalone: true,
@@ -28,6 +86,9 @@ const THEME_KEY = 'hf.theme';
   template: `
     <div class="app">
       <a class="skip-link" href="#main-content">Skip to main content</a>
+      <!-- P10 §C1/§D3 — fund-first, data-driven sidebar with VISIBLE labels
+           (icon-only + hover popovers made 16 unlabeled icons a memory test).
+           The fund is the first destination; config lives in NAV_GROUPS. -->
       <nav class="sidebar" aria-label="Primary">
         <div class="logo">
           <img src="/icon.svg" alt="Haspel Hedge Fund" width="30" height="30" />
@@ -35,149 +96,45 @@ const THEME_KEY = 'hf.theme';
         <!-- Scrollable destination groups — scrolls on short viewports so the
              pinned System group below never clips (HHF-02). -->
         <div class="nav-scroll">
-          <div class="nav-group" role="group" aria-label="Trade">
-            <span class="nav-group-label" aria-hidden="true">Trade</span>
-            <a class="nav-btn" routerLink="/" [routerLinkActiveOptions]="{exact:true}"
-               routerLinkActive="active" #navHome="routerLinkActive"
-               [attr.aria-current]="navHome.isActive ? 'page' : null"
-               aria-label="Dashboard"
-               (mouseenter)="popHome.show()" (mouseleave)="popHome.maybeHide()"
-               (focus)="popHome.show()" (blur)="popHome.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-home" /></svg>
-              <hf-popover #popHome placement="right" align="center" size="compact" strategy="fixed">Dashboard</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/portfolios" routerLinkActive="active" #navPort="routerLinkActive"
-               [attr.aria-current]="navPort.isActive ? 'page' : null"
-               aria-label="Portfolios"
-               (mouseenter)="popPort.show()" (mouseleave)="popPort.maybeHide()"
-               (focus)="popPort.show()" (blur)="popPort.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-wallet" /></svg>
-              <hf-popover #popPort placement="right" align="center" size="compact" strategy="fixed">Portfolios</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/watchlist" routerLinkActive="active" #navWatch="routerLinkActive"
-               [attr.aria-current]="navWatch.isActive ? 'page' : null"
-               aria-label="Watchlist"
-               (mouseenter)="popWatch.show()" (mouseleave)="popWatch.maybeHide()"
-               (focus)="popWatch.show()" (blur)="popWatch.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-eye" /></svg>
-              <hf-popover #popWatch placement="right" align="center" size="compact" strategy="fixed">Watchlist</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/broker-accounts" routerLinkActive="active" #navBrk="routerLinkActive"
-               [attr.aria-current]="navBrk.isActive ? 'page' : null"
-               aria-label="Broker accounts"
-               (mouseenter)="popBrk.show()" (mouseleave)="popBrk.maybeHide()"
-               (focus)="popBrk.show()" (blur)="popBrk.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-link" /></svg>
-              <hf-popover #popBrk placement="right" align="center" size="compact" strategy="fixed">Broker accounts</hf-popover>
-            </a>
-          </div>
-          <div class="nav-group" role="group" aria-label="Research">
-            <span class="nav-group-label" aria-hidden="true">Research</span>
-            <a class="nav-btn" routerLink="/runs" [routerLinkActiveOptions]="{exact:true}"
-               routerLinkActive="active" #navRuns="routerLinkActive"
-               [attr.aria-current]="navRuns.isActive ? 'page' : null"
-               aria-label="Runs"
-               (mouseenter)="popRuns.show()" (mouseleave)="popRuns.maybeHide()"
-               (focus)="popRuns.show()" (blur)="popRuns.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-pulse" /></svg>
-              <hf-popover #popRuns placement="right" align="center" size="compact" strategy="fixed">Runs</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/screener" routerLinkActive="active" #navScreener="routerLinkActive"
-               [attr.aria-current]="navScreener.isActive ? 'page' : null"
-               aria-label="Screener"
-               (mouseenter)="popScreener.show()" (mouseleave)="popScreener.maybeHide()"
-               (focus)="popScreener.show()" (blur)="popScreener.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-filter" /></svg>
-              <hf-popover #popScreener placement="right" align="center" size="compact" strategy="fixed">Screener</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/backtests" routerLinkActive="active" #navBt="routerLinkActive"
-               [attr.aria-current]="navBt.isActive ? 'page' : null"
-               aria-label="Backtests"
-               (mouseenter)="popBt.show()" (mouseleave)="popBt.maybeHide()"
-               (focus)="popBt.show()" (blur)="popBt.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-beaker" /></svg>
-              <hf-popover #popBt placement="right" align="center" size="compact" strategy="fixed">Backtests</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/strategies" routerLinkActive="active" #navSt="routerLinkActive"
-               [attr.aria-current]="navSt.isActive ? 'page' : null"
-               aria-label="Strategies"
-               (mouseenter)="popSt.show()" (mouseleave)="popSt.maybeHide()"
-               (focus)="popSt.show()" (blur)="popSt.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-layers" /></svg>
-              <hf-popover #popSt placement="right" align="center" size="compact" strategy="fixed">Strategies</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/graphs" routerLinkActive="active" #navGraphs="routerLinkActive"
-               [attr.aria-current]="navGraphs.isActive ? 'page' : null"
-               aria-label="Agent graphs"
-               (mouseenter)="popGraphs.show()" (mouseleave)="popGraphs.maybeHide()"
-               (focus)="popGraphs.show()" (blur)="popGraphs.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-graph" /></svg>
-              <hf-popover #popGraphs placement="right" align="center" size="compact" strategy="fixed">Agent graphs</hf-popover>
-            </a>
-          </div>
-          <div class="nav-group" role="group" aria-label="Operate">
-            <span class="nav-group-label" aria-hidden="true">Operate</span>
-            <a class="nav-btn" routerLink="/news" routerLinkActive="active" #navNews="routerLinkActive"
-               [attr.aria-current]="navNews.isActive ? 'page' : null"
-               aria-label="News"
-               (mouseenter)="popNews.show()" (mouseleave)="popNews.maybeHide()"
-               (focus)="popNews.show()" (blur)="popNews.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-news" /></svg>
-              <hf-popover #popNews placement="right" align="center" size="compact" strategy="fixed">News</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/schedules" routerLinkActive="active" #navSched="routerLinkActive"
-               [attr.aria-current]="navSched.isActive ? 'page' : null"
-               aria-label="Schedules"
-               (mouseenter)="popSched.show()" (mouseleave)="popSched.maybeHide()"
-               (focus)="popSched.show()" (blur)="popSched.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-calendar" /></svg>
-              <hf-popover #popSched placement="right" align="center" size="compact" strategy="fixed">Schedules</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/leaderboard" routerLinkActive="active" #navLb="routerLinkActive"
-               [attr.aria-current]="navLb.isActive ? 'page' : null"
-               aria-label="Leaderboard"
-               (mouseenter)="popLb.show()" (mouseleave)="popLb.maybeHide()"
-               (focus)="popLb.show()" (blur)="popLb.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-trophy" /></svg>
-              <hf-popover #popLb placement="right" align="center" size="compact" strategy="fixed">Leaderboard</hf-popover>
-            </a>
-            <a class="nav-btn" routerLink="/fund" routerLinkActive="active" #navFund="routerLinkActive"
-               [attr.aria-current]="navFund.isActive ? 'page' : null"
-               aria-label="Autonomous Fund"
-               (mouseenter)="popFund.show()" (mouseleave)="popFund.maybeHide()"
-               (focus)="popFund.show()" (blur)="popFund.maybeHide()">
-              <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-shield" /></svg>
-              <hf-popover #popFund placement="right" align="center" size="compact" strategy="fixed">Autonomous Fund</hf-popover>
-            </a>
-          </div>
+          @for (g of navGroups; track g.label) {
+            <div class="nav-group" role="group" [attr.aria-label]="g.label">
+              @if (g.collapsible) {
+                <button type="button" class="nav-group-toggle"
+                        (click)="toggleResearch()"
+                        [attr.aria-expanded]="researchOpen()"
+                        [attr.aria-label]="(researchOpen() ? 'Collapse ' : 'Expand ') + g.label + ' group'">
+                  <span class="nav-group-label">{{ g.label }}</span>
+                  <svg width="10" height="10" aria-hidden="true" class="chev"
+                       [class.open]="researchOpen()"><use href="/icons.svg#i-chevron-dn" /></svg>
+                </button>
+              } @else {
+                <span class="nav-group-label" aria-hidden="true">{{ g.label }}</span>
+              }
+              @if (!g.collapsible || researchOpen()) {
+                @for (item of g.items; track item.link) {
+                  <a class="nav-btn" [routerLink]="item.link"
+                     [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
+                     routerLinkActive="active" #rla="routerLinkActive"
+                     [attr.aria-current]="rla.isActive ? 'page' : null">
+                    <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
+                    <span class="nav-label">{{ item.label }}</span>
+                  </a>
+                }
+              }
+            </div>
+          }
         </div>
         <!-- Pinned bottom — never scrolls off (HHF-02). -->
         <div class="nav-group nav-system" role="group" aria-label="System">
           <span class="nav-group-label" aria-hidden="true">System</span>
-          <a class="nav-btn" routerLink="/profile" routerLinkActive="active" #navProfile="routerLinkActive"
-             [attr.aria-current]="navProfile.isActive ? 'page' : null"
-             aria-label="Profile"
-             (mouseenter)="popProfile.show()" (mouseleave)="popProfile.maybeHide()"
-             (focus)="popProfile.show()" (blur)="popProfile.maybeHide()">
-            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-user" /></svg>
-            <hf-popover #popProfile placement="right" align="center" size="compact" strategy="fixed">Profile</hf-popover>
-          </a>
-          <a class="nav-btn" routerLink="/info" routerLinkActive="active" #navInfo="routerLinkActive"
-             [attr.aria-current]="navInfo.isActive ? 'page' : null"
-             aria-label="Guides"
-             (mouseenter)="popInfo.show()" (mouseleave)="popInfo.maybeHide()"
-             (focus)="popInfo.show()" (blur)="popInfo.maybeHide()">
-            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-info" /></svg>
-            <hf-popover #popInfo placement="right" align="center" size="compact" strategy="fixed">Guides</hf-popover>
-          </a>
-          <a class="nav-btn" routerLink="/settings/models" routerLinkActive="active" #navSet="routerLinkActive"
-             [attr.aria-current]="navSet.isActive ? 'page' : null"
-             aria-label="Settings"
-             (mouseenter)="popSet.show()" (mouseleave)="popSet.maybeHide()"
-             (focus)="popSet.show()" (blur)="popSet.maybeHide()">
-            <svg width="18" height="18" aria-hidden="true"><use href="/icons.svg#i-settings" /></svg>
-            <hf-popover #popSet placement="right" align="center" size="compact" strategy="fixed">Settings</hf-popover>
-          </a>
+          @for (item of systemItems; track item.link) {
+            <a class="nav-btn" [routerLink]="item.link"
+               routerLinkActive="active" #rlaSys="routerLinkActive"
+               [attr.aria-current]="rlaSys.isActive ? 'page' : null">
+              <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
+              <span class="nav-label">{{ item.label }}</span>
+            </a>
+          }
         </div>
       </nav>
       <main>
@@ -316,6 +273,35 @@ const THEME_KEY = 'hf.theme';
 })
 export class AppShellComponent implements OnInit {
   @Input() crumbs: { label: string; link?: string }[] = [];
+  readonly navGroups = NAV_GROUPS;
+  readonly systemItems = SYSTEM_ITEMS;
+
+  // P10 §D3: the Research group is collapsed by default; the choice persists.
+  // Auto-expands when the current route lives inside it (active page must
+  // never be hidden).
+  readonly researchOpen = signal(this.initialResearchOpen());
+
+  toggleResearch(): void {
+    const next = !this.researchOpen();
+    this.researchOpen.set(next);
+    try {
+      localStorage.setItem(RESEARCH_COLLAPSED_KEY, next ? '0' : '1');
+    } catch {
+      // localStorage may be unavailable — degrade silently.
+    }
+  }
+
+  private initialResearchOpen(): boolean {
+    const research = NAV_GROUPS.find((g) => g.collapsible);
+    const url = typeof location !== 'undefined' ? location.pathname : '';
+    if (research?.items.some((i) => url.startsWith(i.link))) return true;
+    try {
+      return localStorage.getItem(RESEARCH_COLLAPSED_KEY) === '0';
+    } catch {
+      return false;
+    }
+  }
+
   readonly auth = inject(AuthStore);
   readonly news = inject(NewsStore);
   readonly profile = inject(InvestorProfileStore);

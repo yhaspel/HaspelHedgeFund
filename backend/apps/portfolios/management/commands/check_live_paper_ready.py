@@ -20,8 +20,11 @@ What it checks:
     5. Caps: ``max_position_pct``, ``max_sector_pct`` are non-zero and
        sane (max_position_pct < 1, max_sector_pct < 1).
     6. Kill switch: the strategy can be paused via ``is_active=False``
-       without touching the data path (this is a sanity check; the actual
-       kill switch is exercised by toggling is_active).
+       without touching the data path. P10 §D1 gave ``is_active`` ARCHIVE
+       semantics: archived strategies are hidden from the default
+       strategies list and skipped by the nightly leaderboard recompute.
+       Autopilot dispatch still keys on ``StrategyAutopilot.is_enabled``
+       (disable the autopilot to stop trading; archive to declutter).
 
 This command never sends an order, never touches a broker, and never
 makes an LLM call. It is a pre-flight gate for the operator.
@@ -210,12 +213,14 @@ def check_budget(strategy: PortfolioStrategy) -> Check:
 
 
 def check_kill_switch(strategy: PortfolioStrategy) -> Check:
-    """The kill-switch is ``is_active=False``. Sanity-check the field
-    exists and reflects the current run-state."""
+    """``is_active=False`` = archived (P10 §D1: hidden from the default list,
+    skipped by leaderboard recompute). Sanity-check the field exists and
+    reflects the current run-state. To stop TRADING, disable the autopilot."""
     return Check(
         "kill_switch",
         hasattr(strategy, "is_active"),
-        f"is_active={strategy.is_active}; toggle to False to pause.",
+        f"is_active={strategy.is_active}; archive (False) hides + skips it; "
+        "disable the autopilot to stop trading.",
         required=False,
     )
 

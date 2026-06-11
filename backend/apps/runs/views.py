@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from hedgefund.celery import app as celery_app
+from hedgefund.pagination import DefaultPageNumberPagination
 from hedgefund_agents.registry import MODEL_CATALOG
 
 from .models import Run
@@ -23,8 +24,21 @@ logger = logging.getLogger(__name__)
 
 
 class RunListCreateView(generics.ListCreateAPIView):
+    # P10 §D4: runs are unbounded (386 rows shipped in one response at audit
+    # time) — paginate at 50 and default the window to the last 30 days
+    # (?days=N to widen, ?days=all for everything).
+    pagination_class = DefaultPageNumberPagination
+    DEFAULT_WINDOW_DAYS = 30
+
     def get_queryset(self):
         qs = Run.objects.filter(user=self.request.user)
+        days_raw = (self.request.query_params.get("days") or "").lower()
+        if days_raw != "all":
+            try:
+                days = int(days_raw) if days_raw else self.DEFAULT_WINDOW_DAYS
+            except (TypeError, ValueError):
+                days = self.DEFAULT_WINDOW_DAYS
+            qs = qs.filter(created_at__gte=timezone.now() - dt.timedelta(days=days))
         # P2l: optional source filter. "all" or missing = no filter.
         source = (self.request.query_params.get("source") or "").lower()
         if source in (Run.ADHOC, Run.STRATEGY):

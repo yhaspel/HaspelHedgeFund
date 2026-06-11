@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import {
   BacktestDetail,
@@ -9,23 +9,39 @@ import {
   EquityPoint,
   EstimateRequest,
   EstimateResponse,
+  RollingSharpePoint,
   StrategyBacktestDefaults,
 } from '../core/models/backtest.model';
+
+interface EquityCurveResponse {
+  points: EquityPoint[];
+  baseline_kind: string;
+  // P10 §B2: which benchmark overlays are present + the rolling-Sharpe series.
+  benchmarks: string[];
+  rolling_sharpe: RollingSharpePoint[];
+}
 
 @Injectable({ providedIn: 'root' })
 export class BacktestsStore {
   private readonly api = inject(ApiClient);
 
   private readonly _list = signal<BacktestSummary[]>([]);
+  private readonly _listCount = signal(0);
   private readonly _current = signal<BacktestDetail | null>(null);
   private readonly _equity = signal<EquityPoint[]>([]);
+  private readonly _equityBenchmarks = signal<string[]>([]);
+  private readonly _rollingSharpe = signal<RollingSharpePoint[]>([]);
   private readonly _deflation = signal<DeflationPayload | null>(null);
   private readonly _defaultUniverse = signal<string[]>([]);
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
 
   readonly list = this._list.asReadonly();
+  /** P10 §D4: total rows server-side (the list is paginated at 50). */
+  readonly listCount = this._listCount.asReadonly();
   readonly current = this._current.asReadonly();
   readonly equity = this._equity.asReadonly();
+  readonly equityBenchmarks = this._equityBenchmarks.asReadonly();
+  readonly rollingSharpe = this._rollingSharpe.asReadonly();
   readonly deflation = this._deflation.asReadonly();
   readonly defaultUniverse = this._defaultUniverse.asReadonly();
   readonly isPolling = computed(() => this.pollHandle !== null);
@@ -36,10 +52,32 @@ export class BacktestsStore {
       .pipe(tap((r) => this._defaultUniverse.set(r.universe)));
   }
 
-  listBacktests(): Observable<BacktestSummary[]> {
+  // P10 §D4: paginated ({count, results}, 50/page); archived rows hidden
+  // unless includeArchived.
+  listBacktests(opts?: { includeArchived?: boolean; page?: number }):
+    Observable<BacktestSummary[]> {
+    const params: string[] = [];
+    if (opts?.includeArchived) params.push('include_archived=1');
+    if (opts?.page && opts.page > 1) params.push(`page=${opts.page}`);
+    const qs = params.length ? `?${params.join('&')}` : '';
     return this.api
-      .get<BacktestSummary[]>('/backtests/')
-      .pipe(tap((r) => this._list.set(Array.isArray(r) ? r : [])));
+      .get<BacktestSummary[] | { count: number; results: BacktestSummary[] }>(`/backtests/${qs}`)
+      .pipe(
+        map((r) => {
+          const rows = Array.isArray(r) ? r : (r?.results ?? []);
+          this._listCount.set(Array.isArray(r) ? rows.length : (r?.count ?? rows.length));
+          this._list.set(rows);
+          return rows;
+        }),
+      );
+  }
+
+  // P10 §D4: soft archive/unarchive (the graphs pattern) — done/failed rows
+  // can never be deleted, so archive is the declutter verb.
+  archiveBacktest(id: number, archived: boolean): Observable<{ id: number; archived_at: string | null }> {
+    return this.api.post<{ id: number; archived_at: string | null }>(
+      `/backtests/${id}/archive/`, { archived },
+    );
   }
 
   create(body: CreateBacktestRequest): Observable<BacktestSummary> {
@@ -95,10 +133,14 @@ export class BacktestsStore {
     this.pollHandle = null;
   }
 
-  loadEquity(id: number): Observable<{ points: EquityPoint[]; baseline_kind: string }> {
+  loadEquity(id: number): Observable<EquityCurveResponse> {
     return this.api
-      .get<{ points: EquityPoint[]; baseline_kind: string }>(`/backtests/${id}/equity-curve/`)
-      .pipe(tap((r) => this._equity.set(r.points)));
+      .get<EquityCurveResponse>(`/backtests/${id}/equity-curve/`)
+      .pipe(tap((r) => {
+        this._equity.set(r.points);
+        this._equityBenchmarks.set(r.benchmarks ?? []);
+        this._rollingSharpe.set(r.rolling_sharpe ?? []);
+      }));
   }
 
   loadDeflation(id: number): Observable<DeflationPayload> {

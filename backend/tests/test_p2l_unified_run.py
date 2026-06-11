@@ -367,17 +367,18 @@ def test_runs_api_source_filter(auth_client, user, strategy):
         source=Run.ADHOC, status=Run.QUEUED,
     )
 
+    # P10 §D4: the runs list is paginated — rows live under "results".
     url = reverse("run-list-create")
     all_resp = auth_client.get(url)
-    assert len(all_resp.data) == 2
-    strat_resp = auth_client.get(url + "?source=strategy")
-    assert len(strat_resp.data) == 1
-    assert strat_resp.data[0]["source"] == "strategy"
-    assert strat_resp.data[0]["portfolio_target"] == target.pk
-    adhoc_resp = auth_client.get(url + "?source=adhoc")
-    assert len(adhoc_resp.data) == 1
-    assert adhoc_resp.data[0]["source"] == "adhoc"
-    assert adhoc_resp.data[0]["portfolio_target"] is None
+    assert all_resp.data["count"] == 2
+    strat_rows = auth_client.get(url + "?source=strategy").data["results"]
+    assert len(strat_rows) == 1
+    assert strat_rows[0]["source"] == "strategy"
+    assert strat_rows[0]["portfolio_target"] == target.pk
+    adhoc_rows = auth_client.get(url + "?source=adhoc").data["results"]
+    assert len(adhoc_rows) == 1
+    assert adhoc_rows[0]["source"] == "adhoc"
+    assert adhoc_rows[0]["portfolio_target"] is None
 
 
 @pytest.mark.django_db

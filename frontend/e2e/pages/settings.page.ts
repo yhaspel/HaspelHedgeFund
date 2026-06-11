@@ -1,11 +1,14 @@
 import { type Page, type Locator } from '@playwright/test';
 
 /**
- * Page Object for /settings/* — the five tabbed settings pages
- * (Models · Providers · Personas · Data & News · Notifications).
+ * Page Object for /settings/* — P10 §D5: TWO top-level groups
+ * (General · Models & advanced) with the original five pages as sections
+ * (General: Data & News, Notifications, Your profile; Advanced: Models,
+ * Providers, Personas).
  *
- * Every page wraps its body in a matching `role="tabpanel"`; the shared
- * sub-nav is a real ARIA `tablist` of routed `role="tab"` links.
+ * Every page wraps its body in a matching `role="tabpanel"`; the group row is
+ * a real ARIA `tablist` of routed `role="tab"` links and the active group's
+ * sections render as a secondary nav.
  */
 export class SettingsPage {
   constructor(public readonly page: Page) {}
@@ -42,6 +45,12 @@ export class SettingsPage {
   }
   tabpanel(name: string | RegExp): Locator {
     return this.page.getByRole('tabpanel', { name });
+  }
+  /** A section link in the active group's secondary row (P10 §D5). */
+  section(name: string | RegExp): Locator {
+    return this.page
+      .getByRole('navigation', { name: 'Sections' })
+      .getByRole('link', { name });
   }
 
   // ---- Models -------------------------------------------------------------

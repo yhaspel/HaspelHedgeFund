@@ -80,6 +80,18 @@ app.conf.beat_schedule = {
         "task": "apps.leaderboard.tasks.recompute_leaderboards",
         "schedule": crontab(minute=0, hour=7),  # 07:00 UTC daily
     },
+    # P10 §E3: the news-sentiment LAB. Signal supply was page-view-driven and
+    # the sleeve had no schedule — both invalidated the forward experiment.
+    # Daily symbol-targeted fetch+classify (frozen model), and a weekly cycle
+    # Friday 21:30 UTC — after the fund pods' 20:30/20:45/21:00 fires.
+    "news-lab-fetch": {
+        "task": "apps.portfolios.tasks_lab.fetch_lab_news",
+        "schedule": crontab(minute=5, hour=12),  # 12:05 UTC daily
+    },
+    "news-lab-weekly-cycle": {
+        "task": "apps.portfolios.tasks_lab.run_news_lab_cycles",
+        "schedule": crontab(minute=30, hour=21, day_of_week=5),  # Fri 21:30 UTC
+    },
     # Daily model-catalog reconcile: sync the dev/frugal allowlist, broad-sweep
     # deactivate any OpenRouter row that vanished upstream (the stale-ghost
     # class), and audit pricing drift on every active row — the automatic

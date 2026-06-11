@@ -5,7 +5,9 @@
   /* `minmax(0, 1fr)` lets the main column shrink below its content's min-content
      size. Without this, wide flex children (e.g. the news chyron's nowrap track)
      blow out the column and force horizontal page scroll. */
-  grid-template-columns: 56px minmax(0, 1fr);
+  /* P10 §C1: the sidebar carries visible labels now (icon-only popover nav
+     was a memory test) — 176px rail. */
+  grid-template-columns: 176px minmax(0, 1fr);
   min-height: 100vh;
 }
 .app > main {
@@ -18,19 +20,20 @@
   position: sticky;
   top: 0;
   height: 100vh;
-  width: 56px;
+  width: 176px;
   background: var(--bg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 12px 0;
+  align-items: stretch;
+  padding: 12px 10px;
   gap: 6px;
   z-index: var(--z-nav);
 }
 .sidebar .logo {
   width: 30px;
   height: 30px;
+  margin-left: 4px;
   border: 1px solid var(--border-2);
   border-radius: var(--r-6);
   overflow: hidden;
@@ -44,14 +47,26 @@
   height: 100%;
 }
 .nav-btn {
-  width: 36px;
-  height: 36px;
+  width: 100%;
+  height: 32px;
   border-radius: var(--r-6);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
   color: var(--text-3);
   position: relative;
+  text-decoration: none;
   transition: background var(--dur-fast) var(--ease-out-ui), color var(--dur-fast);
+}
+.nav-btn svg { flex: none; }
+.nav-btn .nav-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .nav-btn:hover {
   background: var(--hover);
@@ -74,7 +89,7 @@
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   /* Hide the scrollbar in the slim rail so its width never shifts the centered
      icons off-axis from the pinned System group (classic-scrollbar platforms). */
@@ -86,11 +101,36 @@
 .nav-group {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
+  align-items: stretch;
+  gap: 4px;
   width: 100%;
 }
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 10px 0 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.nav-group-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-4);
+}
+.nav-group-toggle .chev {
+  transition: transform var(--dur-fast) var(--ease-out-ui);
+  transform: rotate(-90deg);
+}
+.nav-group-toggle .chev.open {
+  transform: rotate(0deg);
+}
 .nav-group-label {
+  margin-left: 10px;
+  text-align: left;
   font-size: 9px;
   line-height: 1;
   letter-spacing: 0.04em;

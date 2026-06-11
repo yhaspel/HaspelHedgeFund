@@ -413,14 +413,121 @@ def xsec_momentum_weights(*, day: dt.date, universe: list[str], config: dict) ->
     return {t: w[t] * scale for t in w}
 
 
+def _trailing_beta(
+    ticker: str, day: dt.date, *, benchmark: str = "SPY",
+    window: int = 252, price_field: str = "adjusted_close",
+) -> float | None:
+    """Trailing CAPM beta of ``ticker`` vs ``benchmark`` (point-in-time —
+    returns strictly before ``day``). None on insufficient overlap."""
+    import statistics
+
+    r_t = trailing_returns_for(ticker, day, lookback_days=window, price_field=price_field)
+    r_b = trailing_returns_for(benchmark, day, lookback_days=window, price_field=price_field)
+    n = min(len(r_t), len(r_b))
+    if n < 60:
+        return None
+    a, b = r_t[-n:], r_b[-n:]
+    mb = statistics.fmean(b)
+    var_b = statistics.fmean([(x - mb) ** 2 for x in b])
+    if var_b <= 0:
+        return None
+    ma = statistics.fmean(a)
+    cov = statistics.fmean([(a[i] - ma) * (b[i] - mb) for i in range(n)])
+    return cov / var_b
+
+
+def xsec_long_short_weights(*, day: dt.date, universe: list[str], config: dict) -> dict[str, float]:
+    """P10 §F2 — cross-sectional momentum LONG/SHORT (market-neutral) sizer.
+
+    Rank every name by its blended trailing momentum (``momentum_lookbacks``,
+    total-return via ``price_field``); LONG the top ``top_n``, SHORT the bottom
+    ``bottom_n`` (relative momentum — no positive-score gate). Each leg is
+    inverse-vol weighted and normalized to half the book's gross; when
+    ``beta_hedge`` (default on) the SHORT leg is rescaled so the book's
+    dollar-beta vs ``beta_benchmark`` ≈ 0 (capped to 0.5–2.0× to avoid
+    degenerate leverage from noisy betas), then gross renormalizes to 1 and
+    the usual vol-target tail (``vol_target_annual`` up to ``max_gross``)
+    applies. Returns {} when fewer than 2×min-leg names have history.
+
+    The research-identified path toward Sharpe ≥ 1.5 without beta; gating
+    backtests (post survivorship-fixed single-name backfill) are a separate,
+    deferred step — this is the sizer only.
+    """
+    from hedgefund_agents.portfolio.portfolio_manager import realized_vol_annual
+
+    floor = float(config.get("vol_floor", 0.05))
+    vol_lb = int(config.get("vol_lookback_days", 60))
+    mom_lbs = [int(x) for x in (config.get("momentum_lookbacks") or [63, 126, 252])]
+    top_n = max(1, int(config.get("top_n", 20)))
+    bottom_n = max(1, int(config.get("bottom_n", top_n)))
+    price_field = str(config.get("price_field", "adjusted_close"))
+    benchmark = str(config.get("beta_benchmark", "SPY"))
+    beta_window = int(config.get("beta_window_days", 252))
+    hedge = bool(config.get("beta_hedge", True))
+    max_lb = max([vol_lb, *mom_lbs])
+
+    scores: dict[str, float] = {}
+    sigma: dict[str, float] = {}
+    for t in universe:
+        tr = trailing_returns_for(t, day, lookback_days=max_lb, price_field=price_field)
+        if len(tr) < 20:
+            continue
+        cums = [_cum_return(tr[-lb:]) for lb in mom_lbs if len(tr) >= lb]
+        if not cums:
+            continue
+        scores[t] = sum(cums) / len(cums)
+        vw = tr[-vol_lb:] if len(tr) >= vol_lb else tr
+        sigma[t] = max(floor, realized_vol_annual(vw))
+    ranked = sorted(scores, key=lambda t: scores[t], reverse=True)
+    if len(ranked) < 2 * min(top_n, bottom_n) and len(ranked) < 4:
+        return {}
+    longs = ranked[:top_n]
+    shorts = [t for t in ranked[-bottom_n:] if t not in longs]
+    if not longs or not shorts:
+        return {}
+
+    def _leg(names: list[str], leg_gross: float, sign: float) -> dict[str, float]:
+        inv = {t: 1.0 / sigma[t] for t in names}
+        z = sum(inv.values()) or 1.0
+        return {t: sign * leg_gross * inv[t] / z for t in names}
+
+    w = {**_leg(longs, 0.5, 1.0), **_leg(shorts, 0.5, -1.0)}
+
+    if hedge:
+        betas = {
+            t: (_trailing_beta(t, day, benchmark=benchmark, window=beta_window,
+                               price_field=price_field) or 1.0)
+            for t in w
+        }
+        beta_long = sum(w[t] * betas[t] for t in longs)
+        beta_short = sum(w[t] * betas[t] for t in shorts)  # negative
+        if beta_short < 0 and beta_long > 0:
+            scale = min(2.0, max(0.5, beta_long / -beta_short))
+            w = {t: (wi * scale if t in shorts else wi) for t, wi in w.items()}
+    gross = sum(abs(v) for v in w.values()) or 1.0
+    w = {t: wi / gross for t, wi in w.items()}
+
+    cap = float(config.get("max_leg_weight", 0.40))
+    w = {t: max(-cap, min(cap, wi)) for t, wi in w.items()}
+    z = sum(abs(v) for v in w.values()) or 1.0
+    w = {t: wi / z for t, wi in w.items()}
+    vol_target = float(config.get("vol_target_annual", 0.15))
+    max_gross = float(config.get("max_gross", 1.0))
+    port_vol = sum(abs(w[t]) * sigma[t] for t in w)  # diagonal proxy
+    scale = min(max_gross, vol_target / port_vol) if port_vol > 0 else 1.0
+    return {t: wi * scale for t, wi in w.items()}
+
+
 # Deterministic sizing dispatch, selected by config["sizing"]. inverse_vol and
 # construct_risk_parity both route to inverse_vol_weights (which handles the
-# construct_risk_parity sub-mode internally); trend / sector add momentum.
+# construct_risk_parity sub-mode internally); trend / sector add momentum;
+# xsec_long_short (P10 §F2) is the market-neutral single-name sizer.
 _SIZERS = {
     "inverse_vol": inverse_vol_weights,
     "construct_risk_parity": inverse_vol_weights,
     "tsmom": tsmom_weights,
     "xsec_momentum": xsec_momentum_weights,
+    "xsec_long_short": xsec_long_short_weights,
 }
 
 
@@ -490,9 +597,20 @@ def run_deterministic_segment(
                     weights = {t: w * rs for t, w in weights.items()}
             for t in universe:
                 wt = weights.get(t, 0.0)
+                # P10 §F2: a NEGATIVE weight is a short target, not a
+                # liquidation — SimulatedPortfolio.execute treats action
+                # "sell" as target-0, so shorts must go through "open_short"
+                # (signed target_weight_pct sizes the short). Long-only sizers
+                # never emit negatives, so their behavior is unchanged.
+                if wt > 0:
+                    action = "buy"
+                elif wt < 0:
+                    action = "open_short"
+                else:
+                    action = "sell"
                 decisions_today.append({
                     "ticker": t,
-                    "action": "buy" if wt > 0 else "sell",
+                    "action": action,
                     "target_weight_pct": wt * 100.0,
                 })
             pending_orders = decisions_today

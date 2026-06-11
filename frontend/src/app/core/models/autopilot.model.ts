@@ -95,6 +95,70 @@ export interface FundOverview {
   recommendations: string[];
 }
 
+// P10 §C2 — GET /api/fund/history/: persisted NAV history with time-weighted
+// (flow-adjusted) return indices + normalized SPY/QQQ overlays.
+export interface FundHistoryPoint {
+  date: string;
+  equity: number;
+  net_flow: number;
+  index: number;       // TWR index, base 100 — flow-immune
+  spy?: number;        // benchmark indices on the aggregate series only
+  qqq?: number;
+}
+
+export interface FundHistoryAccount {
+  strategy_id: number;
+  name: string;
+  kind: string;
+  portfolio_id: number | null;
+  points: FundHistoryPoint[];
+  twr_pct: number | null;
+  // §C4 realized-vs-expected strip: the validated annualized return from the
+  // pod's record-of-record backtest.
+  expected_ann_return_pct: number | null;
+  expected_backtest_id: number | null;
+}
+
+export interface FundHistory {
+  available: boolean;
+  reason: string | null;
+  per_account: FundHistoryAccount[];
+  aggregate: { points: FundHistoryPoint[]; twr_pct: number | null };
+  benchmarks: string[];
+}
+
+// P10 §B5 — GET /api/fund/composite/: the pods' stitched OOS validation curves
+// combined at configurable weights vs SPY-TR / QQQ-TR.
+export interface FundCompositeMember {
+  strategy_id: number;
+  name: string;
+  kind: string;
+  backtest_id: number;
+  backtest_name: string;
+  weight: number;
+}
+
+export interface FundCompositeSeriesStats {
+  total_return_pct: number;
+  annualized_return_pct: number;
+  vol_annual_pct: number;
+  sharpe: number;
+  max_drawdown_pct: number;
+  vs_spy?: { beta: number; alpha_annual_pct: number; information_ratio: number };
+  vs_qqq?: { beta: number; alpha_annual_pct: number; information_ratio: number };
+}
+
+export interface FundComposite {
+  available: boolean;
+  reason?: string;
+  missing?: string[];
+  members?: FundCompositeMember[];
+  window?: { start: string; end: string };
+  base?: number;
+  points?: { date: string; composite: number; spy?: number; qqq?: number }[];
+  metrics?: Record<string, FundCompositeSeriesStats>;
+}
+
 export interface ExecutedBook {
   linked: boolean;
   account_id?: number;
