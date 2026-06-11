@@ -33,7 +33,8 @@ export class RunsPage {
     return this.page.getByRole('heading', { level: 1, name: 'Runs' });
   }
   countHeading(): Locator {
-    return this.page.getByRole('heading', { name: /All runs/ });
+    // P10 §D4 renamed the card heading "All runs (N)" → "Runs (N[ of M])".
+    return this.page.getByRole('heading', { name: /Runs \(/ });
   }
   statusFilter(label: string): Locator {
     return this.page.getByRole('group', { name: 'Filter by status' }).getByRole('button', { name: label });

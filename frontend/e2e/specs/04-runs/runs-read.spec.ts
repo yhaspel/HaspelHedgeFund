@@ -20,7 +20,7 @@ test.describe('WS-4 · Runs (read)', () => {
 
   test('R-03 status filter narrows the list', async ({ runs }) => {
     await runs.goto();
-    await expect(runs.countHeading()).toContainText('All runs (6)');
+    await expect(runs.countHeading()).toContainText('Runs (6');
     await runs.statusFilter('Running').click(); // all seeded runs are "done"
     await expect(runs.emptyNoMatch()).toBeVisible();
     await runs.statusFilter('Any').click();
