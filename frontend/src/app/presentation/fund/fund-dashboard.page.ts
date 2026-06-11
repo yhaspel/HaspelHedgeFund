@@ -7,13 +7,14 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { PopoverComponent } from '../shared/popover.component';
+import { FundCompositeComponent } from './fund-composite.component';
 
 // P7 §14 — the headline fund view: 3 account cards + aggregate panel +
 // realized correlation matrix + the fund-level kill switch. Paper-only.
 @Component({
   selector: 'hf-fund-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, PopoverComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, PopoverComponent, FundCompositeComponent],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund' }]">
       <div class="page-head">
@@ -136,6 +137,9 @@ import { PopoverComponent } from '../shared/popover.component';
             </div>
           </div>
         </section>
+
+        <!-- P10 §B5: the validated composite — what the pods do TOGETHER. -->
+        <hf-fund-composite />
 
         <!-- Correlation matrix -->
         <section class="card">

@@ -116,8 +116,9 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--seed-validation-backtest", action="store_true",
-            help="Also seed a passing demo validation backtest per strategy so the "
-                 "autopilots are enable-able out of the box (educational/paper).",
+            help="Also seed a SYNTHETIC demo backtest per strategy (cosmetic only — "
+                 "P10 §B3: seeds are not §9-gate evidence; run a real deterministic "
+                 "validation backtest to make autopilots enable-able).",
         )
 
     def handle(self, *args, **opts):

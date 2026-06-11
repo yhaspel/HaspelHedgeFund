@@ -41,6 +41,18 @@ class Backtest(models.Model):
     # (no prime, no LLM, $0). Their sizer is picked by ``search_space["sizing"]``.
     DETERMINISTIC_ENGINE_MODES = frozenset({RISK_PARITY, TREND, SECTOR_MOMENTUM})
 
+    # P10 §B3 — data era. Backtests created before the dividend/total-return
+    # data fix (PR #50, merged 2026-06-09 15:17 UTC) ran on price-only bars
+    # known to understate returns/Sharpe; they are kept as history but are
+    # excluded as §9 autopilot-gate evidence. The backfill lives in
+    # migration 0012; new rows are total_return by construction.
+    ERA_PRICE_ONLY = "price_only"
+    ERA_TOTAL_RETURN = "total_return"
+    DATA_ERA_CHOICES = [
+        (ERA_PRICE_ONLY, "Price-only data (pre PR #50)"),
+        (ERA_TOTAL_RETURN, "Total-return data"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="backtests", on_delete=models.CASCADE
     )
@@ -119,6 +131,11 @@ class Backtest(models.Model):
     # is one POST flag away rather than a code change.
     disable_cio = models.BooleanField(default=True)
 
+    # P10 §B3: which bar data the run was computed on (see DATA_ERA_CHOICES).
+    data_era = models.CharField(
+        max_length=16, choices=DATA_ERA_CHOICES, default=ERA_TOTAL_RETURN,
+    )
+
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=QUEUED)
     progress_pct = models.IntegerField(default=0)
     progress_message = models.CharField(max_length=200, blank=True, default="")
@@ -138,6 +155,20 @@ class Backtest(models.Model):
 
     def __str__(self) -> str:
         return f"Backtest {self.pk} {self.name} ({self.status})"
+
+    @property
+    def deflation_meaningful(self) -> bool:
+        """P10 §B4 — the OOS/IS "deflation" ratio guards against overfitting
+        ONLY when an IS candidate search actually selected a config. For
+        deterministic walk-forwards (one fixed config) and single-candidate
+        runs it guards nothing, so the UI suppresses the KPI. The union is
+        required: deterministic rows can store the model-default
+        ``n_candidates=50`` (pre-P10 rows), and legacy engine modes (e.g.
+        ``market_neutral``) are caught by ``n_candidates == 1``."""
+        return (
+            self.n_candidates > 1
+            and self.engine_mode not in self.DETERMINISTIC_ENGINE_MODES
+        )
 
 
 class BacktestFold(models.Model):
@@ -211,6 +242,16 @@ class BacktestMetrics(models.Model):
     sharpe_deflation = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     oos_sharpe_std = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     baseline_return_pct = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    # P10 §B1: the pre-fix (price-only, price-weighted) baseline value, preserved
+    # once by the recompute_baselines management command so the rewrite is
+    # reversible and §9-gate history stays reconstructible. NULL = never rewritten.
+    baseline_return_pct_legacy = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True,
+    )
+    # P10 §B2: SPY-TR / QQQ-TR comparison block (see metrics.benchmark_stats):
+    # {"SPY": {total_return_pct, annualized_return_pct, sharpe, max_drawdown_pct,
+    #          beta, alpha_annual_pct, information_ratio}, "QQQ": {...}}.
+    benchmarks = models.JSONField(default=dict, blank=True)
     per_agent_attribution = models.JSONField(default=dict, blank=True)
 
     def __str__(self) -> str:

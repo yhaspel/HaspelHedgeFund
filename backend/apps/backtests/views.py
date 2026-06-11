@@ -9,7 +9,13 @@ from rest_framework.views import APIView
 from hedgefund.celery import app as celery_app
 
 from .estimator import estimate_cost
-from .metrics import baseline_curve, stitched_oos_returns
+from .metrics import (
+    BENCHMARK_TICKERS,
+    baseline_curve,
+    benchmark_curve,
+    rolling_sharpe_series,
+    stitched_oos_returns,
+)
 from .models import Backtest, BacktestDay
 from .serializers import (
     DEFAULT_UNIVERSE_20,
@@ -119,6 +125,13 @@ class EquityCurveView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         dates, equity, _ = stitched_oos_returns(bt)
         baseline = baseline_curve(bt, dates)
+        # P10 §B2: SPY-TR / QQQ-TR overlays (omitted when no bars in-window)
+        # + the rolling ~3y Sharpe sparkline series.
+        base = float(equity[0]) if equity else float(bt.starting_cash)
+        bench = {
+            t: c for t in BENCHMARK_TICKERS
+            if (c := benchmark_curve(t, dates, base))
+        }
         # Tag each point with fold_index for client-side shading.
         fold_lookup = {d: fid for d, fid in BacktestDay.objects.filter(
             backtest=bt, segment=BacktestDay.SEG_OOS
@@ -129,11 +142,20 @@ class EquityCurveView(APIView):
                 "portfolio_value": round(v, 2),
                 "baseline": round(b, 2) if i < len(baseline) else None,
                 "fold_id": fold_lookup.get(d),
+                **{
+                    t.lower(): round(curve[i], 2)
+                    for t, curve in bench.items() if i < len(curve)
+                },
             }
             for i, (d, v) in enumerate(zip(dates, equity, strict=False))
             for b in [baseline[i] if i < len(baseline) else None]
         ]
-        return Response({"points": points, "baseline_kind": bt.baseline})
+        return Response({
+            "points": points,
+            "baseline_kind": bt.baseline,
+            "benchmarks": sorted(bench.keys()),
+            "rolling_sharpe": rolling_sharpe_series(dates, equity),
+        })
 
 
 class FoldsView(APIView):
@@ -166,13 +188,15 @@ class DeflationView(APIView):
             }
             for f in bt.folds.all()
         ]
+        meaningful = bt.deflation_meaningful  # P10 §B4
         return Response({
             "per_fold": per_fold,
             "mean_is_sharpe": float(m.mean_is_sharpe) if m else 0.0,
             "mean_oos_sharpe": float(m.mean_oos_sharpe) if m else 0.0,
             "sharpe_deflation": float(m.sharpe_deflation) if m else 0.0,
             "oos_sharpe_std": float(m.oos_sharpe_std) if m else 0.0,
-            "red_flag": (float(m.sharpe_deflation) < 0.3) if m else False,
+            "deflation_meaningful": meaningful,
+            "red_flag": (float(m.sharpe_deflation) < 0.3) if (m and meaningful) else False,
         })
 
 

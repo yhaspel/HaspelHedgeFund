@@ -42,7 +42,12 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             <tbody>
               @for(bt of store.list(); track bt.id){
                 <tr>
-                  <td><a [routerLink]="['/backtests', bt.id]" class="text-[var(--acc-info-fg)]">{{ bt.name }}</a></td>
+                  <td>
+                    <a [routerLink]="['/backtests', bt.id]" class="text-[var(--acc-info-fg)]">{{ bt.name }}</a>
+                    @if (bt.data_era === 'price_only') {
+                      <span class="pill warn" title="Pre-PR#50 price-only bars — understates returns; excluded as §9-gate evidence">P</span>
+                    }
+                  </td>
                   <td>
                     <span class="pill"
                       [class.ok]="bt.status==='done'" [class.warn]="bt.status==='running' || bt.status==='queued'"
@@ -53,11 +58,17 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                   <td class="mono text-text-2">{{ bt.start_date }} → {{ bt.end_date }}</td>
                   <td class="num">{{ bt.total_return_pct !== null ? ((bt.total_return_pct | number:'1.2-2') + '%') : '—' }}</td>
                   <td class="num">{{ bt.oos_sharpe !== null ? (bt.oos_sharpe | number:'1.2-2') : '—' }}</td>
-                  <td class="num"
-                    [style.color]="bt.deflation !== null && bt.deflation < 0.3 ? 'var(--acc-short-fg)' : bt.deflation !== null && bt.deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
-                    {{ bt.deflation !== null ? (bt.deflation | number:'1.2-2') : '—' }}
-                    @if(bt.deflation !== null){<span aria-hidden="true"> {{ bt.deflation < 0.3 ? '⚠' : bt.deflation < 0.5 ? '•' : '✓' }}</span>}
-                  </td>
+                  <!-- P10 §B4: the OOS/IS ratio only means something when an IS
+                       candidate search ran — deterministic runs show n/a. -->
+                  @if (bt.deflation_meaningful) {
+                    <td class="num"
+                      [style.color]="bt.deflation !== null && bt.deflation < 0.3 ? 'var(--acc-short-fg)' : bt.deflation !== null && bt.deflation < 0.5 ? 'var(--acc-hold-fg)' : 'var(--acc-long-fg)'">
+                      {{ bt.deflation !== null ? (bt.deflation | number:'1.2-2') : '—' }}
+                      @if(bt.deflation !== null){<span aria-hidden="true"> {{ bt.deflation < 0.3 ? '⚠' : bt.deflation < 0.5 ? '•' : '✓' }}</span>}
+                    </td>
+                  } @else {
+                    <td class="num text-text-2" title="No candidate search (deterministic run) — the OOS/IS ratio is not an overfit guard here.">n/a</td>
+                  }
                   <td class="right whitespace-nowrap">
                     @if (canDelete(bt.status)) {
                       <button type="button" class="btn danger sm"

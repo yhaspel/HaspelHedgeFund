@@ -9,8 +9,17 @@ import {
   EquityPoint,
   EstimateRequest,
   EstimateResponse,
+  RollingSharpePoint,
   StrategyBacktestDefaults,
 } from '../core/models/backtest.model';
+
+interface EquityCurveResponse {
+  points: EquityPoint[];
+  baseline_kind: string;
+  // P10 §B2: which benchmark overlays are present + the rolling-Sharpe series.
+  benchmarks: string[];
+  rolling_sharpe: RollingSharpePoint[];
+}
 
 @Injectable({ providedIn: 'root' })
 export class BacktestsStore {
@@ -19,6 +28,8 @@ export class BacktestsStore {
   private readonly _list = signal<BacktestSummary[]>([]);
   private readonly _current = signal<BacktestDetail | null>(null);
   private readonly _equity = signal<EquityPoint[]>([]);
+  private readonly _equityBenchmarks = signal<string[]>([]);
+  private readonly _rollingSharpe = signal<RollingSharpePoint[]>([]);
   private readonly _deflation = signal<DeflationPayload | null>(null);
   private readonly _defaultUniverse = signal<string[]>([]);
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
@@ -26,6 +37,8 @@ export class BacktestsStore {
   readonly list = this._list.asReadonly();
   readonly current = this._current.asReadonly();
   readonly equity = this._equity.asReadonly();
+  readonly equityBenchmarks = this._equityBenchmarks.asReadonly();
+  readonly rollingSharpe = this._rollingSharpe.asReadonly();
   readonly deflation = this._deflation.asReadonly();
   readonly defaultUniverse = this._defaultUniverse.asReadonly();
   readonly isPolling = computed(() => this.pollHandle !== null);
@@ -95,10 +108,14 @@ export class BacktestsStore {
     this.pollHandle = null;
   }
 
-  loadEquity(id: number): Observable<{ points: EquityPoint[]; baseline_kind: string }> {
+  loadEquity(id: number): Observable<EquityCurveResponse> {
     return this.api
-      .get<{ points: EquityPoint[]; baseline_kind: string }>(`/backtests/${id}/equity-curve/`)
-      .pipe(tap((r) => this._equity.set(r.points)));
+      .get<EquityCurveResponse>(`/backtests/${id}/equity-curve/`)
+      .pipe(tap((r) => {
+        this._equity.set(r.points);
+        this._equityBenchmarks.set(r.benchmarks ?? []);
+        this._rollingSharpe.set(r.rolling_sharpe ?? []);
+      }));
   }
 
   loadDeflation(id: number): Observable<DeflationPayload> {

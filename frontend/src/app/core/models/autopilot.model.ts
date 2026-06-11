@@ -95,6 +95,38 @@ export interface FundOverview {
   recommendations: string[];
 }
 
+// P10 §B5 — GET /api/fund/composite/: the pods' stitched OOS validation curves
+// combined at configurable weights vs SPY-TR / QQQ-TR.
+export interface FundCompositeMember {
+  strategy_id: number;
+  name: string;
+  kind: string;
+  backtest_id: number;
+  backtest_name: string;
+  weight: number;
+}
+
+export interface FundCompositeSeriesStats {
+  total_return_pct: number;
+  annualized_return_pct: number;
+  vol_annual_pct: number;
+  sharpe: number;
+  max_drawdown_pct: number;
+  vs_spy?: { beta: number; alpha_annual_pct: number; information_ratio: number };
+  vs_qqq?: { beta: number; alpha_annual_pct: number; information_ratio: number };
+}
+
+export interface FundComposite {
+  available: boolean;
+  reason?: string;
+  missing?: string[];
+  members?: FundCompositeMember[];
+  window?: { start: string; end: string };
+  base?: number;
+  points?: { date: string; composite: number; spy?: number; qqq?: number }[];
+  metrics?: Record<string, FundCompositeSeriesStats>;
+}
+
 export interface ExecutedBook {
   linked: boolean;
   account_id?: number;

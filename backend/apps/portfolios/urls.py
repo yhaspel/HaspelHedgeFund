@@ -9,7 +9,12 @@ from .api_autopilot import (
     StrategyAutopilotView,
     StrategyExecutedView,
 )
-from .api_fund import FundHaltView, FundOverviewView, FundResumeView
+from .api_fund import (
+    FundCompositeView,
+    FundHaltView,
+    FundOverviewView,
+    FundResumeView,
+)
 from .manual_book_views import (
     PortfolioCashView,
     PortfolioLedgerView,
@@ -128,6 +133,8 @@ urlpatterns = [
     path("strategies/<int:pk>/executed/", StrategyExecutedView.as_view(),
          name="strategy-executed"),
     path("fund/", FundOverviewView.as_view(), name="fund-overview"),
+    # P10 §B5: the pods' validation curves combined vs SPY-TR/QQQ-TR.
+    path("fund/composite/", FundCompositeView.as_view(), name="fund-composite"),
     path("fund/halt/", FundHaltView.as_view(), name="fund-halt"),
     path("fund/resume/", FundResumeView.as_view(), name="fund-resume"),
 ]

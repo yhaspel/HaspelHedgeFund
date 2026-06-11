@@ -10,8 +10,29 @@ export interface BacktestSummary {
   created_at: string;
   finished_at: string | null;
   oos_sharpe: number | null;
+  // P10 §B2: the stitched long-run OOS Sharpe (the honest headline — the
+  // mean-of-folds number above runs ~0.3–0.4 higher).
+  stitched_sharpe: number | null;
   total_return_pct: number | null;
   deflation: number | null;
+  // P10 §B4: false for deterministic / single-candidate runs where the
+  // OOS/IS ratio guards nothing — render "n/a", never a green ✓.
+  deflation_meaningful: boolean;
+  engine_mode: string;
+  // P10 §B3: "price_only" rows predate the dividend fix (PR #50) and are
+  // excluded as §9-gate evidence; badge them.
+  data_era: 'price_only' | 'total_return';
+}
+
+// P10 §B2 — one benchmark's comparison block (vs the stitched OOS curve).
+export interface BenchmarkBlock {
+  total_return_pct: number;
+  annualized_return_pct: number;
+  sharpe: number;
+  max_drawdown_pct: number;
+  beta?: number;
+  alpha_annual_pct?: number;
+  information_ratio?: number;
 }
 
 export interface BacktestMetrics {
@@ -28,6 +49,11 @@ export interface BacktestMetrics {
   sharpe_deflation: number;
   oos_sharpe_std: number;
   baseline_return_pct: number;
+  // P10 §B1: the pre-fix (price-only, price-weighted) baseline, preserved by
+  // the recompute_baselines command. null = never rewritten.
+  baseline_return_pct_legacy: number | null;
+  // P10 §B2: {"SPY": {...}, "QQQ": {...}} — may be {} for old/unrecomputed rows.
+  benchmarks: Record<string, BenchmarkBlock>;
   per_agent_attribution: Record<string, number>;
 }
 
@@ -131,6 +157,15 @@ export interface EquityPoint {
   portfolio_value: number;
   baseline: number | null;
   fold_id: number | null;
+  // P10 §B2: SPY-TR / QQQ-TR overlays (absent when no bars in the window).
+  spy?: number;
+  qqq?: number;
+}
+
+// P10 §B2 — rolling ~3y Sharpe sparkline point.
+export interface RollingSharpePoint {
+  date: string;
+  sharpe: number;
 }
 
 export interface DeflationPayload {
@@ -139,5 +174,7 @@ export interface DeflationPayload {
   mean_oos_sharpe: number;
   sharpe_deflation: number;
   oos_sharpe_std: number;
+  // P10 §B4: false when the ratio guards nothing (deterministic / 1 candidate).
+  deflation_meaningful: boolean;
   red_flag: boolean;
 }

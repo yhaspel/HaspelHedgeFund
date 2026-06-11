@@ -6,6 +6,7 @@ import {
   AutopilotResponse,
   AutopilotRunRow,
   ExecutedBook,
+  FundComposite,
   FundOverview,
 } from '../core/models/autopilot.model';
 
@@ -15,11 +16,13 @@ export class FundStore {
   private readonly api = inject(ApiClient);
 
   private readonly _fund = signal<FundOverview | null>(null);
+  private readonly _composite = signal<FundComposite | null>(null);
   private readonly _autopilot = signal<Autopilot | null>(null);
   private readonly _history = signal<AutopilotRunRow[]>([]);
   private readonly _executed = signal<ExecutedBook | null>(null);
 
   readonly fund = this._fund.asReadonly();
+  readonly composite = this._composite.asReadonly();
   readonly autopilot = this._autopilot.asReadonly();
   readonly history = this._history.asReadonly();
   readonly executed = this._executed.asReadonly();
@@ -27,6 +30,13 @@ export class FundStore {
   // --- fund ---
   loadFund(): Observable<FundOverview> {
     return this.api.get<FundOverview>('/fund/').pipe(tap((r) => this._fund.set(r ?? null)));
+  }
+  // P10 §B5 — the validated composite (pods' stitched OOS curves vs SPY/QQQ-TR).
+  loadComposite(weights?: string): Observable<FundComposite> {
+    const q = weights ? `?weights=${encodeURIComponent(weights)}` : '';
+    return this.api
+      .get<FundComposite>(`/fund/composite/${q}`)
+      .pipe(tap((r) => this._composite.set(r ?? null)));
   }
   haltFund(): Observable<unknown> {
     return this.api.post('/fund/halt/', {}).pipe(tap(() => this.loadFund().subscribe()));

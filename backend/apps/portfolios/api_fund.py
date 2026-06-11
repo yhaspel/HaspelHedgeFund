@@ -24,6 +24,25 @@ class FundOverviewView(APIView):
         return Response(fund_layer.fund_overview(fund))
 
 
+class FundCompositeView(APIView):
+    """P10 §B5 — GET /api/fund/composite/ — the pods' stitched OOS validation
+    curves combined at configurable weights vs SPY-TR/QQQ-TR.
+
+    ``?weights=53:0.6,54:0.2,55:0.2`` (strategy-id:weight, normalized; default
+    equal weight — the live 33/33/33 capital split)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        from .fund_composite import fund_composite
+
+        fund = _user_fund(request.user)
+        if fund is None:
+            return Response({"available": False, "reason": "no fund"})
+        return Response(
+            fund_composite(fund, weights_raw=request.query_params.get("weights"))
+        )
+
+
 class FundHaltView(APIView):
     """Fund-level kill switch — halts all member accounts at once (§7/§10)."""
     permission_classes = [permissions.IsAuthenticated]

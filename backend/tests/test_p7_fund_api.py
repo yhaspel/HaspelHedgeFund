@@ -59,7 +59,9 @@ def _account(user, label="A", cash="100000"):
     )
 
 
-def _passing_backtest(strategy, *, oos="0.8", dd="4.0"):
+def _passing_backtest(strategy, *, oos="0.8", dd="4.0", stitched="0.7"):
+    # P10 §B3: the gate also requires a positive STITCHED OOS Sharpe (the
+    # ``sharpe`` field) and total-return-era data (the model default).
     bt = Backtest.objects.create(
         user=strategy.user, strategy=strategy, name="bt",
         start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 1, 1),
@@ -67,6 +69,7 @@ def _passing_backtest(strategy, *, oos="0.8", dd="4.0"):
     )
     BacktestMetrics.objects.create(
         backtest=bt, mean_oos_sharpe=Decimal(oos), max_drawdown_pct=Decimal(dd),
+        sharpe=Decimal(stitched),
     )
     return bt
 

@@ -24,15 +24,20 @@ class BacktestFoldSerializer(serializers.ModelSerializer):
 
 class BacktestListSerializer(serializers.ModelSerializer):
     oos_sharpe = serializers.SerializerMethodField()
+    stitched_sharpe = serializers.SerializerMethodField()
     total_return_pct = serializers.SerializerMethodField()
     deflation = serializers.SerializerMethodField()
+    # P10 §B4: False for deterministic / single-candidate runs, where the
+    # OOS/IS ratio guards nothing — the UI shows "n/a" instead of a green ✓.
+    deflation_meaningful = serializers.ReadOnlyField()
 
     class Meta:
         model = Backtest
         fields = (
             "id", "name", "status", "progress_pct", "progress_message",
             "universe", "start_date", "end_date", "created_at",
-            "finished_at", "oos_sharpe", "total_return_pct", "deflation",
+            "finished_at", "oos_sharpe", "stitched_sharpe", "total_return_pct",
+            "deflation", "deflation_meaningful", "engine_mode", "data_era",
         )
 
     def _m(self, obj):
@@ -41,6 +46,10 @@ class BacktestListSerializer(serializers.ModelSerializer):
     def get_oos_sharpe(self, obj):
         m = self._m(obj)
         return float(m.mean_oos_sharpe) if m else None
+
+    def get_stitched_sharpe(self, obj):
+        m = self._m(obj)
+        return float(m.sharpe) if m else None
 
     def get_total_return_pct(self, obj):
         m = self._m(obj)
@@ -54,6 +63,7 @@ class BacktestListSerializer(serializers.ModelSerializer):
 class BacktestDetailSerializer(serializers.ModelSerializer):
     metrics = BacktestMetricsSerializer(read_only=True)
     folds = BacktestFoldSerializer(many=True, read_only=True)
+    deflation_meaningful = serializers.ReadOnlyField()  # P10 §B4
 
     class Meta:
         model = Backtest
@@ -66,7 +76,7 @@ class BacktestDetailSerializer(serializers.ModelSerializer):
             "status", "progress_pct", "progress_message", "error_message",
             "total_cost_usd", "max_budget_usd", "disable_cio",
             "created_at", "started_at", "finished_at",
-            "metrics", "folds",
+            "metrics", "folds", "engine_mode", "data_era", "deflation_meaningful",
         )
 
     def to_representation(self, instance):
@@ -123,6 +133,22 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
             user = getattr(self.context.get("request"), "user", None)
             if user is None or strategy.user_id != getattr(user, "id", None):
                 raise serializers.ValidationError({"strategy_id": "strategy not found"})
+            # P10 §B4: kinds with no matching engine mode must not silently fall
+            # through to the council engine — the run would not model how the
+            # strategy trades live, yet could become §9-gate evidence.
+            if strategy.kind == PortfolioStrategy.KIND_NEWS_SENTIMENT:
+                raise serializers.ValidationError({
+                    "strategy_id": "news_sentiment strategies can't be backtested "
+                    "(no point-in-time news archive — the news history is ~weeks "
+                    "deep); they validate FORWARD via the council-alpha A/B "
+                    "harness instead.",
+                })
+            if strategy.kind == PortfolioStrategy.KIND_PAIRS:
+                raise serializers.ValidationError({
+                    "strategy_id": "pairs strategies have no backtest engine mode "
+                    "yet; a council-engine run would not model the live pairs "
+                    "cycle.",
+                })
             # Deterministic strategy kinds validate on the matching backtest engine
             # so the run models how the strategy actually trades live: each routes
             # to the deterministic engine + the same sizing the live cycle uses
@@ -154,6 +180,11 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
                     attrs["search_space"] = {
                         **pd_cfg, **sector_momentum_config(strategy), **caller_ss
                     }
+        # P10 §B4: the deterministic walk-forward replays ONE fixed config (no IS
+        # candidate search), so a stored n_candidates > 1 would lie — and would
+        # incorrectly arm the deflation KPI. Force the field to match reality.
+        if attrs.get("engine_mode") in Backtest.DETERMINISTIC_ENGINE_MODES:
+            attrs["n_candidates"] = 1
         if attrs.get("is_window_days", 252) < 126:
             raise serializers.ValidationError("is_window_days must be >= 126 (6 months)")
         master_days = (attrs["end_date"] - attrs["start_date"]).days
