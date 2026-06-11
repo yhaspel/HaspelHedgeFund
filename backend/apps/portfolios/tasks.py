@@ -2122,6 +2122,22 @@ def daily_long_short_cycle(
     if not members:
         raise RuntimeError("Universe has no active members on as_of date.")
 
+    # P10 §A1: the deterministic pods size off DailyBar momentum/vol, so a stale
+    # or dividend-corrupt tail bar silently distorts the book. Refresh the recent
+    # tail (the on-demand cache heuristic skips the newest sessions) and hard-
+    # assert freshness + adjusted-close integrity before sizing; a failure raises
+    # StaleMarketDataError so the cycle skips rather than trades on bad data.
+    if strategy.kind in (
+        PortfolioStrategy.KIND_RISK_PARITY,
+        PortfolioStrategy.KIND_TREND,
+        PortfolioStrategy.KIND_SECTOR_MOMENTUM,
+    ):
+        from apps.data.freshness import assert_universe_fresh, refresh_universe_bars
+
+        _universe = [t for t, _ in members]
+        refresh_universe_bars(_universe, as_of, get_fmp_provider(user=strategy.user))
+        assert_universe_fresh(_universe, as_of)
+
     # Risk-parity fast path: pure deterministic inverse-vol — no screener, no
     # council. Drops the entire LLM cost (matches plan default
     # enable_council_veto=False). The veto-mode wiring is a follow-up.

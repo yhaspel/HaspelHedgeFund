@@ -127,9 +127,25 @@ def run_autopilot_cycle(autopilot_run_id: int) -> dict:
     AutopilotRun.objects.filter(pk=run.pk).update(
         status=AutopilotRun.RUNNING, guardrail_actions={"drawdown": dd},
     )
-    result = daily_long_short_cycle(
-        strategy.id, force=True, override_preset=ap.model_preset,
-    )
+    # P10 §A1: a deterministic pod refuses to trade on stale or dividend-corrupt
+    # market data (StaleMarketDataError). Skip-and-notify rather than size the
+    # book off a bad tail bar — the fund just holds its current positions.
+    from apps.data.freshness import StaleMarketDataError
+
+    try:
+        result = daily_long_short_cycle(
+            strategy.id, force=True, override_preset=ap.model_preset,
+        )
+    except StaleMarketDataError as exc:
+        from apps.notifications.autopilot import ACCOUNT_UNHEALTHY, notify_autopilot
+
+        _finish(run, AutopilotRun.SKIPPED, {"skipped": "stale_data", "detail": str(exc)[:500]})
+        log.error("autopilot skipped: stale/corrupt market data autopilot=%s: %s", ap.pk, exc)
+        notify_autopilot(
+            ap, ACCOUNT_UNHEALTHY,
+            f"Cycle skipped — stale/corrupt market data; book held. {exc}",
+        )
+        return {"skipped": "stale_data", "detail": str(exc)}
     # If the cycle parked awaiting_review (should not happen — guarded above),
     # halt-and-notify rather than leave it dangling.
     if isinstance(result, dict) and result.get("status") == "awaiting_review":

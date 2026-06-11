@@ -13,8 +13,10 @@ Three task families:
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
+from django.utils import timezone
 
 from .adapters.ibkr_gateway import IBKRGatewaySession
 from .capabilities import AUTH_NONE, get_capabilities
@@ -85,10 +87,38 @@ def poll_open_orders() -> dict:
     return summary
 
 
+def sweep_stuck_confirmed_orders(grace_hours: int = 24) -> int:
+    """Terminate orders stuck in `confirmed` after a failed submission.
+
+    A submission that errors without reaching the venue (no `broker_order_id`)
+    is walked back to `confirmed` with the error recorded. `confirmed` is not in
+    `OPEN_STATUSES`, so `poll_open_orders` never revisits it — a genuinely-dead
+    order (e.g. an order-domain 403 that predates the adapter's reject mapping,
+    or an auth failure whose credentials never recovered) would linger forever,
+    obscuring the book. Reap such rows to `rejected` once they are older than
+    `grace_hours` (the window in which a transient auth blip could still
+    recover). Returns the number reaped."""
+    cutoff = timezone.now() - timedelta(hours=grace_hours)
+    stuck = BrokerOrder.objects.filter(
+        status=BrokerOrder.STATUS_CONFIRMED,
+        broker_order_id="",
+        created_at__lt=cutoff,
+    ).exclude(error_message="")
+    reaped = 0
+    for order in stuck:
+        order.status = BrokerOrder.STATUS_REJECTED
+        order.error_message = (order.error_message or "")[:450] + " [swept: stuck confirmed]"
+        order.save(update_fields=["status", "error_message"])
+        reaped += 1
+    if reaped:
+        log.warning("sweep_stuck_confirmed_orders: reaped %d stuck order(s)", reaped)
+    return reaped
+
+
 @shared_task(name="apps.brokers.tasks.reconcile_all_accounts")
 def reconcile_all_accounts() -> dict:
     """Periodic full reconciliation across every active account."""
-    summary = {"accounts": 0, "drift_events": 0}
+    summary = {"accounts": 0, "drift_events": 0, "stuck_orders_reaped": 0}
     for account in BrokerAccount.objects.filter(
         is_active=True,
         connection_status=BrokerAccount.STATUS_ACTIVE,
@@ -102,6 +132,10 @@ def reconcile_all_accounts() -> dict:
                 summary["drift_events"] += 1
         except Exception:  # pragma: no cover
             log.exception("reconcile_account failed for account %s", account.pk)
+    try:
+        summary["stuck_orders_reaped"] = sweep_stuck_confirmed_orders()
+    except Exception:  # pragma: no cover
+        log.exception("sweep_stuck_confirmed_orders failed")
     return summary
 
 
