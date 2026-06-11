@@ -25,7 +25,7 @@ export class StrategiesPage {
     return this.page.getByRole('link', { name: 'Open' });
   }
   emptyList(): Locator {
-    return this.page.getByText('No strategies yet.');
+    return this.page.getByText('No active strategies.');
   }
 
   // ---- new ----

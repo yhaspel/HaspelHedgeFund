@@ -2508,9 +2508,10 @@ def dispatch_approved_cycle(
     )
 
 
-# Register the P7 autopilot tasks. They live in a sibling module
-# (`tasks_autopilot.py`), which Celery's autodiscover_tasks() — it only imports
-# each app's `tasks` module — would otherwise never load, leaving the beat
-# entries (dispatch_due_autopilots / release_pending_open_orders /
-# guardrail_sweep) rejected as "unregistered task" every cycle.
-from . import tasks_autopilot  # noqa: E402,F401
+# Register the P7 autopilot tasks + the P10 §E3 news-lab tasks. They live in
+# sibling modules (`tasks_autopilot.py` / `tasks_lab.py`), which Celery's
+# autodiscover_tasks() — it only imports each app's `tasks` module — would
+# otherwise never load, leaving their beat entries (dispatch_due_autopilots /
+# guardrail_sweep / fetch_lab_news / run_news_lab_cycles) rejected as
+# "unregistered task" every cycle.
+from . import tasks_autopilot, tasks_lab  # noqa: E402,F401

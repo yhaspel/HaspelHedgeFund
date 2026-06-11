@@ -11,6 +11,7 @@ const ROUTES: { path: string; known?: string[] }[] = [
   { path: '/login' },
   { path: '/signup' },
   { path: '/' },
+  { path: '/dashboard' },
   { path: '/runs' },
   { path: '/runs/new' },
   { path: '/runs/371' },

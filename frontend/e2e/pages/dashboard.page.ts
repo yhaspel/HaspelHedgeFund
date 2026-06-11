@@ -1,15 +1,16 @@
 import { type Page, type Locator } from '@playwright/test';
 
-/** Page Object for the Dashboard (`/`). */
+/** Page Object for the Manual dashboard (`/dashboard` — P10 §C1 demoted the
+ *  manual-book dashboard off `/`, which now renders the fund). */
 export class DashboardPage {
   constructor(public readonly page: Page) {}
 
   async goto(): Promise<void> {
-    await this.page.goto('/');
+    await this.page.goto('/dashboard');
   }
 
   heading(): Locator {
-    return this.page.getByRole('heading', { level: 1, name: 'Dashboard' });
+    return this.page.getByRole('heading', { level: 1, name: 'Manual dashboard' });
   }
   navHero(): Locator {
     return this.page.getByRole('heading', { name: 'Net asset value' });

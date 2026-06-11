@@ -6,30 +6,30 @@ test.describe('WS-2 · App shell & global navigation', () => {
     await page.goto('/');
   });
 
-  // The sidebar destinations that actually exist (the plan's "New run" item is
-  // a page CTA, not a sidebar entry — see dashboard).
+  // The sidebar destinations that actually exist (P10 §C1/§D3: fund-first
+  // ordering with visible labels; the council-era Research group is collapsed
+  // by default; Profile folded into Settings → General).
   const NAV = [
-    ['Dashboard', '/'],
+    ['Autonomous Fund', '/'],
     ['Portfolios', '/portfolios'],
-    ['Watchlist', '/watchlist'],
     ['Broker accounts', '/broker-accounts'],
+    ['Watchlist', '/watchlist'],
+    ['Strategies', '/strategies'],
+    ['Backtests', '/backtests'],
+    ['News', '/news'],
     ['Runs', '/runs'],
     ['Screener', '/screener'],
-    ['Backtests', '/backtests'],
-    ['Strategies', '/strategies'],
     ['Agent graphs', '/graphs'],
-    ['News', '/news'],
-    ['Schedules', '/schedules'],
     ['Leaderboard', '/leaderboard'],
-    ['Autonomous Fund', '/fund'],
-    ['Profile', '/profile'],
+    ['Schedules', '/schedules'],
     ['Guides', '/info'],
-    ['Settings', '/settings/models'],
+    ['Settings', '/settings/data-news'],
   ] as const;
 
   test('N-01 sidebar navigates to every destination', async ({ page, shell }) => {
     // The sidebar persists across routes, so navigate sequentially without
     // resetting to '/' between items (faster + fewer requests under load).
+    // navigateVia auto-expands the collapsed Research group when needed.
     for (const [name, url] of NAV) {
       await shell.navigateVia(name);
       await expect(page).toHaveURL(new RegExp(url.replace(/\//g, '\\/') + '$'));
@@ -40,6 +40,14 @@ test.describe('WS-2 · App shell & global navigation', () => {
     await shell.navigateVia('Runs');
     await expect(shell.navLink('Runs')).toHaveAttribute('aria-current', 'page');
     await expect(shell.navLink('Backtests')).not.toHaveAttribute('aria-current', 'page');
+  });
+
+  test('N-06 Research group is collapsed by default and toggles', async ({ shell }) => {
+    await expect(shell.researchToggle()).toHaveAttribute('aria-expanded', 'false');
+    await expect(shell.navLink('Runs')).toBeHidden();
+    await shell.researchToggle().click();
+    await expect(shell.researchToggle()).toHaveAttribute('aria-expanded', 'true');
+    await expect(shell.navLink('Runs')).toBeVisible();
   });
 
   test('N-03 skip-to-main-content link is reachable and moves focus to <main>', async ({
