@@ -50,10 +50,10 @@ export interface BookExposureVm {
           </div>
           <div class="book-stats">
             <div class="bs">
-              <span class="k">Gross</span><span class="v mono">{{ b.gross_pct }}%</span>
+              <span class="k">Gross</span><span class="v mono">{{ grossPct(b) }}%</span>
             </div>
             <div class="bs">
-              <span class="k">Net</span><span class="v mono">{{ b.net_pct }}%</span>
+              <span class="k">Net</span><span class="v mono">{{ netPct(b) }}%</span>
             </div>
             <div class="bs">
               <span class="k">Leverage</span><span class="v mono">{{ leverage(b) }}×</span>
@@ -174,9 +174,23 @@ export class BookExposureComponent {
   @Input() book: BookExposureVm | null = null;
   @Input() loaded = false;
 
+  // P10 §C1: PortfolioTarget.gross_pct / net_pct are FRACTIONS of NAV
+  // (1.0 = 100%), not percents. The old template printed the raw fraction with
+  // a "%" suffix ("GROSS 1.0000%") and divided by 100 again for leverage
+  // ("0.01×"). Convert exactly once here.
+  grossPct(b: BookExposureVm): string {
+    const g = Number(b.gross_pct);
+    return (Number.isFinite(g) ? g * 100 : 0).toFixed(1);
+  }
+
+  netPct(b: BookExposureVm): string {
+    const n = Number(b.net_pct);
+    return (Number.isFinite(n) ? n * 100 : 0).toFixed(1);
+  }
+
   leverage(b: BookExposureVm): string {
     const g = Number(b.gross_pct);
-    return (Number.isFinite(g) ? g / 100 : 0).toFixed(2);
+    return (Number.isFinite(g) ? g : 0).toFixed(2);
   }
 
   /** Bar width as a % of the largest absolute weight currently shown. */

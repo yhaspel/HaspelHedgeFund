@@ -187,14 +187,27 @@ def guardrail_sweep() -> dict:
     equity curve and auto-halt at the hard limit (freeze or flatten); release any
     held pending_open orders. Fund-level aggregation/halt lands in Stage C."""
     from apps.portfolios import autopilot_risk
+    from apps.portfolios.snapshots import record_snapshot
 
     halted = 0
-    for ap in StrategyAutopilot.objects.filter(is_enabled=True):
+    snapshots = 0
+    for ap in StrategyAutopilot.objects.filter(is_enabled=True).select_related(
+        "broker_account__portfolio"
+    ):
         try:
             dd = autopilot_risk.evaluate_drawdown(ap)
         except Exception:  # noqa: BLE001
             log.exception("guardrail drawdown eval failed autopilot=%s", ap.pk)
             continue
+        # P10 §C2: persist the marked equity this sweep just computed — it used
+        # to be discarded, which is why no NAV history existed anywhere. One
+        # row per (portfolio, day); the hourly upsert converges on the
+        # post-close mark. record_snapshot never raises.
+        equity = dd.get("equity") or dd.get("seeded_peak")
+        pf = ap.broker_account.portfolio if ap.broker_account_id else None
+        if equity is not None and pf is not None:
+            if record_snapshot(pf, equity=equity, cash=pf.cash_balance) is not None:
+                snapshots += 1
         ap.refresh_from_db()
         if dd.get("transition") and ap.state == StrategyAutopilot.STATE_HALTED:
             _on_hard_halt(ap)
@@ -217,7 +230,12 @@ def guardrail_sweep() -> dict:
             log.exception("fund drawdown eval failed fund=%s", fund.pk)
 
     released = release_pending_open_orders()
-    return {"halted": halted, "fund_halts": fund_halts, "released": released.get("released", 0)}
+    return {
+        "halted": halted,
+        "fund_halts": fund_halts,
+        "snapshots": snapshots,
+        "released": released.get("released", 0),
+    }
 
 
 @shared_task(name="apps.portfolios.tasks_autopilot.release_pending_open_orders")

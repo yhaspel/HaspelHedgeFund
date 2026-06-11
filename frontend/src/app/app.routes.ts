@@ -14,7 +14,18 @@ export const routes: Routes = [
       import('./presentation/auth/signup.page').then((m) => m.SignupPage),
   },
   {
+    // P10 §C1 — fund-first: the landing page IS the fund (aggregate NAV,
+    // 3 pod cards, equity history, composite). The old manual-book dashboard
+    // is demoted to /dashboard (linked from the fund page's Manual book card).
     path: '',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/fund/fund-dashboard.page').then(
+        (m) => m.FundDashboardPage,
+      ),
+  },
+  {
+    path: 'dashboard',
     canActivate: [authGuard],
     loadComponent: () =>
       import('./presentation/dashboard/dashboard.page').then(

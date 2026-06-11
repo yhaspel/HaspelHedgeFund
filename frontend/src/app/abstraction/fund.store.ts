@@ -7,6 +7,7 @@ import {
   AutopilotRunRow,
   ExecutedBook,
   FundComposite,
+  FundHistory,
   FundOverview,
 } from '../core/models/autopilot.model';
 
@@ -17,12 +18,14 @@ export class FundStore {
 
   private readonly _fund = signal<FundOverview | null>(null);
   private readonly _composite = signal<FundComposite | null>(null);
+  private readonly _navHistory = signal<FundHistory | null>(null);
   private readonly _autopilot = signal<Autopilot | null>(null);
   private readonly _history = signal<AutopilotRunRow[]>([]);
   private readonly _executed = signal<ExecutedBook | null>(null);
 
   readonly fund = this._fund.asReadonly();
   readonly composite = this._composite.asReadonly();
+  readonly navHistory = this._navHistory.asReadonly();
   readonly autopilot = this._autopilot.asReadonly();
   readonly history = this._history.asReadonly();
   readonly executed = this._executed.asReadonly();
@@ -37,6 +40,13 @@ export class FundStore {
     return this.api
       .get<FundComposite>(`/fund/composite/${q}`)
       .pipe(tap((r) => this._composite.set(r ?? null)));
+  }
+  // P10 §C2 — persisted NAV history (per-account + aggregate + SPY/QQQ, TWR).
+  loadNavHistory(days?: number): Observable<FundHistory> {
+    const q = days ? `?days=${days}` : '';
+    return this.api
+      .get<FundHistory>(`/fund/history/${q}`)
+      .pipe(tap((r) => this._navHistory.set(r ?? null)));
   }
   haltFund(): Observable<unknown> {
     return this.api.post('/fund/halt/', {}).pipe(tap(() => this.loadFund().subscribe()));

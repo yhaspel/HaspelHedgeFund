@@ -12,6 +12,7 @@ from .api_autopilot import (
 from .api_fund import (
     FundCompositeView,
     FundHaltView,
+    FundHistoryView,
     FundOverviewView,
     FundResumeView,
 )
@@ -135,6 +136,8 @@ urlpatterns = [
     path("fund/", FundOverviewView.as_view(), name="fund-overview"),
     # P10 §B5: the pods' validation curves combined vs SPY-TR/QQQ-TR.
     path("fund/composite/", FundCompositeView.as_view(), name="fund-composite"),
+    # P10 §C2: persisted NAV history (per-account + aggregate + SPY/QQQ, TWR).
+    path("fund/history/", FundHistoryView.as_view(), name="fund-history"),
     path("fund/halt/", FundHaltView.as_view(), name="fund-halt"),
     path("fund/resume/", FundResumeView.as_view(), name="fund-resume"),
 ]

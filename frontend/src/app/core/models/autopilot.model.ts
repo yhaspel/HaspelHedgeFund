@@ -95,6 +95,38 @@ export interface FundOverview {
   recommendations: string[];
 }
 
+// P10 §C2 — GET /api/fund/history/: persisted NAV history with time-weighted
+// (flow-adjusted) return indices + normalized SPY/QQQ overlays.
+export interface FundHistoryPoint {
+  date: string;
+  equity: number;
+  net_flow: number;
+  index: number;       // TWR index, base 100 — flow-immune
+  spy?: number;        // benchmark indices on the aggregate series only
+  qqq?: number;
+}
+
+export interface FundHistoryAccount {
+  strategy_id: number;
+  name: string;
+  kind: string;
+  portfolio_id: number | null;
+  points: FundHistoryPoint[];
+  twr_pct: number | null;
+  // §C4 realized-vs-expected strip: the validated annualized return from the
+  // pod's record-of-record backtest.
+  expected_ann_return_pct: number | null;
+  expected_backtest_id: number | null;
+}
+
+export interface FundHistory {
+  available: boolean;
+  reason: string | null;
+  per_account: FundHistoryAccount[];
+  aggregate: { points: FundHistoryPoint[]; twr_pct: number | null };
+  benchmarks: string[];
+}
+
 // P10 §B5 — GET /api/fund/composite/: the pods' stitched OOS validation curves
 // combined at configurable weights vs SPY-TR / QQQ-TR.
 export interface FundCompositeMember {

@@ -42,21 +42,36 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
       @if (loading()) {
         <div class="card p-4 text-xs text-text-3">Loading portfolios…</div>
       } @else if (store.hub(); as hub) {
+        <!-- P10 §C5: headline totals = REAL capital only (broker + manual,
+             marked to market). Strategy mirrors are parallel paper notional —
+             the old all-books cost-basis sum overstated real capital ~2.65×. -->
         <section class="kpi-row mb-4">
           <hf-kpi-tile eyebrow="Total cash"
                        [value]="'$' + (+hub.totals.cash | number: '1.2-2')"
-                       sub="across all books" />
+                       sub="broker + manual books" />
           <hf-kpi-tile eyebrow="Total equity"
                        [value]="'$' + (+hub.totals.equity | number: '1.2-2')"
-                       sub="cash + positions at cost" />
+                       sub="broker + manual · marked to market" />
           <hf-kpi-tile eyebrow="Books"
                        [value]="hub.totals.books.toString()"
-                       [sub]="hub.totals.books === 1 ? 'portfolio' : 'portfolios'" />
+                       [sub]="(+(hub.totals.mirror_books || 0)) > 0
+                          ? ('incl. ' + hub.totals.mirror_books + ' strategy paper books')
+                          : (hub.totals.books === 1 ? 'portfolio' : 'portfolios')" />
         </section>
 
         <section class="card p-0 overflow-hidden">
-          <div class="card-hd"><h2 class="title">Your books</h2></div>
-          @if (hub.books.length === 0) {
+          <div class="card-hd">
+            <h2 class="title">Your books</h2>
+            @if ((+(hub.totals.mirror_books || 0)) > 0) {
+              <button type="button" class="chip" [class.chip-on]="showMirrors()"
+                      (click)="showMirrors.set(!showMirrors())"
+                      data-test="hub-mirror-toggle">
+                Strategy paper books ({{ hub.totals.mirror_books }}) —
+                {{ '$' + (+(hub.totals.mirror_equity || '0') | number: '1.0-0') }} notional
+              </button>
+            }
+          </div>
+          @if (visibleBooks(hub).length === 0) {
             <hf-empty-state message="No portfolios yet"
               detail="Your Manual book will appear here automatically." />
           } @else {
@@ -73,7 +88,7 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
                 </tr>
               </thead>
               <tbody>
-                @for (book of hub.books; track book.portfolio_id) {
+                @for (book of visibleBooks(hub); track book.portfolio_id) {
                   <tr class="book-row" [routerLink]="book.link_route"
                       [attr.data-test]="'hub-row-' + book.kind + '-' + book.portfolio_id">
                     <td>
@@ -94,7 +109,9 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
                       </span>
                     </td>
                     <td class="text-right mono">{{ '$' + (+book.cash | number: '1.2-2') }}</td>
-                    <td class="text-right mono">{{ '$' + (+book.market_value | number: '1.2-2') }}</td>
+                    <td class="text-right mono" [title]="book.marked ? 'Marked to market' : 'Cost basis (mark unavailable)'">
+                      {{ '$' + (+book.market_value | number: '1.2-2') }}@if (!book.marked && book.positions_count > 0) {<span class="text-text-3">*</span>}
+                    </td>
                     <td class="text-right mono font-medium">{{ '$' + (+book.equity | number: '1.2-2') }}</td>
                     <td class="text-right mono">{{ book.positions_count }}</td>
                     <td class="text-right">
@@ -115,6 +132,14 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
   styles: [`
     .book-row { cursor: pointer; }
     .book-row:hover { background: var(--surface-2); }
+    .chip {
+      background: transparent; border: 1px solid var(--border); color: var(--text-2);
+      font-size: 11px; line-height: 1; padding: 0 10px; min-height: 24px;
+      display: inline-flex; align-items: center; border-radius: var(--r-full); cursor: pointer;
+    }
+    .chip:hover { background: var(--surface-2); }
+    .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+    .chip-on { background: var(--surface-2); color: var(--text); border-color: var(--text-3); }
     .open-link {
       display: inline-flex; align-items: center;
       color: var(--text-3); font-size: var(--fs-12);
@@ -130,6 +155,9 @@ export class PortfoliosHubPage implements OnInit {
   readonly store = inject(PortfolioStore);
   readonly loading = signal(true);
   readonly loadError = signal<string | null>(null);
+  // P10 §C5: strategy paper books (mirrors) hidden by default — they are an
+  // implementation detail of pods; the fund accounts are what matters.
+  readonly showMirrors = signal(false);
 
   ngOnInit(): void {
     this.store.loadHub().subscribe({
@@ -139,6 +167,11 @@ export class PortfoliosHubPage implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  visibleBooks(hub: { books: { kind: string }[] }): any[] {
+    const books = hub.books as any[];
+    return this.showMirrors() ? books : books.filter((b) => b.kind !== 'strategy');
   }
 
   kindLabel(kind: string): string {

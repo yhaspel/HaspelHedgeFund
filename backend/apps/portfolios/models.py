@@ -118,6 +118,52 @@ class Position(models.Model):
         return self.quantity < 0
 
 
+class PortfolioSnapshot(models.Model):
+    """P10 §C2 — persisted NAV history (one row per portfolio per date).
+
+    Before this model NO equity time-series existed anywhere: the hourly
+    ``guardrail_sweep`` computed each broker book's marked equity and threw it
+    away. Now the sweep upserts a row per day (last write for the day wins) and
+    the Alpaca portfolio-history backfill (§C3) seeds the past.
+
+    ``net_flow`` is the EXTERNAL cash flow on that date (deposits +,
+    withdrawals −, funding resets either sign). Returns built from this table
+    must be time-weighted: r_t = (equity_t − net_flow_t) / equity_{t−1} − 1, so
+    a ±$25K re-funding (the F1 capital tilt) or the acct-13 $1M→$100K reset
+    never prints as fake performance.
+    """
+
+    SOURCE_SWEEP = "sweep"
+    SOURCE_BACKFILL = "backfill"
+    SOURCE_MANUAL = "manual"
+    SOURCE_CHOICES = [
+        (SOURCE_SWEEP, "Guardrail sweep"),
+        (SOURCE_BACKFILL, "Broker history backfill"),
+        (SOURCE_MANUAL, "Manual"),
+    ]
+
+    portfolio = models.ForeignKey(
+        Portfolio, related_name="snapshots", on_delete=models.CASCADE,
+    )
+    date = models.DateField(db_index=True)
+    equity = models.DecimalField(max_digits=16, decimal_places=2)
+    cash = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    net_flow = models.DecimalField(
+        max_digits=16, decimal_places=2, default=Decimal("0"),
+    )
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_SWEEP)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("portfolio", "date")]
+        indexes = [models.Index(fields=["portfolio", "date"])]
+        ordering = ["date"]
+
+    def __str__(self) -> str:
+        return f"snapshot pf={self.portfolio_id} {self.date} eq={self.equity}"
+
+
 class PortfolioPreferences(models.Model):
     """P3: per-user Manual Book preferences (mark cadence + interval).
 
