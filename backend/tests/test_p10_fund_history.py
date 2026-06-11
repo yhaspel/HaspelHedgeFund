@@ -214,6 +214,24 @@ def test_fund_history_aggregate_flow_adjusted(db, client, user):
     assert agg["points"][-1]["equity"] == pytest.approx(125_000.0)
 
 
+def test_fund_history_member_joining_mid_grid_is_flow_not_performance(db, client, user):
+    """A member whose series starts AFTER the grid begins (clean-started backfill,
+    or a pod added to the fund later) must enter the aggregate as capital flow —
+    not print as a fake ~+100% aggregate gain on its join date."""
+    fund, members = _fund_of(user, n=2)
+    (_s0, a0), (_s1, a1) = members
+    d1, d2 = D0, D0 + dt.timedelta(days=1)
+    _snap(a0.portfolio, d1, 100_000)
+    _snap(a0.portfolio, d2, 100_000)                       # flat member
+    # a1 joins on d2 with full equity but only dust recorded flow (the acct-11
+    # clean-start shape: equity 100,555 / net_flow 783).
+    _snap(a1.portfolio, d2, 100_555, flow="783.02")
+    r = client.get("/api/fund/history/")
+    agg = r.json()["aggregate"]
+    assert agg["points"][-1]["equity"] == pytest.approx(200_555.0)
+    assert agg["twr_pct"] == pytest.approx(0.0, abs=1e-9)  # join ≠ performance
+
+
 def test_fund_history_empty(db, client, user):
     AutonomousFund.objects.create(owner=user, name="Fund")
     r = client.get("/api/fund/history/")

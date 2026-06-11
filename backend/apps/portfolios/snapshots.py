@@ -189,8 +189,16 @@ def fund_history(fund, *, days: int | None = None) -> dict:
             for sid in series_by_id:
                 p = by_date[sid].get(d)
                 if p is not None:
+                    if sid not in last:
+                        # A member entering the composite mid-grid (a clean-
+                        # started backfill, or a pod added to the fund later)
+                        # is CAPITAL joining the book, not performance — count
+                        # its entire first-day equity as flow, or the aggregate
+                        # TWR books the join as a fake gain.
+                        flow += p["equity"]
+                    else:
+                        flow += p["net_flow"]
                     last[sid] = p["equity"]
-                    flow += p["net_flow"]
                 eq += last.get(sid, 0.0)
             agg_points.append({"date": d, "equity": round(eq, 2), "net_flow": round(flow, 2)})
     agg_idx = twr_index(agg_points) if agg_points else []
