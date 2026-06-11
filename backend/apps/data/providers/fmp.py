@@ -384,6 +384,51 @@ class FmpProvider:
         with transaction.atomic():
             DailyBar.objects.bulk_create(objs, ignore_conflicts=True)
 
+    def upsert_recent_bars(self, ticker: str, start: dt.date, end: dt.date) -> int:
+        """Unconditionally fetch [start, end] from `/full` and UPSERT each row
+        (updating existing bars, not just inserting new ones).
+
+        Unlike `_ensure_bars_cached`, this never short-circuits on cache
+        completeness — it is the live-cycle freshness pre-flight (P10 §A1), where
+        the most-recent sessions are exactly what the cache heuristic skips and
+        what the deterministic sizers need. ``adjusted_close`` is seeded from the
+        dividend-adjusted endpoint (callers run `normalize_adjusted_tail`
+        afterwards to repair FMP's corrupt post-dividend tail). Returns the
+        number of rows written."""
+        url = f"{BASE_URL}/historical-price-eod/full"
+        params = {
+            "symbol": ticker, "from": start.isoformat(),
+            "to": end.isoformat(), "apikey": self.api_key,
+        }
+        resp = self._http.get(url, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+        historical: list[dict[str, Any]] = payload if isinstance(payload, list) else []
+        try:
+            adj_map = self.get_adjusted_closes(ticker, start, end)
+        except Exception:  # noqa: BLE001 — degrade to price-only rather than fail
+            adj_map = {}
+        written = 0
+        with transaction.atomic():
+            for row in historical:
+                d = dt.date.fromisoformat(str(row["date"])[:10])
+                close = Decimal(str(row.get("close", 0)))
+                adj = adj_map.get(d.isoformat())
+                adj_dec = Decimal(str(adj)) if adj is not None else close
+                DailyBar.objects.update_or_create(
+                    ticker=ticker, date=d, source=SOURCE,
+                    defaults={
+                        "open": Decimal(str(row.get("open", 0))),
+                        "high": Decimal(str(row.get("high", 0))),
+                        "low": Decimal(str(row.get("low", 0))),
+                        "close": close,
+                        "adjusted_close": adj_dec,
+                        "volume": int(row.get("volume", 0) or 0),
+                    },
+                )
+                written += 1
+        return written
+
     def get_adjusted_closes(self, ticker: str, start: dt.date, end: dt.date) -> dict[str, str]:
         """Map of ISO-date → true dividend+split-adjusted close.
 

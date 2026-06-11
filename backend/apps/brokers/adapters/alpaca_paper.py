@@ -253,6 +253,47 @@ def _make_client(api_key: str, api_secret: str):
 # --- Exception translation --------------------------------------------------
 
 
+# Alpaca returns HTTP 403 for BOTH genuine auth walls and certain ORDER
+# rejections (notably 40310000 "insufficient qty available for order"). The
+# latter must terminate as a rejection, not be mistaken for an auth blip and
+# walked back to a re-submittable `confirmed` state where it lingers forever
+# (idempotency.py BrokerAuthError path). Distinguish by the body's `code`.
+_ORDER_REJECT_403_CODES = frozenset({40310000})
+
+
+def _coerce_int(value) -> int | None:
+    """int(...) that tolerates int/str/None ('40310000' → 40310000)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _alpaca_error_code(exc: Exception) -> int | None:
+    """Best-effort extraction of Alpaca's numeric error ``code`` from an
+    APIError (direct attribute, then a JSON body parse). Tolerates the code
+    arriving as a string."""
+    import json
+
+    code = _coerce_int(getattr(exc, "code", None))
+    if code is not None:
+        return code
+    for blob in (getattr(exc, "_error", None), str(exc)):
+        if not blob:
+            continue
+        try:
+            data = json.loads(blob if isinstance(blob, str) else json.dumps(blob))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict):
+            code = _coerce_int(data.get("code"))
+            if code is not None:
+                return code
+    return None
+
+
 def _raise_translated(exc: Exception, op: str) -> None:
     """Translate Alpaca SDK errors into framework exceptions."""
     # Lazy import so the SDK isn't loaded at module import time.
@@ -260,6 +301,12 @@ def _raise_translated(exc: Exception, op: str) -> None:
 
     if isinstance(exc, APIError):
         status_code = getattr(exc, "status_code", None) or 0
+        code = _alpaca_error_code(exc)
+        # An order-domain 403 (e.g. insufficient qty) is the venue refusing the
+        # ORDER, not an auth failure — classify as a hard rejection so it
+        # terminates rather than walking back to a never-retried `confirmed`.
+        if status_code == 403 and code in _ORDER_REJECT_403_CODES:
+            raise BrokerError(f"Alpaca {op} → {status_code}: {exc}") from exc
         if status_code in (401, 403):
             raise BrokerAuthError(f"Alpaca {op} → {status_code}: {exc}") from exc
         if status_code >= 500:
