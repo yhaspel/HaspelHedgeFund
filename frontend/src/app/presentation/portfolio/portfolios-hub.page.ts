@@ -102,10 +102,13 @@ import { PortfolioStore } from '../../abstraction/portfolio.store';
                       }
                     </td>
                     <td>
+                      <!-- §3.5: the demo (mock) broker book is a historical
+                           artifact post-P10 — a plain gray pill, not the
+                           broker-green of real accounts. -->
                       <span class="pill" [class.info]="book.kind === 'manual'"
-                            [class.ok]="book.kind === 'broker'"
+                            [class.ok]="book.kind === 'broker' && !isDemo(book)"
                             [class.warn]="book.kind === 'strategy'">
-                        <span class="dot"></span>{{ kindLabel(book.kind) }}
+                        <span class="dot"></span>{{ kindLabel(book) }}
                       </span>
                     </td>
                     <td class="text-right mono">{{ '$' + (+book.cash | number: '1.2-2') }}</td>
@@ -174,9 +177,13 @@ export class PortfoliosHubPage implements OnInit {
     return this.showMirrors() ? books : books.filter((b) => b.kind !== 'strategy');
   }
 
-  kindLabel(kind: string): string {
-    if (kind === 'manual') return 'Manual';
-    if (kind === 'broker') return 'Broker';
+  isDemo(book: { kind: string; broker?: string }): boolean {
+    return book.kind === 'broker' && book.broker === 'mock';
+  }
+
+  kindLabel(book: { kind: string; broker?: string }): string {
+    if (book.kind === 'manual') return 'Manual';
+    if (book.kind === 'broker') return this.isDemo(book) ? 'Demo' : 'Broker';
     return 'Strategy';
   }
 }

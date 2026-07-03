@@ -1,5 +1,5 @@
 import { Component, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ModalComponent } from './modal.component';
 import { ConfirmService, PendingRequest } from './confirm.service';
 
@@ -15,7 +15,7 @@ let _seq = 0;
 @Component({
   selector: 'hf-confirm',
   standalone: true,
-  imports: [CommonModule, ModalComponent],
+  imports: [ModalComponent],
   template: `
     @if (svc.active(); as c) {
       <hf-modal [titleId]="titleId" (closed)="cancel()">
@@ -24,42 +24,50 @@ let _seq = 0;
             <h2 class="title" [id]="titleId">{{ c.title }}</h2>
           </div>
           <div class="card-bd">
-            <p class="confirm-body" *ngIf="c.body">{{ c.body }}</p>
+            @if (c.body) {
+              <p class="confirm-body">{{ c.body }}</p>
+            }
 
             <!-- prompt: a single text field (replaces native prompt) -->
-            <div class="field confirm-type" *ngIf="c.kind === 'prompt'">
-              <label class="lbl" [for]="inputId">{{ c.label || 'Value' }}</label>
-              <input
-                class="input sans"
-                [id]="inputId"
-                type="text"
-                autocomplete="off"
-                [placeholder]="c.placeholder || ''"
-                [value]="typed()"
-                (input)="typed.set($any($event.target).value)"
-                (keydown.enter)="accept()"
-              />
-            </div>
+            @if (c.kind === 'prompt') {
+              <div class="field confirm-type">
+                <label class="lbl" [for]="inputId">{{ c.label || 'Value' }}</label>
+                <input
+                  class="input sans"
+                  [id]="inputId"
+                  type="text"
+                  autocomplete="off"
+                  [placeholder]="c.placeholder || ''"
+                  [value]="typed()"
+                  (input)="typed.set($any($event.target).value)"
+                  (keydown.enter)="accept()"
+                />
+              </div>
+            }
 
             <!-- confirm with type-to-confirm gate (high-stakes actions) -->
-            <div class="field confirm-type" *ngIf="c.kind === 'confirm' && c.requireText as rt">
-              <label class="lbl" [for]="inputId">Type “{{ rt }}” to confirm</label>
-              <input
-                class="input sans"
-                [id]="inputId"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                [value]="typed()"
-                (input)="typed.set($any($event.target).value)"
-                (keydown.enter)="accept()"
-              />
-            </div>
+            @if (c.kind === 'confirm' && c.requireText; as rt) {
+              <div class="field confirm-type">
+                <label class="lbl" [for]="inputId">Type “{{ rt }}” to confirm</label>
+                <input
+                  class="input sans"
+                  [id]="inputId"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  [value]="typed()"
+                  (input)="typed.set($any($event.target).value)"
+                  (keydown.enter)="accept()"
+                />
+              </div>
+            }
           </div>
           <div class="confirm-ft">
-            <button class="btn" *ngIf="c.kind !== 'notify'" (click)="cancel()">
-              {{ c.cancelLabel || 'Cancel' }}
-            </button>
+            @if (c.kind !== 'notify') {
+              <button class="btn" (click)="cancel()">
+                {{ c.cancelLabel || 'Cancel' }}
+              </button>
+            }
             <button
               class="btn"
               [class.danger]="c.danger"

@@ -166,6 +166,8 @@ export interface PortfolioHubBook {
   link_route: string;
   /** Broker connection status, when kind === 'broker'. */
   status: string;
+  /** Broker adapter code (e.g. 'mock', 'alpaca_paper'), when kind === 'broker'. */
+  broker?: string;
 }
 
 export interface PortfolioHub {

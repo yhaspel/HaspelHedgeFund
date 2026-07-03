@@ -12,6 +12,12 @@ import { FormsModule } from '@angular/forms';
 
 import { WatchlistItem } from '../../core/models/screener.model';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import {
+  formatBigCompact,
+  formatNum2,
+  formatPct2,
+  formatPrice2dp,
+} from '../shared/format';
 import { TickerComponent } from '../shared/ticker.component';
 
 @Component({
@@ -68,7 +74,7 @@ import { TickerComponent } from '../shared/ticker.component';
                     <td><hf-ticker [ticker]="it.ticker"></hf-ticker></td>
                     <td class="num mono">{{ formatDecimal(it.price) }}</td>
                     <td class="num mono" [class.long]="(it.change_pct ?? 0) > 0" [class.short]="(it.change_pct ?? 0) < 0">
-                      {{ formatNumber(it.change_pct) }}%
+                      {{ formatChange(it.change_pct) }}
                     </td>
                     <td class="num mono">{{ formatNumber(it.rvol) }}</td>
                     <td class="num mono">{{ formatInt(it.volume) }}</td>
@@ -146,19 +152,16 @@ export class WatchlistPanelComponent {
   }
 
   formatDecimal(v: string | null | undefined): string {
-    if (v === null || v === undefined || v === '') return '—';
-    const n = Number(v);
-    return Number.isFinite(n)
-      ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : '—';
+    return formatPrice2dp(v);
+  }
+
+  /** Δ% — signed like the dashboard card; this table has no ▲/▼ glyph. */
+  formatChange(v: number | null | undefined): string {
+    return formatPct2(v, { signed: true });
   }
 
   formatNumber(v: number | null | undefined): string {
-    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-    return v.toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    return formatNum2(v);
   }
 
   formatInt(v: number | null | undefined): string {
@@ -167,13 +170,7 @@ export class WatchlistPanelComponent {
   }
 
   formatBig(v: string | null | undefined): string {
-    if (v === null || v === undefined || v === '') return '—';
-    const n = Number(v);
-    if (!Number.isFinite(n)) return '—';
-    if (Math.abs(n) >= 1e12) return (n / 1e12).toFixed(2) + 'T';
-    if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
-    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
-    return n.toLocaleString('en-US');
+    return formatBigCompact(v);
   }
 
   formatDate(iso: string): string {

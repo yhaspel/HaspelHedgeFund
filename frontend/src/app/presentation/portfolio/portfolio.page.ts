@@ -290,14 +290,8 @@ import { PopoverComponent } from '../shared/popover.component';
   `,
   styles: [
     `
-      .kpi-row {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 14px;
-      }
-      @media (max-width: 1100px) {
-        .kpi-row { grid-template-columns: 1fr 1fr; }
-      }
+      /* .kpi-row now lives in shell.css (shared with portfolios hub +
+         broker account overview). */
       .modal-overlay {
         position: fixed; inset: 0; background: rgba(0,0,0,0.6);
         z-index: var(--z-modal); display: flex; align-items: center;

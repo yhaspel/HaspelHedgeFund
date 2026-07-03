@@ -5,8 +5,11 @@ This module is the integration layer between the deterministic fitter in
 
 * ``ALWAYS_MODELLED_TICKERS`` — the 16-ticker reference universe (SPY, QQQ,
   the 11 SPDR sector ETFs, TLT, GLD, UUP). No background prewarm fits this
-  universe; user-triggered cycles populate ``RegimeSnapshot`` rows on demand
-  via their own user-keyed provider.
+  universe (the platform-key prewarm was deleted in the 2026-05-26 BYOK fix);
+  every deterministic pod cycle refits it at cycle start with the owner's
+  injected provider via
+  ``apps.portfolios.regime_scaling.refresh_regime_snapshots`` (idempotent
+  per as_of; independent of the gate flag).
 * ``fit_and_persist`` — fits a model for one ticker at one as_of_date and
   saves ``RegimeModel`` + ``RegimeSnapshot`` rows. Idempotent on
   ``(ticker, as_of_date, model_type, config_hash)``. **Requires** a caller-
@@ -41,10 +44,11 @@ from .markov_regime import (
 log = logging.getLogger(__name__)
 
 
-# Always-modelled universe: the 16 tickers the prewarm task fits daily so
-# the dashboard / strategy widgets / Markov consensus never wait on a cold
-# fetch. SPY + QQQ for broad equity, 11 SPDR sectors for sector breadth, and
-# TLT/GLD/UUP for the rates / commodity / FX dimensions.
+# Always-modelled universe: the 16 tickers every deterministic pod cycle
+# refits at cycle start (BYOK — owner's provider) so the dashboard / strategy
+# widgets / Markov consensus stay fresh. SPY + QQQ for broad equity, 11 SPDR
+# sectors for sector breadth, and TLT/GLD/UUP for the rates / commodity / FX
+# dimensions.
 ALWAYS_MODELLED_TICKERS: tuple[str, ...] = (
     "SPY", "QQQ",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
@@ -368,6 +372,27 @@ def compute_markov_consensus(
         "stale_count": stale_count,
         "missing": missing,
     }
+
+
+def update_stored_consensus(as_of_date: dt.date) -> dict | None:
+    """Recompute + store ``markov_consensus`` on the day's MacroSnapshot row.
+
+    Called after an in-cycle refit so the fund page's Markov cell reflects the
+    fresh RegimeSnapshot rows the same evening — the MacroSnapshot for the day
+    was typically computed hours earlier (with the then-stale consensus) and
+    would otherwise not refresh until the next day's snapshot build. Read-only
+    aggregation + one row update; NO LLM call (the narrative is untouched).
+    No-op returning None when no MacroSnapshot exists for the date.
+    """
+    from apps.data.models import MacroSnapshot
+
+    row = MacroSnapshot.objects.filter(as_of_date=as_of_date).first()
+    if row is None:
+        return None
+    consensus = compute_markov_consensus(as_of_date=as_of_date)
+    row.markov_consensus = consensus
+    row.save(update_fields=["markov_consensus"])
+    return consensus
 
 
 # Deterministic mapping between macro-agent risk bucket and Markov bucket.

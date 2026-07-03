@@ -8,7 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
 import { AppShellComponent } from '../shared/app-shell.component';
@@ -22,7 +22,6 @@ import { NewsDetailModalComponent } from './news-detail.modal';
   selector: 'hf-news-page',
   standalone: true,
   imports: [
-    CommonModule,
     RouterLink,
     AppShellComponent,
     EmptyStateComponent,
@@ -31,7 +30,7 @@ import { NewsDetailModalComponent } from './news-detail.modal';
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <hf-app-shell [crumbs]="[{label:'News'}]">
+    <hf-app-shell [crumbs]="[{ label: 'News' }]">
       <div class="news-page">
         <header class="page-head">
           <div>
@@ -40,14 +39,16 @@ import { NewsDetailModalComponent } from './news-detail.modal';
             <p class="subtitle">{{ rankingLine() }}</p>
           </div>
           <div class="head-right">
-            <ng-container *ngIf="sentimentEnabled()">
+            @if (sentimentEnabled()) {
               <div class="legend" aria-label="Sentiment legend">
                 <span class="leg-item bullish"><span class="leg-dot"></span>Bullish</span>
                 <span class="leg-item bearish"><span class="leg-dot"></span>Bearish</span>
                 <span class="leg-item neutral"><span class="leg-dot"></span>Neutral</span>
               </div>
-            </ng-container>
-            <span class="updated mono" *ngIf="updatedAt()">Updated {{ updatedAt() }}</span>
+            }
+            @if (updatedAt()) {
+              <span class="updated mono">Updated {{ updatedAt() }}</span>
+            }
             <button
               type="button"
               class="btn ghost"
@@ -55,45 +56,51 @@ import { NewsDetailModalComponent } from './news-detail.modal';
               [disabled]="store.refreshing()"
               data-test="news-refresh"
             >
-              <ng-container *ngIf="!store.refreshing(); else loadingTxt">Refresh</ng-container>
-              <ng-template #loadingTxt>Refreshing…</ng-template>
+              @if (!store.refreshing()) {
+                Refresh
+              } @else {
+                Refreshing…
+              }
             </button>
           </div>
         </header>
 
-        <p
-          class="toast"
-          role="status"
-          aria-live="polite"
-          *ngIf="store.toast() as t"
-        >{{ t }}</p>
+        @if (store.toast(); as t) {
+          <p class="toast" role="status" aria-live="polite">{{ t }}</p>
+        }
 
-        <ng-container *ngIf="store.meta() as meta">
-          <p class="warn" role="status" *ngIf="meta.sentiment_warning">
-            {{ meta.sentiment_warning }}
-          </p>
-          <p class="warn subtle" *ngIf="meta.warnings.length">
-            {{ providerWarningText(meta.warnings) }}
-          </p>
-        </ng-container>
+        @if (store.meta(); as meta) {
+          @if (meta.sentiment_warning) {
+            <p class="warn" role="status">
+              {{ meta.sentiment_warning }}
+            </p>
+          }
+          @if (meta.warnings.length) {
+            <p class="warn subtle">
+              {{ providerWarningText(meta.warnings) }}
+            </p>
+          }
+        }
 
-        <ng-container *ngIf="store.loading() && !store.items().length; else loaded">
+        @if (store.loading() && !store.items().length) {
           <div class="grid skeletons">
-            <div class="skel" *ngFor="let _ of [].constructor(8)"></div>
+            @for (_ of [].constructor(8); track _) {
+              <div class="skel"></div>
+            }
           </div>
-        </ng-container>
-        <ng-template #loaded>
-          <ng-container *ngIf="store.items().length; else emptyTpl">
+        } @else {
+          @if (store.items().length) {
             <div class="grid">
-              <hf-news-tile
-                *ngFor="let item of store.items(); trackBy: trackById"
-                [item]="item"
-                [sentimentEnabled]="sentimentEnabled()"
-                (open)="onOpen($event)"
-              ></hf-news-tile>
+              @for (item of store.items(); track trackById($index, item)) {
+                <hf-news-tile
+                  [item]="item"
+                  [sentimentEnabled]="sentimentEnabled()"
+                  (open)="onOpen($event)"
+                ></hf-news-tile>
+              }
             </div>
             <div class="more-row">
-              <ng-container *ngIf="store.hasMore(); else noMore">
+              @if (store.hasMore()) {
                 <button
                   type="button"
                   class="btn ghost"
@@ -101,41 +108,33 @@ import { NewsDetailModalComponent } from './news-detail.modal';
                   [disabled]="store.loadingMore()"
                   data-test="news-load-more"
                 >
-                  <ng-container *ngIf="!store.loadingMore(); else loadingMoreTxt">
+                  @if (!store.loadingMore()) {
                     Load more news ({{ remainingCount() }} more)
-                  </ng-container>
-                  <ng-template #loadingMoreTxt>
-                    <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                  } @else {
+                    <span class="dots" aria-hidden="true"
+                      ><span></span><span></span><span></span
+                    ></span>
                     <span aria-live="polite">{{ loadMoreStageLabel() }}</span>
-                  </ng-template>
+                  }
                 </button>
-              </ng-container>
-              <ng-template #noMore>
+              } @else {
                 <span class="more-end mono">
                   Showing all {{ store.items().length }} stories ranked today.
                 </span>
-              </ng-template>
+              }
             </div>
-          </ng-container>
-          <ng-template #emptyTpl>
-            <hf-empty-state
-              [message]="emptyMessage()"
-              [detail]="emptyDetail()"
-            >
-              <a
-                *ngIf="store.meta()?.needs_keys"
-                routerLink="/settings/models"
-                class="btn primary mt-3"
-              >Set your data keys</a>
+          } @else {
+            <hf-empty-state [message]="emptyMessage()" [detail]="emptyDetail()">
+              @if (store.meta()?.needs_keys) {
+                <a routerLink="/settings/models" class="btn primary mt-3">Set your data keys</a>
+              }
             </hf-empty-state>
-          </ng-template>
-        </ng-template>
+          }
+        }
       </div>
-      <hf-news-detail-modal
-        *ngIf="selected() as sel"
-        [item]="sel"
-        (closed)="closeModal()"
-      ></hf-news-detail-modal>
+      @if (selected(); as sel) {
+        <hf-news-detail-modal [item]="sel" (closed)="closeModal()"></hf-news-detail-modal>
+      }
     </hf-app-shell>
   `,
   styles: [
@@ -231,8 +230,13 @@ import { NewsDetailModalComponent } from './news-detail.modal';
         animation: pulse 1.4s ease-in-out infinite;
       }
       @keyframes pulse {
-        0%, 100% { opacity: 0.4; }
-        50% { opacity: 0.8; }
+        0%,
+        100% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 0.8;
+        }
       }
       .more-row {
         display: flex;
@@ -257,14 +261,29 @@ import { NewsDetailModalComponent } from './news-detail.modal';
         opacity: 0.35;
         animation: dot-bounce 1.1s ease-in-out infinite;
       }
-      .dots span:nth-child(2) { animation-delay: 0.15s; }
-      .dots span:nth-child(3) { animation-delay: 0.3s; }
+      .dots span:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .dots span:nth-child(3) {
+        animation-delay: 0.3s;
+      }
       @keyframes dot-bounce {
-        0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
-        40% { opacity: 1; transform: translateY(-2px); }
+        0%,
+        80%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        40% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
       }
       @media (prefers-reduced-motion: reduce) {
-        .dots span { animation: none; opacity: 0.7; }
+        .dots span {
+          animation: none;
+          opacity: 0.7;
+        }
       }
     `,
   ],
@@ -278,9 +297,7 @@ export class NewsPage implements OnInit {
 
   readonly sentimentEnabled = computed(() => this.store.sentimentEnabled());
   readonly loadMoreStageLabel = computed(() =>
-    this.loadMoreStage() === 'sentiment'
-      ? 'AI sentiment analysis…'
-      : 'Loading news…',
+    this.loadMoreStage() === 'sentiment' ? 'AI sentiment analysis…' : 'Loading news…',
   );
   readonly updatedAt = computed(() => {
     const meta = this.store.meta();
@@ -293,15 +310,12 @@ export class NewsPage implements OnInit {
     const hours = Math.floor(diff / 60);
     return `${hours}h ago`;
   });
-  readonly rankingLine = computed(() =>
-    this.store.meta()?.ranking_basis ||
-    'Ranked by recency, breadth of coverage & source weight.',
+  readonly rankingLine = computed(
+    () =>
+      this.store.meta()?.ranking_basis || 'Ranked by recency, breadth of coverage & source weight.',
   );
   readonly remainingCount = computed(() =>
-    Math.max(
-      0,
-      (this.store.totalAvailable() || 0) - this.store.items().length,
-    ),
+    Math.max(0, (this.store.totalAvailable() || 0) - this.store.items().length),
   );
 
   constructor() {
@@ -373,7 +387,8 @@ export class NewsPage implements OnInit {
       }
     }
     if (!names.length) return '';
-    if (names.length === 1) return `${capitalize(names[0])} unavailable — showing other providers only.`;
+    if (names.length === 1)
+      return `${capitalize(names[0])} unavailable — showing other providers only.`;
     return `${names.map(capitalize).join(' & ')} unavailable — feed may be incomplete.`;
   }
 

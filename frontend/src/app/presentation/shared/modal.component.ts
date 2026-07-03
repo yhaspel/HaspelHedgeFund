@@ -9,7 +9,6 @@ import {
   Output,
   ViewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 let _modalIdSeq = 0;
 
@@ -23,23 +22,27 @@ let _modalIdSeq = 0;
  * body, footer) inside.
  *
  * Usage:
- *   <hf-modal *ngIf="open" titleText="Edit position" (closed)="onCancel()">
- *     <div class="card-hd"><h2 class="title">…</h2></div>
- *     …
- *   </hf-modal>
+ *   @if (open) {
+ *     <hf-modal titleText="Edit position" (closed)="onCancel()">
+ *       <div class="card-hd"><h2 class="title">…</h2></div>
+ *       …
+ *     </hf-modal>
+ *   }
  */
 @Component({
   selector: 'hf-modal',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="modal-overlay" (click)="onOverlayClick($event)" #overlay>
-      <div #dialog
-           class="hf-modal-dialog"
-           role="dialog"
-           aria-modal="true"
-           [attr.aria-labelledby]="titleId"
-           tabindex="-1">
+      <div
+        #dialog
+        class="hf-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-labelledby]="titleId"
+        tabindex="-1"
+      >
         <ng-content></ng-content>
       </div>
     </div>

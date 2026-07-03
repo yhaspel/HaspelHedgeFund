@@ -12,7 +12,6 @@ import {
   computed,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 import { MarketNewsItem } from '../../core/models/news.model';
 
@@ -31,7 +30,7 @@ import { MarketNewsItem } from '../../core/models/news.model';
 @Component({
   selector: 'hf-news-chyron',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -48,25 +47,21 @@ import { MarketNewsItem } from '../../core/models/news.model';
         type="button"
         class="pause-btn"
         (click)="togglePaused()"
-        [attr.aria-label]="paused() ? 'Resume scrolling news banner' : 'Pause scrolling news banner'"
+        [attr.aria-label]="
+          paused() ? 'Resume scrolling news banner' : 'Pause scrolling news banner'
+        "
         [attr.aria-pressed]="paused()"
       >
-        <svg
-          *ngIf="!paused()"
-          width="14"
-          height="14"
-          aria-hidden="true"
-        >
-          <use href="/icons.svg#i-pause" />
-        </svg>
-        <svg
-          *ngIf="paused()"
-          width="14"
-          height="14"
-          aria-hidden="true"
-        >
-          <use href="/icons.svg#i-play" />
-        </svg>
+        @if (!paused()) {
+          <svg width="14" height="14" aria-hidden="true">
+            <use href="/icons.svg#i-pause" />
+          </svg>
+        }
+        @if (paused()) {
+          <svg width="14" height="14" aria-hidden="true">
+            <use href="/icons.svg#i-play" />
+          </svg>
+        }
       </button>
       <button
         type="button"
@@ -78,13 +73,9 @@ import { MarketNewsItem } from '../../core/models/news.model';
         <svg width="13" height="13" aria-hidden="true"><use href="/icons.svg#i-x" /></svg>
       </button>
       <div class="track-wrap" aria-hidden="true">
-        <div
-          #track
-          class="track"
-          [style.animationDuration.s]="animationSeconds()"
-        >
-          <ng-container *ngFor="let copy of copies; let copyIdx = index">
-            <ng-container *ngFor="let item of items; let i = index">
+        <div #track class="track" [style.animationDuration.s]="animationSeconds()">
+          @for (copy of copies; track copy; let copyIdx = $index) {
+            @for (item of items; track item; let i = $index) {
               <button
                 type="button"
                 class="hl"
@@ -92,32 +83,33 @@ import { MarketNewsItem } from '../../core/models/news.model';
                 (click)="open.emit(item)"
                 [attr.data-key]="copyIdx + '-' + i"
               >
-                <span
-                  class="dot"
-                  *ngIf="item.sentiment"
-                  [attr.data-sent]="item.sentiment"
-                  aria-hidden="true"
-                ></span>
+                @if (item.sentiment) {
+                  <span class="dot" [attr.data-sent]="item.sentiment" aria-hidden="true"></span>
+                }
                 <span class="text">{{ item.headline }}</span>
                 <span class="sep" aria-hidden="true">•</span>
               </button>
-            </ng-container>
-          </ng-container>
+            }
+          }
         </div>
       </div>
       <ul class="sr-only-list">
-        <li *ngFor="let item of items; let i = index">
-          <button
-            type="button"
-            class="sr-hl"
-            (click)="open.emit(item)"
-            (focus)="onFocusIn()"
-            (blur)="onFocusOut()"
-          >
-            <span class="sr-only">{{ srLabel(item) }}</span>
-            <span class="sr-only" *ngIf="item.sentiment">sentiment {{ item.sentiment }}</span>
-          </button>
-        </li>
+        @for (item of items; track item; let i = $index) {
+          <li>
+            <button
+              type="button"
+              class="sr-hl"
+              (click)="open.emit(item)"
+              (focus)="onFocusIn()"
+              (blur)="onFocusOut()"
+            >
+              <span class="sr-only">{{ srLabel(item) }}</span>
+              @if (item.sentiment) {
+                <span class="sr-only">sentiment {{ item.sentiment }}</span>
+              }
+            </button>
+          </li>
+        }
       </ul>
     </div>
   `,
@@ -135,11 +127,7 @@ import { MarketNewsItem } from '../../core/models/news.model';
         display: flex;
         align-items: center;
         gap: 0;
-        background: linear-gradient(
-          to right,
-          var(--surface-2) 0,
-          var(--surface) 100%
-        );
+        background: linear-gradient(to right, var(--surface-2) 0, var(--surface) 100%);
         border-top: 1px solid var(--border-2);
         border-bottom: 1px solid var(--border-2);
         height: 32px;

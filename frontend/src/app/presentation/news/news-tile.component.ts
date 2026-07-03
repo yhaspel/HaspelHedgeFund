@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  EventEmitter,
-  Input,
-  Output,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 
 import { MarketNewsItem, Sentiment } from '../../core/models/news.model';
 import { languageName } from './language-name';
@@ -21,7 +14,7 @@ import { languageName } from './language-name';
 @Component({
   selector: 'hf-news-tile',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <button
@@ -34,27 +27,32 @@ import { languageName } from './language-name';
       [attr.aria-label]="ariaLabel()"
     >
       <header class="hd">
-        <span class="dot" *ngIf="showSentiment && item.sentiment" [attr.data-sent]="item.sentiment" aria-hidden="true"></span>
+        @if (showSentiment && item.sentiment) {
+          <span class="dot" [attr.data-sent]="item.sentiment" aria-hidden="true"></span>
+        }
         <h3 class="headline">{{ item.headline }}</h3>
       </header>
-      <p class="summary" *ngIf="item.summary">{{ item.summary }}</p>
+      @if (item.summary) {
+        <p class="summary">{{ item.summary }}</p>
+      }
       <footer class="ft">
         <span class="src">{{ item.source || item.provider }}</span>
         <span class="sep" aria-hidden="true">•</span>
         <span class="time mono">{{ relativeTime }}</span>
-        <ng-container *ngIf="showSentiment && item.sentiment">
+        @if (showSentiment && item.sentiment) {
           <span class="sep" aria-hidden="true">•</span>
           <span class="pill sentiment" [attr.data-sent]="item.sentiment">{{ item.sentiment }}</span>
-        </ng-container>
-        <ng-container *ngIf="item.translated_from">
+        }
+        @if (item.translated_from) {
           <span class="sep" aria-hidden="true">•</span>
-          <span class="pill xlate"
-                [attr.aria-label]="'auto-translated from ' + translatedLabel">Auto-translated from {{ translatedLabel }}</span>
-        </ng-container>
-        <ng-container *ngIf="item.symbols?.length">
+          <span class="pill xlate" [attr.aria-label]="'auto-translated from ' + translatedLabel"
+            >Auto-translated from {{ translatedLabel }}</span
+          >
+        }
+        @if (item.symbols?.length) {
           <span class="sep" aria-hidden="true">•</span>
           <span class="syms mono">{{ item.symbols.slice(0, 3).join(' ') }}</span>
-        </ng-container>
+        }
       </footer>
     </button>
   `,
@@ -77,7 +75,10 @@ import { languageName } from './language-name';
         border-left: 3px solid var(--border-2);
         color: var(--text);
         cursor: pointer;
-        transition: border-color 80ms ease, transform 80ms ease, box-shadow 80ms ease;
+        transition:
+          border-color 80ms ease,
+          transform 80ms ease,
+          box-shadow 80ms ease;
       }
       .tile:hover {
         border-color: var(--border-2);
@@ -211,10 +212,7 @@ export class NewsTileComponent {
   }
 
   ariaLabel(): string {
-    const sent =
-      this.showSentiment && this.item.sentiment
-        ? ` — ${this.item.sentiment}`
-        : '';
+    const sent = this.showSentiment && this.item.sentiment ? ` — ${this.item.sentiment}` : '';
     return `${this.item.headline}${sent}`;
   }
 }
