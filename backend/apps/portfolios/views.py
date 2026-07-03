@@ -167,6 +167,9 @@ class PortfolioHubView(APIView):
                     book["subtitle"] = f"{display} · {ba.mode}"
                     book["link_route"] = f"/broker-accounts/{ba.id}"
                     book["status"] = ba.connection_status
+                    # 2026-07-03 review §3.5: let the hub render the demo
+                    # (mock) broker distinctly from real broker accounts.
+                    book["broker"] = ba.broker
                 else:
                     book["subtitle"] = "Broker book"
                     book["link_route"] = "/broker-accounts"

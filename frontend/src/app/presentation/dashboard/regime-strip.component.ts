@@ -132,11 +132,16 @@ type PillKind = 'ok' | 'warn' | 'err' | 'info' | '';
               </span>
             } @else {
               <span class="eyebrow">Markov consensus</span>
-              <p class="muted">Unavailable — no fresh regime snapshots.</p>
+              <p class="muted">
+                Unavailable — no fresh regime snapshots. Snapshots refit at
+                each pod cycle (weekly, with your data key).
+              </p>
             }
           } @else {
             <span class="eyebrow">Markov consensus</span>
-            <p class="muted">Unavailable.</p>
+            <p class="muted">
+              Unavailable — refits at the next pod cycle.
+            </p>
           }
         </div>
       } @else {
@@ -338,7 +343,9 @@ export class RegimeStripComponent {
   markovTooltip(mc: MarkovConsensus): string {
     const header =
       'Markov regime consensus — deterministic, price-based regime detector ' +
-      'run nightly on SPY, QQQ, the 11 SPDR sector ETFs, and TLT/GLD/UUP.';
+      'on SPY, QQQ, the 11 SPDR sector ETFs, and TLT/GLD/UUP. Snapshots ' +
+      'refit at each pod cycle using your provider key ' +
+      '(BYOK — there is no platform-key prewarm).';
     const strength = (mc.consensus_strength * 100).toFixed(0);
     const tally =
       `${mc.vote['bull'] ?? 0} bull · ${mc.vote['sideways'] ?? 0} sideways · ` +

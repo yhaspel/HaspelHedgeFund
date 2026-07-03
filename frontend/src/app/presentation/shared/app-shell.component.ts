@@ -1,5 +1,5 @@
 import { Component, HostListener, Input, OnInit, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
 import { InvestorProfileStore } from '../../abstraction/investor-profile.store';
@@ -75,7 +75,6 @@ const SYSTEM_ITEMS: NavItem[] = [
   selector: 'hf-app-shell',
   standalone: true,
   imports: [
-    CommonModule,
     RouterLink,
     RouterLinkActive,
     CommandPaletteComponent,
@@ -99,24 +98,42 @@ const SYSTEM_ITEMS: NavItem[] = [
           @for (g of navGroups; track g.label) {
             <div class="nav-group" role="group" [attr.aria-label]="g.label">
               @if (g.collapsible) {
-                <button type="button" class="nav-group-toggle"
-                        (click)="toggleResearch()"
-                        [attr.aria-expanded]="researchOpen()"
-                        [attr.aria-label]="(researchOpen() ? 'Collapse ' : 'Expand ') + g.label + ' group'">
+                <button
+                  type="button"
+                  class="nav-group-toggle"
+                  (click)="toggleResearch()"
+                  [attr.aria-expanded]="researchOpen()"
+                  [attr.aria-label]="
+                    (researchOpen() ? 'Collapse ' : 'Expand ') + g.label + ' group'
+                  "
+                >
                   <span class="nav-group-label">{{ g.label }}</span>
-                  <svg width="10" height="10" aria-hidden="true" class="chev"
-                       [class.open]="researchOpen()"><use href="/icons.svg#i-chevron-dn" /></svg>
+                  <svg
+                    width="10"
+                    height="10"
+                    aria-hidden="true"
+                    class="chev"
+                    [class.open]="researchOpen()"
+                  >
+                    <use href="/icons.svg#i-chevron-dn" />
+                  </svg>
                 </button>
               } @else {
                 <span class="nav-group-label" aria-hidden="true">{{ g.label }}</span>
               }
               @if (!g.collapsible || researchOpen()) {
                 @for (item of g.items; track item.link) {
-                  <a class="nav-btn" [routerLink]="item.link"
-                     [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
-                     routerLinkActive="active" #rla="routerLinkActive"
-                     [attr.aria-current]="rla.isActive ? 'page' : null">
-                    <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
+                  <a
+                    class="nav-btn"
+                    [routerLink]="item.link"
+                    [routerLinkActiveOptions]="{ exact: item.exact ?? false }"
+                    routerLinkActive="active"
+                    #rla="routerLinkActive"
+                    [attr.aria-current]="rla.isActive ? 'page' : null"
+                  >
+                    <svg width="18" height="18" aria-hidden="true">
+                      <use [attr.href]="'/icons.svg#' + item.icon" />
+                    </svg>
                     <span class="nav-label">{{ item.label }}</span>
                   </a>
                 }
@@ -128,10 +145,16 @@ const SYSTEM_ITEMS: NavItem[] = [
         <div class="nav-group nav-system" role="group" aria-label="System">
           <span class="nav-group-label" aria-hidden="true">System</span>
           @for (item of systemItems; track item.link) {
-            <a class="nav-btn" [routerLink]="item.link"
-               routerLinkActive="active" #rlaSys="routerLinkActive"
-               [attr.aria-current]="rlaSys.isActive ? 'page' : null">
-              <svg width="18" height="18" aria-hidden="true"><use [attr.href]="'/icons.svg#' + item.icon" /></svg>
+            <a
+              class="nav-btn"
+              [routerLink]="item.link"
+              routerLinkActive="active"
+              #rlaSys="routerLinkActive"
+              [attr.aria-current]="rlaSys.isActive ? 'page' : null"
+            >
+              <svg width="18" height="18" aria-hidden="true">
+                <use [attr.href]="'/icons.svg#' + item.icon" />
+              </svg>
               <span class="nav-label">{{ item.label }}</span>
             </a>
           }
@@ -142,15 +165,27 @@ const SYSTEM_ITEMS: NavItem[] = [
           <nav class="crumbs" aria-label="Breadcrumb">
             <a routerLink="/">Haspel Hedge Fund</a>
             <span class="sep" aria-hidden="true">/</span>
-            <ng-container *ngFor="let c of crumbs; let last = last">
-              <a *ngIf="!last && c.link" [routerLink]="c.link">{{ c.label }}</a>
-              <span *ngIf="!last && !c.link">{{ c.label }}</span>
-              <span class="cur" *ngIf="last" aria-current="page">{{ c.label }}</span>
-              <span class="sep" *ngIf="!last" aria-hidden="true">/</span>
-            </ng-container>
+            @for (c of crumbs; track c; let last = $last) {
+              @if (!last && c.link) {
+                <a [routerLink]="c.link">{{ c.label }}</a>
+              }
+              @if (!last && !c.link) {
+                <span>{{ c.label }}</span>
+              }
+              @if (last) {
+                <span class="cur" aria-current="page">{{ c.label }}</span>
+              }
+              @if (!last) {
+                <span class="sep" aria-hidden="true">/</span>
+              }
+            }
           </nav>
-          <button type="button" class="gsearch" (click)="openPalette()"
-                  aria-label="Open command palette ⌘K">
+          <button
+            type="button"
+            class="gsearch"
+            (click)="openPalette()"
+            aria-label="Open command palette ⌘K"
+          >
             <svg width="14" height="14" aria-hidden="true">
               <use href="/icons.svg#i-search" />
             </svg>
@@ -158,19 +193,26 @@ const SYSTEM_ITEMS: NavItem[] = [
             <span class="kbd">{{ paletteShortcutHint() }}</span>
           </button>
           <div class="flex items-center gap-3">
-            <button class="icon-btn" (click)="toggleTheme()"
-                    [attr.aria-label]="themeToggleLabel()"
-                    [attr.aria-pressed]="theme() === 'dark'">
+            <button
+              class="icon-btn"
+              (click)="toggleTheme()"
+              [attr.aria-label]="themeToggleLabel()"
+              [attr.aria-pressed]="theme() === 'dark'"
+            >
               <svg width="16" height="16" aria-hidden="true">
                 <use [attr.href]="theme() === 'dark' ? '/icons.svg#i-sun' : '/icons.svg#i-moon'" />
               </svg>
             </button>
             @if (auth.user(); as u) {
-              <a routerLink="/profile"
-                 class="email-link mono text-2xs text-text-2"
-                 aria-label="Your profile"
-                 (mouseenter)="popEmail.show()" (mouseleave)="popEmail.maybeHide()"
-                 (focus)="popEmail.show()" (blur)="popEmail.maybeHide()">
+              <a
+                routerLink="/profile"
+                class="email-link mono text-2xs text-text-2"
+                aria-label="Your profile"
+                (mouseenter)="popEmail.show()"
+                (mouseleave)="popEmail.maybeHide()"
+                (focus)="popEmail.show()"
+                (blur)="popEmail.maybeHide()"
+              >
                 {{ u.email }}
               </a>
               <hf-popover #popEmail placement="bottom" align="end" size="compact">
@@ -182,23 +224,25 @@ const SYSTEM_ITEMS: NavItem[] = [
                 }
               </hf-popover>
             }
-            <button *ngIf="auth.user()" class="btn ghost sm" (click)="auth.logout()">Log out</button>
+            @if (auth.user()) {
+              <button class="btn ghost sm" (click)="auth.logout()">Log out</button>
+            }
           </div>
         </div>
         @if (showBanner()) {
           <div class="nudge-banner" role="status">
             <span>
-              Personalize your analyses — take the 2-minute investor
-              questionnaire and the council will calibrate to you.
+              Personalize your analyses — take the 2-minute investor questionnaire and the council
+              will calibrate to you.
             </span>
             <div class="actions">
-              <a class="btn primary sm" routerLink="/profile/questionnaire">
-                Take it
-              </a>
-              <button type="button"
-                      class="btn ghost sm"
-                      (click)="dismissNudge()"
-                      aria-label="Dismiss reminder for ~30 days">
+              <a class="btn primary sm" routerLink="/profile/questionnaire"> Take it </a>
+              <button
+                type="button"
+                class="btn ghost sm"
+                (click)="dismissNudge()"
+                aria-label="Dismiss reminder for ~30 days"
+              >
                 Dismiss
               </button>
             </div>
@@ -255,7 +299,10 @@ const SYSTEM_ITEMS: NavItem[] = [
         cursor: pointer;
         position: relative;
       }
-      .email-link:hover { color: var(--text); text-decoration: underline; }
+      .email-link:hover {
+        color: var(--text);
+        text-decoration: underline;
+      }
       .nudge-banner {
         display: flex;
         align-items: center;
@@ -267,7 +314,10 @@ const SYSTEM_ITEMS: NavItem[] = [
         border-bottom: 1px solid var(--border);
         font-size: 12.5px;
       }
-      .nudge-banner .actions { display: flex; gap: 8px; }
+      .nudge-banner .actions {
+        display: flex;
+        gap: 8px;
+      }
     `,
   ],
 })
@@ -314,7 +364,7 @@ export class AppShellComponent implements OnInit {
 
   // ADR 0004: global command palette state.
   readonly paletteOpen = signal(false);
-  readonly paletteShortcutHint = computed(() => this.isMac() ? '⌘K' : 'Ctrl K');
+  readonly paletteShortcutHint = computed(() => (this.isMac() ? '⌘K' : 'Ctrl K'));
 
   readonly showWelcomeModal = computed(
     () => this.profile.nudge().form === 'modal' && this.profile.nudge().due,
@@ -322,9 +372,7 @@ export class AppShellComponent implements OnInit {
   readonly showBanner = computed(
     () => this.profile.nudge().form === 'banner' && this.profile.nudge().due,
   );
-  readonly profileType = computed(
-    () => this.profile.active()?.analysis?.investor_type ?? '',
-  );
+  readonly profileType = computed(() => this.profile.active()?.analysis?.investor_type ?? '');
 
   openPalette(): void {
     this.paletteOpen.set(true);
@@ -345,8 +393,11 @@ export class AppShellComponent implements OnInit {
 
   ngOnInit(): void {
     // Read initial theme — was applied pre-paint by main.ts; keep signal in sync.
-    const stored = (typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null) as Theme | null;
-    const current = (document.documentElement.dataset['theme'] as Theme | undefined) ?? stored ?? 'dark';
+    const stored = (
+      typeof localStorage !== 'undefined' ? localStorage.getItem(THEME_KEY) : null
+    ) as Theme | null;
+    const current =
+      (document.documentElement.dataset['theme'] as Theme | undefined) ?? stored ?? 'dark';
     this.theme.set(current === 'light' ? 'light' : 'dark');
     document.documentElement.dataset['theme'] = this.theme();
 
@@ -359,7 +410,9 @@ export class AppShellComponent implements OnInit {
           this.news.loadFeed().subscribe();
         }
       },
-      error: () => { /* not fatal — chyron just stays hidden */ },
+      error: () => {
+        /* not fatal — chyron just stays hidden */
+      },
     });
 
     // Load profile bundle so the welcome modal / banner / hover popover have

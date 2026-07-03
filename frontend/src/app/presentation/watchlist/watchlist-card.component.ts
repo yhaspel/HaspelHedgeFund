@@ -15,6 +15,7 @@ import { Router, RouterLink } from '@angular/router';
 
 import { WatchlistStore } from '../../abstraction/watchlist.store';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { formatPct2 } from '../shared/format';
 import { TickerComponent } from '../shared/ticker.component';
 
 @Component({
@@ -153,8 +154,6 @@ export class WatchlistCardComponent implements OnInit {
   }
 
   formatChange(v: number | null | undefined): string {
-    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-    const sign = v >= 0 ? '+' : '';
-    return `${sign}${v.toFixed(2)}%`;
+    return formatPct2(v, { signed: true });
   }
 }

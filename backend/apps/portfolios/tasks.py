@@ -987,7 +987,22 @@ def _run_risk_parity_cycle(
 
     # P2m: optional Markov regime gate excludes sleeves whose 5-day bear
     # probability exceeds the configured threshold. Off by default.
-    from .regime_scaling import regime_gate_excluded_sleeves
+    # 2026-07-03: refit BEFORE reading — the BYOK fix (7a93148) removed the
+    # platform-key prewarm, so pod cycles now refresh the snapshots with the
+    # owner's provider (sleeves + 16-ETF reference universe), UNCONDITIONALLY
+    # of the gate flag: the refit feeds the fund page's Markov consensus (a
+    # landing-page surface), while the gate flag only controls exclusions.
+    # Weekly cadence < the 10-day staleness window ⇒ both stay fresh. Never
+    # raises; per-ticker failures surface in beta_diagnostics.markov_refit
+    # and the gate stays fail-open — but now visibly, via markov_gate_status.
+    from .regime_scaling import (
+        markov_gate_status,
+        refresh_regime_snapshots,
+        regime_gate_excluded_sleeves,
+    )
+    markov_refit = refresh_regime_snapshots(
+        strategy, members, as_of=as_of, data_provider=data_provider,
+    )
     markov_excluded = regime_gate_excluded_sleeves(strategy, members, as_of=as_of)
 
     result = construct_risk_parity(
@@ -1151,6 +1166,11 @@ def _run_risk_parity_cycle(
         "markov_gate_enabled": bool(strategy.enable_markov_regime_gate),
         "markov_bear_prob_5d_threshold": float(strategy.markov_bear_prob_5d_threshold),
         "markov_excluded_sleeves": markov_excluded,
+        # Honesty flags (2026-07-03 review §2): an empty exclusion map is
+        # ambiguous — 'active' means the gate really evaluated fresh
+        # snapshots; 'inactive_no_fresh_snapshots' means it was blind.
+        "markov_gate_status": markov_gate_status(strategy, members, as_of=as_of),
+        "markov_refit": markov_refit,
         # P02j review: surface the council-veto branch so the UI can show
         # whether vetoes happened and which sleeves were trimmed.
         "enable_council_veto": bool(strategy.enable_council_veto),
@@ -1205,6 +1225,14 @@ def _run_momentum_cycle(
 
     data_provider = get_fmp_provider(user=strategy.user)
     tickers = [t for t, _ in members]
+    # 2026-07-03: keep the Markov snapshots (fund-page consensus) fresh from
+    # every deterministic pod path, not just risk-parity — idempotent per
+    # as_of, so whichever pod cycles first that day does the fitting and the
+    # rest reuse. Never raises.
+    from .regime_scaling import refresh_regime_snapshots
+    refresh_regime_snapshots(
+        strategy, members, as_of=as_of, data_provider=data_provider,
+    )
     # The engine sizer reads trailing bars from DailyBar (date__lt=as_of). Prefetch
     # the lookback window so the live book sees the same history the backtest does
     # (get_daily_bars self-caches; as_of clamps it so the read stays point-in-time).

@@ -1,11 +1,5 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  OnInit,
-  inject,
-  signal,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -13,6 +7,7 @@ import { ApiClient } from '../../core/api/api-client';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
+import { formatPct2, formatPrice2dp } from '../shared/format';
 import { TickerComponent } from '../shared/ticker.component';
 
 interface WatchlistMeta {
@@ -38,7 +33,7 @@ interface ListDetail {
 @Component({
   selector: 'hf-watchlists-manager-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, TickerComponent],
+  imports: [FormsModule, AppShellComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Watchlists' }]">
@@ -47,24 +42,23 @@ interface ListDetail {
           <div class="eyebrow">Discovery</div>
           <h1 class="mt-1.5">Watchlists</h1>
           <p class="sub">
-            Named ticker sets you can schedule independently. Star tickers from
-            the Screener, type a symbol below, or let the questionnaire pre-fill
-            your favorites into the default list.
+            Named ticker sets you can schedule independently. Star tickers from the Screener, type a
+            symbol below, or let the questionnaire pre-fill your favorites into the default list.
           </p>
         </div>
       </div>
 
-      @if (error()) { <p class="alert" role="alert">{{ error() }}</p> }
+      @if (error()) {
+        <p class="alert" role="alert">{{ error() }}</p>
+      }
 
       <div class="list-bar">
         @for (w of lists(); track w.id) {
-          <button
-            class="chip"
-            [class.active]="w.id === selectedId()"
-            (click)="select(w.id)"
-          >
+          <button class="chip" [class.active]="w.id === selectedId()" (click)="select(w.id)">
             {{ w.name }}<span class="cnt">{{ w.ticker_count }}</span>
-            @if (w.is_default) { <span class="def">★</span> }
+            @if (w.is_default) {
+              <span class="def">★</span>
+            }
           </button>
         }
         @if (creating()) {
@@ -92,7 +86,11 @@ interface ListDetail {
           </div>
 
           <div class="add-row">
-            <input [(ngModel)]="newTicker" placeholder="Add ticker (e.g. AAPL)" (keyup.enter)="addTicker()" />
+            <input
+              [(ngModel)]="newTicker"
+              placeholder="Add ticker (e.g. AAPL)"
+              (keyup.enter)="addTicker()"
+            />
             <button class="btn primary" (click)="addTicker()">Add</button>
           </div>
 
@@ -101,22 +99,38 @@ interface ListDetail {
           } @else {
             <div class="tbl-scroll">
               <table class="tbl">
-                <thead><tr><th>Ticker</th><th>Name</th><th class="r">Price</th><th class="r">Δ%</th><th></th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Name</th>
+                    <th class="r">Price</th>
+                    <th class="r">Δ%</th>
+                    <th></th>
+                  </tr>
+                </thead>
                 <tbody>
                   @for (t of detail()!.items; track t.id) {
                     <tr>
                       <td><hf-ticker [ticker]="t.ticker" [disablePopover]="true"></hf-ticker></td>
                       <td class="name">{{ nameFor(t.ticker) }}</td>
-                      <td class="r">{{ t.price ?? '—' }}</td>
-                      <td class="r" [class.up]="(t.change_pct ?? 0) > 0" [class.dn]="(t.change_pct ?? 0) < 0">
+                      <td class="r mono">{{ formatPrice(t.price) }}</td>
+                      <td
+                        class="r mono"
+                        [class.up]="(t.change_pct ?? 0) > 0"
+                        [class.dn]="(t.change_pct ?? 0) < 0"
+                      >
                         @if (t.change_pct !== null && t.change_pct !== undefined) {
-                          <span aria-hidden="true">{{ t.change_pct > 0 ? '▲' : (t.change_pct < 0 ? '▼' : '—') }}</span>
+                          <span aria-hidden="true">{{
+                            t.change_pct > 0 ? '▲' : t.change_pct < 0 ? '▼' : '—'
+                          }}</span>
                         }
-                        {{ t.change_pct !== null && t.change_pct !== undefined ? (t.change_pct + '%') : '—' }}
+                        {{ formatChange(t.change_pct) }}
                       </td>
                       <td class="r">
                         <button class="btn sm" (click)="sendToRun(t.ticker)">Analyze</button>
-                        <button class="btn sm danger" (click)="removeTicker(t.ticker)">Remove</button>
+                        <button class="btn sm danger" (click)="removeTicker(t.ticker)">
+                          Remove
+                        </button>
                       </td>
                     </tr>
                   }
@@ -130,24 +144,110 @@ interface ListDetail {
   `,
   styles: [
     `
-      .page-head { margin-bottom:16px; }
-      .sub { color: var(--text-3); font-size:12.5px; margin-top:4px; max-width:640px; }
-      .list-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
-      .chip { padding:6px 12px; border-radius:16px; background: var(--surface-2); color: var(--text-2); border:1px solid var(--border); cursor:pointer; font-size:13px; }
-      .chip.active { background: var(--acc-info-soft); color: var(--acc-info-fg); border-color: var(--acc-info); }
-      .chip.add { border-style:dashed; color: var(--text-3); }
-      .chip .cnt { margin-left:6px; font-size:11px; color: var(--text-3); }
-      .chip .def { margin-left:4px; color: var(--acc-info); }
-      .new-inline { display:inline-flex; gap:6px; align-items:center; }
-      .new-inline input { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
-      .card { margin-bottom:16px; }
-      .hd-actions { display:flex; gap:6px; }
-      .add-row { display:flex; gap:8px; margin:8px 0 14px; }
-      .add-row input { flex:1; padding:8px 12px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
-      .empty { color: var(--text-3); font-size:13px; padding:8px 2px; }
-      .alert { padding:10px 14px; background: var(--acc-short-soft); color: var(--acc-short-fg); border-radius: var(--r-6); margin:0 0 12px; }
-      .tbl .r { text-align:right; } .tbl .up { color: var(--acc-long-fg); } .tbl .dn { color: var(--acc-short-fg); }
-      .tbl .name { color: var(--text-3); font-size:12.5px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .page-head {
+        margin-bottom: 16px;
+      }
+      .sub {
+        color: var(--text-3);
+        font-size: 12.5px;
+        margin-top: 4px;
+        max-width: 640px;
+      }
+      .list-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      .chip {
+        padding: 6px 12px;
+        border-radius: 16px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        border: 1px solid var(--border);
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .chip.active {
+        background: var(--acc-info-soft);
+        color: var(--acc-info-fg);
+        border-color: var(--acc-info);
+      }
+      .chip.add {
+        border-style: dashed;
+        color: var(--text-3);
+      }
+      .chip .cnt {
+        margin-left: 6px;
+        font-size: 11px;
+        color: var(--text-3);
+      }
+      .chip .def {
+        margin-left: 4px;
+        color: var(--acc-info);
+      }
+      .new-inline {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .new-inline input {
+        padding: 6px 10px;
+        border-radius: var(--r-6);
+        background: var(--surface-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .card {
+        margin-bottom: 16px;
+      }
+      .hd-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .add-row {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0 14px;
+      }
+      .add-row input {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: var(--r-6);
+        background: var(--surface-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .empty {
+        color: var(--text-3);
+        font-size: 13px;
+        padding: 8px 2px;
+      }
+      .alert {
+        padding: 10px 14px;
+        background: var(--acc-short-soft);
+        color: var(--acc-short-fg);
+        border-radius: var(--r-6);
+        margin: 0 0 12px;
+      }
+      .tbl .r {
+        text-align: right;
+      }
+      .tbl .up {
+        color: var(--acc-long-fg);
+      }
+      .tbl .dn {
+        color: var(--acc-short-fg);
+      }
+      .tbl .name {
+        color: var(--text-3);
+        font-size: 12.5px;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     `,
   ],
 })
@@ -213,7 +313,11 @@ export class WatchlistsManagerPage implements OnInit {
   async rename(): Promise<void> {
     const d = this.detail();
     if (!d) return;
-    const name = await this.confirm.askText({ title: 'Rename list', label: 'List name', initialValue: d.name });
+    const name = await this.confirm.askText({
+      title: 'Rename list',
+      label: 'List name',
+      initialValue: d.name,
+    });
     if (!name) return;
     this.api.patch(`/watchlists/${d.id}/`, { name }).subscribe({
       next: () => {
@@ -227,7 +331,11 @@ export class WatchlistsManagerPage implements OnInit {
   async deleteList(): Promise<void> {
     const d = this.detail();
     if (!d) return;
-    const ok = await this.confirm.ask({ title: `Delete list "${d.name}"?`, confirmLabel: 'Delete', danger: true });
+    const ok = await this.confirm.ask({
+      title: `Delete list "${d.name}"?`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
     this.api.delete(`/watchlists/${d.id}/`).subscribe(() => {
       this.selectedId.set(null);
@@ -257,6 +365,15 @@ export class WatchlistsManagerPage implements OnInit {
       this.select(id);
       this.reloadLists();
     });
+  }
+
+  /** Δ% unsigned here — the row already carries a ▲/▼ direction glyph. */
+  formatChange(v: number | null | undefined): string {
+    return formatPct2(v);
+  }
+
+  formatPrice(v: string | null | undefined): string {
+    return formatPrice2dp(v);
   }
 
   sendToRun(ticker: string): void {

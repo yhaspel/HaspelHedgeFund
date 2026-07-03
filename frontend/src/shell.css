@@ -687,6 +687,25 @@ input[type='checkbox']:focus-visible {
 .tbl .right {
   text-align: right;
 }
+/* Tailwind's .text-right (0,1,0) loses to `.tbl thead th` (0,1,2), which
+   left-aligned numeric column headers while their cells stayed right-aligned
+   (portfolios hub, broker accounts). Mirror the utility at higher specificity. */
+.tbl thead th.text-right {
+  text-align: right;
+}
+.tbl thead th.text-center {
+  text-align: center;
+}
+
+/* Shared KPI tile row — used by portfolios hub, manual book, and broker
+   account overview. Was previously defined only in portfolio.page.ts's
+   component-scoped styles, so the other pages rendered tiles stacked
+   full-width. auto-fit keeps 3- and 4-tile rows equal-width. */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
 
 /* Inputs */
 .input {

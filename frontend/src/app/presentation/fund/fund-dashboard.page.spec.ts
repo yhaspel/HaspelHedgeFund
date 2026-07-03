@@ -5,6 +5,7 @@ import { of } from 'rxjs';
 
 import { FundDashboardPage } from './fund-dashboard.page';
 import { FundStore } from '../../abstraction/fund.store';
+import { MacroStore } from '../../abstraction/macro.store';
 import { FundOverview } from '../../core/models/autopilot.model';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +34,18 @@ function setup(o: FundOverview | null): Cmp {
     haltFund: () => of({}),
     resumeFund: () => of({}),
   } as unknown as FundStore;
-  TestBed.configureTestingModule({ providers: [{ provide: FundStore, useValue: store }] });
+  // The page now renders the macro-regime strip (restored to the landing
+  // page); stub the store so construction doesn't pull ApiClient/HttpClient.
+  const macro = {
+    snapshot: signal(null).asReadonly(),
+    loadSnapshot: () => of(null),
+  } as unknown as MacroStore;
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: FundStore, useValue: store },
+      { provide: MacroStore, useValue: macro },
+    ],
+  });
   return TestBed.runInInjectionContext(() => new FundDashboardPage());
 }
 

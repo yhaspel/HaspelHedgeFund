@@ -6,7 +6,7 @@ import {
   Output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 
 import { ModalComponent } from '../shared/modal.component';
@@ -25,90 +25,117 @@ import { languageName } from './language-name';
 @Component({
   selector: 'hf-news-detail-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, TickerComponent],
+  imports: [ModalComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-modal (closed)="closed.emit()">
       <div class="card hf-news-detail">
         <div class="card-hd">
           <h2 class="title" [id]="'news-modal-title'">News article</h2>
-          <button type="button" class="icon-btn close" (click)="closed.emit()"
-                  aria-label="Close">
+          <button type="button" class="icon-btn close" (click)="closed.emit()" aria-label="Close">
             <svg width="14" height="14" aria-hidden="true">
               <use href="/icons.svg#i-x" />
             </svg>
           </button>
         </div>
         <div class="card-bd">
-          <img
-            *ngIf="item.image_url"
-            [src]="item.image_url"
-            class="img"
-            alt=""
-            loading="lazy"
-            (error)="imgFailed = true"
-            [hidden]="imgFailed"
-          />
+          @if (item.image_url) {
+            <img
+              [src]="item.image_url"
+              class="img"
+              alt=""
+              loading="lazy"
+              (error)="imgFailed = true"
+              [hidden]="imgFailed"
+            />
+          }
           <h2 class="headline">{{ displayHeadline }}</h2>
-          <div class="xlate-row" *ngIf="item.translated_from">
-            <span class="pill xlate"
-                  [attr.aria-label]="'auto-translated from ' + translatedLabel">Auto-translated from {{ translatedLabel }}</span>
-            <button type="button" class="btn ghost xs" (click)="toggleOriginal()"
-                    data-test="news-view-original">
-              {{ showOriginal() ? 'View translation' : 'View original' }}
-            </button>
-          </div>
+          @if (item.translated_from) {
+            <div class="xlate-row">
+              <span class="pill xlate" [attr.aria-label]="'auto-translated from ' + translatedLabel"
+                >Auto-translated from {{ translatedLabel }}</span
+              >
+              <button
+                type="button"
+                class="btn ghost xs"
+                (click)="toggleOriginal()"
+                data-test="news-view-original"
+              >
+                {{ showOriginal() ? 'View translation' : 'View original' }}
+              </button>
+            </div>
+          }
           <div class="meta">
             <span class="src">{{ item.source || item.provider }}</span>
             <span class="sep" aria-hidden="true">•</span>
             <span class="time mono">{{ formattedTime }}</span>
-            <span *ngIf="item.cluster_size > 1" class="pill ml-2">
-              {{ item.cluster_size }} sources
-            </span>
+            @if (item.cluster_size > 1) {
+              <span class="pill ml-2"> {{ item.cluster_size }} sources </span>
+            }
           </div>
-          <p class="summary" *ngIf="displaySummary">{{ displaySummary }}</p>
-          <p class="summary muted" *ngIf="!displaySummary">
-            No preview text from the publisher; open the article for the full
-            story.
-          </p>
-
-          <section *ngIf="item.sentiment" class="sentiment-block" [attr.data-sent]="item.sentiment">
-            <div class="row">
-              <span class="label">Sentiment:</span>
-              <span class="pill sentiment" [attr.data-sent]="item.sentiment">
-                {{ item.sentiment }}
-              </span>
-              <span class="score mono" *ngIf="item.sentiment_score !== null">
-                {{ formatScore(item.sentiment_score) }}
-              </span>
-            </div>
-            <p class="rationale" *ngIf="item.sentiment_rationale">
-              {{ item.sentiment_rationale }}
+          @if (displaySummary) {
+            <p class="summary">{{ displaySummary }}</p>
+          }
+          @if (!displaySummary) {
+            <p class="summary muted">
+              No preview text from the publisher; open the article for the full story.
             </p>
-          </section>
+          }
 
-          <section *ngIf="item.symbols?.length" class="tickers">
-            <div class="label">Tagged tickers</div>
-            <ul class="chip-list">
-              <li *ngFor="let sym of item.symbols.slice(0, 8)">
-                <span class="chip">
-                  <hf-ticker [ticker]="sym"></hf-ticker>
-                  <button type="button" class="btn ghost xs analyze"
-                          (click)="analyzeInRun(sym)"
-                          [attr.aria-label]="'Analyze ' + sym + ' in a new Run'">
-                    Analyze
-                  </button>
+          @if (item.sentiment) {
+            <section class="sentiment-block" [attr.data-sent]="item.sentiment">
+              <div class="row">
+                <span class="label">Sentiment:</span>
+                <span class="pill sentiment" [attr.data-sent]="item.sentiment">
+                  {{ item.sentiment }}
                 </span>
-              </li>
-            </ul>
-          </section>
+                @if (item.sentiment_score !== null) {
+                  <span class="score mono">
+                    {{ formatScore(item.sentiment_score) }}
+                  </span>
+                }
+              </div>
+              @if (item.sentiment_rationale) {
+                <p class="rationale">
+                  {{ item.sentiment_rationale }}
+                </p>
+              }
+            </section>
+          }
 
-          <section *ngIf="item.tags?.length" class="tags">
-            <div class="label">Topics</div>
-            <ul class="tag-list">
-              <li *ngFor="let t of item.tags.slice(0, 8)" class="pill subtle">{{ t }}</li>
-            </ul>
-          </section>
+          @if (item.symbols?.length) {
+            <section class="tickers">
+              <div class="label">Tagged tickers</div>
+              <ul class="chip-list">
+                @for (sym of item.symbols.slice(0, 8); track sym) {
+                  <li>
+                    <span class="chip">
+                      <hf-ticker [ticker]="sym"></hf-ticker>
+                      <button
+                        type="button"
+                        class="btn ghost xs analyze"
+                        (click)="analyzeInRun(sym)"
+                        [attr.aria-label]="'Analyze ' + sym + ' in a new Run'"
+                      >
+                        Analyze
+                      </button>
+                    </span>
+                  </li>
+                }
+              </ul>
+            </section>
+          }
+
+          @if (item.tags?.length) {
+            <section class="tags">
+              <div class="label">Topics</div>
+              <ul class="tag-list">
+                @for (t of item.tags.slice(0, 8); track t) {
+                  <li class="pill subtle">{{ t }}</li>
+                }
+              </ul>
+            </section>
+          }
         </div>
         <div class="card-ft">
           <a class="btn primary" [href]="item.url" target="_blank" rel="noopener noreferrer">
