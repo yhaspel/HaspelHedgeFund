@@ -4,6 +4,7 @@ import { Observable, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
 import { TokenStorage } from '../core/auth/token-storage';
 import { AuthTokens, User } from '../core/models/user.model';
+import { ANON_SCOPE, clearScope, currentScope } from '../core/offline/api-cache';
 
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
@@ -41,6 +42,13 @@ export class AuthStore {
   }
 
   logout(): void {
+    // P4-OFF WS-3.5: purge the offline cache for this user AND the anon scope
+    // BEFORE clearing the token (currentScope reads the JWT) — last-known
+    // portfolio values are exactly the residue logout must remove, and the anon
+    // scope must never survive a session boundary.
+    const scope = currentScope();
+    void clearScope(scope);
+    void clearScope(ANON_SCOPE);
     this.tokens.clear();
     this._user.set(null);
     this.router.navigateByUrl('/login');

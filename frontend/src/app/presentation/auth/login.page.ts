@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthStore } from '../../abstraction/auth.store';
+import { OfflineState } from '../../core/offline/offline-state.service';
 
 @Component({
   selector: 'hf-login',
@@ -17,6 +18,13 @@ import { AuthStore } from '../../abstraction/auth.store';
           </div>
 
           <h1>Log in</h1>
+
+          @if (offline.mode() === 'offline-l2') {
+            <p role="status" class="text-2xs text-text-2">
+              Backend unreachable — sign-in is unavailable. An existing session on
+              this device keeps working.
+            </p>
+          }
 
           <form (ngSubmit)="submit()" class="flex flex-col gap-3.5">
             <div class="field">
@@ -67,6 +75,7 @@ import { AuthStore } from '../../abstraction/auth.store';
 export class LoginPage {
   private readonly auth = inject(AuthStore);
   private readonly router = inject(Router);
+  readonly offline = inject(OfflineState);
   email = '';
   password = '';
   error = signal<string | null>(null);
