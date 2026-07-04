@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from apps.models_catalog.presets import SELECTABLE_PRESETS
+
 from .models import (
     BorrowQuote,
     LedgerEntry,
@@ -216,6 +218,15 @@ class StrategySerializer(serializers.ModelSerializer):
     def get_roster_warnings(self, strategy) -> list[str]:
         from .persona_fit import roster_fit_warnings
         return roster_fit_warnings(strategy.kind, strategy.personas)
+
+    def validate_model_preset(self, value: str) -> str:
+        # The offline-only "local" preset hard-errors on a live Ollama probe if a
+        # strategy carrying it is estimated/cycled online — never user-selectable.
+        if value not in SELECTABLE_PRESETS:
+            raise serializers.ValidationError(
+                f"Unknown preset {value!r}. Choices: {sorted(SELECTABLE_PRESETS)}."
+            )
+        return value
 
     class Meta:
         model = PortfolioStrategy

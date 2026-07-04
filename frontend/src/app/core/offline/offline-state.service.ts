@@ -38,6 +38,10 @@ export class OfflineState {
 
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private probing = false;
+  // A probe requested (reportFailure / online-offline event) while one is already
+  // in flight is coalesced into a single re-probe once the current one settles —
+  // so a recovery signal arriving mid-probe (up to a 5s timeout) is never dropped.
+  private reprobeRequested = false;
 
   init(): void {
     void this.probe();
@@ -66,7 +70,10 @@ export class OfflineState {
       this.backendInfo.set(null);
       return;
     }
-    if (this.probing) return;
+    if (this.probing) {
+      this.reprobeRequested = true;
+      return;
+    }
     this.probing = true;
     try {
       const res = await fetch(`${environment.apiBaseUrl}/health/`, {
@@ -91,6 +98,10 @@ export class OfflineState {
     } finally {
       this.lastProbeAt.set(Date.now());
       this.probing = false;
+      if (this.reprobeRequested) {
+        this.reprobeRequested = false;
+        void this.probe();
+      }
     }
   }
 

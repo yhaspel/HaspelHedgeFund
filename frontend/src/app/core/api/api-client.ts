@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, throwError } from 'rxjs';
+import { defer, Observable, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { OfflineState } from '../offline/offline-state.service';
 import { OfflineWriteBlockedError } from '../offline/offline-write-blocked.error';
@@ -18,25 +18,27 @@ export class ApiClient {
   }
 
   post<T>(path: string, body: unknown): Observable<T> {
-    return this.blocked<T>(path) ?? this.http.post<T>(`${this.base}${path}`, body);
+    return defer(() => this.blocked<T>(path) ?? this.http.post<T>(`${this.base}${path}`, body));
   }
 
   put<T>(path: string, body: unknown): Observable<T> {
-    return this.blocked<T>(path) ?? this.http.put<T>(`${this.base}${path}`, body);
+    return defer(() => this.blocked<T>(path) ?? this.http.put<T>(`${this.base}${path}`, body));
   }
 
   patch<T>(path: string, body: unknown): Observable<T> {
-    return this.blocked<T>(path) ?? this.http.patch<T>(`${this.base}${path}`, body);
+    return defer(() => this.blocked<T>(path) ?? this.http.patch<T>(`${this.base}${path}`, body));
   }
 
   delete<T>(path: string): Observable<T> {
-    return this.blocked<T>(path) ?? this.http.delete<T>(`${this.base}${path}`);
+    return defer(() => this.blocked<T>(path) ?? this.http.delete<T>(`${this.base}${path}`));
   }
 
   /**
    * P4-OFF WS-4.3: block every non-GET at L2 / forced offline BEFORE hitting the
    * network (writes are never queued, D6). L1 does NOT block — the backend is up.
-   * Returns a throwing Observable (and toasts) when blocked, else null.
+   * Returns a throwing Observable (and toasts) when blocked, else null. Wrapped
+   * in `defer` at each call site so the mode check + toast fire on subscribe
+   * (cold-observable contract), not eagerly when the method is invoked.
    */
   private blocked<T>(path: string): Observable<T> | null {
     if (this.offline.mode() === 'offline-l2' || this.offline.forced()) {

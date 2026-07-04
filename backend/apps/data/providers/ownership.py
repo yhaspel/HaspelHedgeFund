@@ -52,7 +52,13 @@ class OwnershipResolver:
             except (OwnershipNotEntitled, httpx.HTTPError, ProviderOffline):
                 # Not entitled / wrong slug / transport error / offline → fall back.
                 pass
-        return self._edgar.get_filer_portfolio(filer_cik, as_of=as_of)
+        try:
+            return self._edgar.get_filer_portfolio(filer_cik, as_of=as_of)
+        except (httpx.HTTPError, ProviderOffline):
+            # The by-filer path is cached-first-then-HTTP with no DB-only fallback,
+            # so on a transport error / OFFLINE_MODE cache miss degrade to None
+            # (the return type already allows it) rather than hard-failing.
+            return None
 
 
 def _edgar_issuer_from_snapshots(

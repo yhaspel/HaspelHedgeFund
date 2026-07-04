@@ -323,18 +323,25 @@ class TickerProfileView(APIView):
             snap = None
 
         if snap is None:
+            # Provider failed (offline fence / transport). Serve the last-persisted
+            # identity from CompanyProfile — the offline contract is "reads serve
+            # last-persisted DB rows" — instead of blanking a ticker whose
+            # name/exchange/sector are already stored (matches the sibling
+            # missing-key branch above and TickerProfileBatchView).
+            cp = CompanyProfile.objects.filter(ticker=sym).first()
             return Response(
                 {
                     "ticker": sym,
-                    "name": "",
-                    "exchange": "",
-                    "sector": "",
+                    "name": cp.name if cp else "",
+                    "exchange": cp.exchange if cp else "",
+                    "sector": cp.sector if cp else "",
                     "price": None,
                     "market_cap": None,
                     "pe_ratio": None,
                     "eps": None,
                     "as_of": dt.date.today().isoformat(),
                     "detail": "no profile available",
+                    "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
                 },
                 status=200,
             )

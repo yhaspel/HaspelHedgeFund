@@ -154,6 +154,29 @@ def test_preset_detail_rejects_local_without_probing_ollama(auth_client):
     assert resp.status_code == 404
 
 
+def test_selectable_presets_excludes_local_but_keeps_the_rest():
+    from apps.models_catalog.presets import PRESETS, SELECTABLE_PRESETS
+
+    assert "local" in PRESETS  # still the internal expansion recipe
+    assert "local" not in SELECTABLE_PRESETS
+    assert set(SELECTABLE_PRESETS) == set(PRESETS) - {"local"}
+
+
+def test_user_input_preset_validators_reject_local():
+    # Every user-facing preset validator must reject the offline-only "local"
+    # preset (it hard-errors on a live Ollama probe if it runs online).
+    from rest_framework import serializers as drf
+
+    from apps.portfolios.serializers import StrategySerializer
+    from apps.schedules.serializers import ScheduledRunSerializer
+
+    for cls in (StrategySerializer, ScheduledRunSerializer):
+        ser = cls()
+        with pytest.raises(drf.ValidationError):
+            ser.validate_model_preset("local")
+        assert ser.validate_model_preset("hybrid") == "hybrid"
+
+
 # ---------------------------------------------------------------------------
 # Provider HTTP fence (WS-1.3 / WS-1.8) — never construction, always the request.
 # ---------------------------------------------------------------------------

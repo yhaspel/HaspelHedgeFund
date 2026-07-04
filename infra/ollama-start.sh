@@ -26,11 +26,15 @@ for arg in "$@"; do
   esac
 done
 
-# Serialize generations regardless of free memory (see header). Exported so the
-# daemon launched by `brew services` inherits it.
-export OLLAMA_NUM_PARALLEL=1
+# Serialize generations regardless of free memory (see header). OLLAMA_NUM_PARALLEL
+# is a SERVER-side startup env var read by the daemon — NOT passed per-request by
+# the adapter. `brew services` launches Ollama via launchd, which does NOT inherit
+# an ad-hoc shell `export`, so set it in the launchd session and RESTART (start is
+# a no-op if the daemon is already up, so it would keep the default auto-parallel).
+launchctl setenv OLLAMA_NUM_PARALLEL 1 2>/dev/null || true
+export OLLAMA_NUM_PARALLEL=1  # fallback for a direct `ollama serve` (non-brew) run
 
-brew services start ollama
+brew services restart ollama
 
 for _ in {1..30}; do
   if curl -sf "$HOST/api/tags" > /dev/null; then
