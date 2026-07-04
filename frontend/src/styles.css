@@ -2,6 +2,32 @@
 @import './shell.css';
 @import './guide-prose.css';
 
+/* P4-OFF WS-2.2: self-hosted Google Fonts (latin-subset variable woff2 under
+   public/fonts/). Bundled here so the @font-face rules land in the app-shell CSS
+   (precached by ngsw) and there is no render-blocking cross-origin request — the
+   shell boots with the WAN down. woff2 files are served from /fonts/. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/source-serif-4.woff2') format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

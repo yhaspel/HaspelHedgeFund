@@ -68,6 +68,19 @@ export const INFO_GUIDES: InfoGuide[] = [
     ],
   },
   {
+    slug: 'offline-mode',
+    title: 'Offline Mode',
+    summary:
+      'Run the app with no internet — local AI model, last-synced data, and a refresh that still boots.',
+    group: 'getting-started',
+    icon: 'i-cpu',
+    keywords: [
+      'offline', 'no internet', 'airplane', 'plane', 'air-gapped', 'local',
+      'ollama', 'service worker', 'cache', 'read-only', 'stale', 'l1', 'l2',
+      'OFFLINE_MODE', 'privacy', 'indexeddb',
+    ],
+  },
+  {
     slug: 'tradestation-setup',
     title: 'TradeStation Setup',
     summary:

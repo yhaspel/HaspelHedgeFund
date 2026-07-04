@@ -11,6 +11,7 @@ import httpx
 from django.conf import settings
 
 from ..models import NewsItem
+from ._http import make_client
 
 TIINGO_BASE = "https://api.tiingo.com/tiingo/news"
 
@@ -22,7 +23,7 @@ class TiingoNewsProvider:
         self.api_key = api_key or settings.TIINGO_API_KEY
         if not self.api_key:
             raise RuntimeError("TIINGO_API_KEY is not set")
-        self._http = http or httpx.Client(timeout=30.0)
+        self._http = http or make_client(timeout=30.0)
 
     def fetch(
         self, ticker: str, *, as_of: dt.date, lookback_days: int = 30, limit: int = 100

@@ -18,6 +18,10 @@ def _connection_for(user):
 
 
 def send_email(channel, subject: str, body: str, html_body: str | None = None) -> tuple[bool, str]:
+    from hedgefund.offline import is_offline
+
+    if is_offline():  # P4-OFF: external delivery paused at L1
+        return False, "skipped: offline"
     address = (channel.config or {}).get("address") or getattr(channel.user, "email", "")
     if not address:
         return False, "no email address configured"

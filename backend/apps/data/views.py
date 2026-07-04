@@ -9,6 +9,7 @@ import logging
 import time
 from decimal import Decimal
 
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.request import Request
@@ -73,6 +74,9 @@ class MacroSnapshotView(APIView):
                 "sector_implications": snap.sector_implications,
                 "series_used": snap.series_used,
                 "markov_consensus": snap.markov_consensus,
+                # P4-OFF: at L1 the FRED refresh is fenced; this is the last
+                # persisted snapshot.
+                "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
             }
         )
 
@@ -319,18 +323,25 @@ class TickerProfileView(APIView):
             snap = None
 
         if snap is None:
+            # Provider failed (offline fence / transport). Serve the last-persisted
+            # identity from CompanyProfile — the offline contract is "reads serve
+            # last-persisted DB rows" — instead of blanking a ticker whose
+            # name/exchange/sector are already stored (matches the sibling
+            # missing-key branch above and TickerProfileBatchView).
+            cp = CompanyProfile.objects.filter(ticker=sym).first()
             return Response(
                 {
                     "ticker": sym,
-                    "name": "",
-                    "exchange": "",
-                    "sector": "",
+                    "name": cp.name if cp else "",
+                    "exchange": cp.exchange if cp else "",
+                    "sector": cp.sector if cp else "",
                     "price": None,
                     "market_cap": None,
                     "pe_ratio": None,
                     "eps": None,
                     "as_of": dt.date.today().isoformat(),
                     "detail": "no profile available",
+                    "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
                 },
                 status=200,
             )
@@ -644,6 +655,9 @@ class MarketNewsFeedView(APIView):
             "ranking_basis": (
                 "Ranked by recency, breadth of coverage & source weight."
             ),
+            # P4-OFF: at L1 the provider fetch is fenced and these rows are the
+            # last-persisted DB values — flag them so the client can badge age.
+            "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
         }
         if sentiment_warning:
             payload["sentiment_warning"] = sentiment_warning

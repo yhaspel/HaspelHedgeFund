@@ -20,6 +20,7 @@ from celery import shared_task
 from django.utils import timezone
 
 from apps.schedules.triggers import compute_next, market_gate_ok
+from hedgefund.offline import skip_when_offline
 
 from .models import AutopilotRun, StrategyAutopilot
 
@@ -28,6 +29,11 @@ log = logging.getLogger(__name__)
 
 @shared_task(name="apps.portfolios.tasks_autopilot.dispatch_due_autopilots")
 def dispatch_due_autopilots() -> dict:
+    # P4-OFF: the autopilot submits orders + reconciles NAV against the broker
+    # (external). Pause the whole subsystem offline — outward-facing beats no-op;
+    # manual analysis cycles still run locally.
+    if skip_when_offline("dispatch_due_autopilots"):
+        return {"status": "skipped_offline"}
     now = timezone.now()
     due_ids = list(
         StrategyAutopilot.objects.filter(
@@ -72,6 +78,8 @@ def run_autopilot_cycle(autopilot_run_id: int) -> dict:
     """Pre-flight + fire one council cycle for an autopilot. The bridge emission
     runs downstream in finalize_cycle; this task returns once the cycle is
     dispatched (or skipped)."""
+    if skip_when_offline("run_autopilot_cycle"):
+        return {"status": "skipped_offline"}
     from .tasks import daily_long_short_cycle
 
     run = (
@@ -186,6 +194,8 @@ def guardrail_sweep() -> dict:
     """Hourly: re-evaluate each enabled account's drawdown off its real-fill
     equity curve and auto-halt at the hard limit (freeze or flatten); release any
     held pending_open orders. Fund-level aggregation/halt lands in Stage C."""
+    if skip_when_offline("guardrail_sweep"):
+        return {"status": "skipped_offline"}
     from apps.portfolios import autopilot_risk
     from apps.portfolios.snapshots import record_snapshot
 
@@ -243,6 +253,8 @@ def release_pending_open_orders() -> dict:
     """Submit locally-held pending_open orders once the market opens (§6.6).
     Daily caps are evaluated HERE (at release), not at create time, so a
     Friday-close batch held over the weekend submits Monday."""
+    if skip_when_offline("release_pending_open_orders"):
+        return {"status": "skipped_offline"}
     from apps.brokers.market_calendar import is_market_open
     from apps.brokers.models import BrokerOrder
     from apps.portfolios.autopilot import submit_held_order

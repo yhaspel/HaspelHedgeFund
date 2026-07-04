@@ -22,6 +22,10 @@ def _escape_markdown(text: str) -> str:
 def send_telegram(
     channel, subject: str, body: str, html_body: str | None = None
 ) -> tuple[bool, str]:
+    from hedgefund.offline import is_offline
+
+    if is_offline():  # P4-OFF: external delivery paused at L1
+        return False, "skipped: offline"
     cfg = channel.config or {}
     token = cfg.get("bot_token")
     chat_id = cfg.get("chat_id")

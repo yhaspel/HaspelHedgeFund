@@ -310,10 +310,12 @@ def _parse_cycle_overrides(request: Request) -> tuple[str | None, dict | None]:
     when absent. Raises ValidationError (→ 400) on an unknown preset or an
     invalid override map. The choice applies to this dispatch only."""
     from apps.models_catalog.overrides import validate_model_overrides
-    from apps.models_catalog.presets import PRESETS
+    from apps.models_catalog.presets import SELECTABLE_PRESETS
 
     preset = request.data.get("preset") or None
-    if preset is not None and preset not in PRESETS:
+    # SELECTABLE_PRESETS excludes the offline-only "local" (it hard-errors on a
+    # live Ollama probe if dispatched/estimated online).
+    if preset is not None and preset not in SELECTABLE_PRESETS:
         raise ValidationError(f"unknown preset {preset!r}")
     overrides = request.data.get("model_overrides") or None
     if overrides is not None:

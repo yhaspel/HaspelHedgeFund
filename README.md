@@ -20,6 +20,10 @@ proxied through a hosted service.
 - **Strategies & autopilot** — compose strategies and let a paper-broker autopilot
   rebalance them.
 - **BYOK** — every provider key is yours, stored encrypted at rest, never proxied.
+- **Offline mode** — runs fully offline on your laptop: analysis on a local Ollama
+  model at `$0.00`, every screen served from the last data it saw, and a refresh
+  that still boots with the network down. See `guides/offline-mode.md` (in-app:
+  Guides → Offline Mode).
 
 **Stack:** Django 5 + DRF + Celery + Postgres 16 + Redis 7 (backend, managed with
 `uv`); Angular 21 (frontend, managed with `pnpm`); Docker Compose for dev.

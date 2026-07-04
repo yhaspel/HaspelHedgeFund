@@ -12,12 +12,16 @@ import logging
 
 from celery import shared_task
 
+from hedgefund.offline import skip_when_offline
+
 log = logging.getLogger(__name__)
 
 
 @shared_task
 def prewarm_macro_snapshot(as_of_iso: str | None = None) -> str:
     """Build (or refresh) a MacroSnapshot for the given date (default: today UTC)."""
+    if skip_when_offline("prewarm_macro_snapshot"):
+        return "skipped_offline"
     from hedgefund_agents.macro.macro_agent import compute_snapshot
 
     as_of = dt.date.fromisoformat(as_of_iso) if as_of_iso else dt.date.today()
@@ -49,6 +53,8 @@ def _most_recent_completed_quarter(today: dt.date | None = None) -> str:
 @shared_task
 def ingest_13f_current_quarter() -> str:
     """Ingest the most-recently-completed 13F quarter's SEC data set."""
+    if skip_when_offline("ingest_13f_current_quarter"):
+        return "skipped_offline"
     from django.core.management import call_command
 
     quarter = _most_recent_completed_quarter()

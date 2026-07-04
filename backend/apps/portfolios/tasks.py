@@ -193,6 +193,13 @@ def _resolve_model_overrides(
     falls through to the env default — otherwise dev strategies created before
     this guard would keep resolving to the frontier `hybrid` map.
     """
+    # P4-OFF WS-1.5: offline strategy cycles run all-local. This wins over even an
+    # explicit dispatch-modal preset/override (no cloud slug may run at L1), the
+    # same seam as the hybrid→dev downgrade below.
+    if getattr(settings, "OFFLINE_MODE", False):
+        from apps.models_catalog.offline import offline_model_overrides
+
+        return offline_model_overrides(strategy.user)
     # Explicit dispatch-modal overrides are already validated active at the API
     # boundary (validate_model_overrides), so they pass through verbatim.
     if overrides:

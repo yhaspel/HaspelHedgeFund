@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
-from apps.models_catalog.presets import PRESETS
+from apps.models_catalog.presets import SELECTABLE_PRESETS
 from apps.schedules.triggers import describe_cron, is_valid_cron
 
 from .models import AutopilotRun, PortfolioStrategy, StrategyAutopilot
@@ -86,11 +86,14 @@ class StrategyAutopilotView(APIView):
                 return Response({"detail": "autopilot is paper-only"}, status=400)
             ap.broker_account = acc
 
-        # Model preset must be one of the catalog's known presets — a bad value
-        # would silently expand to {} and route the council to registry defaults.
-        if "model_preset" in data and data["model_preset"] not in PRESETS:
+        # Model preset must be a user-selectable preset — a bad value would
+        # silently expand to {} and route the council to registry defaults. The
+        # offline-only "local" is excluded (SELECTABLE_PRESETS): accepting it
+        # would store a preset that hard-errors on a live Ollama probe online.
+        if "model_preset" in data and data["model_preset"] not in SELECTABLE_PRESETS:
+            choices = ", ".join(sorted(SELECTABLE_PRESETS))
             return Response(
-                {"detail": f"invalid model_preset (choose: {', '.join(sorted(PRESETS))})"},
+                {"detail": f"invalid model_preset (choose: {choices})"},
                 status=400,
             )
 

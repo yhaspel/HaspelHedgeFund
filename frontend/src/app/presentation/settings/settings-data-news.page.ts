@@ -6,6 +6,7 @@ import { AppShellComponent } from '../shared/app-shell.component';
 import { SettingsTabsComponent } from './settings-tabs.component';
 import { NewsStore } from '../../abstraction/news.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
+import { OfflineState } from '../../core/offline/offline-state.service';
 import { NewsPreferences } from '../../core/models/news.model';
 import { MarkCadence } from '../../core/models/portfolio.model';
 
@@ -241,6 +242,30 @@ import { MarkCadence } from '../../core/models/portfolio.model';
             }
           </div>
         </section>
+
+        <!-- Offline (P4-OFF WS-4.4) -->
+        <section class="card" data-test="offline-settings-card">
+          <div class="card-hd"><h2 class="title">Offline</h2></div>
+          <div class="card-bd flex flex-col gap-3.5">
+            <div class="field">
+              <label class="lbl flex items-center justify-between" for="offline-simulate">
+                <span>Simulate offline (this browser only)</span>
+                <input id="offline-simulate" type="checkbox"
+                       [ngModel]="offline.forced()"
+                       (ngModelChange)="offline.setForced($event)"
+                       name="offline_simulate"
+                       data-test="offline-simulate-toggle"
+                       data-testid="offline-simulate-toggle" />
+              </label>
+              <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
+                Treats every API call as failed (serving last-synced data) without
+                touching the network — the read-only L2 experience. Writes are
+                blocked. Turn off to reconnect. Current state:
+                <strong>{{ offline.mode() }}</strong>.
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
     </hf-app-shell>
   `,
@@ -271,6 +296,7 @@ import { MarkCadence } from '../../core/models/portfolio.model';
 export class SettingsDataNewsPage implements OnInit {
   readonly newsStore = inject(NewsStore);
   readonly portfolio = inject(PortfolioStore);
+  readonly offline = inject(OfflineState);
 
   // ---- News settings --------------------------------------------------
   newsForm: NewsPreferences = {

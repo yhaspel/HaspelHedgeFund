@@ -85,6 +85,10 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/me/provider-keys/', respond: () => json(fixture('provider-keys')) },
   { method: 'PUT', spec: '/me/provider-keys/', respond: () => json(fixture('provider-keys')) },
 
+  // ---- health (P4-OFF): the OfflineState probe runs on every boot; answer
+  // "online" so the mock lane never flips to the offline banner / write-block.
+  { method: 'GET', spec: '/health/', respond: () => json({ status: 'ok', offline_mode: false, llm: { forced_preset: null, local_model: 'qwen2.5:7b', local_available: false } }) },
+
   // ---- fund + autopilot ----------------------------------------------------
   { method: 'GET', spec: '/fund/', respond: () => json(fixture('fund')) },
   // P10 §C2/§B5: NAV history + validated composite. Cold-start shapes (the

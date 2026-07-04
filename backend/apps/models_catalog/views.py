@@ -17,7 +17,7 @@ from .models import (
     UserModelPreferences,
 )
 from .ollama_discovery import discover_ollama_models
-from .presets import ALL_AGENTS, PRESETS, expand_preset
+from .presets import ALL_AGENTS, SELECTABLE_PRESETS, expand_preset
 from .serializers import (
     ModelEntrySerializer,
     ProviderKeyStatusSerializer,
@@ -146,7 +146,7 @@ class AgentsView(APIView):
                 "recommended_tier": AGENT_RECOMMENDATIONS.get(name, "fast_cheap"),
                 "group": AGENT_GROUP.get(name, "other"),
             })
-        return Response({"agents": agents, "presets": list(PRESETS.keys())})
+        return Response({"agents": agents, "presets": SELECTABLE_PRESETS})
 
 
 class PresetView(APIView):
@@ -154,7 +154,9 @@ class PresetView(APIView):
     the active tier's curated model menu (P3-C §6.6)."""
 
     def get(self, request: Request, name: str) -> Response:
-        if name not in PRESETS:
+        # "local" is offline-only and its <local> token needs a live Ollama probe
+        # (would 500 here on a machine with no daemon) — not exposed online.
+        if name not in SELECTABLE_PRESETS:
             return Response({"detail": "unknown preset"}, status=404)
         pk = _get_provider_keys(request.user)
         local = discover_ollama_models(pk.ollama_host)

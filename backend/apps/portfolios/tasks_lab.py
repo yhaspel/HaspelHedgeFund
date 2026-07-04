@@ -29,6 +29,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from hedgefund.offline import skip_when_offline
+
 from .models import PortfolioStrategy
 
 log = logging.getLogger(__name__)
@@ -52,6 +54,8 @@ def _lab_universe(strategy) -> list[str]:
 def fetch_lab_news() -> dict:
     """Symbol-targeted news fetch + frozen-model classification for the lab
     universes — decoupled from the news-page view."""
+    if skip_when_offline("fetch_lab_news"):
+        return {"status": "skipped_offline"}
     import datetime as dt
 
     from apps.data.market_news_sentiment import classify, is_allowed_sentiment_model
@@ -121,6 +125,10 @@ def fetch_lab_news() -> dict:
 def run_news_lab_cycles() -> dict:
     """Weekly lab cycle: refresh the signal, then run each lab sleeve's cycle
     (Friday, after the fund pods' 20:30/20:45/21:00 UTC fires)."""
+    # P4-OFF: the lab classifies with the frozen cloud sentiment model
+    # (NEWS_LAB_SENTIMENT_MODEL) and fetches external news — both blocked at L1.
+    if skip_when_offline("run_news_lab_cycles"):
+        return {"status": "skipped_offline"}
     from .tasks import daily_long_short_cycle
 
     try:

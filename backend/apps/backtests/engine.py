@@ -712,6 +712,15 @@ def prime_agent_cache(
     filings_provider = get_edgar_provider()
     ownership_provider = get_ownership_provider(user=bt.user)
 
+    # P4-OFF WS-1.5: force the all-local preset for offline backtests (the stored
+    # bt.model_overrides may carry cloud slugs saved pre-offline).
+    bt_overrides = bt.model_overrides or {}
+    if getattr(settings, "OFFLINE_MODE", False):
+        from apps.models_catalog.offline import offline_model_overrides
+
+        bt_overrides = offline_model_overrides(bt.user)
+        log.info("offline_backtest backtest_id=%s forced_preset=local", bt.id)
+
     universe = list(bt.universe)
     days = trading_days(start, end, universe)
     rebal = sorted(rebalance_dates_for(days, rebalance_freq))
@@ -752,7 +761,7 @@ def prime_agent_cache(
         initial_state: dict[str, Any] = {
             "ticker": ticker,
             "as_of_date": day,
-            "model_overrides": bt.model_overrides or {},
+            "model_overrides": bt_overrides,
             "data_provider": data_provider,
             "filings_provider": filings_provider,
             "ownership_provider": ownership_provider,

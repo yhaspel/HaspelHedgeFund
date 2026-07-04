@@ -19,6 +19,7 @@ import httpx
 from django.conf import settings
 
 from ..models import MarketNewsItem
+from ._http import make_client
 
 FMP_BASE = "https://financialmodelingprep.com/stable"
 RETENTION_DAYS = 7
@@ -52,7 +53,7 @@ class MarketNewsFmpProvider:
         self.api_key = api_key or settings.FMP_API_KEY
         if not self.api_key:
             raise RuntimeError("FMP_API_KEY is not set")
-        self._http = http or httpx.Client(timeout=30.0)
+        self._http = http or make_client(timeout=30.0)
 
     def _fetch_endpoint(self, path: str, limit: int, **extra) -> list[dict]:
         params = {"page": 0, "limit": limit, "apikey": self.api_key, **extra}

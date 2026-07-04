@@ -35,6 +35,15 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_HOST: db
+      # P4-OFF: offline mode + local-model host. Works via `.env` OR a
+      # shell-prefixed `OFFLINE_MODE=1 docker compose up`. Ollama runs on the
+      # HOST (infra/ollama-start.sh), so containers reach it at
+      # host.docker.internal, not localhost.
+      OFFLINE_MODE: ${OFFLINE_MODE:-0}
+      OFFLINE_LLM_MODEL: ${OFFLINE_LLM_MODEL:-qwen2.5:7b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../backend:/app
     ports:
@@ -55,6 +64,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_HOST: db
+      OFFLINE_MODE: ${OFFLINE_MODE:-0}
+      OFFLINE_LLM_MODEL: ${OFFLINE_LLM_MODEL:-qwen2.5:7b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../backend:/app
     depends_on:
@@ -71,6 +85,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_HOST: db
+      OFFLINE_MODE: ${OFFLINE_MODE:-0}
+      OFFLINE_LLM_MODEL: ${OFFLINE_LLM_MODEL:-qwen2.5:7b}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../backend:/app
     depends_on:
