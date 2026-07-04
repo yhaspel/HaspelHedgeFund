@@ -62,3 +62,8 @@ dev-artifacts/
 
 # Claude Code per-session scheduling lock
 .claude/scheduled_tasks.lock
+
+# Internal planning/research docs — kept locally, excluded from the public repo (ADR 0028).
+development-plans/
+research/
+AGENTS.md
