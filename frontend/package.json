@@ -20,6 +20,7 @@
     "e2e:axe": "playwright test --config e2e/playwright.config.ts --project=axe",
     "e2e:update-snapshots": "playwright test --config e2e/playwright.config.ts --project=visual --update-snapshots",
     "e2e:live": "E2E_LANE=live playwright test --config e2e/playwright.config.ts --project=live-smoke",
+    "e2e:sw": "playwright test --config e2e/playwright.offline.config.ts",
     "e2e:routes": "node e2e/utils/check-fixtures.mjs"
   },
   "private": true,

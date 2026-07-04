@@ -254,7 +254,8 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                        [ngModel]="offline.forced()"
                        (ngModelChange)="offline.setForced($event)"
                        name="offline_simulate"
-                       data-test="offline-simulate-toggle" />
+                       data-test="offline-simulate-toggle"
+                       data-testid="offline-simulate-toggle" />
               </label>
               <p class="text-[11.5px] text-text-3 m-0 mt-0.5">
                 Treats every API call as failed (serving last-synced data) without

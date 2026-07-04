@@ -15,7 +15,8 @@ import { OfflineState } from '../../core/offline/offline-state.service';
   standalone: true,
   template: `
     @if (state.mode() !== 'online') {
-      <div class="offline-banner" [class.l2]="state.mode() === 'offline-l2'" role="status" aria-live="polite">
+      <div class="offline-banner" [class.l2]="state.mode() === 'offline-l2'"
+           role="status" aria-live="polite" data-test="offline-banner" data-testid="offline-banner">
         <span class="dot" aria-hidden="true"></span>
         <span class="msg">{{ message() }}</span>
       </div>
