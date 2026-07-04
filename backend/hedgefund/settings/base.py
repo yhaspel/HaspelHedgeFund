@@ -431,3 +431,19 @@ if _DJANGO_ENV not in {"dev", "test"}:
             "print(Fernet.generate_key().decode())\"` — in "
             f"DJANGO_ENV={_DJANGO_ENV!r}."
         )
+    else:
+        # Presence is not enough: a malformed value (wrong length, hex, a reused
+        # token_urlsafe secret) passes as truthy, then bricks crypto at runtime —
+        # decrypt() would swallow the Fernet ValueError and read every stored key
+        # as absent. Validate constructibility here so it fails fast and clearly.
+        from cryptography.fernet import Fernet
+
+        try:
+            Fernet(FIELD_ENCRYPTION_KEY.strip().encode())
+        except Exception as exc:
+            raise RuntimeError(
+                "FIELD_ENCRYPTION_KEY is set but is not a valid Fernet key "
+                "(needs urlsafe-base64 of 32 bytes). Generate one with "
+                "`python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\"`."
+            ) from exc

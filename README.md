@@ -184,9 +184,10 @@ it with `docker compose -f infra/docker-compose.yml --profile ibkr up`.
 HaspelHedgeFund is **educational and research software**, provided **as-is with no
 warranty** (see [LICENSE](./LICENSE), MIT). It is **not investment advice** and does
 not recommend any security. Trading is **paper-only by design**: live-broker
-auto-execution is permanently blocked in code (a core invariant), and
-`PAPER_AUTO_SUBMIT_ENABLED` is a default-off kill switch for automated paper
-submission. You are solely responsible for any use of this software and for
+auto-execution is permanently blocked in code (a core invariant). Automated paper
+submission is off unless you opt in per schedule (`auto_paper_submit`, default
+off), and `PAPER_AUTO_SUBMIT_ENABLED=0` is a global kill switch that disables it
+instance-wide. You are solely responsible for any use of this software and for
 complying with your data/LLM providers' and broker's terms.
 
 ## License

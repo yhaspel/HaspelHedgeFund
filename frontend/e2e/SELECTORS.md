@@ -1,6 +1,6 @@
 # E2E selectors catalogue
 
-Policy: ADR [0020](../../development-plans/adr/0020-e2e-selector-strategy.md).
+Policy: ADR 0020.
 **Order:** `getByRole(name)` → `getByLabel`/`getByPlaceholder` → `getByTestId`.
 Add a `data-testid` only when role/name can't reach an element; record it here in
 the **same PR** that adds the test. Banned: CSS/XPath, nth-child, class chains,
