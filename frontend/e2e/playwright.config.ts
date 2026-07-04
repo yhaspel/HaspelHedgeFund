@@ -42,6 +42,9 @@ export default defineConfig({
     trace: 'on-first-retry',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // P4-OFF WS-2: the `ct` build sets serviceWorker:false, but block SWs at the
+    // context level too so route interception never races a SW-mediated request.
+    serviceWorkers: 'block',
   },
   projects: [
     {

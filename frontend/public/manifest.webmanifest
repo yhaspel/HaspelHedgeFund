@@ -1,0 +1,14 @@
+{
+  "name": "Haspel Hedge Fund",
+  "short_name": "HHF",
+  "description": "Institutional research and paper-trading platform — runs fully offline on your laptop.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "icons": [
+    { "src": "icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "any" }
+  ]
+}

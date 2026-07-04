@@ -22,5 +22,8 @@ COPY frontend/ /app/
 RUN pnpm build
 
 FROM nginx:1.27-alpine AS prod
+# P4-OFF WS-2.7: SPA-aware config so deep-link refreshes serve index.html (not
+# 404) and index.html / ngsw.json stay uncached for clean deploys.
+COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist/frontend/browser /usr/share/nginx/html
 EXPOSE 80

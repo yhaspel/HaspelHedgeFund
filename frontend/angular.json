@@ -26,7 +26,8 @@
             ],
             "styles": [
               "src/styles.css"
-            ]
+            ],
+            "serviceWorker": "ngsw-config.json"
           },
           "configurations": {
             "production": {
@@ -58,6 +59,7 @@
                 }
               ],
               "outputHashing": "all",
+              "serviceWorker": false,
               "fileReplacements": [
                 {
                   "replace": "src/environments/environment.ts",
