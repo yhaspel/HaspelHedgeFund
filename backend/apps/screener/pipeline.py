@@ -578,7 +578,7 @@ def run_screen(
         if "402" in msg or "403" in msg or "Forbidden" in msg or "Payment" in msg:
             raise RuntimeError(
                 "Your FMP plan does not include the Stock Screener endpoint. "
-                "Upgrade your plan or set a different key at /settings/models."
+                "Upgrade your plan or set a different key at /settings/providers."
             ) from exc
         raise
 

@@ -47,7 +47,14 @@ def main() -> int:
     import logging as _logging
     _logging.getLogger("httpx").setLevel(_logging.WARNING)
 
-    user = User.objects.get(email="owner@example.com")
+    email = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SMOKE_USER_EMAIL", "")
+    if not email:
+        print(
+            "usage: smoke_walkforward.py <user-email>  (or set SMOKE_USER_EMAIL)",
+            file=sys.stderr,
+        )
+        return 1
+    user = User.objects.get(email=email)
     bt = Backtest.objects.create(
         user=user,
         name=f"Verify {dt.date.today().isoformat()} 5n 1yr v2",

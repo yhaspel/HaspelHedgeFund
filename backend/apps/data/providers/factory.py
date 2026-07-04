@@ -9,7 +9,7 @@ Resolution order (see `_resolve_data_key`):
   2. `force_platform=True` kwarg → env var
   3. Provider in `_PUBLIC` (FRED) → env var
   4. `settings.ALLOW_PLATFORM_DATA_KEYS` → env var
-  5. Raise `RuntimeError` with actionable message pointing at `/settings/models`
+  5. Raise `RuntimeError` with actionable message pointing at `/settings/providers`
 
 The (user_id, api_key) tuple is the cache key so a freshly-saved BYO key
 does not reuse a platform-key client. Stale entries die with the worker.
@@ -70,7 +70,7 @@ def _resolve_data_key(
 
     raise RuntimeError(
         f"No {provider.upper()} key configured for this user. "
-        f"Set your {provider.upper()} key at /settings/models."
+        f"Set your {provider.upper()} key at /settings/providers."
     )
 
 

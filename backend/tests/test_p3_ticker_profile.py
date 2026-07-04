@@ -235,7 +235,7 @@ def test_profile_view_degrades_gracefully_without_fmp_key(monkeypatch) -> None:
     body = res.json()
     assert body["name"] == "NVIDIA Corp"  # cached identity still served
     assert body["market_cap"] is None  # no live metrics without key
-    assert "/settings/models" in body.get("detail", "")
+    assert "/settings/providers" in body.get("detail", "")
 
 
 # ---------------------------------------------------------------------------

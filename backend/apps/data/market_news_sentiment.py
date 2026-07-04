@@ -177,7 +177,7 @@ def classify(
         if "no" in msg and "key" in msg:
             return False, (
                 f"Sentiment needs a {provider.upper()} key — "
-                "set it at /settings/models."
+                "set it at /settings/providers."
             )
         return False, f"Sentiment unavailable: {exc.__class__.__name__}"
 
