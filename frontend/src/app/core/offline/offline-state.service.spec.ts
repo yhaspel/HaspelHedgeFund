@@ -51,10 +51,17 @@ describe('OfflineState', () => {
     expect(svc.backendInfo()?.offline_mode).toBe(true);
   });
 
-  it('probe → offline-l2 when unreachable', async () => {
+  it('probe → offline-l2 when unreachable (fetch rejects)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
     await svc.probe();
     expect(svc.mode()).toBe('offline-l2');
+  });
+
+  it('probe stays ONLINE on a non-2xx health (reachable — must not block writes)', async () => {
+    // Finding-4 safety: a reachable-but-erroring health must NOT flip to L2.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 } as Response));
+    await svc.probe();
+    expect(svc.mode()).toBe('online');
   });
 
   it('forced short-circuits to L2 without touching the network', async () => {

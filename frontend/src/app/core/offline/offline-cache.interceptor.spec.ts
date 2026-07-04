@@ -86,7 +86,8 @@ describe('offlineCacheInterceptor', () => {
     expect(r.headers.get('X-HF-Cached-At')).toBeTruthy();
   });
 
-  it.each([503, 504])('replays cache on %i', async (status) => {
+  it.each([503, 504])('replays cache on %i when already offline', async (status) => {
+    offline.mode.set('offline-l2');
     await cache.put({
       key: cache.cacheKey(`${API}/x/`),
       url: `${API}/x/`,
@@ -100,6 +101,25 @@ describe('offlineCacheInterceptor', () => {
     ctrl.expectOne(`${API}/x/`).flush(null, { status, statusText: 'x' });
     await tick();
     expect(ok).toBe(true);
+  });
+
+  it('does NOT serve stale-as-live on a per-route 504 while online', async () => {
+    // Finding-5 safety: health is green (mode online) but one heavy route 504s —
+    // propagate an honest error, never present stale cache as a fresh 200.
+    offline.mode.set('online');
+    await cache.put({
+      key: cache.cacheKey(`${API}/x/`),
+      url: `${API}/x/`,
+      body: { v: 1 },
+      status: 200,
+      savedAt: Date.now(),
+      schemaVersion: cache.SCHEMA_VERSION,
+    });
+    let errored = false;
+    http.get(`${API}/x/`).subscribe({ error: () => (errored = true) });
+    ctrl.expectOne(`${API}/x/`).flush(null, { status: 504, statusText: 'Gateway Timeout' });
+    await tick();
+    expect(errored).toBe(true);
   });
 
   it('does NOT replay cache on 401', async () => {

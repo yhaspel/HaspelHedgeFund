@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 from apps.brokers.models import BrokerAccount
 from apps.graphs.models import AgentGraphVersion
-from apps.models_catalog.presets import PRESETS
+from apps.models_catalog.presets import SELECTABLE_PRESETS
 from apps.notifications.models import NotificationChannel
 from apps.watchlists.models import Watchlist
 
@@ -75,9 +75,10 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
         return value
 
     def validate_model_preset(self, value: str) -> str:
-        if value not in PRESETS:
+        # "local" is offline-only (forced by OFFLINE_MODE), never user-selectable.
+        if value not in SELECTABLE_PRESETS:
             raise serializers.ValidationError(
-                f"Unknown preset {value!r}. Choices: {sorted(PRESETS)}."
+                f"Unknown preset {value!r}. Choices: {sorted(SELECTABLE_PRESETS)}."
             )
         return value
 

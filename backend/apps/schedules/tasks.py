@@ -109,14 +109,20 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         return {"status": "empty"}
 
     # ---- cost ceiling ----
-    # P4-OFF WS-1.5: at L1 the run is all-local ($0) — force the local preset
-    # before estimating so a stored expensive preset can't cost-block a
-    # scheduled run that would otherwise complete. execute_run re-forces at the
-    # execution seam, so the child Run's model actually runs local regardless.
+    # P4-OFF WS-1.5: at L1 the run is all-local ($0), so SKIP cost estimation
+    # entirely — a stored expensive preset can't cost-block a scheduled run, and
+    # estimating "local" would otherwise need a live Ollama probe that can crash
+    # this task. Overrides are left empty (below); execute_run re-forces the local
+    # preset at the execution seam, using the run user's own Ollama host.
     from django.conf import settings as dj_settings
 
-    preset = "local" if getattr(dj_settings, "OFFLINE_MODE", False) else sr.model_preset
-    est = estimate_run_cost(sr.user, preset, sr.model_overrides, sr.personas, len(tickers))
+    offline = getattr(dj_settings, "OFFLINE_MODE", False)
+    preset = "local" if offline else sr.model_preset
+    est = (
+        {"est_total_usd": 0.0}
+        if offline
+        else estimate_run_cost(sr.user, preset, sr.model_overrides, sr.personas, len(tickers))
+    )
     ceiling = float(sr.cost_ceiling_usd) if sr.cost_ceiling_usd is not None else None
     degraded_from = ""
     overage = False
@@ -157,7 +163,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         elif sr.on_breach == ScheduledRun.NOTIFY_ONLY:
             overage = True
 
-    overrides = resolve_overrides(sr.user, preset, sr.model_overrides)
+    overrides = {} if offline else resolve_overrides(sr.user, preset, sr.model_overrides)
     hist.estimated_cost_usd = Decimal(str(est["est_total_usd"]))
     hist.degraded_preset = degraded_from
     hist.save(update_fields=["estimated_cost_usd", "degraded_preset"])

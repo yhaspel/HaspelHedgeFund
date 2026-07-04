@@ -85,18 +85,26 @@ export const offlineCacheInterceptor: HttpInterceptorFn = (req, next) => {
     }),
     catchError((err: HttpErrorResponse) => {
       const status = err?.status ?? 0;
-      // Only backend-unreachable shapes replay cache. The predicate is written
+      // Only backend-unreachable shapes are candidates. The predicate is written
       // out explicitly — a bare `|| 503 || 504` is always-truthy and would
       // replay cache on 401s too.
-      if (status === 0 || [502, 503, 504].includes(status)) {
-        offline.reportFailure();
-        return from(get(key)).pipe(
-          switchMap((rec) =>
-            rec ? of(staleResponse(req.urlWithParams, rec)) : throwError(() => err),
-          ),
-        );
-      }
-      return throwError(() => err);
+      const unreachableShape = status === 0 || [502, 503, 504].includes(status);
+      if (!unreachableShape) return throwError(() => err);
+      // Re-probe so a fresh outage flips OfflineState (and the banner).
+      offline.reportFailure();
+      // Serve stale ONLY when the app is genuinely offline: a raw network failure
+      // (status 0 — the health probe corroborates, so the banner is up), or a
+      // server-error shape while OfflineState already knows we're degraded. A
+      // per-route 502/504 WHILE ONLINE propagates as an honest error — we never
+      // present stale data as a fresh 200 with no banner (§8 safety invariant;
+      // per-page "as of" stamps are deferred, so the banner is the only guard).
+      const canReplay = status === 0 || offline.mode() !== 'online' || offline.forced();
+      if (!canReplay) return throwError(() => err);
+      return from(get(key)).pipe(
+        switchMap((rec) =>
+          rec ? of(staleResponse(req.urlWithParams, rec)) : throwError(() => err),
+        ),
+      );
     }),
   );
 };

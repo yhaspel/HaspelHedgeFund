@@ -220,16 +220,6 @@ def execute_run(run_id: int) -> None:
     filings_provider = get_edgar_provider()
     ownership_provider = get_ownership_provider(user=run.user)
 
-    # P4-OFF WS-1.5: force the all-local preset at the single execution seam.
-    # Covers ad-hoc, scheduled watchlist runs (they call execute_run), and reruns
-    # of pre-offline runs whose stored model_overrides may carry cloud slugs.
-    model_overrides = run.model_overrides or {}
-    if getattr(settings, "OFFLINE_MODE", False):
-        from apps.models_catalog.offline import offline_model_overrides
-
-        model_overrides = offline_model_overrides(run.user)
-        log.info("offline_run run_id=%s forced_preset=local", run.id)
-
     ensure_versions_synced()
     run.agent_versions = snapshot_versions(
         ANALYTICAL_AGENTS + selected_personas + PIPELINE_AGENTS
@@ -237,6 +227,18 @@ def execute_run(run_id: int) -> None:
     run.save(update_fields=["agent_versions"])
 
     try:
+        # P4-OFF WS-1.5: force the all-local preset at the single execution seam.
+        # Covers ad-hoc, scheduled watchlist runs (they call execute_run), and
+        # reruns of pre-offline runs whose stored model_overrides may carry cloud
+        # slugs. Inside the try so a "no local model" hard-error marks the run
+        # FAILED with the actionable message instead of leaving it stuck RUNNING.
+        model_overrides = run.model_overrides or {}
+        if getattr(settings, "OFFLINE_MODE", False):
+            from apps.models_catalog.offline import offline_model_overrides
+
+            model_overrides = offline_model_overrides(run.user)
+            log.info("offline_run run_id=%s forced_preset=local", run.id)
+
         # P02a review: label the run's risk context (stub vs real portfolio).
         # Strategy-sourced runs already see a real portfolio downstream; ad-hoc
         # single-ticker runs use the $100K stub in the risk manager.

@@ -108,6 +108,12 @@ PRESETS: dict[str, dict[str, str]] = {
     "local": {"*": "<local>"},
 }
 
+# Presets a user may pick in the UI / online preset API. "local" is excluded: it
+# is offline-only, forced by OFFLINE_MODE, and its `<local>` token needs a live
+# Ollama probe that would 500 the online preset endpoints on a machine with no
+# daemon. It is never user-selectable — the execution seams apply it directly.
+SELECTABLE_PRESETS = [p for p in PRESETS if p != "local"]
+
 
 def expand_preset(
     preset: str, local_tier_a: str | None = None, local_model: str | None = None

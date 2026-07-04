@@ -12,7 +12,9 @@ export interface BackendHealth {
 }
 
 const FORCED_KEY = 'hf.offline.forced';
-const PROBE_TIMEOUT_MS = 2000;
+// The backend health view does its own 2s Ollama probe on a cache miss, so a
+// tight client abort would race it and false-flag L2 (which blocks all writes).
+const PROBE_TIMEOUT_MS = 5000;
 const DEGRADED_POLL_MS = 30_000;
 
 /**
@@ -71,15 +73,19 @@ export class OfflineState {
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         cache: 'no-store',
       });
-      if (!res.ok) {
-        this.setMode('offline-l2');
-        this.backendInfo.set(null);
-      } else {
+      if (res.ok) {
         const body = (await res.json()) as BackendHealth;
         this.backendInfo.set(body);
         this.setMode(body.offline_mode ? 'offline-l1' : 'online');
+      } else {
+        // The backend RESPONDED (a 4xx/5xx health), so it is reachable — do NOT
+        // flip to L2 (which would block every write). Treat as online; a real
+        // write surfaces its own error. L2 is reserved for genuine unreachability.
+        this.backendInfo.set(null);
+        this.setMode('online');
       }
     } catch {
+      // fetch rejected (network unreachable) or the probe timed out.
       this.setMode('offline-l2');
       this.backendInfo.set(null);
     } finally {

@@ -131,6 +131,30 @@ def test_resolve_local_model_hard_errors_with_no_cloud_fallback():
 
 
 # ---------------------------------------------------------------------------
+# The offline-only "local" preset is not exposed on the online preset API — its
+# <local> token needs a live Ollama probe that would 500 the endpoint.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_local_preset_absent_from_agents_endpoint(auth_client):
+    resp = auth_client.get(reverse("agents-list"))
+    assert resp.status_code == 200
+    assert "local" not in resp.data["presets"]
+    assert "hybrid" in resp.data["presets"]
+
+
+@pytest.mark.django_db
+def test_preset_detail_rejects_local_without_probing_ollama(auth_client):
+    # Must 404 (not 500) even with no Ollama daemon — no discovery is attempted.
+    with patch(
+        "apps.models_catalog.ollama_discovery.discover_ollama_models", return_value=[]
+    ):
+        resp = auth_client.get(reverse("preset-detail", args=["local"]))
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Provider HTTP fence (WS-1.3 / WS-1.8) — never construction, always the request.
 # ---------------------------------------------------------------------------
 
