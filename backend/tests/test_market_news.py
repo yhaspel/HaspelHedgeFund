@@ -546,7 +546,7 @@ def test_classify_missing_key_returns_actionable_warning(sentiment_models) -> No
     with mock.patch(
         "hedgefund_agents.registry.get_llm",
         side_effect=RuntimeError(
-            "No OPENROUTER key configured. Set your OPENROUTER key at /settings/models."
+            "No OPENROUTER key configured. Set your OPENROUTER key at /settings/providers."
         ),
     ):
         ok, warn = classify(
@@ -555,7 +555,7 @@ def test_classify_missing_key_returns_actionable_warning(sentiment_models) -> No
     assert not ok
     assert warn is not None
     assert "OPENROUTER" in warn.upper()
-    assert "/settings/models" in warn
+    assert "/settings/providers" in warn
 
 
 # ---------------------------------------------------------------------------

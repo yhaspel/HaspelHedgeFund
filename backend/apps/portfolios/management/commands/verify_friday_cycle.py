@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -40,7 +41,11 @@ class Command(BaseCommand):
             "--notify", action="store_true",
             help="Push the summary to the owner's notification channels.",
         )
-        parser.add_argument("--owner-email", default="owner@example.com")
+        parser.add_argument(
+            "--owner-email",
+            default=getattr(settings, "ALPACA_FUND_OWNER_EMAIL", ""),
+            help="Notification target; default: settings.ALPACA_FUND_OWNER_EMAIL.",
+        )
 
     def handle(self, *args, **opts) -> None:
         from apps.brokers.models import BrokerAccount

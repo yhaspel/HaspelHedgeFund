@@ -68,7 +68,7 @@ def test_get_fmp_provider_raises_when_gate_closed_and_no_user_key() -> None:
         get_fmp_provider(user=u)
     msg = str(exc.value)
     assert "FMP" in msg
-    assert "/settings/models" in msg
+    assert "/settings/providers" in msg
 
 
 @pytest.mark.django_db

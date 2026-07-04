@@ -10,6 +10,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 _DEV_INSECURE_SENTINEL = "dev-insecure-not-for-prod-not-for-prod-32b-sentinel"
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _DEV_INSECURE_SENTINEL)
+
+# ADR 0022: field encryption is decoupled from SECRET_KEY. When unset, crypto.py
+# falls back to the legacy SECRET_KEY-derived key (dev convenience); the guard at
+# the bottom of this module requires a real value in non-dev/test envs. Generate:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
+
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -299,7 +306,7 @@ TRADESTATION_SCOPES = "openid offline_access ReadAccount Trade"
 
 # P2n: BYOK gate for paid data providers (FMP, Tiingo). When False, the
 # resolver in apps.data.providers.factory refuses to fall back to the env var
-# and raises with an actionable error pointing the user at /settings/models.
+# and raises with an actionable error pointing the user at /settings/providers.
 # FRED is exempt — it's free public-data per data-licensing.md.
 ALLOW_PLATFORM_DATA_KEYS = os.environ.get("ALLOW_PLATFORM_DATA_KEYS", "0") == "1"
 
@@ -415,3 +422,28 @@ if _DJANGO_ENV not in {"dev", "test"}:
             "JWT_SIGNING_KEY must be at least 32 bytes "
             f"(got {len(_jwt_key.encode('utf-8'))}) in DJANGO_ENV={_DJANGO_ENV!r}."
         )
+    if not FIELD_ENCRYPTION_KEY.strip():
+        raise RuntimeError(
+            "FIELD_ENCRYPTION_KEY is not set (ADR 0022); stored BYO keys and "
+            "broker credentials would fall back to the SECRET_KEY-derived key. "
+            "Set a dedicated value — generate one with "
+            "`python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\"` — in "
+            f"DJANGO_ENV={_DJANGO_ENV!r}."
+        )
+    else:
+        # Presence is not enough: a malformed value (wrong length, hex, a reused
+        # token_urlsafe secret) passes as truthy, then bricks crypto at runtime —
+        # decrypt() would swallow the Fernet ValueError and read every stored key
+        # as absent. Validate constructibility here so it fails fast and clearly.
+        from cryptography.fernet import Fernet
+
+        try:
+            Fernet(FIELD_ENCRYPTION_KEY.strip().encode())
+        except Exception as exc:
+            raise RuntimeError(
+                "FIELD_ENCRYPTION_KEY is set but is not a valid Fernet key "
+                "(needs urlsafe-base64 of 32 bytes). Generate one with "
+                "`python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\"`."
+            ) from exc

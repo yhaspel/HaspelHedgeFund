@@ -32,7 +32,7 @@ Two characteristics of IBKR's API drive everything else in this guide:
 1. **Logging in requires you, interactively, once a day.** IB mandates 2FA on every session start; there is no headless username/password path for retail accounts. You log in to the gateway via your browser; it then holds the session.
 2. **The session resets nightly.** IB cuts every gateway session at roughly midnight ET. The app's `keep_gateway_warm` task notices and flips the account to *Needs reauth*; you re-log via the same browser flow.
 
-Design rationale is recorded in [ADR 0011](../development-plans/adr/0011-ibkr-adapter-gateway-bootstrap-reply-loop-gate-amendment.md).
+Design rationale for the gateway bootstrap and the nightly reply-loop reauth gate is recorded in the project's architecture notes.
 
 ## 1. Obtain the gateway distribution
 

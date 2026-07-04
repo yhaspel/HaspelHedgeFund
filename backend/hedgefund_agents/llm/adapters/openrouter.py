@@ -207,7 +207,7 @@ class OpenRouterClient:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "HTTP-Referer": "https://github.com/yhaspel/HaspelHedgeFund",
-            "X-Title": "AIHedgeFund",
+            "X-Title": "HaspelHedgeFund",
             "Content-Type": "application/json",
         }
         t0 = time.perf_counter()

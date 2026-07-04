@@ -1,9 +1,7 @@
 # Playwright E2E (Phase 8)
 
 End-to-end + component-in-harness tests for the Angular frontend. Two lanes
-(ADR [0019](../../development-plans/adr/0019-playwright-two-lane-e2e.md)),
-role/name-first selectors (ADR
-[0020](../../development-plans/adr/0020-e2e-selector-strategy.md)).
+(ADR 0019), role/name-first selectors (ADR 0020).
 
 ## Lanes
 

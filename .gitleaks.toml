@@ -1,0 +1,23 @@
+# gitleaks configuration — extends the built-in ruleset and allowlists the
+# project's deliberate non-secret fixtures so the scan is green on a clean tree.
+#
+# Verified 2026-07-04: the only key-shaped strings in the tree/history are the
+# `*-PLAINTEXT-CANARY-*` test canaries (used to prove BYO keys never leak into
+# API responses — backend/tests/test_p2d_model_routing.py) and the visibly
+# insecure `dev-insecure-*` placeholder secrets in .env.example / dev settings.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deliberate non-secret test canaries and dev placeholder config"
+regexes = [
+  # Test canaries: intentionally fake keys asserted to never appear in responses.
+  '''PLAINTEXT-CANARY''',
+  # Dev/test placeholder secrets — visibly insecure, never real.
+  '''dev-insecure''',
+  '''ci-e2e-lane-b-''',
+]
+paths = [
+  # Template env file: placeholder values only; real secrets live in .env (gitignored).
+  '''\.env\.example$''',
+]

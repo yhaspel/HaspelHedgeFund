@@ -1,0 +1,25 @@
+name: gitleaks
+
+# Secret scan. Runs on every push and PR (needs no repo secrets, so it is safe on
+# fork PRs). Scans the full git history on push; PRs scan their own commits.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  # gitleaks-action lists the PR's commits via the API on pull_request events;
+  # without this it 403s ("Resource not accessible by integration").
+  pull-requests: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml

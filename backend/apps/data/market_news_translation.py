@@ -145,7 +145,7 @@ def translate(
                 # Surface the actionable key message; still try the fallback.
                 last_warning = (
                     "Translation needs an OpenRouter key — "
-                    "set it at /settings/models."
+                    "set it at /settings/providers."
                 )
             else:
                 last_warning = "Translation unavailable — showing original language."
