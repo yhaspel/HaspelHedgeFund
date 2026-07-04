@@ -17,7 +17,7 @@ from apps.data.interfaces import (
     HolderStake,
     IssuerOwnershipSummary,
 )
-from apps.data.providers.errors import OwnershipNotEntitled
+from apps.data.providers.errors import OwnershipNotEntitled, ProviderOffline
 
 
 class OwnershipResolver:
@@ -35,9 +35,10 @@ class OwnershipResolver:
         if self._fmp is not None:
             try:
                 return self._fmp.get_issuer_ownership(ticker, as_of=as_of)
-            except (OwnershipNotEntitled, httpx.HTTPError):
-                # Not entitled, a wrong/placeholder slug (404), or any transport
-                # error: degrade to EDGAR rather than hard-failing the caller.
+            except (OwnershipNotEntitled, httpx.HTTPError, ProviderOffline):
+                # Not entitled, a wrong/placeholder slug (404), any transport
+                # error, or OFFLINE_MODE: degrade to EDGAR DB snapshots rather
+                # than hard-failing the caller.
                 pass
         # EDGAR has no efficient by-issuer query; read aggregated snapshots.
         return _edgar_issuer_from_snapshots(ticker, as_of=as_of)
@@ -48,8 +49,8 @@ class OwnershipResolver:
         if self._fmp is not None:
             try:
                 return self._fmp.get_filer_portfolio(filer_cik, as_of=as_of)
-            except (OwnershipNotEntitled, httpx.HTTPError):
-                # Not entitled / wrong slug / transport error → fall back.
+            except (OwnershipNotEntitled, httpx.HTTPError, ProviderOffline):
+                # Not entitled / wrong slug / transport error / offline → fall back.
                 pass
         return self._edgar.get_filer_portfolio(filer_cik, as_of=as_of)
 

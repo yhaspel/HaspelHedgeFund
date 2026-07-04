@@ -34,6 +34,7 @@ from ..interfaces import (
     ScreenerRow,
 )
 from ..models import DailyBar, Fundamental
+from ._http import make_client
 from .errors import OwnershipNotEntitled
 
 BASE_URL = "https://financialmodelingprep.com/stable"
@@ -64,7 +65,7 @@ class FmpProvider:
         self.api_key = api_key or settings.FMP_API_KEY
         if not self.api_key:
             raise RuntimeError("FMP_API_KEY is not configured")
-        self._http = http or httpx.Client(timeout=30.0)
+        self._http = http or make_client(timeout=30.0)
 
     # ---- intraday quote ----------------------------------------------
 

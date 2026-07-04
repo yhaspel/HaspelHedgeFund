@@ -109,7 +109,13 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         return {"status": "empty"}
 
     # ---- cost ceiling ----
-    preset = sr.model_preset
+    # P4-OFF WS-1.5: at L1 the run is all-local ($0) — force the local preset
+    # before estimating so a stored expensive preset can't cost-block a
+    # scheduled run that would otherwise complete. execute_run re-forces at the
+    # execution seam, so the child Run's model actually runs local regardless.
+    from django.conf import settings as dj_settings
+
+    preset = "local" if getattr(dj_settings, "OFFLINE_MODE", False) else sr.model_preset
     est = estimate_run_cost(sr.user, preset, sr.model_overrides, sr.personas, len(tickers))
     ceiling = float(sr.cost_ceiling_usd) if sr.cost_ceiling_usd is not None else None
     degraded_from = ""

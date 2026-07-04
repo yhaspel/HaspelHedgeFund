@@ -100,16 +100,26 @@ PRESETS: dict[str, dict[str, str]] = {
         "portfolio_manager": "anthropic:claude-sonnet-4-6",
         "cio": "anthropic:claude-sonnet-4-6",
     },
+    # P4-OFF: the all-local preset for offline mode. Every agent resolves to the
+    # discovered Ollama model via the `<local>` token. Unlike hybrid's
+    # `<local-tier-a>` (which falls back to a cloud slug when no local model is
+    # found), `<local>` HARD-ERRORS with no local model — a cloud fallback would
+    # defeat the offline guarantee (R3).
+    "local": {"*": "<local>"},
 }
 
 
-def expand_preset(preset: str, local_tier_a: str | None = None) -> dict[str, str]:
+def expand_preset(
+    preset: str, local_tier_a: str | None = None, local_model: str | None = None
+) -> dict[str, str]:
     """Return {agent_name: model_id} with wildcards expanded.
 
     The `<local-tier-a>` token (used in 'hybrid') resolves to `local_tier_a`
-    when a local model was discovered, else to `HYBRID_LOCAL_FALLBACK`. It
-    is *always* resolved — the literal token must never leak out as a model
-    id.
+    when a local model was discovered, else to `HYBRID_LOCAL_FALLBACK`. The
+    `<local>` token (used in 'local', the offline preset) resolves to
+    `local_model` when given, else via live Ollama discovery — and HARD-ERRORS
+    (never a cloud fallback) when no local model exists. Both tokens are
+    *always* resolved — the literal token must never leak out as a model id.
     """
     if preset not in PRESETS:
         return {}
@@ -129,4 +139,10 @@ def expand_preset(preset: str, local_tier_a: str | None = None) -> dict[str, str
             out[agent] = rules["*"]
     placeholder_target = local_tier_a or HYBRID_LOCAL_FALLBACK
     out = {k: (placeholder_target if v == "<local-tier-a>" else v) for k, v in out.items()}
+    if any(v == "<local>" for v in out.values()):
+        if local_model is None:
+            from .offline import resolve_local_model  # lazy: avoid import cycle
+
+            local_model = resolve_local_model()
+        out = {k: (local_model if v == "<local>" else v) for k, v in out.items()}
     return out

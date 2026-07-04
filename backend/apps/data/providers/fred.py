@@ -16,6 +16,7 @@ from django.conf import settings
 from django.db import transaction
 
 from ..models import MacroSeries
+from ._http import make_client
 
 ALFRED_BASE = "https://api.stlouisfed.org/fred"
 
@@ -35,7 +36,7 @@ class FredProvider:
         self.api_key = api_key or settings.FRED_API_KEY
         if not self.api_key:
             raise RuntimeError("FRED_API_KEY is not set")
-        self._http = http or httpx.Client(timeout=30.0)
+        self._http = http or make_client(timeout=30.0)
 
     def get_latest_value(
         self, series_id: str, *, as_of: dt.date

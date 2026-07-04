@@ -13,11 +13,15 @@ import logging
 
 from celery import shared_task
 
+from hedgefund.offline import skip_when_offline
+
 log = logging.getLogger(__name__)
 
 
 @shared_task
 def reconcile_model_catalog() -> dict:
+    if skip_when_offline("reconcile_model_catalog"):
+        return {"status": "skipped_offline"}
     from . import verification
     from .fetching import sync_tier_models
 

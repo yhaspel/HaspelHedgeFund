@@ -12,6 +12,8 @@ from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from hedgefund.offline import skip_when_offline
+
 from .engine import (
     cost_cap_reached,
     is_cycle_due,
@@ -55,6 +57,9 @@ def evolve_personas(
     bypasses ``is_cycle_due`` but still respects ``is_evolvable`` and the
     monthly cost cap.
     """
+    # P4-OFF: persona evolution does `:online` web search + cloud LLM calls.
+    if skip_when_offline("evolve_personas"):
+        return {"ran": [], "skipped": [], "failed": [], "reason": "offline"}
     user_settings = _resolve_target_user(user_id)
     if user_settings is None:
         return {"ran": [], "skipped": [], "failed": [], "reason": "no_enabled_user"}

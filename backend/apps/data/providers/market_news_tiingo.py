@@ -18,6 +18,7 @@ import httpx
 from django.conf import settings
 
 from ..models import MarketNewsItem
+from ._http import make_client
 
 TIINGO_BASE = "https://api.tiingo.com/tiingo/news"
 RETENTION_DAYS = 7
@@ -44,7 +45,7 @@ class MarketNewsTiingoProvider:
         self.api_key = api_key or settings.TIINGO_API_KEY
         if not self.api_key:
             raise RuntimeError("TIINGO_API_KEY is not set")
-        self._http = http or httpx.Client(timeout=30.0)
+        self._http = http or make_client(timeout=30.0)
 
     def fetch_latest(self, *, limit: int = 60) -> list[MarketNewsItem]:
         params = {

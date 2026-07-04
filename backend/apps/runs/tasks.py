@@ -220,6 +220,16 @@ def execute_run(run_id: int) -> None:
     filings_provider = get_edgar_provider()
     ownership_provider = get_ownership_provider(user=run.user)
 
+    # P4-OFF WS-1.5: force the all-local preset at the single execution seam.
+    # Covers ad-hoc, scheduled watchlist runs (they call execute_run), and reruns
+    # of pre-offline runs whose stored model_overrides may carry cloud slugs.
+    model_overrides = run.model_overrides or {}
+    if getattr(settings, "OFFLINE_MODE", False):
+        from apps.models_catalog.offline import offline_model_overrides
+
+        model_overrides = offline_model_overrides(run.user)
+        log.info("offline_run run_id=%s forced_preset=local", run.id)
+
     ensure_versions_synced()
     run.agent_versions = snapshot_versions(
         ANALYTICAL_AGENTS + selected_personas + PIPELINE_AGENTS
@@ -251,7 +261,7 @@ def execute_run(run_id: int) -> None:
                 "as_of_date": run.as_of_date,
                 "run_id": run.id,
                 "user_id": run.user_id,
-                "model_overrides": run.model_overrides or {},
+                "model_overrides": model_overrides,
                 "data_provider": data_provider,
                 "filings_provider": filings_provider,
                 "ownership_provider": ownership_provider,

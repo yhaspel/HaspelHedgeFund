@@ -46,6 +46,17 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
     if getattr(settings, "E2E_STUB_LLM", False):
         from .llm.adapters.stub import StubLLMClient
         return StubLLMClient()
+    # P4-OFF R3: the hard "local LLM only" guarantee. Under OFFLINE_MODE, any
+    # non-Ollama adapter is a leak (a per-agent override, the Settings default
+    # model, a stored strategy preset, or a rerun of a pre-offline run that
+    # slipped past the execution-seam forcing) — fail loud rather than reach the
+    # network. A healthy L1 run never hits this: every agent is forced local.
+    if getattr(settings, "OFFLINE_MODE", False) and provider != "ollama":
+        from .errors import OfflineLLMViolation
+        raise OfflineLLMViolation(
+            f"OFFLINE_MODE blocks the '{provider}' LLM provider — offline runs "
+            "use the local Ollama model only."
+        )
     if user_id is None and state is not None:
         user_id = state.get("user_id")
     api_key = ""

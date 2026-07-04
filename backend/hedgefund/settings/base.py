@@ -234,6 +234,26 @@ EDGAR_USER_AGENT = os.environ.get(
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 
+# Ollama host for local models. The adapter and per-user ProviderKey.ollama_host
+# already default to this; naming it here lets the health probe + offline
+# resolver share one source of truth (the view is unauthenticated, so it has no
+# per-user host to read).
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+# --- Offline mode (P4-OFF, ADR 0029) -----------------------------------------
+# OFFLINE_MODE=1 puts the backend in "internet down, local stack up" (L1) mode:
+#   1. External data providers are fenced at their HTTP seam (apps/data/
+#      providers/_http.py) — reads serve last-persisted DB rows, never the WAN.
+#   2. Every LLM call is forced onto the local Ollama model at the execution
+#      seams, and registry.get_llm hard-blocks any non-Ollama adapter (R3).
+#   3. Outward-facing periodic tasks (provider refresh, notifications, broker
+#      polling) no-op fast instead of spamming connection errors every beat.
+# Explicit env flag, never auto-detected (deterministic + testable, D5).
+OFFLINE_MODE = os.environ.get("OFFLINE_MODE", "0") == "1"
+# The Ollama tag every agent runs on offline. Kept inside the 24 GB M4 envelope
+# (§WS-5): qwen2.5:7b is the live-verified default; >14B is excluded by docs.
+OFFLINE_LLM_MODEL = os.environ.get("OFFLINE_LLM_MODEL", "qwen2.5:7b")
+
 # P10 §E3 — the news-sentiment lab's FROZEN classifier. The lab tasks always
 # classify with this model (never the user's news-page preference): swapping
 # the sentiment model mid-experiment would silently change the sleeve's signal

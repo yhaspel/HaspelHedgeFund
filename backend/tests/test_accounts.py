@@ -113,7 +113,11 @@ def test_ping_task_runs_eagerly() -> None:
 def test_health_endpoint_is_unauthenticated(client: APIClient) -> None:
     resp = client.get(reverse("health"))
     assert resp.status_code == 200
-    assert resp.data == {"status": "ok"}
+    # P4-OFF extended the probe in place (WS-1.2): still ok + unauthenticated,
+    # now also the offline discriminator fields.
+    assert resp.data["status"] == "ok"
+    assert resp.data["offline_mode"] is False
+    assert "llm" in resp.data
 
 
 def test_cors_default_includes_localhost_and_127_origins() -> None:

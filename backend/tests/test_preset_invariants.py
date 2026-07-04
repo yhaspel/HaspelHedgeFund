@@ -29,6 +29,12 @@ from hedgefund_agents.llm.adapters.openrouter import _REASONING_SLUGS, is_reason
 # personas that vote and the risk/PM/CIO synthesis that decides.
 DECISION_ROLES = PERSONA_AGENTS | {"risk_manager", "portfolio_manager", "cio"}
 
+# P4-OFF: the "local" preset is offline-only. Its models resolve at runtime via
+# Ollama discovery (the `<local>` token hard-errors without a daemon), and local
+# tags are never in the cloud tier menus — so it is out of scope for these
+# cloud-preset vetting/reasoning invariants.
+CLOUD_PRESETS = sorted(p for p in PRESETS if p != "local")
+
 
 def _vetted_ids() -> set[str]:
     """The curated, vetted model id set: the dev/frugal allowlists (kept fresh
@@ -44,7 +50,7 @@ def _is_reasoning(model_id: str) -> bool:
     return any(tag in model_id.lower() for tag in _REASONING_SLUGS)
 
 
-@pytest.mark.parametrize("preset", sorted(PRESETS))
+@pytest.mark.parametrize("preset", CLOUD_PRESETS)
 def test_every_preset_model_is_vetted(preset: str) -> None:
     """Every model a preset resolves to (wildcards expanded, `<local-tier-a>`
     resolved) must be in a curated tier menu — catches typos and un-vetted /
@@ -58,7 +64,7 @@ def test_every_preset_model_is_vetted(preset: str) -> None:
         )
 
 
-@pytest.mark.parametrize("preset", sorted(PRESETS))
+@pytest.mark.parametrize("preset", CLOUD_PRESETS)
 def test_no_reasoning_model_on_a_decision_role(preset: str) -> None:
     """No preset may put a reasoning slug (per the adapter's _REASONING_SLUGS)
     on a decision role — they reasoning-exhaust to empty content (qwen3.6-27b,

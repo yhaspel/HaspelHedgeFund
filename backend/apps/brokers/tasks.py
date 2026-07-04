@@ -18,6 +18,8 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
+from hedgefund.offline import skip_when_offline
+
 from .adapters.ibkr_gateway import IBKRGatewaySession
 from .capabilities import AUTH_NONE, get_capabilities
 from .demo_fills import evaluate_resting_demo_orders
@@ -36,6 +38,8 @@ log = logging.getLogger(__name__)
 def poll_open_orders() -> dict:
     """Walk every active account with at least one open order and poll the
     adapter for new fills."""
+    if skip_when_offline("poll_open_orders"):
+        return {"status": "skipped_offline"}
     summary = {"accounts_scanned": 0, "fills_written": 0, "needs_reauth": 0}
     account_ids = (
         BrokerOrder.objects
@@ -118,6 +122,8 @@ def sweep_stuck_confirmed_orders(grace_hours: int = 24) -> int:
 @shared_task(name="apps.brokers.tasks.reconcile_all_accounts")
 def reconcile_all_accounts() -> dict:
     """Periodic full reconciliation across every active account."""
+    if skip_when_offline("reconcile_all_accounts"):
+        return {"status": "skipped_offline"}
     summary = {"accounts": 0, "drift_events": 0, "stuck_orders_reaped": 0}
     for account in BrokerAccount.objects.filter(
         is_active=True,
@@ -170,6 +176,8 @@ def reconcile_account_task(
 
 @shared_task(name="apps.brokers.tasks.keep_ibkr_gateway_warm")
 def keep_ibkr_gateway_warm() -> dict:
+    if skip_when_offline("keep_ibkr_gateway_warm"):
+        return {"status": "skipped_offline"}
     summary: dict = {
         "monitored_accounts": 0,
         "checked": False,

@@ -9,6 +9,7 @@ import logging
 import time
 from decimal import Decimal
 
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.request import Request
@@ -73,6 +74,9 @@ class MacroSnapshotView(APIView):
                 "sector_implications": snap.sector_implications,
                 "series_used": snap.series_used,
                 "markov_consensus": snap.markov_consensus,
+                # P4-OFF: at L1 the FRED refresh is fenced; this is the last
+                # persisted snapshot.
+                "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
             }
         )
 
@@ -644,6 +648,9 @@ class MarketNewsFeedView(APIView):
             "ranking_basis": (
                 "Ranked by recency, breadth of coverage & source weight."
             ),
+            # P4-OFF: at L1 the provider fetch is fenced and these rows are the
+            # last-persisted DB values — flag them so the client can badge age.
+            "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
         }
         if sentiment_warning:
             payload["sentiment_warning"] = sentiment_warning

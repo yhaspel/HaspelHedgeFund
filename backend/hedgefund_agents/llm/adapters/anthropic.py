@@ -28,6 +28,13 @@ class AnthropicClient:
     provider = "anthropic"
 
     def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+        if getattr(settings, "OFFLINE_MODE", False):  # P4-OFF WS-1.8: defense in depth
+            from hedgefund_agents.errors import OfflineLLMViolation
+
+            raise OfflineLLMViolation(
+                "AnthropicClient must not be constructed in OFFLINE_MODE — "
+                "offline runs use the local Ollama model only."
+            )
         if getattr(settings, "BLOCK_ANTHROPIC", False):
             raise RuntimeError(
                 "Anthropic API is blocked in this environment "

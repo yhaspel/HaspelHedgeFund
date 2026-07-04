@@ -111,6 +111,13 @@ class OpenRouterClient:
     provider = "openrouter"
 
     def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+        if getattr(settings, "OFFLINE_MODE", False):  # P4-OFF WS-1.8: defense in depth
+            from hedgefund_agents.errors import OfflineLLMViolation
+
+            raise OfflineLLMViolation(
+                "OpenRouterClient must not be constructed in OFFLINE_MODE — "
+                "offline runs use the local Ollama model only."
+            )
         self.api_key = api_key or settings.OPENROUTER_API_KEY
         if not self.api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")

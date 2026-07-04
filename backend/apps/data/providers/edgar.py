@@ -16,6 +16,7 @@ from django.db import transaction
 
 from ..interfaces import FilerHolding, FilerPortfolio, Filing
 from ..models import FilingRecord
+from ._http import make_client
 
 # Sections we index for 10-K / 10-Q. The keys are normalized; the values are
 # regex fragments that match the section heading in the stripped text.
@@ -38,7 +39,7 @@ class EdgarProvider:
 
     def __init__(self, user_agent: str | None = None, http: httpx.Client | None = None) -> None:
         self.user_agent = user_agent or settings.EDGAR_USER_AGENT
-        self._http = http or httpx.Client(
+        self._http = http or make_client(
             timeout=30.0, headers={"User-Agent": self.user_agent}
         )
 

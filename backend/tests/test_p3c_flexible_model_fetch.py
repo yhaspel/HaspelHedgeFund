@@ -276,6 +276,8 @@ def test_menu_routing_invariant_for_every_preset() -> None:
     from apps.models_catalog.presets import PRESETS, expand_preset
 
     for preset in PRESETS:
+        if preset == "local":
+            continue  # P4-OFF: offline-only preset, runtime-resolved via Ollama
         mapping = expand_preset(preset)  # hybrid <local-tier-a> → fallback
         menu = set(tier_menu(preset))
         for agent, mid in mapping.items():
