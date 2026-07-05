@@ -17,6 +17,10 @@ cd "$(dirname "$0")"
 #     docker compose --profile ibkr up
 # (see guides/ibkr-gateway.md).
 
+# Auto-renew the frontend's anonymous node_modules volume when its pnpm lockfile
+# drifts from the image the volume was seeded with. Shared with restart-rebuild.sh.
+source ./frontend-deps-guard.sh
+
 # web/worker/beat load ../.env via `env_file`, so compose hard-fails without it.
 # On a fresh clone, seed it from the committed example; dev defaults boot as-is.
 if [ ! -f ../.env ]; then
@@ -27,6 +31,10 @@ fi
 
 echo ">> Building images and starting the full stack..."
 docker compose up -d --build
+
+# A reused anon node_modules volume can mask the freshly-built image's deps; if
+# the lockfile changed since the volume was seeded, renew just that volume.
+renew_frontend_node_modules_if_lockfile_changed
 
 echo ">> Waiting for the web container's startup migrations to finish..."
 ready=""

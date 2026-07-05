@@ -6,6 +6,11 @@ RUN npm install -g pnpm@11.1.2
 FROM base AS deps
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
+# Stamp node_modules with the lockfile's hash so the dev stack can detect when a
+# reused anonymous /app/node_modules volume was seeded from a stale image (see
+# infra/frontend-deps-guard.sh). Docker seeds an anon volume only once, so a
+# lockfile bump otherwise leaves the old volume masking the new image's deps.
+RUN sha256sum pnpm-lock.yaml | cut -d' ' -f1 > node_modules/.deps-lock-hash
 
 FROM base AS dev
 COPY --from=deps /app/node_modules /app/node_modules
