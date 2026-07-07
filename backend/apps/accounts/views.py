@@ -1,4 +1,9 @@
+from datetime import timedelta
+from decimal import Decimal
+
 from django.conf import settings
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.request import Request
@@ -53,5 +58,75 @@ class HealthView(APIView):
                     "local_model": local_model,
                     "local_available": local_available,
                 },
+            }
+        )
+
+
+class IsSuperUser(permissions.BasePermission):
+    """Operator-only: a true superuser, not merely staff (DRF's IsAdminUser
+    checks is_staff, which is a weaker bar)."""
+
+    def has_permission(self, request, view) -> bool:
+        return bool(request.user and request.user.is_superuser)
+
+
+class CostSummaryView(APIView):
+    """P5-SH WS2.4: operator LLM-spend view. Instance-wide daily spend over the
+    last N days (stacked by model) plus by-agent / by-model breakdowns, all
+    aggregated from LLMCall rows with a known price. Superuser-only — this is an
+    operator page, not per-user billing."""
+
+    permission_classes = [IsSuperUser]
+
+    def get(self, request: Request) -> Response:
+        try:
+            days = int(request.query_params.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 365))
+        cutoff = timezone.now() - timedelta(days=days)
+
+        from hedgefund_agents.models import LLMCall
+
+        # Exclude the cost_usd < 0 "unknown price" sentinel from spend totals.
+        base = LLMCall.objects.filter(created_at__gte=cutoff, cost_usd__gt=0)
+        by_day_model = (
+            base.annotate(day=TruncDate("created_at"))
+            .values("day", "model")
+            .annotate(cost_usd=Sum("cost_usd"))
+            .order_by("day", "model")
+        )
+        by_agent = (
+            base.values("agent_name")
+            .annotate(cost_usd=Sum("cost_usd"), calls=Count("id"))
+            .order_by("-cost_usd")
+        )
+        by_model = (
+            base.values("model")
+            .annotate(cost_usd=Sum("cost_usd"), calls=Count("id"))
+            .order_by("-cost_usd")
+        )
+        total = base.aggregate(s=Sum("cost_usd"))["s"] or Decimal("0")
+
+        return Response(
+            {
+                "days": days,
+                "start": cutoff.date().isoformat(),
+                "total_usd": str(total),
+                "by_day_model": [
+                    {"date": r["day"].isoformat(), "model": r["model"],
+                     "cost_usd": str(r["cost_usd"])}
+                    for r in by_day_model
+                ],
+                "by_agent": [
+                    {"agent_name": r["agent_name"], "cost_usd": str(r["cost_usd"]),
+                     "calls": r["calls"]}
+                    for r in by_agent
+                ],
+                "by_model": [
+                    {"model": r["model"], "cost_usd": str(r["cost_usd"]),
+                     "calls": r["calls"]}
+                    for r in by_model
+                ],
             }
         )

@@ -1,6 +1,6 @@
 import os
 
-from celery import Celery
+from celery import Celery, signals
 from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hedgefund.settings.dev")
@@ -8,6 +8,25 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hedgefund.settings.dev")
 app = Celery("hedgefund")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
+
+
+# P5-SH WS2.1: bind the Celery task id as request_id for the task's lifetime so
+# every worker log line is greppable per task (execute_run additionally binds the
+# run_id). Contextvars are reset on task exit to avoid bleed across pooled tasks.
+@signals.task_prerun.connect
+def _bind_task_context(task_id=None, **_kw):
+    from hedgefund.logging_filters import request_id_var, run_id_var
+
+    request_id_var.set(task_id or "")
+    run_id_var.set("")  # a fresh task starts with no run bound
+
+
+@signals.task_postrun.connect
+def _clear_task_context(**_kw):
+    from hedgefund.logging_filters import request_id_var, run_id_var
+
+    request_id_var.set("")
+    run_id_var.set("")
 
 # Default periodic schedule. The DatabaseScheduler picks these up at startup
 # and any operator-edited PeriodicTask rows override them.

@@ -1,0 +1,36 @@
+name: backend-safety-ci
+
+# P5-SH WS1.5: the adversarial safety suite already runs inside backend-ci (full
+# pytest). This targeted job ADDITIONALLY re-runs just tests/safety/ whenever the
+# agent code or LLM adapters change (llm/adapters/** lives under hedgefund_agents/**)
+# — a fast, focused signal that a prompt-assembly or adapter edit didn't weaken the
+# injection-confinement / budget-guard / anti-hallucination guarantees.
+on:
+  push:
+    paths:
+      - "backend/hedgefund_agents/**"
+      - "backend/tests/safety/**"
+      - ".github/workflows/backend-safety-ci.yml"
+  pull_request:
+    paths:
+      - "backend/hedgefund_agents/**"
+      - "backend/tests/safety/**"
+      - ".github/workflows/backend-safety-ci.yml"
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install deps
+        run: uv sync
+      - name: Safety suite
+        run: uv run pytest -q tests/safety/

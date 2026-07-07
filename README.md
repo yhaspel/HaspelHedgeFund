@@ -115,6 +115,32 @@ the instance to the public internet as-is.** Before any non-local deployment, se
 `JWT_SIGNING_KEY`, and `FIELD_ENCRYPTION_KEY` (the boot guard refuses to start
 otherwise).
 
+## Operations & safety (self-host)
+
+Built to run unattended without any third-party observability account:
+
+- **Run cost guard.** Set `RUN_DEFAULT_MAX_BUDGET_USD` (or a per-run
+  `max_budget_usd`) and a run that crosses it aborts mid-flight
+  (`failed` / `budget_exceeded`). Off by default. Scheduled runs also honor a
+  per-schedule `cost_ceiling_usd`.
+- **Operator alerts.** Configure an email/Telegram channel in **Settings →
+  Notifications** and your superuser account is alerted on failed runs, orphan
+  sweeps, provider outages, and cost-ceiling breaches — reusing the built-in
+  notifications, no paging vendor.
+- **Cost view.** **Settings → Costs** shows daily LLM spend (last 30 days) by
+  model and by agent, aggregated from recorded calls.
+- **Log context.** Every JSON log line carries a `request_id` (HTTP) or `run_id`
+  (worker) so you can grep one request/run end to end.
+- **Backups, retention, incidents.** See [`guides/backup-restore.md`](./guides/backup-restore.md)
+  (`pg_dump`/restore, smoke-tested end to end), the `prune_old_data` management
+  command (retention, dry-run by default), and the incident
+  [`guides/runbooks/`](./guides/runbooks/) (runaway spend · stuck queue · broker
+  drift · provider outage).
+- **Optional Sentry.** Error reporting is **off by default** — nothing is
+  imported unless `SENTRY_DSN` is set. To opt in, set the DSN and install the
+  extra: `cd backend && uv sync --extra sentry`. No OpenTelemetry / Prometheus /
+  Grafana stack is bundled.
+
 ## Costs & responsibility
 
 Your keys, your API spend. You are solely responsible for complying with each
@@ -203,6 +229,7 @@ complying with your data/LLM providers' and broker's terms.
 ```
 backend/     Django project + apps
 frontend/    Angular app (in-app Guides live under frontend/public/guides/)
-guides/      BYO-integration setup guides (IBKR, TradeStation, local models)
+guides/      Operator guides — BYO-integration setup (IBKR, TradeStation, local
+             models), offline mode, backup/restore, and incident runbooks/
 infra/       Dockerfiles + compose
 ```

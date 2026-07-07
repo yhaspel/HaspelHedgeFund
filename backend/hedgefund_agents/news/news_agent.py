@@ -28,6 +28,7 @@ from ..llm.client import Message
 from ..llm.structured import call_structured
 from ..outputs import MaterialEvent, NewsOutput
 from ..registry import DEFAULT_MODELS, get_llm
+from ..untrusted import wrap_untrusted
 from ..versioning import AgentSpec, register
 
 log = logging.getLogger(__name__)
@@ -186,11 +187,18 @@ def run_news(state: AgentState) -> AgentState:
         "- risk_factor_highlights: 3-7 short phrases from the Risk Factors;\n"
         "- sentiment_score in [-1, 1] and sentiment_drivers (short phrases)."
     )
+    # Both the news items and the 10-K excerpt are attacker-controllable, so
+    # each goes inside an explicit UNTRUSTED delimiter (belt-and-suspenders with
+    # the system-prompt defense above). See hedgefund_agents/untrusted.py.
+    risk_block = (
+        wrap_untrusted(risk_factors, "10-K RISK FACTORS")
+        if risk_factors else "(none available)"
+    )
     user = (
         f"TICKER: {ticker}\nAS-OF: {as_of.isoformat()}\n\n"
         f"NEWS ITEMS ({len(payload)} after dedup + denylist):\n"
-        f"{json.dumps(payload, indent=2)}\n\n"
-        f"10-K RISK FACTORS EXCERPT:\n{risk_factors or '(none available)'}"
+        f"{wrap_untrusted(json.dumps(payload, indent=2), 'NEWS ITEMS')}\n\n"
+        f"10-K RISK FACTORS EXCERPT:\n{risk_block}"
     )
     try:
         from apps.backtests.cache import make_cache_ctx

@@ -11,6 +11,7 @@ from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.backtests.exceptions import BudgetExceeded
 from apps.data.providers.factory import (
     get_edgar_provider,
     get_fmp_provider,
@@ -179,6 +180,7 @@ def sweep_orphan_runs() -> dict:
         return {"swept": 0, "error": "inspect_failed"}
 
     swept = 0
+    swept_ids: list[int] = []
     for run in candidates:
         if run.celery_task_id and run.celery_task_id in active_ids:
             continue  # still running, just slow
@@ -190,8 +192,16 @@ def sweep_orphan_runs() -> dict:
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error_message", "finished_at"])
         swept += 1
+        swept_ids.append(run.id)
     if swept:
         log.warning("orphan sweep marked %d runs failed", swept)
+        # P5-SH WS2.2: a sweep > 0 means a worker died mid-run — tell the operator.
+        try:
+            from apps.notifications.operator import notify_orphan_sweep
+
+            notify_orphan_sweep(swept, run_ids=swept_ids)
+        except Exception:  # pragma: no cover — never let an alert break the sweep
+            log.exception("orphan-sweep operator alert failed")
     return {"swept": swept}
 
 
@@ -226,6 +236,13 @@ def execute_run(run_id: int) -> None:
     )
     run.save(update_fields=["agent_versions"])
 
+    # P5-SH WS2.1: bind run_id for the run's execution so every worker log line is
+    # greppable. Bound immediately before the try (and reset in its finally) so a
+    # failure during the setup above can never leak it into the next task on this
+    # worker process. The Celery task_postrun signal is a second-line backstop.
+    from hedgefund.logging_filters import run_id_var
+
+    _run_ctx_token = run_id_var.set(str(run_id))
     try:
         # P4-OFF WS-1.5: force the all-local preset at the single execution seam.
         # Covers ad-hoc, scheduled watchlist runs (they call execute_run), and
@@ -306,12 +323,26 @@ def execute_run(run_id: int) -> None:
                     "An LLM route was likely stalling; the run did not hang the "
                     "worker (see self-healing layers L1/L2)."
                 )
+            elif isinstance(exc, BudgetExceeded):
+                # P5-SH WS1.2: the mid-run LLM-spend cap tripped. Prefix the
+                # message with the machine-readable "budget_exceeded:" token the
+                # API/UI and operator alert key off.
+                msg = f"budget_exceeded: {exc}"
             else:
                 msg = f"{type(exc).__name__}: {exc}"
             run.status = Run.FAILED
             run.error_message = msg[:2000]
             run.finished_at = timezone.now()
             run.save(update_fields=["status", "error_message", "finished_at"])
+            # P5-SH WS2.2: alert the operator that a run failed (covers the
+            # budget-cap abort too). Best-effort — never let notification errors
+            # mask the original failure.
+            try:
+                from apps.notifications.operator import notify_run_failed
+
+                notify_run_failed(run)
+            except Exception:  # pragma: no cover — defensive
+                log.exception("operator run-failed alert failed for run=%s", run_id)
         raise
     finally:
         # Exclude unknown-price sentinel rows (cost_usd < 0) from the total.
@@ -321,6 +352,7 @@ def execute_run(run_id: int) -> None:
             or Decimal("0")
         )
         Run.objects.filter(pk=run.pk).update(total_cost_usd=total)
+        run_id_var.reset(_run_ctx_token)
 
 
 def _scrub_nul(obj):

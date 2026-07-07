@@ -42,6 +42,7 @@ def record_llm_call(
             from apps.runs.models import Run
 
             Run.objects.filter(pk=run_id).update(total_cost_usd=F("total_cost_usd") + cost)
+            _enforce_run_budget(run_id)
         if backtest_id is not None:
             from apps.backtests.models import Backtest
 
@@ -55,3 +56,40 @@ def record_llm_call(
                 total_cost_usd=F("total_cost_usd") + cost
             )
     return call
+
+
+def _enforce_run_budget(run_id: int) -> None:
+    """Mid-run LLM-spend backstop (P5-SH WS1.2).
+
+    Re-read the run's running total and cap; if an effective cap is set and the
+    summed cost has crossed it, raise ``BudgetExceeded`` so the run aborts
+    between agent nodes. This mirrors ``backtests/engine.py``'s ``_ingest``
+    check, and — like ``ModelUnavailable`` — the node self-heal wrapper re-raises
+    it rather than degrading to a null signal (see graphs/_node_fallback.py).
+
+    A NULL ``Run.max_budget_usd`` falls back to
+    ``settings.RUN_DEFAULT_MAX_BUDGET_USD`` (itself ``None`` = off by default),
+    so the guard is a no-op unless the operator opts in. Backtests never reach
+    here (they persist under ``backtest_id``, not ``run_id``).
+    """
+    from django.conf import settings
+
+    from apps.backtests.exceptions import BudgetExceeded
+    from apps.runs.models import Run
+
+    row = (
+        Run.objects.filter(pk=run_id)
+        .values_list("total_cost_usd", "max_budget_usd")
+        .first()
+    )
+    if row is None:
+        return
+    spent, cap = row
+    if cap is None:
+        cap = getattr(settings, "RUN_DEFAULT_MAX_BUDGET_USD", None)
+    if cap is None:
+        return
+    cap = Decimal(str(cap))
+    if spent is not None and spent >= cap:
+        n_calls = LLMCall.objects.filter(run_id=run_id).count()
+        raise BudgetExceeded(float(spent), float(cap), n_calls, n_calls)

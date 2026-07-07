@@ -38,6 +38,15 @@ class Run(models.Model):
     total_cost_usd = models.DecimalField(
         max_digits=10, decimal_places=6, default=Decimal("0")
     )
+    # P5-SH WS1.2: mid-run LLM-spend backstop. NULL ⇒ fall back to
+    # settings.RUN_DEFAULT_MAX_BUDGET_USD (itself None/off by default). When an
+    # effective cap is set, the run aborts FAILED/"budget_exceeded" once summed
+    # LLMCall cost crosses it — checked in record_llm_call between agent nodes,
+    # mirroring backtests/engine.py's budget_cap. Input truncation bounds
+    # per-call tokens; this is the backstop for a runaway multi-node run.
+    max_budget_usd = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True
+    )
     error_message = models.TextField(blank=True, default="")
     # Subset of personas to run; empty/None = run all registered.
     personas = models.JSONField(default=list, blank=True)

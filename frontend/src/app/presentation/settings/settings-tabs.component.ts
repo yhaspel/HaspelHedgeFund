@@ -139,6 +139,8 @@ export class SettingsTabsComponent {
         { path: '/settings/models', label: 'Models', icon: 'i-cpu' },
         { path: '/settings/providers', label: 'Providers', icon: 'i-key' },
         { path: '/settings/personas', label: 'Personas', icon: 'i-layers' },
+        // P5-SH WS2.4: operator LLM-spend view.
+        { path: '/settings/costs', label: 'Costs', icon: 'i-wallet' },
       ],
     },
   ];
