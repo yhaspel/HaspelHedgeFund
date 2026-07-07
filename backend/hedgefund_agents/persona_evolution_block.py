@@ -31,9 +31,14 @@ def format_evolution_block(
     """Return the delimited evolution block, or ``""`` when no revision."""
     if not revision_md or not str(revision_md).strip():
         return ""
+    # P5-SH: sanitize the (LLM-distilled, ultimately external-sourced) note so it
+    # can't close the EVOLUTION block early or carry bidi-spoofed instructions.
+    from .untrusted import sanitize_untrusted
+
+    body = sanitize_untrusted(str(revision_md).strip())
     return (
         f"\n\n{framing}\n"
         "<<<PERSONA EVOLUTION>>>\n"
-        f"{revision_md.strip()}\n"
+        f"{body}\n"
         "<<<END PERSONA EVOLUTION>>>\n"
     )

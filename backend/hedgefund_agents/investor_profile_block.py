@@ -44,6 +44,11 @@ def format_profile_block(profile: dict[str, Any] | None, framing: str) -> str:
     brief = (profile.get("agent_brief") or "").strip()
     if not brief:
         return ""
+    # P5-SH: sanitize the user-controlled brief (strip bidi controls, defang
+    # fence markers) so it can't close the PROFILE block early or hide text.
+    from .untrusted import sanitize_untrusted
+
+    brief = sanitize_untrusted(brief)
     return (
         f"\n\n{framing}\n"
         "<<<PROFILE>>>\n"

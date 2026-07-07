@@ -28,6 +28,11 @@ dependencies = [
     "langdetect>=1.0.9",
 ]
 
+[project.optional-dependencies]
+# P5-SH WS2.3: optional error reporting. Default-off; install only if you set
+# SENTRY_DSN. `uv sync --extra sentry`.
+sentry = ["sentry-sdk>=2.0"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

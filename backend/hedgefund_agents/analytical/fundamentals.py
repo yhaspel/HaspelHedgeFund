@@ -50,6 +50,27 @@ def _build_table(rows: list) -> str:
     return "\n".join(lines)
 
 
+def _revenue_cagr(rows: list) -> float | None:
+    """Annualized revenue CAGR over the trailing revenue series.
+
+    Same formula as ``valuation._cagr`` (periods_per_year=4): a deterministic
+    computation used to OVERRIDE the LLM's estimate of ``revenue_cagr_3y`` — the
+    figure is arithmetic, not judgment, so the model must not be able to
+    hallucinate it (P5-SH WS1.4). Returns None when the series has fewer than two
+    points or any non-positive value, in which case the model's number stands.
+    """
+    revs = sorted(
+        (r for r in rows if r.metric == "revenue"), key=lambda r: r.period_end
+    )
+    values = [float(r.value) for r in revs]
+    if len(values) < 2 or any(v <= 0 for v in values):
+        return None
+    years = (len(values) - 1) / 4.0
+    if years <= 0:
+        return None
+    return (values[-1] / values[0]) ** (1.0 / years) - 1.0
+
+
 def run_fundamentals(state: AgentState) -> AgentState:
     ticker = state["ticker"]
     as_of = state["as_of_date"]
@@ -108,7 +129,14 @@ def run_fundamentals(state: AgentState) -> AgentState:
         agent_name="fundamentals",
         resp=resp,
     )
-    return {"fundamentals": parsed.model_dump()}  # type: ignore[return-value]
+    result = parsed.model_dump()
+    # P5-SH WS1.4: replace the LLM's estimated revenue_cagr_3y with the exact
+    # value computed from the revenue series. Falls back to the model's number
+    # only when the series is too sparse/non-positive to compute deterministically.
+    cagr = _revenue_cagr(rows)
+    if cagr is not None:
+        result["revenue_cagr_3y"] = cagr
+    return {"fundamentals": result}  # type: ignore[return-value]
 
 
 def _format_ownership_block(own) -> str:

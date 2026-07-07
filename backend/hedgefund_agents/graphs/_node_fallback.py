@@ -144,8 +144,11 @@ def wrap_backtest_tolerant(
             # here would mask them and let the run "complete" with all-hold
             # garbage. Re-raise so the operator sees the actionable upstream
             # message. (RateLimited is a ModelUnavailable subclass.)
-            from apps.backtests.exceptions import ModelUnavailable
-            if isinstance(exc, ModelUnavailable):
+            # BudgetExceeded (P5-SH WS1.2) is the same kind of hard stop: the
+            # run has crossed its LLM-spend cap, and null-signalling would let it
+            # keep spending past the cap — so it must propagate, not degrade.
+            from apps.backtests.exceptions import BudgetExceeded, ModelUnavailable
+            if isinstance(exc, (ModelUnavailable, BudgetExceeded)):
                 raise
             fb = _fallback_for(state_key)
             if fb is None:

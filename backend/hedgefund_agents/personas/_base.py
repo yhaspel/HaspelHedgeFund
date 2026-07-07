@@ -20,6 +20,7 @@ from ..llm.structured import call_structured
 from ..outputs import PersonaOutput
 from ..persona_evolution_block import EVOLUTION_FRAMING, format_evolution_block
 from ..registry import DEFAULT_MODELS, get_llm
+from ..untrusted import wrap_untrusted
 from ..versioning import AGENT_VERSIONS, AgentSpec, register
 
 # Appended to every persona system prompt. The PersonaOutput schema now caps
@@ -99,10 +100,16 @@ def make_persona_node(spec: AgentSpec) -> Callable[[AgentState], AgentState]:
                 "macro": state.get("macro", {}),
                 "news_digest": state.get("news_digest", {}),
             }
+            # Filings are attacker-controllable free text (a 10-K/10-Q excerpt
+            # can carry injected instructions), so fence them in an UNTRUSTED
+            # block. The analytical inputs above are structured agent outputs —
+            # the news/sentiment nodes that derive from raw external text already
+            # confined it upstream, so it isn't re-fenced here. See
+            # hedgefund_agents/untrusted.py.
             user = (
                 f"Ticker: {ticker}\nAs-of: {as_of.isoformat()}\n\n"
                 f"ANALYTICAL INPUTS:\n{json.dumps(ctx, indent=2, default=str)}\n\n"
-                f"RECENT FILINGS:\n{filing_block}\n\n"
+                f"RECENT FILINGS:\n{wrap_untrusted(filing_block, 'RECENT FILINGS')}\n\n"
                 "Produce your PersonaOutput JSON now."
             )
             # P3-prereq-5 WS-C: investor-profile context (no-op when unset).

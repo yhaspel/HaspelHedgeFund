@@ -20,6 +20,18 @@ from apps.data.interfaces import (
 from apps.data.providers.errors import OwnershipNotEntitled, ProviderOffline
 
 
+def _record_provider_outage(provider: str, exc: Exception) -> None:
+    """Best-effort: count a data-provider transport failure toward the operator
+    outage alert. Lazy import keeps apps.data free of an apps.notifications
+    dependency at module load, and a failure here must never break the resolver."""
+    try:
+        from apps.notifications.operator import record_provider_failure
+
+        record_provider_failure(provider, detail=f"{type(exc).__name__}: {exc}")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class OwnershipResolver:
     """Prefer FMP (if entitled), else fall back to SEC EDGAR."""
 
@@ -35,10 +47,15 @@ class OwnershipResolver:
         if self._fmp is not None:
             try:
                 return self._fmp.get_issuer_ownership(ticker, as_of=as_of)
+            except httpx.TransportError as exc:
+                # A genuine connect/read/timeout outage (not a 404 or entitlement
+                # issue). Count it so the operator is alerted if one provider keeps
+                # failing (P5-SH WS2.2), then degrade to EDGAR snapshots.
+                _record_provider_outage("fmp-ownership", exc)
             except (OwnershipNotEntitled, httpx.HTTPError, ProviderOffline):
-                # Not entitled, a wrong/placeholder slug (404), any transport
-                # error, or OFFLINE_MODE: degrade to EDGAR DB snapshots rather
-                # than hard-failing the caller.
+                # Not entitled, a wrong/placeholder slug (404), any other HTTP
+                # status error, or OFFLINE_MODE: degrade to EDGAR DB snapshots
+                # rather than hard-failing the caller.
                 pass
         # EDGAR has no efficient by-issuer query; read aggregated snapshots.
         return _edgar_issuer_from_snapshots(ticker, as_of=as_of)

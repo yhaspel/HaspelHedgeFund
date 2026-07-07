@@ -85,6 +85,9 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/me/provider-keys/', respond: () => json(fixture('provider-keys')) },
   { method: 'PUT', spec: '/me/provider-keys/', respond: () => json(fixture('provider-keys')) },
 
+  // ---- P5-SH operator cost view (Settings -> Costs) ----
+  { method: 'GET', spec: '/costs/summary/', respond: () => json({ days: 30, start: '2026-06-07', total_usd: '0.00', by_day_model: [], by_agent: [], by_model: [] }) },
+
   // ---- health (P4-OFF): the OfflineState probe runs on every boot; answer
   // "online" so the mock lane never flips to the offline banner / write-block.
   { method: 'GET', spec: '/health/', respond: () => json({ status: 'ok', offline_mode: false, llm: { forced_preset: null, local_model: 'qwen2.5:7b', local_available: false } }) },

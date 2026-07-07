@@ -32,6 +32,16 @@ from .triggers import compute_next, market_gate_ok
 log = logging.getLogger(__name__)
 
 
+def _alert_ceiling_breach(sr, est_usd, ceiling, *, degraded: bool) -> None:
+    """P5-SH WS2.2: route a cost-ceiling skip to the operator too. Best-effort."""
+    try:
+        from apps.notifications.operator import notify_ceiling_breach
+
+        notify_ceiling_breach(sr, est_usd=est_usd, ceiling=ceiling, degraded=degraded)
+    except Exception:  # pragma: no cover — an alert must never break the dispatcher
+        log.exception("ceiling-breach operator alert failed sr=%s", getattr(sr, "pk", "?"))
+
+
 @shared_task(name="apps.schedules.tasks.dispatch_due_scheduled_runs")
 def dispatch_due_scheduled_runs() -> dict:
     now = timezone.now()
@@ -136,6 +146,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
             )
             hist.finished_at = timezone.now()
             hist.save(update_fields=["status", "estimated_cost_usd", "error", "finished_at"])
+            _alert_ceiling_breach(sr, est["est_total_usd"], ceiling, degraded=False)
             return {"status": "skipped_cost"}
         if sr.on_breach == ScheduledRun.DEGRADE:
             cur = preset
@@ -159,6 +170,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
                 hist.save(update_fields=[
                     "status", "estimated_cost_usd", "degraded_preset", "error", "finished_at",
                 ])
+                _alert_ceiling_breach(sr, est["est_total_usd"], ceiling, degraded=True)
                 return {"status": "skipped_after_degrade"}
         elif sr.on_breach == ScheduledRun.NOTIFY_ONLY:
             overage = True

@@ -79,7 +79,8 @@ class RunDetailSerializer(serializers.ModelSerializer):
         fields = (
             "id", "tickers", "status", "model_overrides", "as_of_date",
             "personas", "agent_versions",
-            "created_at", "finished_at", "total_cost_usd", "error_message",
+            "created_at", "finished_at", "total_cost_usd", "max_budget_usd",
+            "error_message",
             "source", "portfolio_target", "strategy_backlink",
             # P4 WS-A: rerun provenance (this run's parent + its child reruns).
             "rerun_of", "reruns",
@@ -132,7 +133,10 @@ class RunCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Run
         fields = ("id", "tickers", "model_overrides", "as_of_date", "personas",
-                  "status", "graph_version_id")
+                  "status", "graph_version_id",
+                  # P5-SH WS1.2: optional per-run LLM-spend cap. NULL ⇒ instance
+                  # default (settings.RUN_DEFAULT_MAX_BUDGET_USD, itself off).
+                  "max_budget_usd")
         read_only_fields = ("id", "status")
 
     def validate(self, attrs: dict) -> dict:

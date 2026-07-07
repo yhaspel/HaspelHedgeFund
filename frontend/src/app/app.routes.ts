@@ -200,6 +200,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'settings/costs',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/settings/settings-costs.page').then(
+        (m) => m.SettingsCostsPage,
+      ),
+  },
+  {
     path: 'settings/data-news',
     canActivate: [authGuard],
     loadComponent: () =>

@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -51,6 +52,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    # P5-SH WS2.1: bind request_id early so every log line while handling the
+    # request (including downstream middleware) is greppable.
+    "hedgefund.middleware.RequestIdMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -223,6 +227,12 @@ LLM_LAST_RESORT_MODEL = os.environ.get(
 RUN_SELF_HEAL = os.environ.get("RUN_SELF_HEAL", "1") == "1"
 RUN_SOFT_TIME_LIMIT_SECONDS = int(os.environ.get("RUN_SOFT_TIME_LIMIT_SECONDS", "600"))
 RUN_HARD_TIME_LIMIT_SECONDS = int(os.environ.get("RUN_HARD_TIME_LIMIT_SECONDS", "720"))
+# P5-SH WS1.2: default mid-run LLM-spend cap (USD) for ad-hoc/scheduled runs
+# whose own Run.max_budget_usd is NULL. Unset ⇒ None ⇒ guard off (ship safe:
+# no surprise aborts). Set e.g. RUN_DEFAULT_MAX_BUDGET_USD=5 to backstop every
+# run instance-wide. Enforced between agent nodes in record_llm_call.
+_run_budget = os.environ.get("RUN_DEFAULT_MAX_BUDGET_USD", "").strip()
+RUN_DEFAULT_MAX_BUDGET_USD = Decimal(_run_budget) if _run_budget else None
 
 # External providers
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
@@ -394,22 +404,33 @@ LOGGING = {
     "disable_existing_loggers": False,
     "filters": {
         "redact_secrets": {"()": "hedgefund.logging_filters.RedactSecretsFilter"},
+        # P5-SH WS2.1: stamp request_id / run_id onto every record.
+        "context": {"()": "hedgefund.logging_filters.ContextFilter"},
     },
     "formatters": {
         "json": {
             "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+            "format": "%(asctime)s %(levelname)s %(name)s %(request_id)s %(run_id)s %(message)s",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "json",
-            "filters": ["redact_secrets"],
+            "filters": ["context", "redact_secrets"],
         },
     },
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# --- Optional Sentry (P5-SH WS2.3) --------------------------------------
+# Default OFF. Unset ⇒ no import, no init on any runtime path (web/worker/CLI).
+# Set SENTRY_DSN and install the extra (`uv sync --extra sentry`) to opt in.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if SENTRY_DSN:
+    from hedgefund.observability import init_sentry
+
+    init_sentry(SENTRY_DSN, environment=os.environ.get("DJANGO_ENV", ""))
 
 
 # --- Secret-safety guard ------------------------------------------------
