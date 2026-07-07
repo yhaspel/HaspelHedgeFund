@@ -127,6 +127,88 @@ def _apply_sector_cap(
     return out, notes
 
 
+# P11 D1 — aggregate equity-class cap for risk parity. Today's "risk parity" is
+# ~75% equity risk (6 of 8 seeded sleeves are equity sectors), so the diagonal
+# inverse-vol book is far less diversified than the label implies (research §5/R4).
+# Classify by an explicit NON-equity allowlist (small + stable) and treat every
+# other group as equity — robust to the many, varied equity-sector labels.
+NON_EQUITY_SLEEVE_GROUPS = frozenset({
+    "rates", "rate", "bond", "bonds", "fixed income", "treasury", "treasuries",
+    "duration", "credit", "tips", "commodity", "commodities", "gold",
+    "cash", "currency", "currencies", "fx", "real assets",
+})
+
+
+def _is_equity_group(group: str) -> bool:
+    return (group or "").strip().lower() not in NON_EQUITY_SLEEVE_GROUPS
+
+
+def _apply_equity_class_cap(
+    weights: dict[str, float], group_of: dict[str, str],
+    max_equity_pct: float, per_sleeve_max_pct: float,
+) -> tuple[dict[str, float], dict | None]:
+    """Cap the aggregate weight of equity-group sleeves at ``max_equity_pct`` of
+    gross, redistributing the freed weight to the NON-equity sleeves (by their
+    inverse-vol share) so the book stays at its gross target. Fail-open: if there
+    are no non-equity sleeves to diversify into, the cap is skipped (you cannot
+    make an all-equity basket cross-asset). Respects ``per_sleeve_max_pct`` on the
+    receiving sleeves; any weight that cannot be redistributed lowers gross and is
+    reported. Returns (weights, note_or_None)."""
+    if not weights or max_equity_pct is None or max_equity_pct <= 0:
+        return weights, None
+    gross = sum(abs(w) for w in weights.values())
+    if gross <= 0:
+        return weights, None
+    equity = {t: w for t, w in weights.items() if _is_equity_group(group_of.get(t, ""))}
+    non_equity = {t: w for t, w in weights.items() if t not in equity}
+    equity_total = sum(equity.values())
+    cap_abs = max_equity_pct * gross
+    if not non_equity or equity_total <= cap_abs + 1e-9:
+        # Nothing to cap, or nowhere to put the freed weight (fail-open).
+        return weights, None
+
+    out = dict(weights)
+    scale = cap_abs / equity_total
+    for t in equity:
+        out[t] = equity[t] * scale
+    freed = equity_total - cap_abs
+
+    # Redistribute `freed` to non-equity sleeves in proportion to their original
+    # inverse-vol weight, iterating so a sleeve that hits per_sleeve_max_pct hands
+    # its overflow to the others. `placed` accumulates what actually lands.
+    orig_non_equity = dict(non_equity)
+    sleeve_cap = per_sleeve_max_pct * gross if per_sleeve_max_pct > 0 else gross
+    placed = 0.0
+    for _ in range(len(non_equity) + 2):
+        remaining = freed - placed
+        if remaining <= 1e-9:
+            break
+        base_total = sum(orig_non_equity[t] for t in non_equity if out[t] < sleeve_cap - 1e-9)
+        if base_total <= 1e-9:
+            break
+        round_placed = 0.0
+        for t in non_equity:
+            room = sleeve_cap - out[t]
+            if room <= 1e-9:
+                continue
+            give = min((orig_non_equity[t] / base_total) * remaining, room)
+            if give > 0:
+                out[t] += give
+                round_placed += give
+        placed += round_placed
+        if round_placed <= 1e-12:
+            break
+
+    note = {
+        "equity_before": round(equity_total, 6),
+        "equity_cap": round(cap_abs, 6),
+        "redistributed": round(placed, 6),
+        "residual_ungross": round(freed - placed, 6),
+        "max_equity_pct": max_equity_pct,
+    }
+    return out, note
+
+
 def construct(
     candidates: list[Candidate], constraints: Constraints
 ) -> ConstructorResult:
@@ -695,12 +777,18 @@ def construct_risk_parity(
     excluded: dict[str, str] | None = None,
     current_weights: dict[str, float] | None = None,
     rebalance_band_pct: float = 0.05,
+    max_equity_pct: float | None = None,
 ) -> RiskParityResult:
     """Inverse-volatility weighting (risk parity lite).
 
     raw_w_i = 1 / σ_i over surviving sleeves; normalise to target_gross_pct;
     apply per-sleeve max and min floors; compute drift vs current_weights to
     decide whether trades are actually needed today.
+
+    ``max_equity_pct`` (P11 D1, None=off): cap aggregate equity-sleeve weight at
+    this fraction of gross, redistributing to non-equity sleeves — makes the book
+    genuinely cross-asset instead of ~75% equity risk. Needs real sleeve group
+    labels (fails open on all-equity or unlabelled sleeves).
     """
     excluded = excluded or {}
     rejected: list[dict] = []
@@ -744,8 +832,17 @@ def construct_risk_parity(
                     share = (donors[t] / donor_total) * extra
                     weights[t] = max(per_sleeve_min_pct, weights[t] - share)
 
-    sector_exposure: dict[str, float] = {}
     group_of = {t: g for t, g in survivors}
+
+    # P11 D1 — aggregate equity-class cap (cross-asset risk parity). Off (None) ⇒
+    # unchanged; needs real group labels (backtest threads them via sleeve_groups).
+    equity_cap_note = None
+    if max_equity_pct:
+        weights, equity_cap_note = _apply_equity_class_cap(
+            weights, group_of, max_equity_pct, per_sleeve_max_pct
+        )
+
+    sector_exposure: dict[str, float] = {}
     for t, w in weights.items():
         g = group_of.get(t, "")
         sector_exposure[g] = sector_exposure.get(g, 0.0) + w
@@ -803,6 +900,7 @@ def construct_risk_parity(
             f"all sleeves within ±{rebalance_band_pct:.0%} band"
             if within_band else ""
         ),
+        "equity_class_cap": equity_cap_note,  # P11 D1: None unless the cap bound
     }
 
     return RiskParityResult(
@@ -968,7 +1066,12 @@ def _momentum_base_config(strategy) -> dict:
 
 def trend_config(strategy) -> dict:
     """Deterministic-trend (TSMOM) sizing config — shared by live cycle + backtest."""
-    return {**_momentum_base_config(strategy), "sizing": "tsmom", "allow_short": False}
+    return {
+        **_momentum_base_config(strategy),
+        "sizing": "tsmom",
+        # P11 C3 — long/short when the strategy opts in; long/flat otherwise.
+        "allow_short": bool(getattr(strategy, "allow_short", False)),
+    }
 
 
 def sector_momentum_config(strategy) -> dict:
@@ -1030,4 +1133,34 @@ def construct_sector_momentum(
     from apps.backtests.engine import xsec_momentum_weights
 
     weights = xsec_momentum_weights(day=day, universe=[t for t, _ in members], config=config)
+    return _wrap_momentum_result(weights, members, current_weights)
+
+
+# P11 F (R5) — single-name cross-sectional LONG/SHORT (beta-hedged) scaffolding.
+# Same wrap-the-engine-sizer pattern as trend/sector so live ≡ backtest. The pod
+# is NOT live-deployable until a survivorship-clean single-name backfill exists
+# (SCAFFOLDING_KINDS; the §9 gate blocks arming). This is the sizer wiring only.
+def xsec_long_short_config(strategy) -> dict:
+    """Single-name cross-sectional L/S sizing config — shared by live + backtest."""
+    return {
+        **_momentum_base_config(strategy),
+        "sizing": "xsec_long_short",
+        "top_n": int(getattr(strategy, "top_k_longs", 20) or 20),
+        "bottom_n": int(getattr(strategy, "top_k_shorts", 20) or 20),
+        "beta_benchmark": str(getattr(strategy, "benchmark_ticker", "SPY") or "SPY"),
+        "beta_window_days": int(getattr(strategy, "beta_window_days", 252) or 252),
+        "beta_hedge": True,
+    }
+
+
+def construct_xsec_long_short(
+    day, members: list[tuple[str, str]], *, config: dict,
+    current_weights: dict[str, float] | None = None,
+) -> RiskParityResult:
+    """Deterministic single-name cross-sectional long/short target weights.
+    Wraps engine.xsec_long_short_weights so the live book sizes EXACTLY as the
+    backtest (top-N long / bottom-N short, beta-hedged)."""
+    from apps.backtests.engine import xsec_long_short_weights
+
+    weights = xsec_long_short_weights(day=day, universe=[t for t, _ in members], config=config)
     return _wrap_momentum_result(weights, members, current_weights)

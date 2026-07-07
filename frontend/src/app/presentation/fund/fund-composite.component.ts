@@ -34,6 +34,30 @@ Chart.register(
             {{ weightsLabel() }} weights — the same structure as the live 3-account fund.
             This is the fund's <b>expected</b> shape from its records of record, not live performance.
           </p>
+          <!-- P11 A3 — the review levers: re-lever the low-beta book toward market
+               risk (BAB), and control for the bond-bull tailwind via the post-GFC
+               sub-period. Both recompute from the same stored OOS curves. -->
+          <div class="comp-controls">
+            <label class="ctl">Leverage
+              <select (change)="setLeverage($event)">
+                @for (l of LEVERAGES; track l.v) {
+                  <option [value]="l.v" [selected]="l.v === leverage">{{ l.label }}</option>
+                }
+              </select>
+            </label>
+            <div class="seg" role="group" aria-label="History window">
+              <button type="button" [class.on]="subPeriod === 'full'"
+                (click)="setSubPeriod('full')">Full history</button>
+              <button type="button" [class.on]="subPeriod === 'post_gfc'"
+                (click)="setSubPeriod('post_gfc')">Post-GFC (2010–)</button>
+            </div>
+            @if (leverage !== 1) {
+              <span class="lev-note">
+                Core ×{{ leverage | number: '1.1-1' }} — net of
+                ~{{ (c.financing_bps ?? 200) / 100 | number: '1.0-1' }}%/yr financing (BAB)
+              </span>
+            }
+          </div>
           <!-- P10 §G: the three numbers that define "alpha" here — shown even
                when unflattering. -->
           @if (headline(); as h) {
@@ -87,6 +111,29 @@ Chart.register(
               }
             </tbody>
           </table>
+          <!-- P11 A3 — per-calendar-year returns: the edge is crisis alpha (2008 /
+               2022 outperform) bought with a lag in every bull year. -->
+          @if (c.calendar_years?.length) {
+            <details class="cal">
+              <summary>Calendar-year returns — where the edge lives (crisis alpha vs bull-year lag)</summary>
+              <table class="tbl mt-2">
+                <thead><tr>
+                  <th>Year</th><th class="right">Composite{{ leverage !== 1 ? ' ×' + (leverage | number: '1.1-1') : '' }}</th>
+                  <th class="right">SPY</th><th class="right">QQQ</th>
+                </tr></thead>
+                <tbody>
+                  @for (y of c.calendar_years; track y.year) {
+                    <tr>
+                      <td>{{ y.year }}</td>
+                      <td class="num" [style.color]="(y.composite ?? 0) >= 0 ? 'var(--acc-long-fg)' : 'var(--acc-short-fg)'">{{ y.composite == null ? '—' : (y.composite | number: '1.1-1') + '%' }}</td>
+                      <td class="num">{{ y.spy == null ? '—' : (y.spy | number: '1.1-1') + '%' }}</td>
+                      <td class="num">{{ y.qqq == null ? '—' : (y.qqq | number: '1.1-1') + '%' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </details>
+          }
           <p class="muted small">
             Members:
             @for (m of c.members; track m.strategy_id; let last = $last) {
@@ -129,12 +176,32 @@ Chart.register(
     table.tbl th.right, table.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
     tr.hero td { font-weight: 600; }
     .mt-2 { margin-top: 8px; }
+    .comp-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 4px 0 10px; }
+    .ctl { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); }
+    .ctl select { font-size: 12px; padding: 3px 6px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { font-size: 11.5px; padding: 4px 10px; background: var(--surface-2); color: var(--text-2); border: none; cursor: pointer; }
+    .seg button.on { background: var(--acc-info-fg); color: #fff; }
+    .lev-note { font-size: 11px; color: var(--text-3); }
+    details.cal { margin-top: 10px; }
+    details.cal summary { cursor: pointer; font-size: 12px; color: var(--acc-info-fg); }
   `],
 })
 export class FundCompositeComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly store = inject(FundStore);
   private chart: Chart | null = null;
   private viewReady = false;
+
+  // P11 A3 — review levers (re-fetch the composite from the same stored curves).
+  readonly LEVERAGES = [
+    { v: 1, label: '1.0× (unlevered)' },
+    { v: 1.3, label: '1.3×' },
+    { v: 1.5, label: '1.5× (research op. point)' },
+    { v: 1.7, label: '1.7×' },
+    { v: 2, label: '2.0×' },
+  ];
+  leverage = 1;
+  subPeriod: 'full' | 'post_gfc' = 'full';
 
   @ViewChild('compChart', { static: false }) canvas?: ElementRef<HTMLCanvasElement>;
 
@@ -143,7 +210,24 @@ export class FundCompositeComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   ngOnInit(): void {
-    this.store.loadComposite().subscribe({ error: () => undefined });
+    this.reload();
+  }
+
+  private reload(): void {
+    this.store
+      .loadComposite({ leverage: this.leverage, subPeriod: this.subPeriod })
+      .subscribe({ error: () => undefined });
+  }
+
+  setLeverage(e: Event): void {
+    this.leverage = Number((e.target as HTMLSelectElement).value) || 1;
+    this.reload();
+  }
+
+  setSubPeriod(p: 'full' | 'post_gfc'): void {
+    if (this.subPeriod === p) return;
+    this.subPeriod = p;
+    this.reload();
   }
 
   ngAfterViewInit(): void {

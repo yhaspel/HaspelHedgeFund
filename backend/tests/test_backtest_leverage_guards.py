@@ -124,3 +124,53 @@ def test_execute_caps_leverage_at_max_gross() -> None:
     pf.execute(decisions, fill_prices=prices, max_gross=1.5)
     assert _gross(pf) <= 150_000 + 1.0
     assert pf.cash >= -50_000 - 1.0                          # borrowing capped at 0.5×equity
+
+
+# --- P11 E2: financing drag on the margin borrow --------------------------
+
+def _lever_2x(financing_bps: float) -> SimulatedPortfolio:
+    """A 2× long book: cash borrowed ~= -100k (the margin debit)."""
+    pf = SimulatedPortfolio(
+        starting_cash=100_000, commission_bps=0, spread_bps=0,
+        financing_bps=financing_bps,
+    )
+    decisions = [
+        {"ticker": f"T{i}", "action": "buy", "target_weight_pct": 20.0} for i in range(10)
+    ]
+    pf.execute(decisions, fill_prices={f"T{i}": 100.0 for i in range(10)}, max_gross=2.0)
+    return pf
+
+
+def test_accrue_financing_charges_daily_carry_on_borrow() -> None:
+    # 2× book borrows ~100k; one day of 2%/yr carry ≈ 100_000 * 0.02 / 252.
+    pf = _lever_2x(financing_bps=200)
+    assert pf.cash == pytest.approx(-100_000, abs=1.0)
+    charge = pf.accrue_financing()
+    assert charge == pytest.approx(100_000 * 0.02 / 252, rel=1e-6)
+    # A full year of daily accrual ≈ 2% of the borrow (compounding grows the debt
+    # slightly, so the total is a touch above 2000).
+    for _ in range(251):
+        pf.accrue_financing()
+    total_carry = -100_000 - pf.cash
+    assert 2_000 <= total_carry <= 2_030
+
+
+def test_accrue_financing_noop_when_unlevered() -> None:
+    # A 50% book holds positive cash (no borrow) ⇒ zero financing even at 2%/yr.
+    pf = SimulatedPortfolio(
+        starting_cash=100_000, commission_bps=0, spread_bps=0, financing_bps=200,
+    )
+    pf.execute(
+        [{"ticker": "AAPL", "action": "buy", "target_weight_pct": 50.0}],
+        fill_prices={"AAPL": 100.0},
+    )
+    assert pf.cash == pytest.approx(50_000, abs=1.0)
+    assert pf.accrue_financing() == 0.0
+    assert pf.cash == pytest.approx(50_000, abs=1.0)
+
+
+def test_accrue_financing_zero_rate_is_noop() -> None:
+    # financing_bps=0 (the dataclass default) never charges, even when levered.
+    assert SimulatedPortfolio(starting_cash=1.0).financing_bps == 0.0
+    pf = _lever_2x(financing_bps=0)
+    assert pf.accrue_financing() == 0.0

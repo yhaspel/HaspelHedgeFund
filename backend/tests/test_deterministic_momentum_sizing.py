@@ -63,6 +63,74 @@ def test_tsmom_allow_short_shorts_downtrend() -> None:
     assert w["DOWN"] < 0.0                  # downtrend → short when allowed
 
 
+# --- P11 C1/C3: allow_short is a strategy field, threaded via trend_config ---
+
+def test_trend_config_reads_allow_short_field() -> None:
+    from apps.portfolios.construction import trend_config
+    base = dict(target_gross_pct=1.0, vol_window_days=60)
+    assert trend_config(SimpleNamespace(allow_short=True, **base))["allow_short"] is True
+    assert trend_config(SimpleNamespace(allow_short=False, **base))["allow_short"] is False
+    # Absent field (older strategy rows) defaults to long/flat.
+    assert trend_config(SimpleNamespace(**base))["allow_short"] is False
+
+
+@pytest.mark.django_db
+def test_carried_levered_book_charged_financing_on_segment_day_zero() -> None:
+    """P11 E2 fold-boundary fix: a levered book carried into a new segment (a
+    walk-forward fold after the first) must be charged financing on day 0 — before
+    the fix, ``accrue_financing`` sat inside the ``i>0`` guard and the boundary
+    overnight was silently skipped, understating the drag once per fold."""
+    from apps.backtests.portfolio import SimulatedPortfolio
+    _seed("UP", _rising(40))
+    pf = SimulatedPortfolio(
+        starting_cash=100_000.0, commission_bps=0.0, spread_bps=0.0, financing_bps=200.0,
+    )
+    pf.execute(
+        [{"ticker": "UP", "action": "buy", "target_weight_pct": 200.0}],
+        fill_prices={"UP": 100.0}, max_gross=2.0,
+    )
+    assert pf.cash < 0                       # book is levered (borrowing)
+    cash_before = pf.cash
+    bt = SimpleNamespace(
+        starting_cash=100_000.0, commission_bps=0.0, spread_bps=0.0,
+        financing_bps=200.0, universe=["UP"], hold_semantics="hold_existing",
+    )
+    # rebalance_dates=set() ⇒ no trades, so cash falls ONLY from financing. Day 0
+    # (i==0) of this carried segment must be charged (seg.cash[0] < cash_before).
+    seg = run_deterministic_segment(
+        bt=bt, start=START + dt.timedelta(days=30), end=START + dt.timedelta(days=33),
+        config={"sizing": "tsmom", "max_gross": 2.0}, rebalance_dates=set(), pf=pf,
+    )
+    assert seg.cash[0] < cash_before
+
+
+@pytest.mark.django_db
+def test_trend_long_short_opens_short_end_to_end() -> None:
+    """C2: a trend pod with allow_short=True must open a SHORT on a downtrend
+    through the deterministic segment (trend_config → tsmom → open_short)."""
+    from apps.portfolios.construction import trend_config
+    # Continue the trends INTO the segment window so there are bars to trade on
+    # (the sizer reads trailing history; the segment replays the last few days).
+    up, down = _rising(40), _falling(40)
+    up += [up[-1] + 1.0 * i for i in range(1, 7)]      # keep rising
+    down += [max(1.0, down[-1] - 1.0 * i) for i in range(1, 7)]  # keep falling
+    _seed("UP", up)
+    _seed("DOWN", down)
+    seg_start = START + dt.timedelta(days=40)          # inside the seeded window
+    strategy = SimpleNamespace(allow_short=True, target_gross_pct=1.0, vol_window_days=10)
+    config = {**trend_config(strategy), "momentum_lookbacks": [5, 10, 20]}
+    bt = SimpleNamespace(
+        starting_cash=100_000.0, commission_bps=0.0, spread_bps=0.0,
+        universe=["UP", "DOWN"], hold_semantics="hold_existing",
+    )
+    seg = run_deterministic_segment(
+        bt=bt, start=seg_start, end=seg_start + dt.timedelta(days=5), config=config,
+    )
+    final = {p["ticker"]: p["qty"] for p in seg.positions_by_day[-1]}
+    assert final.get("DOWN", 0.0) < 0.0    # short leg established live-equivalently
+    assert final.get("UP", 0.0) > 0.0
+
+
 @pytest.mark.django_db
 def test_tsmom_uses_total_return_adjusted_close() -> None:
     # Price (close) FLAT but adjusted_close rising (a dividend payer): total-return

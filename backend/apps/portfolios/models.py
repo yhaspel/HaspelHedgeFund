@@ -332,6 +332,13 @@ class PortfolioStrategy(models.Model):
     # is constructor-bound (equal-weight top-N) so it routes through the bridge
     # like the other deterministic kinds; council_alpha measures the overlay.
     KIND_NEWS_SENTIMENT = "news_sentiment"
+    # P11 F (R5) — single-name cross-sectional LONG/SHORT (beta-hedged) pod. The
+    # sizer (xsec_long_short_weights) already exists and backtests run, but the pod
+    # is SCAFFOLDING: it is not live-deployable until a survivorship-clean single-
+    # name backfill (F1) exists (today's index membership is survivorship-biased,
+    # so any backtest on it is an UPPER BOUND only — research R5). Live-arming is
+    # hard-blocked by the §9 gate for SCAFFOLDING_KINDS.
+    KIND_XSEC_LONG_SHORT = "xsec_long_short"
     KIND_CHOICES = [
         (KIND_LONG_ONLY, "Long-only"),
         (KIND_SHORT_ONLY, "Short-only"),
@@ -345,6 +352,8 @@ class PortfolioStrategy(models.Model):
         (KIND_TREND, "Deterministic trend (TSMOM)"),
         (KIND_SECTOR_MOMENTUM, "Deterministic sector momentum"),
         (KIND_NEWS_SENTIMENT, "News-sentiment single-name (council overlay)"),
+        (KIND_XSEC_LONG_SHORT,
+         "Single-name L/S (cross-sectional) — scaffolding, needs survivorship-clean data"),
     ]
 
     # Deterministic, council-free kinds. Their target weights are fully sized
@@ -355,6 +364,11 @@ class PortfolioStrategy(models.Model):
     DETERMINISTIC_KINDS = frozenset(
         {KIND_RISK_PARITY, KIND_PAIRS, KIND_TREND, KIND_SECTOR_MOMENTUM, KIND_NEWS_SENTIMENT}
     )
+
+    # P11 F — kinds that can be backtested (for research/validation) but are NOT
+    # yet live-deployable: the §9 gate refuses to arm their autopilot. Un-gate once
+    # the survivorship-clean single-name data + margin infra (F1/F3) land.
+    SCAFFOLDING_KINDS = frozenset({KIND_XSEC_LONG_SHORT})
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="strategies", on_delete=models.CASCADE
@@ -449,6 +463,13 @@ class PortfolioStrategy(models.Model):
         max_digits=5, decimal_places=4, default=Decimal("0.00")
     )
     rp_max_gross = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("1.00"))
+    # P11 D1 — cross-asset risk parity: cap aggregate equity-sleeve weight at this
+    # fraction of gross, redistributing to non-equity sleeves (bonds/commodities).
+    # Today's RP is ~75% equity risk; this makes it genuinely multi-asset. Default
+    # 0 = off (no cap). Applied identically in the live cycle + backtest sizing.
+    rp_max_equity_pct = models.DecimalField(
+        max_digits=4, decimal_places=3, default=Decimal("0.000")
+    )
     # P7c Part D — deterministic SPY-200dMA regime gate (research §4.6: orthogonal
     # to vol-targeting, beats the LLM gate). When on, the deterministic book's
     # gross is scaled by regime_gate_floor..1.0 by SPY vs its 200-day MA (risk-off
@@ -457,6 +478,12 @@ class PortfolioStrategy(models.Model):
     regime_gate_floor = models.DecimalField(
         max_digits=4, decimal_places=3, default=Decimal("0.500")
     )
+    # P11 C3 — long/short trend (TSMOM). When True, a negative blended-momentum
+    # signal opens a short instead of going flat, adding a negative-beta crisis
+    # sleeve (research §5/R3: β≈-0.03 standalone, trims the core's drawdown).
+    # Default False = long/flat (unchanged). Read by construction.trend_config,
+    # so the live cycle and the backtest size identically.
+    allow_short = models.BooleanField(default=False)
 
     # Pairs trading (kind=pairs) parameters.
     pair_entry_z = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("2.0"))

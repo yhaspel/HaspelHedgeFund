@@ -34,9 +34,19 @@ export class FundStore {
   loadFund(): Observable<FundOverview> {
     return this.api.get<FundOverview>('/fund/').pipe(tap((r) => this._fund.set(r ?? null)));
   }
-  // P10 §B5 — the validated composite (pods' stitched OOS curves vs SPY/QQQ-TR).
-  loadComposite(weights?: string): Observable<FundComposite> {
-    const q = weights ? `?weights=${encodeURIComponent(weights)}` : '';
+  // P10 §B5 / P11 A3 — the validated composite (pods' stitched OOS curves vs
+  // SPY/QQQ-TR), optionally re-levered / clipped to the post-GFC sub-period.
+  loadComposite(opts?: {
+    weights?: string;
+    leverage?: number;
+    subPeriod?: 'full' | 'post_gfc';
+  }): Observable<FundComposite> {
+    const params = new URLSearchParams();
+    if (opts?.weights) params.set('weights', opts.weights);
+    if (opts?.leverage && opts.leverage !== 1) params.set('leverage', String(opts.leverage));
+    if (opts?.subPeriod === 'post_gfc') params.set('sub_period', 'post_gfc');
+    const qs = params.toString();
+    const q = qs ? `?${qs}` : '';
     return this.api
       .get<FundComposite>(`/fund/composite/${q}`)
       .pipe(tap((r) => this._composite.set(r ?? null)));

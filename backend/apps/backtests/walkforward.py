@@ -227,6 +227,7 @@ def _run_deterministic_walkforward(bt: Backtest, folds: list[Fold]) -> None:
         starting_cash=float(bt.starting_cash),
         commission_bps=float(bt.commission_bps),
         spread_bps=float(bt.spread_bps),
+        financing_bps=float(getattr(bt, "financing_bps", 0) or 0),  # P11 E2
     )
 
     def _sharpe(seg: SegmentResult) -> float:

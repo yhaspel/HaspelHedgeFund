@@ -1021,6 +1021,7 @@ def _run_risk_parity_cycle(
         excluded=markov_excluded or None,
         current_weights=current_weights or None,
         rebalance_band_pct=float(strategy.rebalance_band_pct),
+        max_equity_pct=float(getattr(strategy, "rp_max_equity_pct", 0) or 0) or None,  # P11 D1
     )
     # P02j review: optional council-veto branch. Deterministic by default
     # (enable_council_veto=False). When enabled, the council may trim

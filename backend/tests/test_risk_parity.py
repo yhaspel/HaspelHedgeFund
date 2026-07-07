@@ -3,6 +3,69 @@ from __future__ import annotations
 
 from apps.portfolios.construction import construct_risk_parity
 
+# 6 equity sectors + 1 bond + 1 commodity, equal vol ⇒ 75% equity risk (the R4
+# problem: today's "risk parity" is ~75% equity). Used by the P11 D1 cap tests.
+_MIXED_SLEEVES = [
+    ("XLK", "Technology"), ("XLF", "Financials"), ("XLE", "Energy"),
+    ("XLV", "Health Care"), ("XLY", "Consumer Discretionary"), ("XLP", "Consumer Staples"),
+    ("TLT", "Rates"), ("GLD", "Commodity"),
+]
+_MIXED_VOLS = {t: 0.01 for t, _ in _MIXED_SLEEVES}
+
+
+def test_equity_class_cap_off_by_default():
+    # max_equity_pct=None (default) ⇒ no change: equity stays at 75%.
+    out = construct_risk_parity(
+        _MIXED_SLEEVES, _MIXED_VOLS, target_gross_pct=1.0,
+        per_sleeve_max_pct=0.50, per_sleeve_min_pct=0.0,
+    )
+    equity = sum(w for t, w in out.target_weights.items() if t not in ("TLT", "GLD"))
+    assert abs(equity - 0.75) < 1e-6
+    assert out.diagnostics["equity_class_cap"] is None
+
+
+def test_equity_class_cap_redistributes_to_non_equity():
+    # Cap equity at 50% of gross; the freed 25% flows to TLT/GLD, gross preserved.
+    out = construct_risk_parity(
+        _MIXED_SLEEVES, _MIXED_VOLS, target_gross_pct=1.0,
+        per_sleeve_max_pct=0.50, per_sleeve_min_pct=0.0, max_equity_pct=0.50,
+    )
+    w = out.target_weights
+    equity = sum(v for t, v in w.items() if t not in ("TLT", "GLD"))
+    non_equity = w["TLT"] + w["GLD"]
+    assert abs(equity - 0.50) < 1e-6            # equity capped at the target
+    assert abs(non_equity - 0.50) < 1e-6        # freed weight redistributed
+    assert abs(out.gross_pct - 1.0) < 1e-6      # gross preserved
+    note = out.diagnostics["equity_class_cap"]
+    assert note is not None and abs(note["redistributed"] - 0.25) < 1e-6
+
+
+def test_equity_class_cap_fails_open_when_all_equity():
+    # No non-equity sleeve to diversify into ⇒ cap is skipped (fail-open).
+    sleeves = [("XLK", "Technology"), ("XLF", "Financials"), ("XLE", "Energy")]
+    out = construct_risk_parity(
+        sleeves, {t: 0.01 for t, _ in sleeves}, target_gross_pct=1.0,
+        per_sleeve_max_pct=1.0, per_sleeve_min_pct=0.0, max_equity_pct=0.50,
+    )
+    assert abs(out.gross_pct - 1.0) < 1e-6
+    assert out.diagnostics["equity_class_cap"] is None
+
+
+def test_equity_class_cap_respects_per_sleeve_max():
+    # One non-equity sleeve, per_sleeve_max 0.40: it cannot absorb all the freed
+    # equity weight, so some gross is left un-redistributed (residual reported).
+    sleeves = [
+        ("XLK", "Technology"), ("XLF", "Financials"),
+        ("XLE", "Energy"), ("TLT", "Rates"),
+    ]
+    out = construct_risk_parity(
+        sleeves, {t: 0.01 for t, _ in sleeves}, target_gross_pct=1.0,
+        per_sleeve_max_pct=0.40, per_sleeve_min_pct=0.0, max_equity_pct=0.50,
+    )
+    assert out.target_weights["TLT"] <= 0.40 + 1e-6      # cap respected
+    note = out.diagnostics["equity_class_cap"]
+    assert note is not None and note["residual_ungross"] > 0  # couldn't place it all
+
 
 def test_inverse_vol_weighting_matches_expected():
     sleeves = [("A", "Equity"), ("B", "Equity"), ("C", "Rates")]

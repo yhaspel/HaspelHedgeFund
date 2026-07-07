@@ -428,6 +428,69 @@ def test_fund_composite_custom_weights(db, client, user):
     assert body["points"][-1]["composite"] == pytest.approx(expected_last, rel=1e-4)
 
 
+# ---------------------------------------------------------------------------
+# P11 A3 — composite leverage / financing / calendar-year / post-GFC sub-period.
+# ---------------------------------------------------------------------------
+def test_lever_curve_math():
+    from apps.portfolios.fund_composite import _lever_curve
+    curve = [100.0, 110.0, 121.0]  # +10%/step
+    assert _lever_curve(curve, 1.0, 200) == curve                 # 1× is identity
+    # 2×, no financing: each step doubles to +20% ⇒ 100 → 120 → 144.
+    assert _lever_curve(curve, 2.0, 0.0) == pytest.approx([100.0, 120.0, 144.0])
+    # Financing drag makes the levered curve strictly lower.
+    dragged = _lever_curve(curve, 2.0, 200.0)
+    assert dragged[-1] < 144.0
+
+
+def test_calendar_years_helper():
+    import datetime as _dt
+
+    from apps.portfolios.fund_composite import _calendar_years
+    grid = [_dt.date(2023, 12, 30), _dt.date(2023, 12, 31),
+            _dt.date(2024, 1, 2), _dt.date(2024, 6, 1)]
+    rows = _calendar_years(grid, {"composite": [100.0, 101.0, 102.0, 110.0]})
+    assert [r["year"] for r in rows] == [2023, 2024]
+    assert rows[0]["composite"] == pytest.approx(1.0)             # 100→101
+    assert rows[1]["composite"] == pytest.approx((110 / 102 - 1) * 100, abs=1e-2)
+
+
+def _two_pod_fund(user):
+    fund = AutonomousFund.objects.create(owner=user, name="Fund")
+    for j, daily in enumerate([0.01, 0.02]):
+        s = _strategy(user, name=f"lev{j}")
+        fund.strategies.add(s)
+        bt, _, _ = _make_done_backtest_with_days(
+            user, universe=["AAA"], n_days=6, daily=daily,
+        )
+        bt.strategy = s
+        bt.save(update_fields=["strategy"])
+    return fund
+
+
+def test_fund_composite_leverage_amplifies_return(db, client, user):
+    _two_pod_fund(user)
+    days = _dates(6)
+    for i, d in enumerate(days):
+        _bar("SPY", d, 100 * (1.002 ** i))
+    base = client.get("/api/fund/composite/").json()
+    lev = client.get("/api/fund/composite/?leverage=2.0&financing_bps=0").json()
+    base_ret = base["metrics"]["composite"]["total_return_pct"]
+    lev_ret = lev["metrics"]["composite"]["total_return_pct"]
+    assert lev_ret > base_ret * 1.9                 # ~2× the gain (no drag)
+    assert lev["leverage"] == 2.0
+    # Benchmarks are never levered.
+    assert lev["points"][-1]["spy"] == pytest.approx(base["points"][-1]["spy"], rel=1e-6)
+
+
+def test_fund_composite_carries_calendar_and_subperiod(db, client, user):
+    _two_pod_fund(user)
+    body = client.get("/api/fund/composite/?sub_period=post_gfc").json()
+    assert body["sub_period"] == "post_gfc"
+    assert body["financing_bps"] == 200.0
+    assert isinstance(body["calendar_years"], list) and body["calendar_years"]
+    assert "composite" in body["calendar_years"][0]
+
+
 def test_fund_composite_excludes_price_only_records(db, client, user):
     fund = AutonomousFund.objects.create(owner=user, name="Fund")
     s = _strategy(user, name="pold")

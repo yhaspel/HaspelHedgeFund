@@ -148,6 +148,14 @@ export interface FundCompositeSeriesStats {
   vs_qqq?: { beta: number; alpha_annual_pct: number; information_ratio: number };
 }
 
+// P11 A3 — one per-calendar-year total-return row (composite + benchmarks).
+export interface FundCompositeCalendarYear {
+  year: number;
+  composite?: number | null;
+  spy?: number | null;
+  qqq?: number | null;
+}
+
 export interface FundComposite {
   available: boolean;
   reason?: string;
@@ -155,8 +163,13 @@ export interface FundComposite {
   members?: FundCompositeMember[];
   window?: { start: string; end: string };
   base?: number;
+  // P11 A3 — echoed leverage / financing / sub-period + the calendar table.
+  leverage?: number;
+  financing_bps?: number;
+  sub_period?: 'full' | 'post_gfc';
   points?: { date: string; composite: number; spy?: number; qqq?: number }[];
   metrics?: Record<string, FundCompositeSeriesStats>;
+  calendar_years?: FundCompositeCalendarYear[];
 }
 
 export interface ExecutedBook {
