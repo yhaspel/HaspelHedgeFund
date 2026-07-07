@@ -49,6 +49,10 @@ class SimulatedPortfolio:
     starting_cash: float
     commission_bps: float = 5.0
     spread_bps: float = 5.0
+    # P11 E2: annual financing/carry rate (bps) charged daily on the margin
+    # borrow. Default 0 = no drag (backward-compatible for callers that don't
+    # set it); real backtests thread Backtest.financing_bps (default 2%/yr).
+    financing_bps: float = 0.0
     cash: float = 0.0
     positions: dict[str, Position] = field(default_factory=dict)
     fills_today: list[Fill] = field(default_factory=list)
@@ -71,6 +75,29 @@ class SimulatedPortfolio:
             new_mark = prices.get(tkr)
             if new_mark is not None and new_mark > 0:
                 p.mark = float(new_mark)
+
+    def accrue_financing(self) -> float:
+        """Charge one trading day of financing on the margin borrow (P11 E2).
+
+        The engine lets a levered book borrow: a gross>1 book runs cash negative
+        (``-cash`` is the margin debit), yet ``execute`` only ever charged
+        commission + spread — so every gross>1 backtest overstated its return by
+        the full carry a live margined book pays. This accrues that carry daily.
+
+        Charged on the *actual* borrow ``max(0, -cash)`` at ``financing_bps/252``.
+        For a net-long levered book (the RP/Trend core this targets) the borrow
+        equals ``(gross-1)·equity`` — the paper's ``(L-1)·rf`` formula — while a
+        market-neutral book funds its longs with short proceeds (cash stays ~flat)
+        and correctly pays ~nothing. No-op when unlevered or ``financing_bps<=0``.
+        Returns the dollar charge (for diagnostics/tests)."""
+        if self.financing_bps <= 0:
+            return 0.0
+        borrow = max(0.0, -self.cash)
+        if borrow <= 0.0:
+            return 0.0
+        charge = borrow * (self.financing_bps / 10_000.0) / 252.0
+        self.cash -= charge
+        return charge
 
     # ---- corporate actions ------------------------------------------
 

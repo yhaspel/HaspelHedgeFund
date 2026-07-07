@@ -141,6 +141,7 @@ def run_segment(
         starting_cash=float(bt.starting_cash),
         commission_bps=float(bt.commission_bps),
         spread_bps=float(bt.spread_bps),
+        financing_bps=float(getattr(bt, "financing_bps", 0) or 0),
     )
 
     universe = list(bt.universe)
@@ -152,10 +153,16 @@ def run_segment(
     pending_orders: list[dict] = []  # decisions made yesterday, executed at today's open
 
     for i, day in enumerate(days):
-        # 1. Mark-to-market using prior close
+        # 1. Mark-to-market using prior close, then accrue one day of financing
+        #    on any margin borrow (P11 E2; no-op when unlevered).
         if i > 0:
             prev = days[i - 1]
             pf.mark_to_market(close_prices_for(prev, universe))
+        # Accrue OUTSIDE the i>0 guard: a book carried into this segment (a
+        # walk-forward fold after the first) starts at i==0 already levered, and
+        # its boundary-overnight borrow must be charged. A fresh book has borrow 0
+        # on day 0 ⇒ no-op, so single-segment/unlevered results are unchanged.
+        pf.accrue_financing()
         # 2. Corporate actions (ex-date is `day`)
         for t in universe:
             acts = actions_on(t, day)
@@ -259,11 +266,15 @@ def inverse_vol_weights(*, day: dt.date, universe: list[str], config: dict) -> d
                     dvols[t] = s
         if not dvols:
             return {}
+        # P11 D1 — real sleeve group labels (default {}) so the optional equity
+        # cap can classify sleeves; without them the cap fails open (all-equity).
+        sleeve_groups = config.get("sleeve_groups") or {}
         res = construct_risk_parity(
-            [(t, "") for t in dvols], dvols,
+            [(t, sleeve_groups.get(t, "")) for t in dvols], dvols,
             target_gross_pct=float(config.get("target_gross", 1.0)),
             per_sleeve_max_pct=float(config.get("per_sleeve_max_pct", 0.50)),
             per_sleeve_min_pct=float(config.get("per_sleeve_min_pct", 0.02)),
+            max_equity_pct=float(config.get("max_equity_pct") or 0) or None,
         )
         weights = dict(res.target_weights)
         # P7c Part D — optional leverage (deploy-faithful with the live RP cycle):
@@ -558,6 +569,7 @@ def run_deterministic_segment(
             starting_cash=float(bt.starting_cash),
             commission_bps=float(bt.commission_bps),
             spread_bps=float(bt.spread_bps),
+            financing_bps=float(getattr(bt, "financing_bps", 0) or 0),
         )
     universe = list(bt.universe)
     days = trading_days(start, end, universe)
@@ -570,6 +582,10 @@ def run_deterministic_segment(
     for i, day in enumerate(days):
         if i > 0:
             pf.mark_to_market(close_prices_for(days[i - 1], universe))
+        # P11 E2: daily carry on margin borrow. OUTSIDE the i>0 guard so a levered
+        # book carried across contiguous OOS folds is charged the boundary
+        # overnight on each fold's day 0 (fresh books have borrow 0 ⇒ no-op).
+        pf.accrue_financing()
         for t in universe:
             acts = actions_on(t, day)
             if acts:

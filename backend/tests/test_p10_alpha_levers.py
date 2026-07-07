@@ -81,6 +81,64 @@ def test_sizer_registered():
     assert _SIZERS["xsec_long_short"] is xsec_long_short_weights
 
 
+# ---------------------------------------------------------------------------
+# P11 F (R5) — single-name L/S pod SCAFFOLDING: KIND + construction wrapper +
+# backtest routing exist for research/validation, but the pod is gate-blocked
+# from live arming until a survivorship-clean single-name backfill (F1) lands.
+# ---------------------------------------------------------------------------
+def test_xsec_long_short_registered_as_scaffolding_kind():
+    from apps.backtests.models import Backtest
+    assert PortfolioStrategy.KIND_XSEC_LONG_SHORT in PortfolioStrategy.SCAFFOLDING_KINDS
+    assert Backtest.XSEC_LONG_SHORT in Backtest.DETERMINISTIC_ENGINE_MODES
+    # scaffolding is NOT treated as a live-deployable deterministic kind
+    assert PortfolioStrategy.KIND_XSEC_LONG_SHORT not in PortfolioStrategy.DETERMINISTIC_KINDS
+
+
+def test_construct_xsec_long_short_wraps_sizer(bars, db):
+    from apps.portfolios.construction import construct_xsec_long_short
+    members = [(t, "") for t in NAMES] + [("SPY", "")]
+    res = construct_xsec_long_short(day=bars, members=members, config=CONFIG)
+    w = res.target_weights
+    assert w["LNG1"] > 0 and w["SHT1"] < 0          # long + short legs present
+    assert res.gross_pct == pytest.approx(1.0, abs=1e-6)
+
+
+def test_gate_blocks_arming_scaffolding_kind(db):
+    from apps.portfolios.validation import validation_status
+    user = User.objects.create_user(email="p11f@x.test", password="pw-fake-123456789")
+    u = Universe.objects.create(name="p11f-uni")
+    UniverseMembership.objects.create(universe=u, ticker="AAA", effective_from=D0)
+    pf = Portfolio.objects.create(user=user, kind=Portfolio.KIND_STRATEGY, name="s")
+    s = PortfolioStrategy.objects.create(
+        user=user, name="single-name-ls", universe=u, portfolio=pf,
+        kind=PortfolioStrategy.KIND_XSEC_LONG_SHORT,
+    )
+    status = validation_status(s)
+    assert status["passed"] is False
+    assert any(c["key"] == "deployable_kind" and not c["ok"] for c in status["checks"])
+
+
+def test_serializer_routes_xsec_long_short_to_deterministic(db):
+    from apps.backtests.models import Backtest
+    from apps.backtests.serializers import BacktestCreateSerializer
+    user = User.objects.create_user(email="p11f2@x.test", password="pw-fake-123456789")
+    u = Universe.objects.create(name="p11f2-uni")
+    UniverseMembership.objects.create(universe=u, ticker="AAA", effective_from=D0)
+    pf = Portfolio.objects.create(user=user, kind=Portfolio.KIND_STRATEGY, name="s2")
+    s = PortfolioStrategy.objects.create(
+        user=user, name="ls2", universe=u, portfolio=pf,
+        kind=PortfolioStrategy.KIND_XSEC_LONG_SHORT,
+    )
+    ser = BacktestCreateSerializer(
+        data={"name": "ls-validation", "universe": ["AAA"],
+              "start_date": "2023-01-02", "end_date": "2025-12-31", "strategy_id": s.id},
+        context={"request": SimpleNamespace(user=user)},
+    )
+    assert ser.is_valid(), ser.errors
+    assert ser.validated_data["engine_mode"] == Backtest.XSEC_LONG_SHORT
+    assert ser.validated_data["search_space"]["sizing"] == "xsec_long_short"
+
+
 def test_long_short_legs_and_market_neutrality(bars, db):
     day = bars
     w = xsec_long_short_weights(day=day, universe=[*NAMES, "SPY"], config=CONFIG)

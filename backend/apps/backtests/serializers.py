@@ -170,6 +170,19 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
                     attrs["engine_mode"] = Backtest.RISK_PARITY
                     ss = {**pd_cfg, **caller_ss}
                     ss.setdefault("sizing", "construct_risk_parity")
+                    # P11 D1 — thread the equity cap + real sleeve group labels so
+                    # the gate-facing backtest classifies sleeves like the live cycle
+                    # (inverse_vol_weights otherwise passes empty groups, silently
+                    # no-op'ing the cap). Off unless rp_max_equity_pct > 0.
+                    mep = float(getattr(strategy, "rp_max_equity_pct", 0) or 0)
+                    if mep > 0:
+                        from apps.portfolios.models import UniverseMembership
+                        ss.setdefault("max_equity_pct", mep)
+                        ss.setdefault("sleeve_groups", dict(
+                            UniverseMembership.objects
+                            .filter(universe=strategy.universe, effective_to__isnull=True)
+                            .values_list("ticker", "sector")
+                        ))
                     attrs["search_space"] = ss
                 elif strategy.kind == PortfolioStrategy.KIND_TREND:
                     from apps.portfolios.construction import trend_config
@@ -180,6 +193,15 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
                     attrs["engine_mode"] = Backtest.SECTOR_MOMENTUM
                     attrs["search_space"] = {
                         **pd_cfg, **sector_momentum_config(strategy), **caller_ss
+                    }
+                elif strategy.kind == PortfolioStrategy.KIND_XSEC_LONG_SHORT:
+                    # P11 F (R5) scaffolding — validation backtests run on the same
+                    # deterministic path; live-arming is gate-blocked until F1's
+                    # survivorship-clean single-name data lands.
+                    from apps.portfolios.construction import xsec_long_short_config
+                    attrs["engine_mode"] = Backtest.XSEC_LONG_SHORT
+                    attrs["search_space"] = {
+                        **pd_cfg, **xsec_long_short_config(strategy), **caller_ss
                     }
         # P10 §B4: the deterministic walk-forward replays ONE fixed config (no IS
         # candidate search), so a stored n_candidates > 1 would lie — and would

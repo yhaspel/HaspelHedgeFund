@@ -25,21 +25,38 @@ class FundOverviewView(APIView):
 
 
 class FundCompositeView(APIView):
-    """P10 §B5 — GET /api/fund/composite/ — the pods' stitched OOS validation
-    curves combined at configurable weights vs SPY-TR/QQQ-TR.
+    """P10 §B5 / P11 A3 — GET /api/fund/composite/ — the pods' stitched OOS
+    validation curves combined at configurable weights vs SPY-TR/QQQ-TR.
 
     ``?weights=53:0.6,54:0.2,55:0.2`` (strategy-id:weight, normalized; default
-    equal weight — the live 33/33/33 capital split)."""
+    equal weight — the live 33/33/33 capital split).
+    ``?leverage=1.5`` re-levers the composite toward market risk net of a
+    ``(L-1)·rf`` drag (``?financing_bps=200`` overrides the ~2%/yr default).
+    ``?sub_period=post_gfc`` clips the window to 2010–."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request: Request) -> Response:
-        from .fund_composite import fund_composite
+        from .fund_composite import DEFAULT_FINANCING_BPS, fund_composite
 
         fund = _user_fund(request.user)
         if fund is None:
             return Response({"available": False, "reason": "no fund"})
+        qp = request.query_params
+        try:
+            leverage = min(3.0, max(0.5, float(qp.get("leverage", 1.0))))
+        except (TypeError, ValueError):
+            leverage = 1.0
+        try:
+            financing_bps = float(qp.get("financing_bps", DEFAULT_FINANCING_BPS))
+            financing_bps = min(2000.0, max(0.0, financing_bps))
+        except (TypeError, ValueError):
+            financing_bps = DEFAULT_FINANCING_BPS
+        sub_period = "post_gfc" if qp.get("sub_period") == "post_gfc" else "full"
         return Response(
-            fund_composite(fund, weights_raw=request.query_params.get("weights"))
+            fund_composite(
+                fund, weights_raw=qp.get("weights"),
+                leverage=leverage, financing_bps=financing_bps, sub_period=sub_period,
+            )
         )
 
 

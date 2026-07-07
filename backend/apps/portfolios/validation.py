@@ -37,7 +37,22 @@ def validation_status(strategy) -> dict:
     ``{passed, checks: [{key, ok, detail}], backtest_id}``."""
     from apps.backtests.models import Backtest, BacktestMetrics
 
+    from .models import PortfolioStrategy
+
     checks: list[dict] = []
+
+    # P11 F — scaffolding kinds backtest for research but are NOT live-deployable
+    # (e.g. single-name L/S needs survivorship-clean data + margin infra first).
+    # Hard-block arming regardless of backtest metrics.
+    if strategy.kind in PortfolioStrategy.SCAFFOLDING_KINDS:
+        checks.append({
+            "key": "deployable_kind", "ok": False,
+            "detail": "This strategy kind is research scaffolding and cannot be "
+                      "armed yet — it needs a survivorship-clean single-name "
+                      "backfill (F1) and margin support before live paper trading.",
+        })
+        return {"passed": False, "checks": checks, "backtest_id": None}
+
     bt = (
         Backtest.objects.filter(
             strategy=strategy,

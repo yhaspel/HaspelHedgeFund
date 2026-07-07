@@ -16,6 +16,8 @@ proxied through a hosted service.
   debate and vote a decision per ticker, with their full reasoning surfaced.
 - **Backtesting** — walk-forward, out-of-sample-scored backtests, with a §9
   validation gate a strategy must clear before its autopilot can go live (paper).
+  Leveraged backtests are charged realistic financing/carry on the borrow
+  (`Backtest.financing_bps`, ~2%/yr default) so a levered curve isn't overstated.
 - **Screener** — rank the market on fundamentals / technicals / factors.
 - **Strategies & autopilot** — compose strategies and let a paper-broker autopilot
   rebalance them.

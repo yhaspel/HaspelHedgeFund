@@ -31,15 +31,19 @@ class Backtest(models.Model):
     RISK_PARITY = "risk_parity"
     TREND = "trend"
     SECTOR_MOMENTUM = "sector_momentum"
+    XSEC_LONG_SHORT = "xsec_long_short"  # P11 F (R5) scaffolding
     ENGINE_MODE_CHOICES = [
         (COUNCIL, "Council (LLM vote)"),
         (RISK_PARITY, "Deterministic risk parity"),
         (TREND, "Deterministic trend (TSMOM)"),
         (SECTOR_MOMENTUM, "Deterministic sector momentum"),
+        (XSEC_LONG_SHORT, "Single-name cross-sectional long/short"),
     ]
     # Council-free engine modes routed through the deterministic walk-forward
     # (no prime, no LLM, $0). Their sizer is picked by ``search_space["sizing"]``.
-    DETERMINISTIC_ENGINE_MODES = frozenset({RISK_PARITY, TREND, SECTOR_MOMENTUM})
+    DETERMINISTIC_ENGINE_MODES = frozenset(
+        {RISK_PARITY, TREND, SECTOR_MOMENTUM, XSEC_LONG_SHORT}
+    )
 
     # P10 §B3 — data era. Backtests created before the dividend/total-return
     # data fix (PR #50, merged 2026-06-09 15:17 UTC) ran on price-only bars
@@ -75,6 +79,11 @@ class Backtest(models.Model):
     starting_cash = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("100000"))
     commission_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
     spread_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
+    # P11 E2: annual financing/carry (bps) charged daily on the margin borrow of a
+    # levered (gross>1) book. Default 200 = ~2%/yr — the paper's (L-1)·rf drag. It
+    # is a no-op for unlevered books (no borrow ⇒ no charge), so only gross>1
+    # backtests change when re-run; pre-existing DONE rows are untouched until then.
+    financing_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("200"))
     engine_mode = models.CharField(
         max_length=20, choices=ENGINE_MODE_CHOICES, default=COUNCIL
     )
