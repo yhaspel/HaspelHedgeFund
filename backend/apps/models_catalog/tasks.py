@@ -7,6 +7,7 @@ that vanished upstream (the stale-ghost class), and audits pricing drift on ever
 active OpenRouter row — recording + notifying operators when anything changed.
 This is what keeps the catalog resilient to OpenRouter churn without a deploy.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,7 +43,7 @@ def reconcile_model_catalog() -> dict:
 
 
 def _notify_operators(sync, drift) -> None:
-    """Best-effort operator notification over any active staff channel. Never
+    """Best-effort operator notification over active staff email channels. Never
     raises — the log.warning above is the durable record."""
     try:
         from apps.notifications.models import NotificationChannel
@@ -56,19 +57,16 @@ def _notify_operators(sync, drift) -> None:
         lines.append("Retired (vanished upstream): " + ", ".join(sync.swept))
     if sync.excluded:
         lines.append(
-            "Excluded: "
-            + ", ".join(f"{e['slug']} ({e['reason']})" for e in sync.excluded)
+            "Excluded: " + ", ".join(f"{e['slug']} ({e['reason']})" for e in sync.excluded)
         )
     if drift:
         lines.append("Pricing drift: " + ", ".join(r.model_id for r in drift))
     body = "Model-catalog reconcile found changes:\n\n" + "\n".join(lines)
     try:
         channels = NotificationChannel.objects.filter(
-            user__is_staff=True, is_active=True
+            user__is_staff=True, is_active=True, kind=NotificationChannel.EMAIL
         )
         for ch in channels:
-            send_notification(
-                ch, "Model catalog reconcile", body, enforce_cap=False
-            )
+            send_notification(ch, "Model catalog reconcile", body, enforce_cap=False)
     except Exception:
         return

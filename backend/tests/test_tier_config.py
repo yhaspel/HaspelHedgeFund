@@ -6,6 +6,7 @@ mirror the tier_menus DEFAULT_* baseline. These tests exercise the behaviors the
 DB layer adds on top: active-only menus, the per-tier-default fallback, and the
 broadened reconcile sweep.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,7 +30,11 @@ _FRUGAL_DEFAULT = "openrouter:meta-llama/llama-3.3-70b-instruct"
 @pytest.mark.django_db
 def test_post_migrate_seeded_all_tiers() -> None:
     assert set(TierConfig.objects.values_list("tier_name", flat=True)) == {
-        "dev", "frugal", "research", "quality", "hybrid",
+        "dev",
+        "frugal",
+        "research",
+        "quality",
+        "hybrid",
     }
     # frugal default + membership mirror the baseline.
     assert tier_default("frugal") == _FRUGAL_DEFAULT
@@ -43,9 +48,9 @@ def test_seeded_cheap_tiers_have_no_reasoning_member() -> None:
     catches a bad operator edit, not just a bad constant."""
     for tier in ("dev", "frugal"):
         bad = list(
-            TierMembership.objects.filter(
-                tier_id=tier, model__supports_reasoning=True
-            ).values_list("model_id", flat=True)
+            TierMembership.objects.filter(tier_id=tier, model__supports_reasoning=True).values_list(
+                "model_id", flat=True
+            )
         )
         assert not bad, f"{tier} has reasoning members: {bad}"
 
@@ -77,6 +82,7 @@ def test_tier_menu_drops_deactivated_member() -> None:
 def test_unseeded_tier_falls_back_to_constant_baseline() -> None:
     # Wipe the dev tier's DB membership → tier_menu falls back to DEFAULT_*.
     from apps.models_catalog.tier_menus import _default_menu
+
     TierMembership.objects.filter(tier_id="dev").delete()
     assert tier_menu("dev") == _default_menu("dev")
 
@@ -106,14 +112,14 @@ def test_tier_default_falls_back_to_first_active_member_when_default_dead() -> N
 def test_sanitize_replaces_only_inactive_with_tier_default() -> None:
     ModelEntry.objects.filter(id=_FRUGAL_MEMBER).update(is_active=False)
     overrides = {
-        "druckenmiller": _FRUGAL_MEMBER,                         # dead
-        "buffett": _FRUGAL_DEFAULT,                              # active
-        "wood": "openrouter:google/gemma-3-27b-it",             # active
+        "druckenmiller": _FRUGAL_MEMBER,  # dead
+        "buffett": _FRUGAL_DEFAULT,  # active
+        "wood": "openrouter:google/gemma-3-27b-it",  # active
     }
     out = sanitize_overrides("frugal", overrides)
-    assert out["druckenmiller"] == tier_default("frugal")       # dead → default
-    assert out["buffett"] == _FRUGAL_DEFAULT                     # unchanged
-    assert out["wood"] == "openrouter:google/gemma-3-27b-it"     # unchanged
+    assert out["druckenmiller"] == tier_default("frugal")  # dead → default
+    assert out["buffett"] == _FRUGAL_DEFAULT  # unchanged
+    assert out["wood"] == "openrouter:google/gemma-3-27b-it"  # unchanged
 
 
 @pytest.mark.django_db
@@ -125,15 +131,15 @@ def test_sanitize_preserves_persona_spread() -> None:
     # the persona that used the dead slug now points at the live fallback
     assert mapping["druckenmiller"] == tier_default("frugal")
     others = {mapping[p] for p in PERSONA_AGENTS if p != "druckenmiller"}
-    assert _FRUGAL_MEMBER not in others           # dead slug fully gone
-    assert len(others) > 1                         # spread preserved
+    assert _FRUGAL_MEMBER not in others  # dead slug fully gone
+    assert len(others) > 1  # spread preserved
 
 
 @pytest.mark.django_db
 def test_sanitize_exempts_ollama_and_active_picks() -> None:
     ov = {
-        "buffett": "ollama:llama3.3:8b",            # no ModelEntry row — exempt
-        "wood": _FRUGAL_DEFAULT,                     # active
+        "buffett": "ollama:llama3.3:8b",  # no ModelEntry row — exempt
+        "wood": _FRUGAL_DEFAULT,  # active
     }
     assert sanitize_overrides("frugal", ov) == ov
 
@@ -143,7 +149,8 @@ def test_sanitize_exempts_ollama_and_active_picks() -> None:
 
 def _entry(slug: str, p_in: str = "0", p_out: str = "0") -> dict:
     return {
-        "id": slug, "name": slug,
+        "id": slug,
+        "name": slug,
         "pricing": {"prompt": p_in, "completion": p_out},
         "top_provider": {"context_length": 131072},
         "supported_parameters": ["structured_outputs"],
@@ -155,6 +162,7 @@ def _catalog_for_all_active_openrouter(exclude: tuple[str, ...] = ()) -> dict:
     `exclude` — so a sync deactivates ONLY the excluded slug(s). Dev slugs stay
     free; everything else is cheap enough to pass the frugal ceiling guard."""
     from apps.models_catalog.tier_menus import DEV_TIER_SLUGS
+
     dev = set(DEV_TIER_SLUGS)
     cat: dict = {}
     for row in ModelEntry.objects.filter(is_active=True, provider="openrouter"):
@@ -175,14 +183,12 @@ def test_sync_broad_sweep_deactivates_vanished_nonallowlist_row() -> None:
     ghost = "openrouter:arcee-ai/trinity-large-thinking:free"
     assert ModelEntry.objects.get(id=ghost).is_active
     cat = _catalog_for_all_active_openrouter(exclude=(ghost,))
-    with patch(
-        "apps.models_catalog.verification.fetch_openrouter_catalog", return_value=cat
-    ):
+    with patch("apps.models_catalog.verification.fetch_openrouter_catalog", return_value=cat):
         result = sync_tier_models()
-    g = ModelEntry.objects.get(id=ghost)        # still EXISTS — never hard-deleted
+    g = ModelEntry.objects.get(id=ghost)  # still EXISTS — never hard-deleted
     assert g.is_active is False
-    assert result.swept == [ghost]              # ONLY the ghost swept (broad pass)
-    assert result.deactivated == []             # no curated/allowlist slug died
+    assert result.swept == [ghost]  # ONLY the ghost swept (broad pass)
+    assert result.deactivated == []  # no curated/allowlist slug died
     # Anthropic rows are not in the OpenRouter catalog and must never be touched.
     assert ModelEntry.objects.get(id="anthropic:claude-sonnet-4-6").is_active is True
 
@@ -194,12 +200,39 @@ def test_reconcile_task_runs_sync_and_verify() -> None:
     from apps.models_catalog.tasks import reconcile_model_catalog
 
     cat = _catalog_for_all_active_openrouter()
-    with patch(
-        "apps.models_catalog.verification.fetch_openrouter_catalog", return_value=cat
-    ):
+    with patch("apps.models_catalog.verification.fetch_openrouter_catalog", return_value=cat):
         out = reconcile_model_catalog()
     assert "sync" in out and "drift" in out
     assert out["sync"]["fetched_at"] is not None
+
+
+@pytest.mark.django_db
+def test_reconcile_notifies_email_channels_only() -> None:
+    """Model-reconcile operator alerts must go to email, never Telegram."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from django.contrib.auth import get_user_model
+
+    from apps.models_catalog.tasks import _notify_operators
+    from apps.notifications.models import NotificationChannel
+
+    staff = get_user_model().objects.create_user(
+        email="ops@example.com", password="x", is_staff=True
+    )
+    email_ch = NotificationChannel.objects.create(
+        user=staff, kind=NotificationChannel.EMAIL, is_active=True
+    )
+    NotificationChannel.objects.create(
+        user=staff, kind=NotificationChannel.TELEGRAM, is_active=True
+    )
+
+    sync = SimpleNamespace(deactivated=["some:slug"], swept=[], excluded=[])
+    with patch("apps.notifications.services.send_notification") as send:
+        _notify_operators(sync, drift=[])
+
+    sent_channels = [call.args[0] for call in send.call_args_list]
+    assert sent_channels == [email_ch]
 
 
 def test_beat_schedule_registers_reconcile() -> None:
@@ -215,18 +248,18 @@ def test_beat_schedule_registers_reconcile() -> None:
 
 def _make_user(email: str, *, staff: bool = False):
     from django.contrib.auth import get_user_model
-    return get_user_model().objects.create_user(
-        email=email, password="supersecret", is_staff=staff
-    )
+
+    return get_user_model().objects.create_user(email=email, password="supersecret", is_staff=staff)
 
 
 def _client(email: str):
     from django.urls import reverse
     from rest_framework.test import APIClient
+
     c = APIClient()
-    tok = c.post(
-        reverse("login"), {"email": email, "password": "supersecret"}, format="json"
-    ).data["access"]
+    tok = c.post(reverse("login"), {"email": email, "password": "supersecret"}, format="json").data[
+        "access"
+    ]
     c.credentials(HTTP_AUTHORIZATION=f"Bearer {tok}")
     return c
 
@@ -290,7 +323,11 @@ def test_tier_config_requires_staff() -> None:
     r = _client("boss@example.com").get(reverse("tiers-list"))
     assert r.status_code == 200
     assert {t["tier_name"] for t in r.data["tiers"]} == {
-        "dev", "frugal", "research", "quality", "hybrid",
+        "dev",
+        "frugal",
+        "research",
+        "quality",
+        "hybrid",
     }
 
 
@@ -340,6 +377,7 @@ def _strategy(user, **kwargs):
     from decimal import Decimal
 
     from apps.portfolios.models import Portfolio, PortfolioStrategy, Universe
+
     uni = Universe.objects.create(name=f"u-{user.email}", is_active=True)
     pf = Portfolio.objects.create(
         user=user, name="p", kind="strategy", cash_balance=Decimal("100000")
@@ -362,11 +400,12 @@ def test_sanitize_dead_fallback_falls_through_to_live_tier_default() -> None:
 
 def test_anchor_non_personas_skips_hybrid_and_keeps_personas() -> None:
     from apps.models_catalog.tier_menus import anchor_non_personas
+
     base = {"buffett": "m1", "cio": "m2", "fundamentals": "m3"}
     assert anchor_non_personas("hybrid", dict(base), "anchor") == base  # hybrid no-op
     out = anchor_non_personas("frugal", dict(base), "anchor")
-    assert out["buffett"] == "m1"        # persona kept
-    assert out["cio"] == "anchor"        # non-persona anchored
+    assert out["buffett"] == "m1"  # persona kept
+    assert out["cio"] == "anchor"  # non-persona anchored
     assert out["fundamentals"] == "anchor"
 
 
@@ -380,13 +419,14 @@ def test_partial_per_agent_overlays_preset_and_per_tier() -> None:
     user = _make_user("partial@example.com")
     anchor = "openrouter:nvidia/nemotron-3-nano-30b-a3b"
     UserModelPreferences.objects.create(
-        user=user, preset="frugal",
+        user=user,
+        preset="frugal",
         per_agent_defaults={"buffett": "openrouter:z-ai/glm-4-32b"},  # one agent only
         per_tier_defaults={"frugal": anchor},
     )
     out = _resolve_model_overrides(_strategy(user, model_preset="frugal"))
-    assert out["buffett"] == "openrouter:z-ai/glm-4-32b"   # explicit per-agent wins
-    assert out["cio"] == anchor                            # non-persona anchored, not dropped
+    assert out["buffett"] == "openrouter:z-ai/glm-4-32b"  # explicit per-agent wins
+    assert out["cio"] == anchor  # non-persona anchored, not dropped
     # personas keep the preset spread (not all collapsed to the anchor)
     assert len({out[p] for p in ("munger", "graham", "wood", "druckenmiller")}) > 1
 
@@ -400,10 +440,11 @@ def test_members_only_put_clears_orphaned_default() -> None:
     # Replace frugal members WITHOUT the current default (llama-3.3-70b), no default_model key.
     r = c.put(
         reverse("tier-detail", args=["frugal"]),
-        {"members": ["openrouter:z-ai/glm-4-32b"]}, format="json",
+        {"members": ["openrouter:z-ai/glm-4-32b"]},
+        format="json",
     )
     assert r.status_code == 200
-    assert r.data["default_model"] is None                 # orphaned default cleared
+    assert r.data["default_model"] is None  # orphaned default cleared
     assert tier_default("frugal") == "openrouter:z-ai/glm-4-32b"
 
 
@@ -420,14 +461,14 @@ def test_invalid_default_does_not_mutate_membership() -> None:
     # be untouched (validate-before-write; no partial mutation).
     r = c.put(
         reverse("tier-detail", args=["frugal"]),
-        {"members": ["openrouter:z-ai/glm-4-32b"],
-         "default_model": "openrouter:meta-llama/llama-3.3-70b-instruct"},
+        {
+            "members": ["openrouter:z-ai/glm-4-32b"],
+            "default_model": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        },
         format="json",
     )
     assert r.status_code == 400
-    after = list(
-        TierMembership.objects.filter(tier_id="frugal").values_list("model_id", flat=True)
-    )
+    after = list(TierMembership.objects.filter(tier_id="frugal").values_list("model_id", flat=True))
     assert after == before
 
 
@@ -435,8 +476,8 @@ def test_invalid_default_does_not_mutate_membership() -> None:
 def test_seed_tiers_does_not_revive_operator_emptied_tier() -> None:
     from apps.models_catalog.seed import seed_tiers
 
-    TierMembership.objects.filter(tier_id="dev").delete()   # operator emptied dev
-    seed_tiers()                                            # next post_migrate
+    TierMembership.objects.filter(tier_id="dev").delete()  # operator emptied dev
+    seed_tiers()  # next post_migrate
     assert not TierMembership.objects.filter(tier_id="dev").exists()
 
 
@@ -447,9 +488,7 @@ def test_sync_aborts_on_empty_catalog() -> None:
     from apps.models_catalog.fetching import sync_tier_models
 
     before = ModelEntry.objects.filter(is_active=True, provider="openrouter").count()
-    with patch(
-        "apps.models_catalog.verification.fetch_openrouter_catalog", return_value={}
-    ):
+    with patch("apps.models_catalog.verification.fetch_openrouter_catalog", return_value={}):
         result = sync_tier_models()
     assert result.deactivated == [] and result.swept == []
     assert ModelEntry.objects.filter(is_active=True, provider="openrouter").count() == before
@@ -463,6 +502,7 @@ def test_per_tier_defaults_rejects_hybrid() -> None:
     c = _client("hy@example.com")
     r = c.put(
         reverse("my-model-prefs"),
-        {"per_tier_defaults": {"hybrid": "anthropic:claude-sonnet-4-6"}}, format="json",
+        {"per_tier_defaults": {"hybrid": "anthropic:claude-sonnet-4-6"}},
+        format="json",
     )
     assert r.status_code == 400
