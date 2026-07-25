@@ -56,6 +56,11 @@ Then open:
 
 Database migrations run automatically when the `web` container boots.
 
+Want it running when your machine is closed? Scheduled runs and autopilot cycles are
+driven by Celery beat, which stops with your laptop. See
+[`guides/railway-deploy.md`](./guides/railway-deploy.md) for an always-on cloud deploy
+(six services, ~$15–25/month) that can migrate your existing database as-is.
+
 Restart all services:
 
 ```bash
@@ -110,12 +115,17 @@ the agent council, backtesting, connecting a broker, and each strategy.
 
 ## Deployment posture
 
-Designed for **local / trusted-network self-hosting.** Signup is **open by design**
-(`SignupView` is `AllowAny`) so you can create your own account — **do not expose
-the instance to the public internet as-is.** Before any non-local deployment, set
+Designed for **local / trusted-network self-hosting.** Signup is **open by default**
+(`SIGNUP_ENABLED=1`) so you can create your own account — **do not expose the
+instance to the public internet as-is.** Before any non-local deployment, set
 `DJANGO_ENV=staging|prod` and real values for `DJANGO_SECRET_KEY`,
 `JWT_SIGNING_KEY`, and `FIELD_ENCRYPTION_KEY` (the boot guard refuses to start
-otherwise).
+otherwise), and set `SIGNUP_ENABLED=0` to lock `POST /api/auth/signup/` to 403 once
+your own account exists.
+
+For a personal always-on deployment (Railway: SPA + API + worker + beat + Postgres +
+Redis, migrating your existing database), follow
+[`guides/railway-deploy.md`](./guides/railway-deploy.md).
 
 ## Operations & safety (self-host)
 

@@ -32,3 +32,35 @@ FROM nginx:1.27-alpine AS prod
 COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist/frontend/browser /usr/share/nginx/html
 EXPOSE 80
+
+# P12 WS-1.5: Railway/PaaS variant — same SPA config plus /health and an /api/
+# proxy to the API service. The config is baked at build time because Railway
+# ignores the nginx image's runtime entrypoint templating; API_ORIGIN arrives as
+# a build arg (Railway exposes service variables to Dockerfile builds).
+# The compose `prod` target above stays untouched for self-hosters.
+FROM nginx:1.27-alpine AS railway
+ARG API_ORIGIN
+RUN test -n "$API_ORIGIN" || (echo "API_ORIGIN build arg required" && false)
+COPY infra/nginx.railway.conf.template /tmp/nginx.template
+# Normalize: strip any trailing slash — `proxy_pass https://host/;` (with a URI
+# part) would rewrite away the /api prefix and break every API call.
+#
+# The `nginx -t` syntax check runs against a COPY of the rendered config whose
+# upstream is swapped for a literal IP. `nginx -t` resolves proxy_pass hostnames
+# at parse time, so testing the real config would make this image build depend on
+# the API domain's DNS — it fails outright for a not-yet-created service or a
+# reserved placeholder domain. The copy still proves the template + envsubst
+# output is valid nginx; the real hostname is resolved by nginx at runtime.
+RUN API_ORIGIN="${API_ORIGIN%/}" \
+    && API_HOST=$(echo "$API_ORIGIN" | sed 's|https\?://||') \
+    && export API_ORIGIN API_HOST \
+    && envsubst '$API_ORIGIN $API_HOST' < /tmp/nginx.template > /etc/nginx/conf.d/default.conf \
+    && cp /etc/nginx/conf.d/default.conf /tmp/real.conf \
+    && sed 's|proxy_pass [^;]*;|proxy_pass http://127.0.0.1:8811;|' /tmp/real.conf \
+       > /etc/nginx/conf.d/default.conf \
+    && nginx -t \
+    && cp /tmp/real.conf /etc/nginx/conf.d/default.conf \
+    && rm -f /tmp/real.conf \
+    && grep -q "proxy_pass ${API_ORIGIN};" /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist/frontend/browser /usr/share/nginx/html
+EXPOSE 80

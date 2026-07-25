@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -22,6 +23,26 @@ def test_signup_creates_user(client: APIClient) -> None:
     )
     assert resp.status_code == 201
     assert User.objects.filter(email="a@b.com").exists()
+
+
+@pytest.mark.django_db
+@override_settings(SIGNUP_ENABLED=False)
+def test_signup_disabled_returns_403_and_creates_no_user(client: APIClient) -> None:
+    """P12/D2: with SIGNUP_ENABLED=0 the endpoint 403s and creates nothing."""
+    resp = client.post(
+        reverse("signup"),
+        {"email": "blocked@b.com", "password": "supersecret"},
+        format="json",
+    )
+    assert resp.status_code == 403
+    assert not User.objects.filter(email="blocked@b.com").exists()
+
+
+def test_signup_enabled_by_default() -> None:
+    """Self-hosters see no change: the gate defaults open (ADR 0031)."""
+    from django.conf import settings
+
+    assert settings.SIGNUP_ENABLED is True
 
 
 @pytest.mark.django_db
