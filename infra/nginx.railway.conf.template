@@ -1,0 +1,35 @@
+# Railway (PaaS) nginx config for the built Angular frontend — P12 WS-1.5.
+#
+# Same SPA-aware behavior as nginx.conf (deep-link fallback, no-cache for
+# index.html / ngsw.json) plus the two things a cloud deploy needs: a cheap
+# /health endpoint for the platform healthcheck, and an /api/ proxy to the API
+# service's PUBLIC origin (Railway private DNS is unreliable for nginx
+# proxy_pass, which resolves once at startup).
+#
+# ${API_ORIGIN} / ${API_HOST} are substituted by envsubst at BUILD time (see the
+# `railway` target in frontend.Dockerfile) — Railway ignores runtime entrypoint
+# templating for the nginx image, so the config is baked into the image.
+server {
+  listen 80 default_server;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  gzip on;
+  gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
+  location = /health { default_type text/plain; return 200 'ok'; }
+
+  location = /index.html { add_header Cache-Control "no-cache"; }
+  location = /ngsw.json  { add_header Cache-Control "no-cache"; }
+
+  location /api/ {
+    proxy_pass ${API_ORIGIN};
+    proxy_ssl_server_name on;
+    proxy_set_header Host ${API_HOST};
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location / { try_files $uri $uri/ /index.html; }
+}

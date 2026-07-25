@@ -29,5 +29,8 @@ FROM base AS dev
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8811"]
 
 FROM base AS prod
-RUN python manage.py collectstatic --noinput || true
-CMD ["gunicorn", "hedgefund.wsgi:application", "--bind", "0.0.0.0:8811", "--workers", "3"]
+# P12 WS-1.3: no build-time collectstatic — at build time the DJANGO_* env is
+# absent, so it silently no-opped. It moves to the API service's start command
+# (runtime, where settings and the DB are real). $PORT is injected by the
+# platform (Railway); the default keeps compose self-hosters on 8811.
+CMD ["sh", "-c", "gunicorn hedgefund.wsgi:application --bind 0.0.0.0:${PORT:-8811} --workers 2 --timeout 120 --access-logfile - --error-logfile -"]

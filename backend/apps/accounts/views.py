@@ -6,6 +6,7 @@ from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,6 +17,14 @@ from .serializers import SignupSerializer, UserSerializer
 class SignupView(generics.CreateAPIView):
     serializer_class = SignupSerializer
     permission_classes = [permissions.AllowAny]
+
+    def create(self, request, *args, **kwargs):
+        # P12/D2: a single-user instance sets SIGNUP_ENABLED=0 so this endpoint
+        # 403s. DRF's PermissionDenied (not Django's) so the DRF handler renders
+        # the detail message consistently with every other API error.
+        if not settings.SIGNUP_ENABLED:
+            raise PermissionDenied("Signup is disabled on this instance.")
+        return super().create(request, *args, **kwargs)
 
 
 class MeView(APIView):

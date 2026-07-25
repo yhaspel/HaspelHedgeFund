@@ -8,22 +8,28 @@
 .gitignore
 
 # Python
-__pycache__/
+# NB: these use **/ because a bare `foo/` pattern only matches at the context
+# ROOT — `.venv/` never excluded `backend/.venv`, so a developer's 330 MB macOS
+# virtualenv was copied into the Linux image by `COPY backend/ /app/` (P12).
+**/__pycache__/
 *.py[cod]
 *.egg-info/
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+**/.venv/
+**/venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
 .coverage
 htmlcov/
 *.sqlite3
 
 # Node / Angular
-node_modules/
-dist/
-.angular/
+# Same root-only caveat as above: `node_modules/` did not exclude
+# `frontend/node_modules`, so host (macOS) modules overwrote the deps stage's
+# Linux install and pnpm aborted the build trying to purge them.
+**/node_modules/
+**/dist/
+**/.angular/
 *.log
 npm-debug.log*
 yarn-debug.log*

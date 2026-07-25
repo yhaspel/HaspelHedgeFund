@@ -66,6 +66,33 @@ docker compose -f infra/docker-compose.yml exec -T db \
 docker compose -f infra/docker-compose.yml up -d web worker beat
 ```
 
+## Backing up a cloud-hosted database
+
+If you run the stack in the cloud (see [`railway-deploy.md`](./railway-deploy.md)), the
+managed Postgres is now your source of truth — the same `-Fc` dump/restore flow works
+against it from your machine over its public TCP-proxy URL. Two differences:
+
+- **Match the client to the server major version.** Run `pg_dump`/`pg_restore` from a
+  `postgres:<major>` image matching the managed server (check its image tag), not
+  whatever your local `db` service happens to be. A `-Fc` dump taken by an older
+  `pg_dump` restores into a newer server fine, but the *restore client* must match.
+- **There's no `exec db`** — point the client at the connection URL instead:
+
+```bash
+# Back up the cloud database into the same backups/ flow.
+docker run --rm -v "$PWD/backups:/b" postgres:<major> \
+  pg_dump -Fc "<DATABASE_PUBLIC_URL>" > backups/cloud_$(date +%F).dump
+
+# Restore a dump into it (e.g. migrating a local instance up to the cloud).
+docker run --rm -v "$PWD/backups:/b" postgres:<major> \
+  pg_restore --no-owner --no-privileges -d "<DATABASE_PUBLIC_URL>" /b/<file>.dump
+```
+
+Keep `FIELD_ENCRYPTION_KEY` with these dumps exactly as you would locally — it is what
+makes the encrypted provider/broker columns readable, and a cloud instance uses its own
+`DJANGO_SECRET_KEY`. Also enable your provider's native database backups if the plan
+offers them; treat them as a complement to these dumps, not a replacement.
+
 ## Smoke test after a restore
 
 1. **Health probe** — `curl -s -o /dev/null -w '%{http_code}' http://localhost:8811/api/health/`

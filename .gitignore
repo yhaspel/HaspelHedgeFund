@@ -60,6 +60,10 @@ frontend/.pnpm-store/
 # Scratch verification screenshots / artifacts (not part of the repo)
 dev-artifacts/
 
+# Database dumps (guides/backup-restore.md). Never commit: large, and they carry
+# every encrypted credential and all trading history.
+backups/
+
 # Claude Code per-session scheduling lock
 .claude/scheduled_tasks.lock
 

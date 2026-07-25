@@ -135,6 +135,12 @@ SIMPLE_JWT = {
 # warning still appears in CI for legacy configs — explicit assertion above
 # keeps test output clean.
 
+# P12/D2: self-service signup is open by default (self-hosters see no change);
+# a single-user instance locks it down with SIGNUP_ENABLED=0, which makes
+# POST /api/auth/signup/ return 403. The only access-control surface this phase
+# adds — no allowlist models, no admin UI. See ADR 0031.
+SIGNUP_ENABLED = os.environ.get("SIGNUP_ENABLED", "1") == "1"
+
 # Development default lists both localhost and 127.0.0.1 so that browser
 # probes from either hostname succeed without a CORS preflight failure.
 # Override with CORS_ALLOWED_ORIGINS in staging/prod.
