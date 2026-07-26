@@ -73,11 +73,18 @@ def test_estimate_cycle_override_preset_expands_that_tier(user) -> None:
 
 
 @pytest.mark.django_db
-def test_estimate_cycle_override_models_used_verbatim(user) -> None:
+def test_estimate_cycle_override_models_active_verbatim_dead_healed(user) -> None:
+    """P13: an explicit override map is no longer trusted verbatim — active
+    picks pass through untouched, dead/unknown ones heal to live models (the
+    stored-map drift class: validated at write time, dead by dispatch time)."""
     strategy = _strategy(user, model_preset="research")
-    chosen = {"buffett": "openrouter:acme/x", "munger": "openrouter:acme/y"}
+    live = _seed_model("openrouter:acme/live-est")
+    chosen = {"buffett": live, "munger": "openrouter:acme/never-existed"}
     est = estimate_cycle(strategy, override_models=chosen)
-    assert est["overrides"] == chosen
+    assert est["overrides"]["buffett"] == live  # active → verbatim
+    healed = est["overrides"]["munger"]
+    assert healed != "openrouter:acme/never-existed"  # dead → healed
+    assert ModelEntry.objects.get(id=healed).is_active
     # preset echoes the strategy's saved tier when only models were overridden.
     assert est["preset"] == "research"
 
@@ -85,11 +92,14 @@ def test_estimate_cycle_override_models_used_verbatim(user) -> None:
 @pytest.mark.django_db
 def test_resolve_model_overrides_explicit_overrides_win(user) -> None:
     strategy = _strategy(user, model_preset="research")
+    live = _seed_model("openrouter:acme/live-explicit")
     out = _resolve_model_overrides(
-        strategy, preset="dev", overrides={"buffett": "openrouter:acme/x"}
+        strategy, preset="dev", overrides={"buffett": live}
     )
-    # An explicit map wins outright — preset is ignored.
-    assert out == {"buffett": "openrouter:acme/x"}
+    # An explicit map wins outright — preset is ignored. (P13: the map is
+    # sanitized against the live catalog on the way through; an ACTIVE pick
+    # like this one passes verbatim.)
+    assert out == {"buffett": live}
 
 
 @pytest.mark.django_db
@@ -146,7 +156,9 @@ def test_estimate_post_unknown_agent_key_400(user) -> None:
 
 
 @pytest.mark.django_db
-def test_estimate_post_unknown_model_400(user) -> None:
+def test_estimate_post_unknown_model_healed_200(user) -> None:
+    """P13: the estimate endpoint heals a dead pick instead of rejecting it —
+    mirroring what dispatch will actually run."""
     strategy = _strategy(user)
     client = _client("cdo@example.com")
     resp = client.post(
@@ -154,7 +166,10 @@ def test_estimate_post_unknown_model_400(user) -> None:
         {"model_overrides": {"buffett": "openrouter:does/not-exist"}},
         format="json",
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200, resp.data
+    healed = resp.data["overrides"]["buffett"]
+    assert healed != "openrouter:does/not-exist"
+    assert ModelEntry.objects.get(id=healed).is_active
 
 
 @pytest.mark.django_db
@@ -278,7 +293,9 @@ def test_budget_trim_honours_transient_override(user) -> None:
 
 
 @pytest.mark.django_db
-def test_run_now_rejects_unknown_model(user) -> None:
+def test_run_now_heals_unknown_model_and_dispatches(user) -> None:
+    """P13: run-now no longer rejects a dead pick — it heals it to a live model
+    and dispatches the cycle with the healed map."""
     strategy = _strategy(user)
     client = _client("cdo@example.com")
     with patch("apps.portfolios.views.daily_long_short_cycle.delay") as mock_task:
@@ -287,5 +304,12 @@ def test_run_now_rejects_unknown_model(user) -> None:
             {"model_overrides": {"buffett": "openrouter:nope/missing"}},
             format="json",
         )
-    assert resp.status_code == 400
-    mock_task.assert_not_called()
+    assert resp.status_code in (200, 202), resp.data
+    mock_task.assert_called_once()
+    sent = mock_task.call_args.kwargs.get("override_models") or next(
+        (a for a in mock_task.call_args.args if isinstance(a, dict) and "buffett" in a),
+        {},
+    )
+    healed = sent.get("buffett")
+    assert healed and healed != "openrouter:nope/missing"
+    assert ModelEntry.objects.get(id=healed).is_active

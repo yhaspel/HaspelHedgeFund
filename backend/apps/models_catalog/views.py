@@ -166,9 +166,16 @@ class PresetView(APIView):
             (m["id"] for m in local if (m.get("notes") or "").startswith("local-A")),
             None,
         ) or next((m["id"] for m in local), None)
+        # Serve the expansion HEALED against the live catalog: a curated slug
+        # that the reconcile deactivated must never reach the run form as a
+        # prefill (it would 400 the submission — the 2026-07-26 frugal/
+        # glm-4-32b incident). sanitize_overrides spreads dead picks across
+        # the tier's active menu, preserving the persona spread.
+        from .tier_menus import sanitize_overrides
+
         return Response({
             "preset": name,
-            "overrides": expand_preset(name, local_a),
+            "overrides": sanitize_overrides(name, expand_preset(name, local_a)),
             "menu": tier_menu(name),
         })
 

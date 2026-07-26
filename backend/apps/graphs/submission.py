@@ -61,7 +61,14 @@ def apply_graph_version(attrs: dict, version, *, user) -> dict:
     flattened = model_overrides_for_version(version)
     explicit = attrs.get("model_overrides") or {}
     merged = {**flattened, **explicit}  # explicit user overrides take precedence
-    attrs["model_overrides"] = merged
+    # P13 self-heal: this merge happens AFTER the serializer's field-level
+    # validate_model_overrides ran, so a graph version pinning a since-
+    # deactivated model would slip a dead id into the run unhealed. Heal the
+    # merged map against the live catalog here (active picks are untouched).
+    from apps.models_catalog.tier_menus import heal_overrides
+
+    healed, _moves = heal_overrides(merged)
+    attrs["model_overrides"] = healed
     personas = personas_for_version(version)
     if personas:
         attrs["personas"] = personas

@@ -78,7 +78,12 @@ PRESETS: dict[str, dict[str, str]] = {
         "munger": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
         "graham": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
         "wood": "openrouter:google/gemma-3-27b-it",
-        "druckenmiller": "openrouter:z-ai/glm-4-32b",
+        # druckenmiller was z-ai/glm-4-32b until OpenRouter delisted it
+        # (2026-07 reconcile; the dead prefill 400'd every untouched frugal
+        # submission until P13 healing). The slug stays in FRUGAL_TIER_SLUGS
+        # (curation intent — the live sync governs its activity if it
+        # returns); the preset pick moves to a live non-reasoning member.
+        "druckenmiller": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
         "burry": "openrouter:deepseek/deepseek-v4-flash",
         # damodaran reuses deepseek-v4-flash (validated clean); amazon/nova-lite-v1
         # was dropped after it degraded 4 council agents. 6 proven non-reasoning

@@ -200,10 +200,14 @@ def _resolve_model_overrides(
         from apps.models_catalog.offline import offline_model_overrides
 
         return offline_model_overrides(strategy.user)
-    # Explicit dispatch-modal overrides are already validated active at the API
-    # boundary (validate_model_overrides), so they pass through verbatim.
+    # Explicit dispatch-modal overrides were validated active at the API
+    # boundary (validate_model_overrides) — but that was at WRITE time, and the
+    # catalog drifts afterwards (the 2026-07-26 incident: a stored all-agents
+    # deepseek-v4-pro map reached the workers verbatim long after the model
+    # died). Sanitize at every dispatch so stored maps heal against the live
+    # catalog; active picks pass through untouched.
     if overrides:
-        return dict(overrides)
+        return sanitize_overrides(preset, dict(overrides))
     default_preset = getattr(settings, "LLM_DEFAULT_PRESET", "hybrid")
     user_prefs = getattr(strategy.user, "model_prefs", None)
     # Saved per-agent picks layer ON TOP of the preset+per-tier base (a PARTIAL
@@ -465,10 +469,27 @@ def run_candidate_council(self, payload: dict) -> dict:
     else:
         graph = build_council_graph(personas=personas)
     council_user_id = payload.get("user_id")
+    # P13 self-heal (execution seam): the payload was built at dispatch time
+    # and may have sat in the queue across a catalog reconcile — heal its map
+    # against the live catalog at the moment of consumption so a queued
+    # backlog never runs (and re-runs) dead models.
+    council_overrides = payload.get("model_overrides") or {}
+    if council_overrides:
+        from apps.models_catalog.tier_menus import heal_overrides
+
+        council_overrides, _council_moves = heal_overrides(council_overrides)
+        if _council_moves:
+            log.warning(
+                "council run %s: healed %d dead model reference(s): %s",
+                run_id, len(_council_moves),
+                "; ".join(
+                    f"{m['agent']}: {m['from']} -> {m['to']}" for m in _council_moves
+                ),
+            )
     initial_state: dict = {
         "ticker": ticker,
         "as_of_date": as_of,
-        "model_overrides": payload.get("model_overrides", {}),
+        "model_overrides": council_overrides,
         "data_provider": get_fmp_provider(user=council_user_id),
         "filings_provider": get_edgar_provider(),
         "ownership_provider": get_ownership_provider(user=council_user_id),

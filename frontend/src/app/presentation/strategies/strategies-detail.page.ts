@@ -445,6 +445,7 @@ import { ModalComponent } from '../shared/modal.component';
                   <thead><tr>
                     <th scope="col">#</th><th scope="col">Ticker</th>
                     <th scope="col">Side</th><th scope="col">Status</th>
+                    <th scope="col">Decision</th>
                     <th scope="col" class="right">Cost</th><th scope="col">Transcript</th>
                   </tr></thead>
                   <tbody>
@@ -467,6 +468,16 @@ import { ModalComponent } from '../shared/modal.component';
                             [class.err]="cr.run_status === 'failed' || cr.run_status === 'cancelled'">
                             {{ cr.run_status }}
                           </span>
+                        </td>
+                        <td data-test="candidate-run-decision">
+                          @if (cr.decision) {
+                            <span class="pill decision-pill h-auto py-0.5 px-1.5 text-[11px]"
+                                  [class]="decisionToneClass(cr.decision.action)">
+                              {{ cr.decision.action }}
+                            </span>
+                          } @else {
+                            <span class="text-text-3">—</span>
+                          }
                         </td>
                         <td class="num mono">$ {{ cr.run_cost_usd }}</td>
                         <td>
@@ -1000,6 +1011,29 @@ import { ModalComponent } from '../shared/modal.component';
   `,
   styles: [
     `
+      /* P13: council decision pill in the candidate-runs table (mirrors the
+         Runs archive styling). */
+      .decision-pill {
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .decision-pill.tone-long {
+        background: color-mix(in oklab, var(--acc-long) 18%, transparent);
+        color: var(--acc-long-fg);
+      }
+      .decision-pill.tone-short {
+        background: color-mix(in oklab, var(--acc-short) 18%, transparent);
+        color: var(--acc-short-fg);
+      }
+      .decision-pill.tone-hold {
+        background: color-mix(in oklab, var(--acc-hold) 18%, transparent);
+        color: var(--acc-hold-fg);
+      }
+      .decision-pill.tone-skip {
+        background: var(--surface-2);
+        color: var(--text-3);
+      }
       .qty-input {
         width: 72px;
         text-align: right;
@@ -1155,6 +1189,25 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
     if (!ticker) return '—';
     void this.profiles._bump();
     return this.profiles.name(ticker) || '—';
+  }
+
+  /** P13: tone class for the candidate-run Decision pill (mirrors the Runs
+   *  archive mapping). */
+  decisionToneClass(action: string): string {
+    switch (action) {
+      case 'buy':
+      case 'cover_short':
+      case 'enter':
+        return 'tone-long';
+      case 'sell':
+      case 'open_short':
+        return 'tone-short';
+      case 'hold':
+        return 'tone-hold';
+      case 'skip':
+      default:
+        return 'tone-skip';
+    }
   }
 
   private _collectCycleTickers(d: CycleDetail | null | undefined): string[] {

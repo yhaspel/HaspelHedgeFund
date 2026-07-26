@@ -255,6 +255,23 @@ def execute_run(run_id: int) -> None:
 
             model_overrides = offline_model_overrides(run.user)
             log.info("offline_run run_id=%s forced_preset=local", run.id)
+        elif model_overrides:
+            # P13 self-heal (execution seam): the stored map may have been
+            # written before a catalog reconcile deactivated one of its models
+            # (queued runs, reruns, schedule fan-outs). Heal against the live
+            # catalog at the moment of execution and persist the healed map so
+            # the run detail shows the models that actually ran.
+            from apps.models_catalog.tier_menus import heal_overrides
+
+            model_overrides, moves = heal_overrides(model_overrides)
+            if moves:
+                log.warning(
+                    "run %s: healed %d dead model reference(s) at execution: %s",
+                    run.id, len(moves),
+                    "; ".join(f"{m['agent']}: {m['from']} -> {m['to']}" for m in moves),
+                )
+                run.model_overrides = model_overrides
+                run.save(update_fields=["model_overrides"])
 
         # P02a review: label the run's risk context (stub vs real portfolio).
         # Strategy-sourced runs already see a real portfolio downstream; ad-hoc
