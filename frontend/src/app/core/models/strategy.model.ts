@@ -284,6 +284,8 @@ export interface CandidateRunSummary {
   screener_score: number | null;
   sector: string;
   borrow_veto: boolean;
+  /** P13: the run's council decision — null/absent while queued/running. */
+  decision?: { action: string; side: string; confidence: number } | null;
 }
 
 export interface CycleDetail extends CycleSummary {

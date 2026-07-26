@@ -346,6 +346,9 @@ class PortfolioTargetRunSummarySerializer(serializers.ModelSerializer):
     run_cost_usd = serializers.DecimalField(
         source="run.total_cost_usd", max_digits=10, decimal_places=6, read_only=True,
     )
+    # P13: the run's council decision (buy/sell/hold/open_short/…) so the cycle
+    # table can show a Decision column live while the strategy is running.
+    decision = serializers.SerializerMethodField()
 
     class Meta:
         model = PortfolioTargetRun
@@ -353,7 +356,18 @@ class PortfolioTargetRunSummarySerializer(serializers.ModelSerializer):
             "run_id", "run_status", "tickers", "run_cost_usd",
             "candidate_key", "primary_ticker", "side",
             "screener_rank", "screener_score", "sector", "borrow_veto",
+            "decision",
         )
+
+    def get_decision(self, link: PortfolioTargetRun) -> dict | None:
+        # Uses the prefetched run__decisions (see get_candidate_runs) — no N+1.
+        # Candidate runs are single-ticker, so the first decision is THE
+        # decision; None while the run is still queued/running.
+        decisions = list(link.run.decisions.all()) if link.run_id else []
+        if not decisions:
+            return None
+        d = decisions[0]
+        return {"action": d.action, "side": d.side, "confidence": d.confidence}
 
 
 class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
@@ -385,6 +399,7 @@ class PortfolioTargetDetailSerializer(serializers.ModelSerializer):
         links = (
             PortfolioTargetRun.objects.filter(target=target)
             .select_related("run")
+            .prefetch_related("run__decisions")
             .order_by("screener_rank", "candidate_key")
         )
         return PortfolioTargetRunSummarySerializer(links, many=True).data

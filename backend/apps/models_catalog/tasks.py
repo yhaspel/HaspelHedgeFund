@@ -24,25 +24,36 @@ def reconcile_model_catalog() -> dict:
     if skip_when_offline("reconcile_model_catalog"):
         return {"status": "skipped_offline"}
     from . import verification
+    from .doctor import heal_stored_model_maps
     from .fetching import sync_tier_models
 
     sync = sync_tier_models()
     drift = [r for r in verification.verify_models(None) if not r.ok]
-    if sync.deactivated or sync.excluded or sync.swept or drift:
+    # P13: after the sync has deactivated whatever vanished upstream, repair
+    # every STORED per-agent map that still references a dead model (schedules,
+    # user prefs, graph versions, queued runs) — drift now self-repairs daily
+    # without a deploy instead of waiting to be re-healed on every dispatch.
+    healed = heal_stored_model_maps()
+    if sync.deactivated or sync.excluded or sync.swept or drift or healed:
         log.warning(
-            "model-catalog reconcile: deactivated=%s excluded=%s swept=%s drift=%s",
+            "model-catalog reconcile: deactivated=%s excluded=%s swept=%s drift=%s healed=%s",
             sync.deactivated,
             [e.get("slug") for e in sync.excluded],
             sync.swept,
             [r.model_id for r in drift],
+            [(h["store"], h["id"]) for h in healed],
         )
-        _notify_operators(sync, drift)
+        _notify_operators(sync, drift, healed)
     else:
         log.info("model-catalog reconcile: no changes")
-    return {"sync": sync.as_dict(), "drift": [r.as_dict() for r in drift]}
+    return {
+        "sync": sync.as_dict(),
+        "drift": [r.as_dict() for r in drift],
+        "healed": healed,
+    }
 
 
-def _notify_operators(sync, drift) -> None:
+def _notify_operators(sync, drift, healed=None) -> None:
     """Best-effort operator notification over active staff email channels. Never
     raises — the log.warning above is the durable record."""
     try:
@@ -61,6 +72,17 @@ def _notify_operators(sync, drift) -> None:
         )
     if drift:
         lines.append("Pricing drift: " + ", ".join(r.model_id for r in drift))
+    if healed:
+        n = sum(len(h["moves"]) for h in healed)
+        lines.append(
+            f"Self-healed {n} stored model reference(s): "
+            + "; ".join(
+                f"{h['store']}#{h['id']} ("
+                + ", ".join(f"{m['agent']}: {m['from']}→{m['to']}" for m in h["moves"])
+                + ")"
+                for h in healed
+            )
+        )
     body = "Model-catalog reconcile found changes:\n\n" + "\n".join(lines)
     try:
         channels = NotificationChannel.objects.filter(

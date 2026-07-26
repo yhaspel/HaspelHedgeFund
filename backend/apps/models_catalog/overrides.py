@@ -1,21 +1,32 @@
-"""Shared validation for per-agent ``model_overrides`` dicts.
+"""Shared validation + healing for per-agent ``model_overrides`` dicts.
 
 Extracted from ``RunCreateSerializer`` so the run, cycle-estimate, and
-run-now endpoints all reject unknown agents / inactive models / unreachable
-providers at the API boundary using one implementation.
+run-now endpoints all handle unknown agents / inactive models at the API
+boundary using one implementation. Since P13, a dead CATALOG model no longer
+rejects the request: it is healed to a live same-tier model (the self-healing
+invariant — a submission must never fail because the catalog drifted under
+the client's feet). Unknown agent keys and unknown ``ollama:`` ids still 400.
 """
 from __future__ import annotations
 
+import logging
+
 from rest_framework.exceptions import ValidationError
+
+log = logging.getLogger(__name__)
 
 
 def validate_model_overrides(overrides: dict | None, user) -> dict:
-    """Return ``overrides`` unchanged, or raise ``ValidationError``.
+    """Return ``overrides`` (healed where necessary), or raise ``ValidationError``.
 
     ``ollama:`` ids are validated against ``user``'s live discovery (they
-    have no ``ModelEntry`` row and are intentionally per-user/ephemeral);
-    everything else validates against the active catalog. Mirrors the
-    precedence used at dispatch.
+    have no ``ModelEntry`` row and are intentionally per-user/ephemeral) and
+    still reject when unknown — silently swapping a local model for a cloud
+    one would violate the offline guarantees. Catalog ids that are inactive
+    or unknown are HEALED to a live same-tier model via
+    ``tier_menus.heal_overrides`` and the healed map is returned — it is what
+    gets stored on the Run, so the UI and cost paths see what will actually
+    execute.
     """
     if not overrides:
         return overrides or {}
@@ -73,10 +84,39 @@ def validate_model_overrides(overrides: dict | None, user) -> dict:
             .values_list("id", flat=True)
         )
         known_short = {k.split(":", 1)[-1] for k in known}
-        for agent, mid in catalog_overrides.items():
-            short = mid.split(":", 1)[-1]
-            if mid not in known and short not in known_short:
+        dead = {
+            agent: mid
+            for agent, mid in catalog_overrides.items()
+            if mid not in known and mid.split(":", 1)[-1] not in known_short
+        }
+        if dead:
+            # P13 self-heal: a dead/unknown catalog pick no longer 400s the
+            # submission — heal it to a live same-tier model (each dead id
+            # resolves its own tier via TierMembership) and store THAT. The
+            # 2026-07-26 incident: the frugal preset still carried the
+            # deactivated z-ai/glm-4-32b and every untouched ad-hoc analysis
+            # submission was rejected.
+            from apps.models_catalog.tier_menus import heal_overrides
+
+            healed, moves = heal_overrides(dict(overrides))
+            if moves:
+                log.warning(
+                    "validate_model_overrides: healed %d dead pick(s) at "
+                    "submission: %s",
+                    len(moves),
+                    "; ".join(f"{m['agent']}: {m['from']} -> {m['to']}" for m in moves),
+                )
+            still_dead = {
+                agent: mid for agent, mid in dead.items()
+                if healed.get(agent) == mid
+            }
+            if still_dead:
+                # Nothing live to heal to (empty catalog / DB down mid-request):
+                # keep the old explicit rejection rather than dispatching a run
+                # that is guaranteed to fail.
+                agent, mid = next(iter(still_dead.items()))
                 raise ValidationError(
                     f"model_overrides[{agent!r}] = {mid!r} is not a known active model"
                 )
+            return healed
     return overrides

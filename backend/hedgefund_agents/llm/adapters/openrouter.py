@@ -107,6 +107,84 @@ def _last_resort_model() -> str:
     return target
 
 
+def _max_fallbacks() -> int:
+    """P13: the hard bound on how many FALLBACK models one agent call may try
+    after its configured model fails (the owner's "within limits, e.g. 5")."""
+    try:
+        return max(0, int(getattr(settings, "LLM_MAX_MODEL_FALLBACKS", 5)))
+    except (TypeError, ValueError):
+        return 5
+
+
+def _fallback_candidates(model: str, tried: tuple[str, ...]) -> list[str]:
+    """P13: catalog-driven SAME-TIER fallback candidates for a failed `model`,
+    in menu order, excluding the model itself and anything already tried.
+
+    Tier resolution: the model's own TierMembership rows (so a frugal pick
+    chains through the other frugal models, a dev/:free pick through the other
+    :free models); a model in no tier falls back on its price class — the dev
+    menu for `:free` slugs, the frugal menu otherwise. Price-class discipline
+    is enforced on the candidates too: a `:free` route never silently chains
+    onto a paid one (the existing OPENROUTER_PAID_FALLBACK hatch remains the
+    only paid escape), and a paid route never downgrades onto `:free`.
+
+    Returns bare OpenRouter slugs. Candidates come ONLY from live catalog rows
+    (DB TierMembership joined to active ModelEntry) — never the static baseline
+    constants: a DB-sourced candidate is guaranteed active AND priced (the
+    catalog price feeds estimate_cost), whereas a baseline slug could complete
+    and then blow up unpriced. On any DB/import failure returns [] — the
+    static ladder + last resort remain the degraded path.
+    """
+    try:
+        from apps.models_catalog.models import TierMembership
+        from apps.models_catalog.tier_menus import _tiers_for_model
+    except Exception:  # pragma: no cover — apps layer unavailable (unit tests)
+        return []
+    is_free = model.endswith(":free")
+    try:
+        tiers = _tiers_for_model(model)
+    except Exception:
+        tiers = []
+    if not tiers:
+        tiers = ["dev" if is_free else "frugal"]
+    tried_set = set(tried) | {model}
+    out: list[str] = []
+    for tier in tiers:
+        try:
+            menu = list(
+                TierMembership.objects.filter(tier_id=tier, model__is_active=True)
+                .order_by("ordering", "model_id")
+                .values_list("model_id", flat=True)
+            )
+        except Exception:
+            return []  # DB unreachable — degrade to the static ladder
+        for mid in menu:
+            if not str(mid).startswith("openrouter:"):
+                continue  # this adapter can only hop to OpenRouter routes
+            slug = str(mid).split(":", 1)[-1]
+            if slug.endswith(":free") != is_free:
+                continue  # price-class discipline
+            if slug in tried_set or slug in out:
+                continue
+            out.append(slug)
+        if out:
+            break  # first tier with candidates wins (the model's own tier)
+    return out
+
+
+def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
+    """The next untried model in the P13 fallback chain, or None when the
+    LLM_MAX_MODEL_FALLBACKS bound is reached or nothing is left. The chain is
+    the model's same-tier catalog candidates followed by the static last
+    resort — so the previous single-hop behavior is the chain's final rung."""
+    if len(tried) >= _max_fallbacks():
+        return None
+    for candidate in [*_fallback_candidates(model, tried), _last_resort_model()]:
+        if candidate != model and candidate not in tried:
+            return candidate
+    return None
+
+
 class OpenRouterClient:
     provider = "openrouter"
 
@@ -149,21 +227,24 @@ class OpenRouterClient:
         json_mode: bool,
         _tried: tuple[str, ...],
     ) -> LLMResponse | None:
-        """L2 self-heal: hop ONCE to the known-good non-reasoning last-resort
-        model when `model` is dead/empty/non-JSON. Returns the recovered
-        response, or None when no hop is possible (self-heal off, or the dead
-        model already IS the last resort, or it was already tried) — the caller
-        then falls back to its terminal raise. `_tried` makes this loop-proof:
-        the dead model is added before recursing, so the last resort is attempted
-        at most once and a broken account still surfaces a real error."""
+        """L2 self-heal (P13): hop to the NEXT model in the same-tier fallback
+        chain when `model` is dead/empty/non-JSON — the model's own tier-menu
+        peers first (price-class preserved), the known-good non-reasoning last
+        resort as the final rung. Returns the recovered response, or None when
+        no hop is possible (self-heal off, the LLM_MAX_MODEL_FALLBACKS bound is
+        reached, or every candidate was already tried) — the caller then falls
+        back to its terminal raise. `_tried` makes this loop-proof AND bounded:
+        the failed model is appended before each recursion, every candidate is
+        attempted at most once, and a fully-broken account still surfaces a
+        real error after at most LLM_MAX_MODEL_FALLBACKS hops."""
         if not getattr(settings, "LLM_SELF_HEAL", True):
             return None
-        target = _last_resort_model()
-        if target == model or target in _tried:
+        target = _next_heal_target(model, _tried)
+        if target is None:
             return None
         log.warning(
-            "openrouter self-heal: %s (model=%s); hopping to last-resort %s",
-            reason, model, target,
+            "openrouter self-heal: %s (model=%s); hop %d/%d to %s",
+            reason, model, len(_tried) + 1, _max_fallbacks(), target,
         )
         return self.complete(
             model=target,
@@ -254,13 +335,25 @@ class OpenRouterClient:
         # to a same-tier free model on a different provider rather than failing
         # the whole run. Guarded by _tried so the chain can't loop.
         if resp.status_code in RETRY_STATUSES:
+            # P13 chain: the curated static hop first (it deliberately targets a
+            # DIFFERENT upstream provider), then the catalog-driven same-tier
+            # candidates — every hop bounded by LLM_MAX_MODEL_FALLBACKS and
+            # loop-proofed by _tried.
             fb = _RATE_LIMIT_FALLBACK.get(model)
-            if fb and fb not in _tried:
+            if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
+                fb = next(
+                    (c for c in _fallback_candidates(model, _tried) if c != model),
+                    None,
+                )
+            if fb and fb not in _tried and len(_tried) < _max_fallbacks():
                 log.warning(
-                    "openrouter %s exhausted retries for %s; falling back to %s",
+                    "openrouter %s exhausted retries for %s; falling back to %s "
+                    "(hop %d/%d)",
                     resp.status_code,
                     model,
                     fb,
+                    len(_tried) + 1,
+                    _max_fallbacks(),
                 )
                 return self.complete(
                     model=fb,

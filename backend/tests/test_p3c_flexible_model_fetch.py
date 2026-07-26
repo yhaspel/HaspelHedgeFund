@@ -486,9 +486,13 @@ def test_frugal_preset_spreads_personas_across_distinct_models() -> None:
     mapping = expand_preset("frugal")
     persona_models = {mapping[p] for p in PERSONA_AGENTS}
     allow = {f"openrouter:{s}" for s in FRUGAL_TIER_SLUGS}
-    # Personas span the full (paid, non-reasoning) frugal menu; with 8 personas
-    # and 7 stable non-reasoning slugs one slug is shared.
-    assert persona_models == allow, (persona_models, allow)
+    # Personas span the (paid, non-reasoning) frugal allowlist — minus
+    # z-ai/glm-4-32b, delisted upstream 2026-07 (P13): it stays in the
+    # allowlist for the live sync to govern, but no persona defaults to it.
+    assert persona_models == allow - {"openrouter:z-ai/glm-4-32b"}, (
+        persona_models, allow,
+    )
+    assert len(persona_models) >= 5  # genuine spread, not a collapse
 
 
 # --- Management command -------------------------------------------------

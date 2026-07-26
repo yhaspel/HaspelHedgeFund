@@ -131,7 +131,13 @@ def test_estimate_cost_resolves_bare_openrouter_free_slug() -> None:
 
 
 @pytest.mark.django_db
-def test_create_run_rejects_unknown_model_override() -> None:
+def test_create_run_heals_unknown_model_override() -> None:
+    """P13 self-heal: an unknown/dead model pick no longer 400s the submission —
+    it is healed to a live catalog model at the API boundary and the run
+    dispatches (the 2026-07-26 frugal/glm-4-32b incident class)."""
+    from apps.models_catalog.models import ModelEntry
+    from apps.runs.models import Run
+
     User.objects.create_user(email="m@m.com", password="x" * 12)
     c = APIClient()
     tok = c.post(
@@ -150,9 +156,12 @@ def test_create_run_rejects_unknown_model_override() -> None:
             },
             format="json",
         )
-    assert resp.status_code == 400, resp.data
-    assert "model_overrides" in resp.data
-    mock_task.assert_not_called()
+    assert resp.status_code == 201, resp.data
+    mock_task.assert_called_once()
+    run = Run.objects.get(pk=resp.data["id"])
+    healed = run.model_overrides["buffett"]
+    assert healed != "anthropic:no-such-model"
+    assert ModelEntry.objects.get(id=healed).is_active
 
 
 @pytest.mark.django_db

@@ -124,10 +124,14 @@ def test_sanitize_replaces_only_inactive_with_tier_default() -> None:
 
 @pytest.mark.django_db
 def test_sanitize_preserves_persona_spread() -> None:
-    """Only the dead persona collapses to the anchor; the others keep distinct
-    still-active models (risk #2 — the spread must not collapse)."""
+    """Only the dead persona moves to a live model; the others keep distinct
+    still-active models (risk #2 — the spread must not collapse). Since the
+    P13 hygiene fix the frugal preset no longer carries glm-4-32b, so the dead
+    pick is injected explicitly (as a stored/user map would carry it)."""
     ModelEntry.objects.filter(id=_FRUGAL_MEMBER).update(is_active=False)
-    mapping = sanitize_overrides("frugal", expand_preset("frugal"))
+    base = expand_preset("frugal")
+    base["druckenmiller"] = _FRUGAL_MEMBER  # the dead pick
+    mapping = sanitize_overrides("frugal", base)
     # the persona that used the dead slug now points at the live fallback
     assert mapping["druckenmiller"] == tier_default("frugal")
     others = {mapping[p] for p in PERSONA_AGENTS if p != "druckenmiller"}

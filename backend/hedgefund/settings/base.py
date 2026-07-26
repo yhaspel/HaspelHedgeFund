@@ -211,15 +211,28 @@ OPENROUTER_PAID_FALLBACK = os.environ.get("OPENROUTER_PAID_FALLBACK", "0") == "1
 #       that trickles bytes resets it on every byte and never fires (run 236 hung
 #       10+ min). A tighter read timeout converts a stalled response into a normal
 #       httpx.ReadTimeout the retry/self-heal path can act on.
-#   L2  LLM_SELF_HEAL + LLM_LAST_RESORT_MODEL — when a route is permanently dead
-#       (HTTP 404/402, run 228-235), returns a non-JSON body (run 241), or is
-#       terminally empty (reasoning exhaustion, run 236/237), the adapter hops
-#       ONCE to a known-good NON-reasoning model instead of failing the whole run.
+#   L2  LLM_SELF_HEAL + LLM_MAX_MODEL_FALLBACKS + LLM_LAST_RESORT_MODEL — when a
+#       route is permanently dead (HTTP 404/402, run 228-235), returns a
+#       non-JSON body (run 241), is terminally empty (reasoning exhaustion,
+#       run 236/237), or exhausts its transient-retry budget, the adapter walks
+#       a catalog-driven SAME-TIER fallback chain (P13): up to
+#       LLM_MAX_MODEL_FALLBACKS other active models from the failed model's own
+#       tier menu (:free routes chain within :free, paid within paid), ending at
+#       the known-good NON-reasoning last resort — instead of failing the run.
 #   L3  RUN_SOFT_TIME_LIMIT_SECONDS / RUN_HARD_TIME_LIMIT_SECONDS — Celery
 #       wall-clock cap on execute_run / run_candidate_council so a run is
 #       guaranteed to terminate (soft → clean FAILED; hard → SIGKILL backstop).
+#
+# P13 adds a fourth, selection-time layer ABOVE L1: every consumer of a
+# per-agent model map (preset endpoint, run submission, dispatch, execution
+# seams, the stored-map doctor in reconcile_model_catalog) heals dead ids to
+# live same-tier models via apps.models_catalog.tier_menus.heal_overrides — so
+# the adapter chain is the last net, not the first responder.
 LLM_HTTP_READ_TIMEOUT = float(os.environ.get("LLM_HTTP_READ_TIMEOUT", "45"))
 LLM_SELF_HEAL = os.environ.get("LLM_SELF_HEAL", "1") == "1"
+# P13: max number of FALLBACK models one agent call may try after its configured
+# model fails (each with its own retry budget). 5 ≈ the whole frugal/dev menu.
+LLM_MAX_MODEL_FALLBACKS = int(os.environ.get("LLM_MAX_MODEL_FALLBACKS", "5"))
 # Non-reasoning, proven prod analytical default. Under LLM_FREE_ONLY the adapter
 # uses the :free variant so zero-spend environments never silently bill.
 LLM_LAST_RESORT_MODEL = os.environ.get(
