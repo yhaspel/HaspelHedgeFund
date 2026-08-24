@@ -69,8 +69,10 @@ test.describe('WS-19 · Autonomous Fund', () => {
     await fund.confirmInput().fill('HALT');
     await fund.haltConfirm().click();
     await expect(fund.statePill()).toContainText('halted');
-    // Clearing the halt brings the fund back to active.
+    // Clearing the halt is an acknowledgment: confirm the re-arm dialog
+    // (peaks rebase to current equity), then the fund reads active again.
     await fund.clearHaltButton().click();
+    await fund.clearRearmConfirm().click();
     await expect(fund.statePill()).toContainText('active');
   });
 
@@ -102,7 +104,10 @@ test.describe('WS-19 · Autonomous Fund', () => {
     fund,
   }) => {
     await fund.goto();
-    await page.getByRole('link', { name: /Re-run|Run.*validation|validation backtest/i }).first().click();
+    await page
+      .getByRole('link', { name: /Re-run|Run.*validation|validation backtest/i })
+      .first()
+      .click();
     await expect(page).toHaveURL(/\/backtests\/new/);
   });
 });

@@ -5,6 +5,7 @@
   "is_live": true,
   "aggregate_nav": "299827.56",
   "peak_equity": "303610.52",
+  "drawdown_pct": 1.246,
   "fund_dd_halt_pct": "6.00",
   "per_account": [
     {

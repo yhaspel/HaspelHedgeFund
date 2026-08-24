@@ -25,6 +25,11 @@ export class FundPage {
   clearHaltButton(): Locator {
     return this.page.getByRole('button', { name: 'Clear fund halt' });
   }
+  // Clearing is an acknowledgment: the confirm dialog's action re-arms the
+  // drawdown breakers from current equity (peaks rebase) before resuming.
+  clearRearmConfirm(): Locator {
+    return this.page.getByRole('button', { name: 'Clear & re-arm' });
+  }
   accountNameLink(name: string | RegExp): Locator {
     return this.page.getByRole('link', { name });
   }
@@ -71,16 +76,25 @@ export class FundPage {
   // The panel renders responsive (desktop/mobile) duplicates of its controls;
   // target the visible one.
   enableButton(): Locator {
-    return this.page.getByRole('button', { name: 'Enable autopilot' }).filter({ visible: true }).first();
+    return this.page
+      .getByRole('button', { name: 'Enable autopilot' })
+      .filter({ visible: true })
+      .first();
   }
   disableButton(): Locator {
     return this.page.getByRole('button', { name: 'Disable' }).filter({ visible: true }).first();
   }
   resumeButton(): Locator {
-    return this.page.getByRole('button', { name: /Resume/ }).filter({ visible: true }).first();
+    return this.page
+      .getByRole('button', { name: /Resume/ })
+      .filter({ visible: true })
+      .first();
   }
   runValidationLink(): Locator {
-    return this.page.getByRole('link', { name: /Run validation backtest/ }).filter({ visible: true }).first();
+    return this.page
+      .getByRole('link', { name: /Run validation backtest/ })
+      .filter({ visible: true })
+      .first();
   }
   apStatePill(): Locator {
     return this.page.locator('.head-actions .pill').first();
