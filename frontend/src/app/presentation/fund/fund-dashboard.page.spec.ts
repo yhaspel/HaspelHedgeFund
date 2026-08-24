@@ -13,13 +13,31 @@ type Cmp = any;
 
 function overview(overrides: Partial<FundOverview> = {}): FundOverview {
   return {
-    fund_id: 1, name: 'Autonomous Fund', state: 'active', is_live: true,
-    aggregate_nav: '300000', peak_equity: '305000', fund_dd_halt_pct: '6',
+    fund_id: 1,
+    name: 'Autonomous Fund',
+    state: 'active',
+    is_live: true,
+    aggregate_nav: '300000',
+    peak_equity: '305000',
+    drawdown_pct: 1.6,
+    fund_dd_halt_pct: '6',
     per_account: [
-      { strategy_id: 1, name: 'Multi-Factor', kind: 'long_short', state: 'active',
-        is_enabled: true, nav: '100000', peak_equity: '100000', rolling_sharpe: 0.8,
-        next_run_at: '2026-06-05T20:30:00Z', cron_description: 'At 04:30 PM, only on Friday',
-        validation_passed: true, can_enable: false, setup_hint: null, has_backtest: true },
+      {
+        strategy_id: 1,
+        name: 'Multi-Factor',
+        kind: 'long_short',
+        state: 'active',
+        is_enabled: true,
+        nav: '100000',
+        peak_equity: '100000',
+        rolling_sharpe: 0.8,
+        next_run_at: '2026-06-05T20:30:00Z',
+        cron_description: 'At 04:30 PM, only on Friday',
+        validation_passed: true,
+        can_enable: false,
+        setup_hint: null,
+        has_backtest: true,
+      },
     ],
     correlation: { available: false, reason: 'insufficient_data', min_sample: 8 },
     recommendations: [],
@@ -57,9 +75,11 @@ describe('FundDashboardPage', () => {
   });
 
   it('derives correlation columns when the matrix is available', () => {
-    const cmp = setup(overview({
-      correlation: { available: true, matrix: { A: { A: 1, B: 0.2 }, B: { A: 0.2, B: 1 } } },
-    }));
+    const cmp = setup(
+      overview({
+        correlation: { available: true, matrix: { A: { A: 1, B: 0.2 }, B: { A: 0.2, B: 1 } } },
+      }),
+    );
     expect(cmp.cols()).toEqual(['A', 'B']);
   });
 
@@ -67,7 +87,8 @@ describe('FundDashboardPage', () => {
     const cmp = setup(overview());
     expect(cmp.hintFor({ setup_hint: null })).toContain('validation backtest');
     expect(cmp.hintFor({ setup_hint: '   ' })).toContain('validation backtest');
-    expect(cmp.hintFor({ setup_hint: 'Validated — open Autopilot and enable.' }))
-      .toBe('Validated — open Autopilot and enable.');
+    expect(cmp.hintFor({ setup_hint: 'Validated — open Autopilot and enable.' })).toBe(
+      'Validated — open Autopilot and enable.',
+    );
   });
 });

@@ -8,7 +8,10 @@ stop (NOT auto-reallocation — isolated paper accounts can't share cash):
     below a minimum sample) + rolling-Sharpe *recommendations*.
   * ``evaluate_fund_drawdown`` — aggregate-equity drawdown past
     ``fund_dd_halt_pct`` halts all member accounts (the firm-level cap).
-  * ``halt_fund`` / ``resume_fund`` — the manual fund kill switch.
+  * ``halt_fund`` / ``resume_fund`` — the manual fund kill switch. Resume is
+    the full-restart acknowledgment: it rebases the fund + member-account
+    peaks to current equity so the breakers re-arm from today's level (an
+    un-rebased resume would be re-halted by the next sweep, forever).
 
 The realized correlation is "measure, don't assume": Accounts 1 & 2 are both
 equity, so expect their pairwise number to run high — that is information.
@@ -202,6 +205,12 @@ def fund_overview(fund: AutonomousFund) -> dict:
                 f"{worst[0]} has a negative rolling Sharpe — "
                 "consider reducing its mandate."
             )
+    # Current drawdown-from-peak (what the halt breaker sees) — surfaced so the
+    # dashboard can show WHY the fund is halted / how close it is to the limit.
+    peak = fund.peak_equity_usd
+    drawdown_pct = None
+    if peak and peak > 0 and agg_nav > 0:
+        drawdown_pct = round(max(0.0, float((peak - agg_nav) / peak * 100)), 3)
     return {
         "fund_id": fund.id,
         "name": fund.name,
@@ -213,6 +222,7 @@ def fund_overview(fund: AutonomousFund) -> dict:
         and any(p["is_enabled"] for p in per_account),
         "aggregate_nav": str(agg_nav),
         "peak_equity": str(fund.peak_equity_usd) if fund.peak_equity_usd else None,
+        "drawdown_pct": drawdown_pct,
         "fund_dd_halt_pct": str(fund.fund_dd_halt_pct),
         "per_account": per_account,
         "correlation": correlation_matrix(strategies),
@@ -263,8 +273,52 @@ def halt_fund(fund: AutonomousFund, *, reason: str = "manual") -> int:
     return n
 
 
-def resume_fund(fund: AutonomousFund) -> None:
-    """Clear the fund halt. Per-account halts are NOT auto-cleared — each account
-    re-evaluates its own drawdown on the next tick (fail-safe)."""
+def resume_fund(fund: AutonomousFund) -> dict:
+    """Clear the fund halt — the full-restart acknowledgment.
+
+    A drawdown halt can never clear itself: a halted fund doesn't trade, so
+    equity stays pinned below the stored peak and an un-rebased resume would be
+    re-halted by the next guardrail sweep, forever. Resuming therefore means
+    "I acknowledge the loss — restart from here": the fund peak is rebased to
+    current aggregate equity AND every member account is un-halted with its own
+    peak rebased to its book's current equity, so each drawdown breaker re-arms
+    at the configured distance below TODAY's level. Fail-safety is preserved —
+    a fresh breach from the acknowledged level halts again. A peak that can't
+    be valued right now is cleared instead (None), which re-seeds at the next
+    evaluation (same effect: drawdown restarts at 0).
+    """
+    from . import autopilot_risk
+
+    strategies = list(fund.strategies.select_related("autopilot").all())
+    equity = Decimal("0")
+    for s in strategies:
+        eq = account_equity(s)
+        if eq is not None:
+            equity += eq
     fund.state = AutonomousFund.STATE_ACTIVE
-    fund.save(update_fields=["state", "updated_at"])
+    fund.peak_equity_usd = equity if equity > 0 else None
+    fund.save(update_fields=["state", "peak_equity_usd", "updated_at"])
+
+    accounts_resumed = 0
+    for s in strategies:
+        ap = getattr(s, "autopilot", None)
+        if ap is None:
+            continue
+        eq = autopilot_risk.broker_equity(ap)
+        ap.peak_equity_usd = eq if (eq is not None and eq > 0) else None
+        if ap.state != StrategyAutopilot.STATE_ACTIVE:
+            ap.state = StrategyAutopilot.STATE_ACTIVE
+            accounts_resumed += 1
+        # A halted account skipped its fires; recompute the next one (no-op /
+        # clears when disabled — reschedule() guards internally).
+        ap.reschedule()
+        ap.save(update_fields=["state", "peak_equity_usd", "next_run_at", "updated_at"])
+    log.warning(
+        "fund resumed fund=%s peak_rebased_to=%s accounts_resumed=%s",
+        fund.id, fund.peak_equity_usd, accounts_resumed,
+    )
+    return {
+        "state": fund.state,
+        "accounts_resumed": accounts_resumed,
+        "peak_rebased_to": str(fund.peak_equity_usd) if fund.peak_equity_usd is not None else None,
+    }

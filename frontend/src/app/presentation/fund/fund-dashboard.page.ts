@@ -71,6 +71,12 @@ import { FundHistoryComponent } from './fund-history.component';
             </div>
           </div>
           <div class="kpi">
+            <div class="kpi-label">Drawdown</div>
+            <div class="kpi-value" [class.dd-breach]="ddBreached()">
+              {{ f.drawdown_pct !== null ? (f.drawdown_pct | number: '1.1-1') + '%' : '—' }}
+            </div>
+          </div>
+          <div class="kpi">
             <div class="kpi-label">Fund DD halt</div>
             <div class="kpi-value">{{ f.fund_dd_halt_pct }}%</div>
           </div>
@@ -494,6 +500,9 @@ import { FundHistoryComponent } from './fund-history.component';
         color: var(--acc-short-fg);
         border-color: var(--acc-short-fg);
       }
+      .kpi-value.dd-breach {
+        color: var(--acc-short-fg);
+      }
     `,
   ],
 })
@@ -526,6 +535,12 @@ export class FundDashboardPage implements OnInit {
   readonly notLive = computed(() => {
     const f = this.fund();
     return !!f && f.state === 'active' && !f.is_live;
+  });
+
+  // Paint the drawdown KPI red once it's at/past the halt limit.
+  readonly ddBreached = computed(() => {
+    const f = this.fund();
+    return !!f && f.drawdown_pct !== null && f.drawdown_pct >= +f.fund_dd_halt_pct;
   });
 
   // Deep link the banner to the first account that still needs setup (else the
@@ -562,7 +577,22 @@ export class FundDashboardPage implements OnInit {
       .subscribe({ next: () => this.busy.set(false), error: () => this.busy.set(false) });
   }
 
-  resumeFund(): void {
+  // Clearing a drawdown halt is an acknowledgment, not a retry: the backend
+  // rebases the fund + account peaks to current equity so the breakers re-arm
+  // from today's level (otherwise the stale peak would re-halt on the next
+  // sweep, forever). Spell that out before acting.
+  async resumeFund(): Promise<void> {
+    const f = this.fund();
+    const limit = f ? +f.fund_dd_halt_pct : 0;
+    const ok = await this.confirm.ask({
+      title: 'Clear halt & re-arm breakers?',
+      body:
+        'Resuming acknowledges the drawdown: the fund and account peaks reset to current ' +
+        'equity, all accounts resume on their schedules, and the drawdown breakers re-arm' +
+        (limit ? ` — a fresh ${limit}% drawdown from here halts again.` : '.'),
+      confirmLabel: 'Clear & re-arm',
+    });
+    if (!ok) return;
     this.busy.set(true);
     this.store
       .resumeFund()

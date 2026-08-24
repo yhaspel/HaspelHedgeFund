@@ -93,12 +93,14 @@ class FundHaltView(APIView):
 
 
 class FundResumeView(APIView):
-    """Clear the fund halt. Per-account halts are NOT auto-cleared (fail-safe)."""
+    """Clear the fund halt — the full-restart acknowledgment: rebases the fund
+    peak to current aggregate equity, un-halts every member account and rebases
+    its peak too, so all drawdown breakers re-arm from today's level (an
+    un-rebased resume would be re-halted by the next guardrail sweep, forever)."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request: Request) -> Response:
         fund = _user_fund(request.user)
         if fund is None:
             return Response({"detail": "no fund"}, status=404)
-        fund_layer.resume_fund(fund)
-        return Response({"state": fund.state})
+        return Response(fund_layer.resume_fund(fund))

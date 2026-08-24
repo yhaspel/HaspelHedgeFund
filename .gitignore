@@ -71,3 +71,4 @@ backups/
 development-plans/
 research/
 AGENTS.md
+.claude/settings.local.json

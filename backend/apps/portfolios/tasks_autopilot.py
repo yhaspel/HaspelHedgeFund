@@ -235,7 +235,12 @@ def guardrail_sweep() -> dict:
                 fund_halts += 1
                 from apps.notifications.autopilot import notify_fund
 
-                notify_fund(fund, "aggregate drawdown breached — all accounts halted.")
+                notify_fund(
+                    fund,
+                    "aggregate drawdown breached — all accounts halted. "
+                    "Clearing the halt on the Fund page re-arms the breakers "
+                    "from current equity.",
+                )
         except Exception:  # noqa: BLE001
             log.exception("fund drawdown eval failed fund=%s", fund.pk)
 

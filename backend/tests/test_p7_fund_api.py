@@ -182,6 +182,47 @@ def test_disable_and_resume(client, user):
     assert ap.state == StrategyAutopilot.STATE_ACTIVE
 
 
+def test_account_resume_rebases_peak(client, user):
+    """Per-account Resume is the same acknowledgment as the fund-level one:
+    the stale peak rebases to the book's current equity so the breaker re-arms
+    instead of re-halting on the next evaluation (the loop, per-account)."""
+    s = _strategy(user)
+    acc = _account(user)                                # $100k cash book
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    ap = StrategyAutopilot.objects.create(
+        strategy=s, broker_account=acc, is_enabled=True,
+        state=StrategyAutopilot.STATE_HALTED,
+        peak_equity_usd=Decimal("200000"),              # stale → dd 50%
+    )
+    r = client.post(f"/api/strategies/{s.id}/autopilot/resume/")
+    assert r.status_code == 200
+    ap.refresh_from_db()
+    assert ap.state == StrategyAutopilot.STATE_ACTIVE
+    assert ap.peak_equity_usd == Decimal("100000")      # re-armed at current equity
+    assert r.json()["autopilot"]["peak_equity_usd"] == str(ap.peak_equity_usd)
+
+
+def test_enable_out_of_halt_rebases_peak(client, user):
+    """Disable→re-enable must not resurrect the stale peak: enabling a halted
+    autopilot re-arms the breaker exactly like Resume."""
+    s = _strategy(user)
+    acc = _account(user)
+    StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
+    ap = StrategyAutopilot.objects.create(
+        strategy=s, broker_account=acc,
+        state=StrategyAutopilot.STATE_HALTED,
+        peak_equity_usd=Decimal("200000"),
+        dd_hard_halt_pct=Decimal("7.5"),
+    )
+    _passing_backtest(s)
+    r = client.post(f"/api/strategies/{s.id}/autopilot/enable/")
+    assert r.status_code == 200
+    ap.refresh_from_db()
+    assert ap.is_enabled is True
+    assert ap.state == StrategyAutopilot.STATE_ACTIVE
+    assert ap.peak_equity_usd == Decimal("100000")
+
+
 def test_cron_edit_reschedules_enabled_autopilot(client, user):
     """Editing the cron on an already-enabled autopilot must recompute
     next_run_at — otherwise the new cadence persists but the next fire still
@@ -299,11 +340,70 @@ def test_fund_halt_halts_all_then_resume(user):
         ap.state == StrategyAutopilot.STATE_HALTED
         for ap in StrategyAutopilot.objects.all()
     )
-    fund_layer.resume_fund(fund)
+    out = fund_layer.resume_fund(fund)
     fund.refresh_from_db()
     assert fund.state == AutonomousFund.STATE_ACTIVE
-    # per-account halts persist (fail-safe — re-evaluated on the next tick).
-    assert all(ap.state == StrategyAutopilot.STATE_HALTED for ap in StrategyAutopilot.objects.all())
+    # Full restart: every member account is un-halted with its breaker
+    # re-armed (an un-cleared account would just idle behind a stale peak).
+    assert out["accounts_resumed"] == 3
+    assert all(
+        ap.state == StrategyAutopilot.STATE_ACTIVE
+        for ap in StrategyAutopilot.objects.all()
+    )
+
+
+def test_fund_resume_rebases_peaks_and_breaks_the_rehalt_loop(user):
+    """The escape hatch for the halt loop: a halted fund can't trade, so its
+    drawdown vs. a stale all-time peak can never shrink — clearing the halt
+    without rebasing the peak just re-halts on the next guardrail sweep.
+    Resume must rebase fund + account peaks to current equity (drawdown 0)."""
+    fund = _fund_of_three(user)                        # 3 × $100k books
+    fund.fund_dd_halt_pct = Decimal("20")
+    fund.peak_equity_usd = Decimal("400000")           # stale peak → dd 25%
+    fund.save()
+    res = fund_layer.evaluate_fund_drawdown(fund)
+    assert res["halted"] is True                       # 25% ≥ 20% → breaker fires
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_HALTED
+
+    StrategyAutopilot.objects.all().update(peak_equity_usd=Decimal("150000"))
+    out = fund_layer.resume_fund(fund)
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_ACTIVE
+    assert fund.peak_equity_usd == Decimal("300000")   # rebased to current equity
+    assert out["peak_rebased_to"] == str(fund.peak_equity_usd)
+    for ap in StrategyAutopilot.objects.all():
+        assert ap.state == StrategyAutopilot.STATE_ACTIVE
+        assert ap.peak_equity_usd == Decimal("100000")  # each book's own equity
+
+    # The next sweep evaluation is clean — no immediate re-halt (loop broken).
+    res2 = fund_layer.evaluate_fund_drawdown(fund)
+    assert res2["halted"] is False
+    assert float(res2["drawdown_pct"]) == 0.0
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_ACTIVE
+
+
+def test_fund_resume_without_valuable_equity_clears_peak_for_reseed(user):
+    """No members / unpriceable books: resume clears the peak instead of
+    rebasing, so the next evaluation cold-start re-seeds (drawdown 0)."""
+    fund = AutonomousFund.objects.create(
+        owner=user, name="Empty", state=AutonomousFund.STATE_HALTED,
+        peak_equity_usd=Decimal("500000"),
+    )
+    out = fund_layer.resume_fund(fund)
+    fund.refresh_from_db()
+    assert fund.state == AutonomousFund.STATE_ACTIVE
+    assert fund.peak_equity_usd is None
+    assert out["peak_rebased_to"] is None
+
+
+def test_fund_overview_reports_drawdown_pct(user):
+    fund = _fund_of_three(user)
+    assert fund_layer.fund_overview(fund)["drawdown_pct"] is None  # no peak yet
+    fund.peak_equity_usd = Decimal("400000")           # books total $300k → 25%
+    fund.save()
+    assert fund_layer.fund_overview(fund)["drawdown_pct"] == 25.0
 
 
 def test_fund_api_halt_resume(client, user):
@@ -312,7 +412,9 @@ def test_fund_api_halt_resume(client, user):
     r = client.post("/api/fund/halt/")
     assert r.status_code == 200
     assert r.json()["accounts_halted"] == 3
-    assert client.post("/api/fund/resume/").json()["state"] == "active"
+    body = client.post("/api/fund/resume/").json()
+    assert body["state"] == "active"
+    assert body["accounts_resumed"] == 3
 
 
 # --------------------------------------------------------------------------

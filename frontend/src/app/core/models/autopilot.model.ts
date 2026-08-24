@@ -89,6 +89,9 @@ export interface FundOverview {
   is_live: boolean;
   aggregate_nav: string;
   peak_equity: string | null;
+  // Current drawdown-from-peak in % (what the halt breaker sees); null until
+  // a peak is seeded. Resume rebases the peak, so this resets to ~0 on clear.
+  drawdown_pct: number | null;
   fund_dd_halt_pct: string;
   per_account: FundAccountCard[];
   correlation: FundCorrelation;
@@ -101,8 +104,8 @@ export interface FundHistoryPoint {
   date: string;
   equity: number;
   net_flow: number;
-  index: number;       // TWR index, base 100 — flow-immune
-  spy?: number;        // benchmark indices on the aggregate series only
+  index: number; // TWR index, base 100 — flow-immune
+  spy?: number; // benchmark indices on the aggregate series only
   qqq?: number;
 }
 

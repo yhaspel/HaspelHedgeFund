@@ -56,6 +56,18 @@ def _get_strategy(request, pk):
     return PortfolioStrategy.objects.filter(pk=pk, user=request.user).first()
 
 
+def _rearm_drawdown_breaker(ap: StrategyAutopilot) -> None:
+    """Rebase ``peak_equity_usd`` to the book's current equity (or clear it for
+    a cold re-seed when the book can't be valued) so the §6.3 drawdown breaker
+    re-arms from today's level. Called on every human un-halt path — without
+    this, the stale all-time peak re-halts the account on its next evaluation
+    no matter how many times the halt is cleared."""
+    from apps.portfolios import autopilot_risk
+
+    eq = autopilot_risk.broker_equity(ap)
+    ap.peak_equity_usd = eq if (eq is not None and eq > 0) else None
+
+
 class StrategyAutopilotView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -143,6 +155,10 @@ class StrategyAutopilotView(APIView):
             PortfolioStrategy.objects.filter(pk=strategy.pk).update(auto_run_council=True)
         ap.is_enabled = True
         if ap.state == StrategyAutopilot.STATE_HALTED:
+            # Re-enabling out of a halt is the same human acknowledgment as
+            # Resume — re-arm the breaker, else the stale peak re-halts the
+            # account on its first pre-flight.
+            _rearm_drawdown_breaker(ap)
             ap.state = StrategyAutopilot.STATE_ACTIVE
         ap.reschedule()
         ap.save()
@@ -177,8 +193,12 @@ class StrategyAutopilotDisableView(APIView):
 
 
 class StrategyAutopilotResumeView(APIView):
-    """The one human touch-point: clear a drawdown halt. Fail-safe — the next
-    drawdown evaluation re-halts if the book hasn't recovered (§6.3)."""
+    """The one human touch-point: clear a drawdown halt. Resuming acknowledges
+    the loss — the peak rebases to the book's current equity so the §6.3
+    breaker re-arms from today's level (a halted book can't trade its way back
+    above a stale peak, so an un-rebased resume would re-halt on the very next
+    evaluation, forever). Fail-safe is preserved: a fresh drawdown of the
+    configured size from the acknowledged level halts again."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request: Request, pk: int) -> Response:
@@ -188,9 +208,10 @@ class StrategyAutopilotResumeView(APIView):
         ap = getattr(strategy, "autopilot", None)
         if ap is None:
             return Response({"detail": "no autopilot"}, status=404)
+        _rearm_drawdown_breaker(ap)
         ap.state = StrategyAutopilot.STATE_ACTIVE
         ap.reschedule()
-        ap.save(update_fields=["state", "next_run_at", "updated_at"])
+        ap.save(update_fields=["state", "peak_equity_usd", "next_run_at", "updated_at"])
         return Response({"autopilot": _autopilot_dict(ap)})
 
 

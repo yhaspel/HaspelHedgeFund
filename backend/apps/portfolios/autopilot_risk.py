@@ -220,9 +220,11 @@ def broker_equity(autopilot) -> Decimal | None:
 def evaluate_drawdown(autopilot) -> dict:
     """Update ``peak_equity_usd`` and resolve the state machine from the current
     drawdown-from-peak. Returns an audit dict. Cold start (null peak) seeds
-    ``peak = current`` (drawdown 0) so it never fires spuriously. Resume is
-    fail-safe: this recomputes immediately, so a premature un-halt that hasn't
-    recovered re-halts on the next evaluation.
+    ``peak = current`` (drawdown 0) so it never fires spuriously. The human
+    un-halt paths (autopilot Resume / re-enable, fund resume) rebase the peak
+    to current equity before clearing the halt, so this evaluation is fail-safe
+    against a FRESH drawdown from the acknowledged level — not an inescapable
+    re-halt loop off the stale all-time peak.
     """
     from .models import StrategyAutopilot
 
