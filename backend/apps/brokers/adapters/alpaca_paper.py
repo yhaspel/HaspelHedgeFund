@@ -277,7 +277,16 @@ def _alpaca_error_code(exc: Exception) -> int | None:
     arriving as a string."""
     import json
 
-    code = _coerce_int(getattr(exc, "code", None))
+    # ``APIError.code`` is a PROPERTY doing ``self._error["code"]``, so it raises
+    # KeyError — not AttributeError — when the body carries no ``code``. Alpaca's
+    # auth failures are a bare ``{"message": "unauthorized."}``, and getattr's
+    # default only swallows AttributeError, so an unguarded read escaped this
+    # helper and killed _raise_translated before it could reach the 401/403 arm:
+    # the account stayed `active` instead of flipping to needs_reauth.
+    try:
+        code = _coerce_int(getattr(exc, "code", None))
+    except (KeyError, AttributeError, TypeError):
+        code = None
     if code is not None:
         return code
     for blob in (getattr(exc, "_error", None), str(exc)):
