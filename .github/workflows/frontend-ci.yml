@@ -1,12 +1,13 @@
 name: frontend-ci
 
-# CI policy: every push (any branch) and PRs, path-filtered. See
-# backend-ci.yml for the decision trail.
+# CI policy: every push (any branch) and PRs. See backend-ci.yml for the
+# decision trail and for why `pull_request` is deliberately not path-filtered
+# (`build-test` is a required check on `main`; a workflow that never starts
+# reports nothing, which blocks the PR forever rather than passing it).
 on:
   push:
     paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
   pull_request:
-    paths: ["frontend/**", ".github/workflows/frontend-ci.yml"]
 
 jobs:
   build-test:
