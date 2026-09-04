@@ -204,9 +204,9 @@ needs a flat account — **Flatten** queues the closing orders first).
 The CLI shortcut provisions the same thing from `.env`:
 
 ```bash
-# Reads the ALPACA_PAPER_{1,2,3}_* triples + ALPACA_FUND_OWNER_EMAIL from .env.
-# The FIRST complete triple (or --slot N) is the fund's shared account; the three
-# template strategies become members at an equal split.
+# Reads the ALPACA_PAPER_{NAME,KEY_ID,SECRET} triple + ALPACA_FUND_OWNER_EMAIL
+# from .env. That one triple is the fund's shared account; the three template
+# strategies become members at an equal split, each with its own sleeve.
 uv run python manage.py bootstrap_autonomous_fund
 
 # Demo/educational shortcut — also seed a passing validation backtest per

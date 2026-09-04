@@ -75,8 +75,8 @@ generated on Linux in CI.
   `E2E_API_BASE=http://localhost:8811` (set by the CI job); the storageState origin
   stays `:4111`. Playwright starts **no** webServer in the live lane (the compose
   `frontend` service owns `:4111`). The CI `lane-b` job synthesizes the gitignored
-  `.env` (incl. dummy `ALPACA_PAPER` triples — mock broker is keyless, so they're
-  never used for a network call) before `docker compose up`. Lane B runs
+  `.env` (incl. a dummy `ALPACA_PAPER_{NAME,KEY_ID,SECRET}` triple — mock broker is
+  keyless, so it's never used for a network call) before `docker compose up`. Lane B runs
   **nightly / non-PR-blocking**.
 - **Why D-01 / LB-01 / R-04 are Lane-A-only (not @smoke):** in a secret-less CI the
   seeded world can't satisfy them — D-01's regime/sector widgets need macro data
