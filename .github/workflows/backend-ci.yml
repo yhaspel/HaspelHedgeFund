@@ -1,14 +1,22 @@
 name: backend-ci
 
-# CI policy: run on every push (any branch) and on pull requests, filtered by
-# paths so docs-only edits skip CI. See phase-00-foundations review for the
-# decision trail (plan called for every-push, original workflow filtered to
-# main; this resolves to every-push + PR).
+# CI policy: run on every push (any branch) and on pull requests. See
+# phase-00-foundations review for the decision trail (plan called for
+# every-push, original workflow filtered to main; this resolves to
+# every-push + PR).
+#
+# The `push` trigger stays path-filtered so docs-only edits skip CI. The
+# `pull_request` trigger is deliberately NOT filtered: `test` is a required
+# status check on `main`, and a path-filtered workflow that never starts
+# produces no check-run at all — which branch protection reads as "still
+# waiting", not "skipped". That deadlocked every frontend-only PR (and the
+# mirror-image filter in frontend-ci deadlocked every backend-only one), so
+# only PRs touching BOTH halves could merge. Always reporting on PRs costs a
+# short no-op run and keeps all three required contexts satisfiable.
 on:
   push:
     paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
 
 jobs:
   test:
