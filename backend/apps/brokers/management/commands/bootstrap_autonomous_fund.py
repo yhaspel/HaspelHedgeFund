@@ -1,14 +1,16 @@
 """P7 / P14 — bootstrap the autonomous fund on ONE shared Alpaca paper account.
 
-Reads the ``ALPACA_PAPER_{1,2,3}_{NAME,KEY_ID,SECRET}`` env triples (exposed as
+Reads the single ``ALPACA_PAPER_{NAME,KEY_ID,SECRET}`` env triple (exposed as
 ``settings.ALPACA_PAPER_ACCOUNTS``) + ``ALPACA_FUND_OWNER_EMAIL`` (or ``--user``).
-P14 (shared pool): the FIRST complete triple (or ``--slot N``) is the fund's
-shared account; every other triple is still upserted as a plain paper
-``BrokerAccount`` (credentials kept fresh) but stays OUT of the fund. The three
-§3 template strategies become fund members with an equal split, each with a
-disabled ``StrategyAutopilot`` on a staggered Friday-close cron; with the demo
-broker (flat $100k book) the fund is reset so the sleeves are funded and
-``/fund`` has a live world.
+That one triple IS the fund's shared account — P14 made the fund a shared pool
+with per-strategy sleeves, so the old numbered ``ALPACA_PAPER_{1,2,3}_*`` slots
+were retired (see ``settings/base.py``). The three §3 template strategies become
+fund members with an equal split, each with a disabled ``StrategyAutopilot`` on a
+staggered Friday-close cron; with the demo broker (flat $100k book) the fund is
+reset so the sleeves are funded and ``/fund`` has a live world.
+
+Note the §3 ``TEMPLATES`` below are *strategy* templates, not env slots: there are
+still three of them (three sleeves), all sharing the one account.
 
 **Idempotent + rotation-aware**: NAME is the match key; a changed key/secret
 updates the credential and clears ``needs_reauth``. NAMEs must be distinct
@@ -17,7 +19,7 @@ is only ADDED to, never trimmed (the Fund tab owns removals).
 
 Usage:
     uv run python manage.py bootstrap_autonomous_fund
-    uv run python manage.py bootstrap_autonomous_fund --user me@example.com --slot 2
+    uv run python manage.py bootstrap_autonomous_fund --user me@example.com
     uv run python manage.py bootstrap_autonomous_fund --broker mock --no-verify  # tests/demo
 """
 from __future__ import annotations
@@ -114,8 +116,10 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--slot", type=int, default=0,
-            help="Which ALPACA_PAPER_<N> triple is the fund's shared account "
-                 "(default: the first complete one).",
+            help="Vestigial since the env collapsed to one unnumbered "
+                 "ALPACA_PAPER_* triple: there is only slot 1, which is the "
+                 "fund's shared account. Kept so injected multi-triple configs "
+                 "(the tests) still select. Default 0 = the first complete one.",
         )
         parser.add_argument(
             "--no-verify", action="store_true",
@@ -140,7 +144,7 @@ class Command(BaseCommand):
         triples = self._validate_triples()
         if not triples:
             raise CommandError(
-                "no complete ALPACA_PAPER_{1,2,3}_{NAME,KEY_ID,SECRET} triples found "
+                "no complete ALPACA_PAPER_{NAME,KEY_ID,SECRET} triple found "
                 "in the environment; nothing to bootstrap."
             )
         fund_slot = opts["slot"] or min(triples)
@@ -235,11 +239,10 @@ class Command(BaseCommand):
                     f"slot {slot}: incomplete triple (NAME/KEY_ID/SECRET) — reported, not used."
                 ))
                 continue
-            # default NAME for slot 1 (the reused legacy key) if somehow blank.
             if name in names_seen:
                 raise CommandError(
                     f"duplicate NAME {name!r} (slots {names_seen[name]} and {slot}); "
-                    "the three NAMEs must be distinct (label is not DB-unique)."
+                    "NAMEs must be distinct (label is not DB-unique)."
                 )
             names_seen[name] = slot
             triples[slot] = {"name": name, "key_id": key_id, "secret": secret}

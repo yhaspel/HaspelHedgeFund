@@ -291,19 +291,26 @@ NEWS_LAB_SENTIMENT_MODEL = os.environ.get(
     "NEWS_LAB_SENTIMENT_MODEL", "openrouter:qwen/qwen3.6-27b"
 )
 
-# P7 — Autonomous 3-account fund bootstrap. Each Alpaca paper account has its
-# own distinct API key/secret; NAME is a human label that becomes the
-# BrokerAccount.label + maps to a strategy. ``bootstrap_autonomous_fund`` reads
-# these (paper-only) + the owner email. Empty defaults keep the default install
-# unchanged (the command no-ops on missing triples). .env stays gitignored.
+# P7 / P14 — Autonomous fund bootstrap. The fund trades ONE shared Alpaca paper
+# account, configured as a single UNNUMBERED ``ALPACA_PAPER_{NAME,KEY_ID,SECRET}``
+# triple. The numbered ``ALPACA_PAPER_{1,2,3}_*`` slots are retired: P14 made the
+# fund a shared pool with per-strategy sleeves, so a second/third account no
+# longer has a role. NAME is a human label that becomes the BrokerAccount.label.
+# ``bootstrap_autonomous_fund`` reads this (paper-only) + the owner email. The
+# empty defaults keep a default install importable and create nothing; running
+# the command without a complete triple aborts with a CommandError rather than
+# silently doing nothing. .env stays gitignored.
+#
+# Deliberately still a LIST OF ONE keyed by ``slot``: the bootstrap command
+# iterates triples, keys accounts by slot and exposes ``--slot``, so preserving
+# the shape keeps that logic — and the tests that inject it — untouched.
 ALPACA_PAPER_ACCOUNTS = [
     {
-        "slot": i,
-        "name": os.environ.get(f"ALPACA_PAPER_{i}_NAME", ""),
-        "key_id": os.environ.get(f"ALPACA_PAPER_{i}_KEY_ID", ""),
-        "secret": os.environ.get(f"ALPACA_PAPER_{i}_SECRET", ""),
+        "slot": 1,
+        "name": os.environ.get("ALPACA_PAPER_NAME", ""),
+        "key_id": os.environ.get("ALPACA_PAPER_KEY_ID", ""),
+        "secret": os.environ.get("ALPACA_PAPER_SECRET", ""),
     }
-    for i in (1, 2, 3)
 ]
 ALPACA_FUND_OWNER_EMAIL = os.environ.get("ALPACA_FUND_OWNER_EMAIL", "")
 

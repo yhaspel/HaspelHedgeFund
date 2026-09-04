@@ -180,9 +180,11 @@ jobs:
         # orders (plan §3.7). Data-provider keys are passed through from repo secrets
         # when present; absent, data-surfaces degrade (the real-shape signal Lane B
         # exists to catch — plan §905) while the provider-independent journeys stay green.
-        # The ALPACA_PAPER triples are dummy: bootstrap_autonomous_fund needs three to
-        # enumerate the fund's accounts, but `--broker mock` makes it keyless (creds
-        # never stored, no verify), so the values are never used for a network call.
+        # The ALPACA_PAPER triple is dummy: bootstrap_autonomous_fund needs one complete
+        # triple to create the fund's shared account (P14 — one account, N sleeves), but
+        # `--broker mock` makes it keyless (creds never stored, no verify), so the values
+        # are never used for a network call. The three member strategies come from the
+        # command's own §3 TEMPLATES, not from env triples.
         run: |
           cat > .env <<'EOF'
           POSTGRES_DB=hedgefund
@@ -204,15 +206,9 @@ jobs:
           E2E_STUB_BROKER=1
           EDGAR_USER_AGENT=lane-b-e2e e2e@local
           ALPACA_FUND_OWNER_EMAIL=e2e@local
-          ALPACA_PAPER_1_NAME=E2E Paper 1
-          ALPACA_PAPER_1_KEY_ID=e2e-dummy-key-1
-          ALPACA_PAPER_1_SECRET=e2e-dummy-secret-1
-          ALPACA_PAPER_2_NAME=E2E Paper 2
-          ALPACA_PAPER_2_KEY_ID=e2e-dummy-key-2
-          ALPACA_PAPER_2_SECRET=e2e-dummy-secret-2
-          ALPACA_PAPER_3_NAME=E2E Paper 3
-          ALPACA_PAPER_3_KEY_ID=e2e-dummy-key-3
-          ALPACA_PAPER_3_SECRET=e2e-dummy-secret-3
+          ALPACA_PAPER_NAME=E2E Paper Pool
+          ALPACA_PAPER_KEY_ID=e2e-dummy-key
+          ALPACA_PAPER_SECRET=e2e-dummy-secret
           EOF
           # Optional data-provider keys — empty when the secret is unset.
           {
