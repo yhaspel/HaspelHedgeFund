@@ -59,21 +59,25 @@ def apply_caps(
     return capped, notes
 
 
-def account_nav(account) -> Decimal:
-    """Cost-basis NAV proxy for the account's broker book: cash + Σ|qty|·avg_cost.
+def book_nav(pf) -> Decimal:
+    """Cost-basis NAV proxy for a book: cash + Σ|qty|·avg_cost.
 
     Deterministic (no market-data dependency), which keeps the submit-time risk
     gate testable without mocking marks. Stage B's vol-target / drawdown layer
     uses ``valuation.value_portfolio`` (marked-to-market) for the equity curve;
     this proxy is only the denominator for the per-name cap guard.
     """
-    pf = getattr(account, "portfolio", None)
     if pf is None:
         return Decimal("0")
     nav = Decimal(str(pf.cash_balance or 0))
     for pos in pf.positions.all():
         nav += abs(Decimal(str(pos.quantity))) * Decimal(str(pos.avg_cost or 0))
     return nav
+
+
+def account_nav(account) -> Decimal:
+    """``book_nav`` of the account's whole broker book (legacy path)."""
+    return book_nav(getattr(account, "portfolio", None))
 
 
 def _order_price(order, *, user=None) -> Decimal:
@@ -105,14 +109,18 @@ def _order_price(order, *, user=None) -> Decimal:
     return _FALLBACK_PRICE
 
 
-def make_risk_check(strategy):
+def make_risk_check(strategy, *, book=None):
     """Build the ``risk_check`` callable the scheduled gate runs per order.
 
-    Re-applies the strategy's ``max_position_pct`` against the order's broker
-    book: if filling this order would leave the name's |market value| above the
-    cap, the order is rejected (non-empty reasons list). This is the second
+    Re-applies the strategy's ``max_position_pct`` against the strategy's book
+    of record: if filling this order would leave the name's |market value| above
+    the cap, the order is rejected (non-empty reasons list). This is the second
     enforcement point — distinct from the LLM-side ``apply_hard_caps`` in
     ``hedgefund_agents/risk/`` — so caps bind both inside the cycle and at submit.
+
+    ``book`` is the Portfolio the cap is measured against — the strategy's fund
+    SLEEVE on the shared account (P14: cap = % of the sleeve's NAV, the position
+    is the sleeve's), else the order's whole account book (legacy).
     """
 
     max_pos = float(strategy.max_position_pct or 0)
@@ -122,11 +130,11 @@ def make_risk_check(strategy):
         if max_pos <= 0:
             return reasons
         account = order.broker_account
-        nav = account_nav(account)
+        pf = book if book is not None else getattr(account, "portfolio", None)
+        nav = book_nav(pf)
         if nav <= 0:
             return reasons
         price = _order_price(order, user=getattr(account, "user", None))
-        pf = getattr(account, "portfolio", None)
         existing = Decimal("0")
         if pf is not None:
             pos = pf.positions.filter(ticker=order.ticker).first()
@@ -203,18 +211,34 @@ def vol_target_scale(weights: dict[str, float], autopilot, as_of, user) -> tuple
 # §6.3 — drawdown circuit-breaker (deterministic; off the broker book's
 # real-fill equity curve, never the hypothetical mark).
 # ---------------------------------------------------------------------------
-def broker_equity(autopilot) -> Decimal | None:
-    """Marked NAV of the autopilot's broker book (real fills). None if no
-    account / valuation fails."""
+def member_book(autopilot):
+    """The book whose equity curve this autopilot's breaker watches: the
+    strategy's fund sleeve (P14 — its slice of the shared account), else the
+    legacy whole account book, else None."""
+    from . import sleeves
+
+    book = sleeves.member_book(autopilot.strategy)
+    if book is not None:
+        return book
     account = autopilot.broker_account
-    if account is None or getattr(account, "portfolio", None) is None:
+    return getattr(account, "portfolio", None) if account is not None else None
+
+
+def broker_equity(autopilot) -> Decimal | None:
+    """Marked NAV of the autopilot's book of record (real fills — its sleeve on
+    the shared fund account, or its own account). None if no book / valuation
+    fails."""
+    book = member_book(autopilot)
+    if book is None:
         return None
+    if not (book.cash_balance or 0) and not book.positions.exists():
+        return None  # an unfunded sleeve — nothing to measure (never a 0-peak)
     from .valuation import value_portfolio
 
     try:
-        return Decimal(str(value_portfolio(account.portfolio).total_value))
+        return Decimal(str(value_portfolio(book).total_value))
     except Exception:  # noqa: BLE001 — fall back to the cost-basis proxy
-        return account_nav(account)
+        return book_nav(book)
 
 
 def evaluate_drawdown(autopilot) -> dict:

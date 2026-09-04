@@ -1,7 +1,8 @@
 import { type Page, type Locator } from '@playwright/test';
 
 /** Page Object for the Autonomous Fund (`/fund`) + per-strategy Autopilot
- *  panel (`/strategies/:id/autopilot`). Paper-only by construction. */
+ *  panel — P14: under the Fund tab at `/fund/strategies/:id` (the old
+ *  `/strategies/:id/autopilot` redirects). Paper-only by construction. */
 export class FundPage {
   constructor(public readonly page: Page) {}
 
@@ -9,6 +10,9 @@ export class FundPage {
     await this.page.goto('/fund');
   }
   async gotoAutopilot(strategyId: number): Promise<void> {
+    await this.page.goto(`/fund/strategies/${strategyId}`);
+  }
+  async gotoLegacyAutopilot(strategyId: number): Promise<void> {
     await this.page.goto(`/strategies/${strategyId}/autopilot`);
   }
 
@@ -53,6 +57,47 @@ export class FundPage {
   }
   disclaimer(): Locator {
     return this.page.getByText('Paper trading only', { exact: false });
+  }
+
+  // ---- P14 manage drawer: settings + roster + fresh start ----
+  manageButton(): Locator {
+    return this.page.getByRole('button', { name: /Manage fund|Hide settings/ });
+  }
+  settingsHeading(): Locator {
+    return this.page.getByRole('heading', { name: /Fund settings|Set up the autonomous fund/ });
+  }
+  accountSelect(): Locator {
+    return this.page.getByLabel('Shared paper account');
+  }
+  rosterHeading(): Locator {
+    return this.page.getByRole('heading', { name: 'Strategies in the fund' });
+  }
+  memberToggle(name: string | RegExp): Locator {
+    return this.page.getByRole('checkbox', { name: new RegExp(`Include ${name}`) });
+  }
+  memberShare(name: string | RegExp): Locator {
+    return this.page.getByRole('spinbutton', { name: new RegExp(`Share of pool for ${name}`) });
+  }
+  allocationTotal(): Locator {
+    return this.page.getByTestId('alloc-total');
+  }
+  equalSplitButton(): Locator {
+    return this.page.getByRole('button', { name: 'Equal split' });
+  }
+  saveStrategiesButton(): Locator {
+    return this.page.getByRole('button', { name: /Save strategies|Saving…/ });
+  }
+  membersSaved(): Locator {
+    return this.page.getByTestId('members-saved');
+  }
+  resetButton(): Locator {
+    return this.page.getByRole('button', { name: 'Reset fund' });
+  }
+  flattenButton(): Locator {
+    return this.page.getByRole('button', { name: 'Flatten account' });
+  }
+  notConfiguredBanner(): Locator {
+    return this.page.locator('.banner-warn').filter({ hasText: 'no paper account' });
   }
 
   // ---- fund kill-switch confirm dialog (hf-confirm, requireText 'HALT') ----

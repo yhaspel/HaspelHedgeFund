@@ -2,12 +2,26 @@
   "fund_id": 1,
   "name": "Autonomous Fund",
   "state": "active",
+  "is_configured": true,
+  "broker_account": {
+    "id": 13,
+    "label": "alpaca-paper-pool",
+    "broker": "alpaca_paper",
+    "broker_display": "Alpaca",
+    "mode": "paper",
+    "connection_status": "active",
+    "last_synced_at": "2026-06-06T13:00:00+00:00",
+    "cash": "254321.00",
+    "nav": "299827.56",
+    "positions_count": 6,
+    "portfolio_id": 130
+  },
   "is_live": true,
   "aggregate_nav": "299827.56",
   "peak_equity": "303610.52",
   "drawdown_pct": 1.246,
   "fund_dd_halt_pct": "6.00",
-  "per_account": [
+  "members": [
     {
       "strategy_id": 48,
       "name": "Cross-Asset Trend (CTA-lite)",
@@ -22,7 +36,13 @@
       "has_backtest": true,
       "validation_passed": true,
       "can_enable": false,
-      "setup_hint": null
+      "setup_hint": null,
+      "allocation_pct": "33.34",
+      "initial_capital": "100000.00",
+      "cash": "100000.00",
+      "positions_count": 0,
+      "pnl_pct": 0.0,
+      "sleeve_portfolio_id": 248
     },
     {
       "strategy_id": 46,
@@ -38,7 +58,13 @@
       "has_backtest": true,
       "validation_passed": true,
       "can_enable": false,
-      "setup_hint": null
+      "setup_hint": null,
+      "allocation_pct": "33.33",
+      "initial_capital": "100000.00",
+      "cash": "99827.56",
+      "positions_count": 6,
+      "pnl_pct": -0.172,
+      "sleeve_portfolio_id": 246
     },
     {
       "strategy_id": 47,
@@ -54,9 +80,31 @@
       "has_backtest": true,
       "validation_passed": true,
       "can_enable": false,
-      "setup_hint": null
+      "setup_hint": null,
+      "allocation_pct": "33.33",
+      "initial_capital": "100000.00",
+      "cash": "100000.00",
+      "positions_count": 0,
+      "pnl_pct": 0.0,
+      "sleeve_portfolio_id": 247
     }
   ],
+  "members_count": 3,
+  "allocation_total_pct": "100.00",
+  "unallocated_nav": "0.00",
+  "attribution_gap": {
+    "available": true,
+    "positions": {},
+    "cash": "0.00"
+  },
+  "leaving": [],
+  "reset": {
+    "ready": false,
+    "reason": "positions",
+    "positions": 6,
+    "inflight_orders": 0
+  },
+  "inflight_orders": 0,
   "correlation": {
     "available": false,
     "reason": "insufficient_data",

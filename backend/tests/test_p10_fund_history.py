@@ -17,7 +17,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from rest_framework.test import APIClient
 
-from apps.brokers.models import BrokerAccount, StrategyBrokerLink
+from apps.brokers.models import BrokerAccount
 from apps.data.models import DailyBar
 from apps.portfolios.models import (
     AutonomousFund,
@@ -76,15 +76,30 @@ def _account(user, label="A", cash="100000"):
 
 
 def _fund_of(user, n=2):
+    """P14 layout: one shared account, n member sleeves (equal split, funded by
+    reset, autopilots enabled). Returns ``(fund, [(strategy, book)])`` where
+    ``book`` is the member's SLEEVE portfolio — its own equity curve."""
+    from types import SimpleNamespace
+
+    from apps.portfolios import sleeves
+
     fund = AutonomousFund.objects.create(owner=user, name="Fund")
+    sleeves.configure_account(fund, _account(user, label="POOL"))
+    members = [
+        {"strategy_id": _strategy(user, name=f"S{i}").id, "allocation_pct": str(pct)}
+        for i, pct in enumerate(sleeves.equal_split(n))
+    ]
+    sleeves.set_members(fund, members)
+    sleeves.reset_fund(fund)
+    StrategyAutopilot.objects.filter(strategy__in=fund.strategies.all()).update(is_enabled=True)
+    fund.refresh_from_db()
+    # Reset stamps a day-0 snapshot on every book; these tests author their own
+    # dated series, so start from a clean slate.
+    PortfolioSnapshot.objects.all().delete()
     out = []
-    for i in range(n):
-        s = _strategy(user, name=f"S{i}")
-        acc = _account(user, label=f"A{i}")
-        StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
-        StrategyAutopilot.objects.create(strategy=s, broker_account=acc, is_enabled=True)
-        fund.strategies.add(s)
-        out.append((s, acc))
+    for sl in fund.active_sleeves():
+        # Same shape the tests already use (``acc.portfolio`` = the member's book).
+        out.append((sl.strategy, SimpleNamespace(portfolio=sl.portfolio)))
     return fund, out
 
 
@@ -161,7 +176,8 @@ def test_guardrail_sweep_records_snapshots(db, user, monkeypatch):
         lambda ap: {"equity": "101234.56", "drawdown_pct": 0.0, "state": "active"},
     )
     out = tasks_autopilot.guardrail_sweep()
-    assert out["snapshots"] == 2
+    # 2 member sleeves + the shared account's own (fund NAV) snapshot.
+    assert out["snapshots"] == 3
     for _s, acc in members:
         snap = PortfolioSnapshot.objects.get(portfolio=acc.portfolio)
         assert snap.equity == Decimal("101234.56")
@@ -245,8 +261,8 @@ def test_fund_history_empty(db, client, user):
 def test_backfill_command_with_fake_adapter(db, user, monkeypatch):
     from apps.portfolios.management.commands import backfill_portfolio_history as cmd
 
-    _fund, members = _fund_of(user, n=1)
-    _s, acc = members[0]
+    fund, _members = _fund_of(user, n=1)
+    acc = fund.broker_account                  # the broker's history IS the fund account's
 
     class FakeAdapter:
         def __init__(self, account):
@@ -273,8 +289,8 @@ def test_backfill_command_with_fake_adapter(db, user, monkeypatch):
 def test_backfill_does_not_overwrite_sweep_rows(db, user, monkeypatch):
     from apps.portfolios.management.commands import backfill_portfolio_history as cmd
 
-    _fund, members = _fund_of(user, n=1)
-    _s, acc = members[0]
+    fund, _members = _fund_of(user, n=1)
+    acc = fund.broker_account
     record_snapshot(acc.portfolio, equity="999", on=dt.date(2026, 6, 2), net_flow="0")
 
     class FakeAdapter:

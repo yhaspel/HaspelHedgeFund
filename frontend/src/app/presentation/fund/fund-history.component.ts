@@ -41,7 +41,7 @@ Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearS
           <div class="pods">
             @for (a of h.per_account; track a.strategy_id) {
               <div class="pod">
-                <a class="pod-name" [routerLink]="['/strategies', a.strategy_id, 'autopilot']">{{ a.name }}</a>
+                <a class="pod-name" [routerLink]="['/fund/strategies', a.strategy_id]">{{ a.name }}</a>
                 <span class="pod-twr" [class.up]="(a.twr_pct ?? 0) >= 0" [class.down]="(a.twr_pct ?? 0) < 0">
                   {{ a.twr_pct !== null ? ((a.twr_pct >= 0 ? '+' : '') + (a.twr_pct | number: '1.2-2') + '%') : '—' }}
                 </span>

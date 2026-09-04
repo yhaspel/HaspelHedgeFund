@@ -139,21 +139,29 @@ export const routes: Routes = [
       ),
   },
   {
-    // P7 — per-strategy autopilot panel.
+    // P14 — the per-strategy autopilot panel lives INSIDE the Fund tab now
+    // (/fund/strategies/:id); the old address redirects so deep links survive.
     path: 'strategies/:id/autopilot',
-    canActivate: [authGuard],
-    loadComponent: () =>
-      import('./presentation/strategies/autopilot-panel.page').then(
-        (m) => m.AutopilotPanelPage,
-      ),
+    redirectTo: 'fund/strategies/:id',
   },
   {
-    // P7 — the autonomous fund dashboard (3 accounts + aggregate + correlation).
+    // P7 / P14 — the autonomous fund dashboard: the shared account, member
+    // sleeves, roster + allocations, reset, aggregate + correlation.
     path: 'fund',
     canActivate: [authGuard],
     loadComponent: () =>
       import('./presentation/fund/fund-dashboard.page').then(
         (m) => m.FundDashboardPage,
+      ),
+  },
+  {
+    // P14 — one member's panel (validation gate, enable, schedule, guardrails,
+    // run history, sleeve book) under the Fund tab.
+    path: 'fund/strategies/:id',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./presentation/strategies/autopilot-panel.page').then(
+        (m) => m.AutopilotPanelPage,
       ),
   },
   {

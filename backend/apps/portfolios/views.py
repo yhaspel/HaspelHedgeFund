@@ -106,11 +106,21 @@ class PortfolioHubView(APIView):
         strat_by_pf: dict[int, PortfolioStrategy] = {}
         for st in PortfolioStrategy.objects.filter(user=request.user):
             strat_by_pf.setdefault(st.portfolio_id, st)
+        # P14: fund sleeves — a strategy's attributed slice of the shared fund
+        # account. Reverse lookup sleeve portfolio → (strategy, account label).
+        from .models import FundSleeve
+
+        sleeve_by_pf = {
+            sl.portfolio_id: sl
+            for sl in FundSleeve.objects.filter(fund__owner=request.user)
+            .select_related("strategy", "fund__broker_account")
+        }
 
         kind_order = {
             Portfolio.KIND_MANUAL: 0,
             Portfolio.KIND_BROKER: 1,
-            Portfolio.KIND_STRATEGY: 2,
+            Portfolio.KIND_SLEEVE: 2,
+            Portfolio.KIND_STRATEGY: 3,
         }
         books: list[dict] = []
         for p in portfolios:
@@ -122,6 +132,12 @@ class PortfolioHubView(APIView):
             # clutter the hub or inflate the cash/equity totals with its default
             # notional cash. Manual and broker books always show.
             if p.kind == Portfolio.KIND_STRATEGY and not positions and not p.ledger.exists():
+                continue
+            # A retired (inactive) sleeve that is flat is history, not a book.
+            sleeve = sleeve_by_pf.get(p.id) if p.kind == Portfolio.KIND_SLEEVE else None
+            if p.kind == Portfolio.KIND_SLEEVE and (
+                sleeve is None or (not sleeve.is_active and not positions)
+            ):
                 continue
             # P10 §C5: mark to market (the old quantity*avg_cost cost basis
             # understated/overstated moves). Marks are short-TTL-cached;
@@ -182,6 +198,15 @@ class PortfolioHubView(APIView):
                 else:
                     book["subtitle"] = "Strategy book"
                     book["link_route"] = "/strategies"
+            elif p.kind == Portfolio.KIND_SLEEVE and sleeve is not None:
+                acc = sleeve.fund.broker_account
+                book["name"] = sleeve.strategy.name
+                book["subtitle"] = (
+                    f"Fund sleeve · {sleeve.allocation_pct}% of {acc.label}" if acc
+                    else "Fund sleeve · fund account not chosen yet"
+                )
+                book["link_route"] = f"/fund/strategies/{sleeve.strategy_id}"
+                book["status"] = "active" if sleeve.is_active else "leaving"
             books.append(book)
 
         books.sort(
@@ -191,8 +216,11 @@ class PortfolioHubView(APIView):
         # Strategy mirrors are parallel paper notional (the same intent the
         # broker books already hold) — summing them inflated "total equity"
         # ~2.65×. Their subtotal is still reported separately for the toggle.
-        real = [b for b in books if b["kind"] != Portfolio.KIND_STRATEGY]
-        mirrors = [b for b in books if b["kind"] == Portfolio.KIND_STRATEGY]
+        # P14: sleeves are attribution slices of a broker book already counted
+        # in "real" — they are mirrors too, never summed twice.
+        mirror_kinds = (Portfolio.KIND_STRATEGY, Portfolio.KIND_SLEEVE)
+        real = [b for b in books if b["kind"] not in mirror_kinds]
+        mirrors = [b for b in books if b["kind"] in mirror_kinds]
         totals = {
             "books": len(books),
             "cash": str(sum((Decimal(b["cash"]) for b in real), Decimal("0"))),

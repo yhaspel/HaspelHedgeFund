@@ -280,11 +280,35 @@ def _apply_snapshot_status(
 def _apply_fill_to_portfolio(order: BrokerOrder, fill: BrokerFill) -> None:
     """Mutate the broker Portfolio + write a LedgerEntry(kind=broker_fill).
 
+    P14: an order tagged with a fund sleeve (``order.sleeve``) is ALSO applied
+    to that sleeve's ledger — the same fill, the same math — so the strategy's
+    attributed slice of the shared account tracks its own fills. The account
+    book stays the truth; the sleeve is attribution. A sleeve write failure is
+    logged, never propagated (the account book must always be squared).
+    """
+    _apply_fill_to_book(order.broker_account.portfolio, order, fill)
+    sleeve_id = getattr(order, "sleeve_id", None)
+    if sleeve_id is None:
+        return
+    try:
+        from apps.portfolios.models import FundSleeve
+
+        sleeve = FundSleeve.objects.select_related("portfolio").filter(pk=sleeve_id).first()
+        if sleeve is not None:
+            _apply_fill_to_book(sleeve.portfolio, order, fill, note_suffix=" (sleeve)")
+    except Exception:  # noqa: BLE001 — attribution is best-effort
+        log.exception("sleeve fill attribution failed order=%s sleeve=%s", order.pk, sleeve_id)
+
+
+def _apply_fill_to_book(
+    portfolio: Portfolio, order: BrokerOrder, fill: BrokerFill, *, note_suffix: str = "",
+) -> None:
+    """Apply one fill to one book (account or sleeve).
+
     Sign convention: buy increases quantity, sell decreases (and may go
     negative if the position was a short already). cash_delta is negative
     for buys, positive for sells.
     """
-    portfolio = order.broker_account.portfolio
     qty = _qty(fill.quantity)
     price = Decimal(str(fill.price))
     signed_qty = qty if order.side == "buy" else -qty
@@ -310,7 +334,7 @@ def _apply_fill_to_portfolio(order: BrokerOrder, fill: BrokerFill) -> None:
                 opened_via=Position.OPENED_VIA_RUN,
                 source_run=order.decision.run if order.decision else None,
                 source_decision=order.decision,
-                note=f"broker fill {fill.broker_fill_id}",
+                note=f"broker fill {fill.broker_fill_id}{note_suffix}",
             )
         else:
             existing_is_long = position.quantity > 0
@@ -362,7 +386,7 @@ def _apply_fill_to_portfolio(order: BrokerOrder, fill: BrokerFill) -> None:
             source_run=order.decision.run if order.decision else None,
             source_decision=order.decision,
             broker_order=order,
-            note=f"broker fill {fill.broker_fill_id}",
+            note=f"broker fill {fill.broker_fill_id}{note_suffix}",
         )
 
 

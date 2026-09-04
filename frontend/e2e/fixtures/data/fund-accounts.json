@@ -1,0 +1,26 @@
+{
+  "accounts": [
+    {
+      "id": 13,
+      "label": "alpaca-paper-pool",
+      "broker": "alpaca_paper",
+      "broker_display": "Alpaca",
+      "connection_status": "active",
+      "is_active": true,
+      "cash": "254321.00",
+      "positions_count": 6,
+      "in_fund": true
+    },
+    {
+      "id": 14,
+      "label": "alpaca-paper-2",
+      "broker": "alpaca_paper",
+      "broker_display": "Alpaca",
+      "connection_status": "active",
+      "is_active": true,
+      "cash": "100000.00",
+      "positions_count": 0,
+      "in_fund": false
+    }
+  ]
+}

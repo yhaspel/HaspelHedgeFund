@@ -37,4 +37,6 @@ Added by the workstreams as needed. Each row names the test that required it.
 
 | `data-testid` | Element | Required by |
 | --- | --- | --- |
-| _(none yet)_ | | |
+| `alloc-total` | Fund roster editor — the "N selected · total X%" status line | FN-11, FN-12, FN-13 (19-fund) |
+| `members-saved` | Fund roster editor — the post-save summary line | FN-12 (19-fund) |
+| `members-warnings` | Fund roster editor — server warnings list after a save | (reserved for P14 follow-ups) |

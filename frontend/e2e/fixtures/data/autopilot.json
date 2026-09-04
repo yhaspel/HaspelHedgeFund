@@ -47,6 +47,13 @@
         }
       ],
       "backtest_id": 23
+    },
+    "sleeve": {
+      "fund_id": 1,
+      "fund_configured": true,
+      "allocation_pct": "33.34",
+      "initial_capital": "100000.00",
+      "portfolio_id": 248
     }
   }
 }

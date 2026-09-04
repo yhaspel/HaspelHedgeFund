@@ -1,22 +1,23 @@
-"""P7 — bootstrap the 3-account autonomous fund (ADR 0018).
+"""P7 / P14 — bootstrap the autonomous fund on ONE shared Alpaca paper account.
 
-Reads the three ``ALPACA_PAPER_{1,2,3}_{NAME,KEY_ID,SECRET}`` env triples
-(exposed as ``settings.ALPACA_PAPER_ACCOUNTS``) + ``ALPACA_FUND_OWNER_EMAIL``
-(or ``--user``), and creates/updates, per slot:
+Reads the ``ALPACA_PAPER_{1,2,3}_{NAME,KEY_ID,SECRET}`` env triples (exposed as
+``settings.ALPACA_PAPER_ACCOUNTS``) + ``ALPACA_FUND_OWNER_EMAIL`` (or ``--user``).
+P14 (shared pool): the FIRST complete triple (or ``--slot N``) is the fund's
+shared account; every other triple is still upserted as a plain paper
+``BrokerAccount`` (credentials kept fresh) but stays OUT of the fund. The three
+§3 template strategies become fund members with an equal split, each with a
+disabled ``StrategyAutopilot`` on a staggered Friday-close cron; with the demo
+broker (flat $100k book) the fund is reset so the sleeves are funded and
+``/fund`` has a live world.
 
-  * a paper ``BrokerAccount`` (``label=NAME``, encrypted creds) + its
-    ``kind="broker"`` Portfolio,
-  * a ``PortfolioStrategy`` seeded from the §3 template (kind per slot),
-  * an active ``StrategyBrokerLink`` (paper-only),
-  * a disabled ``StrategyAutopilot`` on a staggered Friday-close cron,
-
-and one ``AutonomousFund`` over the three. **Idempotent + rotation-aware**: NAME
-is the match key; a changed key/secret updates the credential and clears
-``needs_reauth``. The three NAMEs must be distinct (label is not DB-unique).
+**Idempotent + rotation-aware**: NAME is the match key; a changed key/secret
+updates the credential and clears ``needs_reauth``. NAMEs must be distinct
+(label is not DB-unique). Existing members keep their allocations; the roster
+is only ADDED to, never trimmed (the Fund tab owns removals).
 
 Usage:
     uv run python manage.py bootstrap_autonomous_fund
-    uv run python manage.py bootstrap_autonomous_fund --user me@example.com
+    uv run python manage.py bootstrap_autonomous_fund --user me@example.com --slot 2
     uv run python manage.py bootstrap_autonomous_fund --broker mock --no-verify  # tests/demo
 """
 from __future__ import annotations
@@ -31,7 +32,8 @@ from django.utils.text import slugify
 
 from apps.brokers.capabilities import AUTH_NONE, get_capabilities
 from apps.brokers.credentials import set_api_key_secret
-from apps.brokers.models import BrokerAccount, StrategyBrokerLink
+from apps.brokers.models import BrokerAccount
+from apps.portfolios import sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     Portfolio,
@@ -99,7 +101,7 @@ TEMPLATES = {
 
 
 class Command(BaseCommand):
-    help = "Bootstrap the 3-account autonomous Alpaca paper fund (P7 / ADR 0018)."
+    help = "Bootstrap the shared-account autonomous Alpaca paper fund (P7 / P14)."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -109,6 +111,11 @@ class Command(BaseCommand):
         parser.add_argument(
             "--broker", default="alpaca_paper",
             help="Broker code (use 'mock' for demo/tests).",
+        )
+        parser.add_argument(
+            "--slot", type=int, default=0,
+            help="Which ALPACA_PAPER_<N> triple is the fund's shared account "
+                 "(default: the first complete one).",
         )
         parser.add_argument(
             "--no-verify", action="store_true",
@@ -136,38 +143,55 @@ class Command(BaseCommand):
                 "no complete ALPACA_PAPER_{1,2,3}_{NAME,KEY_ID,SECRET} triples found "
                 "in the environment; nothing to bootstrap."
             )
+        fund_slot = opts["slot"] or min(triples)
+        if fund_slot not in triples:
+            raise CommandError(f"slot {fund_slot} has no complete triple; have {sorted(triples)}.")
 
-        seeded_strategies: list[PortfolioStrategy] = []
+        # 1. Accounts: every triple is a paper account; ONE is the fund's pool.
+        accounts: dict[int, BrokerAccount] = {}
         for slot, triple in triples.items():
+            with transaction.atomic():
+                account = self._upsert_account(owner, broker_code, is_demo, triple)
+                self._set_credentials(account, triple, is_demo)
+            if verify:
+                self._verify_account(account)
+                account.refresh_from_db()
+            accounts[slot] = account
+            role = "FUND ACCOUNT" if slot == fund_slot else "paper account (not in fund)"
+            self.stdout.write(self.style.SUCCESS(
+                f"slot {slot}: {triple['name']!r} → account #{account.id} "
+                f"({account.connection_status}) — {role}"
+            ))
+        fund_account = accounts[fund_slot]
+
+        # 2. Strategies from the §3 templates (one per template, kind per slot).
+        seeded_strategies: list[PortfolioStrategy] = []
+        for slot in sorted(TEMPLATES):
             tmpl = TEMPLATES[slot]
             universe = Universe.objects.filter(name=tmpl["universe_slug"]).first()
             if universe is None:
                 self.stderr.write(self.style.WARNING(
-                    f"slot {slot}: universe {tmpl['universe_slug']!r} not found — skipping. "
+                    f"template {slot}: universe {tmpl['universe_slug']!r} not found — skipping. "
                     "Seed it first (or load fixtures)."
                 ))
                 continue
-            with transaction.atomic():
-                account = self._upsert_account(owner, broker_code, is_demo, triple)
-                self._set_credentials(account, triple, is_demo)
-                strategy = self._upsert_strategy(owner, universe, tmpl)
-                self._upsert_link(strategy, account)
-                self._upsert_autopilot(strategy, account, tmpl)
-            if verify:
-                self._verify_account(account)
-                account.refresh_from_db()  # surface the post-verify status below
-            seeded_strategies.append(strategy)
-            self.stdout.write(self.style.SUCCESS(
-                f"slot {slot}: {triple['name']!r} → account #{account.id} "
-                f"({account.connection_status}) + strategy '{strategy.name}' #{strategy.id} "
-                f"+ autopilot (disabled, cron {tmpl['cron']})"
-            ))
+            seeded_strategies.append(self._upsert_strategy(owner, universe, tmpl))
 
-        fund = self._upsert_fund(owner, seeded_strategies)
+        # 3. The fund: shared account + members (equal split, added never trimmed).
+        fund = self._upsert_fund(owner, fund_account, seeded_strategies, TEMPLATES)
         self.stdout.write(self.style.SUCCESS(
-            f"AutonomousFund #{fund.id} '{fund.name}' over "
-            f"{fund.strategies.count()} strategies (owner {owner.email})."
+            f"AutonomousFund #{fund.id} '{fund.name}' on account #{fund_account.id} "
+            f"'{fund_account.label}' with {fund.sleeves.filter(is_active=True).count()} "
+            f"member strategies (owner {owner.email})."
         ))
+        for sl in fund.active_sleeves():
+            ap = getattr(sl.strategy, "autopilot", None)
+            self.stdout.write(
+                f"  · {sl.strategy.name} #{sl.strategy_id}: {sl.allocation_pct}% "
+                f"(${sl.initial_capital_usd}), autopilot "
+                f"{'enabled' if (ap and ap.is_enabled) else 'disabled'} "
+                f"cron {ap.cron_expression if ap else '—'}"
+            )
 
         if opts.get("seed_validation_backtest"):
             from apps.backtests.seed import seed_validation_backtest
@@ -303,44 +327,52 @@ class Command(BaseCommand):
         strategy.save()
         return strategy
 
-    def _upsert_link(self, strategy, account) -> StrategyBrokerLink:
-        link = StrategyBrokerLink.objects.filter(
-            strategy=strategy, is_active=True,
-        ).first()
-        if link is not None:
-            if link.broker_account_id != account.id:
-                link.is_active = False
-                link.save(update_fields=["is_active"])
-                link = None
-        if link is None:
-            link = StrategyBrokerLink.objects.create(
-                strategy=strategy, broker_account=account, is_active=True,
-                allocation_usd=Decimal("100000"),
-            )
-        return link
-
-    def _upsert_autopilot(self, strategy, account, tmpl) -> StrategyAutopilot:
-        ap, _created = StrategyAutopilot.objects.get_or_create(
-            strategy=strategy,
-            defaults={
-                "broker_account": account,
-                "cron_expression": tmpl["cron"],
-                "model_preset": "frugal",
-                "short_mode": tmpl["short_mode"],
-                "is_enabled": False,
-            },
-        )
-        # Keep the link target + cron in sync on re-run (never auto-enable).
-        ap.broker_account = account
-        ap.cron_expression = tmpl["cron"]
-        ap.short_mode = tmpl["short_mode"]
-        ap.save(update_fields=["broker_account", "cron_expression", "short_mode", "updated_at"])
-        return ap
-
-    def _upsert_fund(self, owner, strategies) -> AutonomousFund:
+    def _upsert_fund(self, owner, account, strategies, templates) -> AutonomousFund:
         fund, _created = AutonomousFund.objects.get_or_create(
             owner=owner, name="Autonomous Fund",
         )
-        if strategies:
-            fund.strategies.add(*strategies)
+        if fund.broker_account_id != account.id:
+            try:
+                sleeves.configure_account(fund, account)
+            except sleeves.FundError as exc:
+                raise CommandError(f"cannot bind fund account: {exc.detail}") from exc
+            fund.refresh_from_db()
+        existing = {sl.strategy_id: sl for sl in fund.sleeves.filter(is_active=True)}
+        new = [s for s in strategies if s.pk not in existing]
+        if new:
+            # Keep existing members' allocations; split the whole 100% equally
+            # across the full roster only when the fund is being built fresh.
+            if not existing:
+                split = sleeves.equal_split(len(new))
+                members = [
+                    {"strategy_id": s.pk, "allocation_pct": str(pct)}
+                    for s, pct in zip(new, split, strict=True)
+                ]
+            else:
+                # Existing members keep their %, newcomers are added at 0% and
+                # the owner re-levels on the Fund tab (a bootstrap must never
+                # silently reshuffle a running fund's capital).
+                members = [
+                    {"strategy_id": sid, "allocation_pct": str(sl.allocation_pct)}
+                    for sid, sl in existing.items()
+                ] + [{"strategy_id": s.pk, "allocation_pct": "0"} for s in new]
+            sleeves.set_members(fund, members)
+        # Template crons/short modes for the seeded strategies (never auto-enable).
+        by_name = {t["strategy_name"]: t for t in templates.values()}
+        for strategy in strategies:
+            tmpl = by_name.get(strategy.name)
+            ap = StrategyAutopilot.objects.filter(strategy=strategy).first()
+            if tmpl is None or ap is None:
+                continue
+            ap.cron_expression = tmpl["cron"]
+            ap.short_mode = tmpl["short_mode"]
+            ap.model_preset = "frugal"
+            ap.save(update_fields=["cron_expression", "short_mode", "model_preset", "updated_at"])
+        # Demo broker: the book is a flat $100k — fund the sleeves right away so
+        # the seeded world (seed_e2e) has capital to trade.
+        fund.refresh_from_db()
+        if sleeves.reset_readiness(fund)["ready"] and not any(
+            sl.initial_capital_usd for sl in fund.active_sleeves()
+        ):
+            sleeves.reset_fund(fund)
         return fund

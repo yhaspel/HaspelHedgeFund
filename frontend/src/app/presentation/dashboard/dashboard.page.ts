@@ -531,7 +531,7 @@ export class DashboardPage implements OnInit {
         // fall back to the legacy heuristic only when no fund exists.
         this.fundStore.loadFund().subscribe({
           next: (f) => {
-            const memberIds = new Set((f?.per_account ?? []).map((a) => a.strategy_id));
+            const memberIds = new Set((f?.members ?? []).map((a) => a.strategy_id));
             const members = ss.filter((s) => memberIds.has(s.id));
             const ordered = [
               ...members.filter((s) => !!s.last_run_at),

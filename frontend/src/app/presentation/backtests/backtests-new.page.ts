@@ -34,7 +34,7 @@ import { GlossaryTermComponent } from '../shared/glossary-term.component';
               This backtest is linked to your strategy — once it completes with a
               positive out-of-sample Sharpe and drawdown within the hard-halt limit,
               the strategy's <strong>Enable autopilot</strong> toggle unlocks.
-              <a [routerLink]="['/strategies', strategyId(), 'autopilot']">Back to Autopilot</a>
+              <a [routerLink]="['/fund/strategies', strategyId()]">Back to the fund strategy</a>
             </p>
           </div>
         </div>
