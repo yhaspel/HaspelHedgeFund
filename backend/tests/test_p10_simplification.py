@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 
 from apps.backtests.models import Backtest
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
+from apps.portfolios import sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     Portfolio,
@@ -111,7 +112,7 @@ def test_archive_sweep_archives_orphans(db, user):
 def test_archive_sweep_refuses_fund_members_and_enabled_autopilots(db, user):
     member = _strategy(user, "fund-member")
     fund = AutonomousFund.objects.create(owner=user, name="Fund")
-    fund.strategies.add(member)
+    sleeves.create_sleeve(fund, member, 100)
     with pytest.raises(CommandError, match="fund member"):
         call_command("archive_strategies", ids=[member.id], stdout=StringIO())
 

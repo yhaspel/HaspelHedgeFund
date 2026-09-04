@@ -18,7 +18,22 @@ import { PopoverComponent } from '../shared/popover.component';
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund', link: '/fund' }, { label: 'Autopilot' }]">
       <div class="page-head">
-        <div><h1>Autopilot</h1></div>
+        <div>
+          <h1>Autopilot</h1>
+          <!-- P14: this strategy is one sleeve of the fund's shared paper account. -->
+          @if (ap()?.sleeve; as sl) {
+            <p class="sleeve-sub">
+              Fund member · <b>{{ +sl.allocation_pct | number: '1.0-2' }}%</b> of the pool
+              @if (+sl.initial_capital > 0) {
+                ({{ +sl.initial_capital | currency: 'USD' : 'symbol' : '1.0-0' }} at last reset)
+              }
+              @if (!sl.fund_configured) {
+                · <span class="warn-inline">fund account not chosen yet</span>
+              }
+              · <a routerLink="/fund" class="sub-link">Back to the fund</a>
+            </p>
+          }
+        </div>
         @if (ap(); as a) {
           <div class="head-actions">
             <!-- Enabled: a plain status pill. -->
@@ -365,13 +380,22 @@ import { PopoverComponent } from '../shared/popover.component';
       </section>
 
       <section class="card">
-        <h2>Executed book</h2>
+        <h2>{{ book()?.is_sleeve ? 'Sleeve book' : 'Executed book' }}</h2>
+        @if (book()?.is_sleeve) {
+          <p class="muted sleeve-note">
+            This strategy's slice of the fund's shared account — its own cash and the positions its
+            orders filled. The account as a whole is on the Fund page.
+          </p>
+        }
         @if (bookError()) {
           <p class="muted">Could not load the executed book.</p>
         }
         @if (!bookError() && book(); as b) {
-          @if (!b.linked) {
+          @if (!b.linked && !b.is_sleeve) {
             <p class="muted">No broker account linked to this strategy.</p>
+          }
+          @if (b.is_sleeve && !b.linked) {
+            <p class="muted">The fund has no paper account yet — choose one on the Fund page.</p>
           }
           @if (b.linked) {
             <div class="controls">
@@ -409,6 +433,25 @@ import { PopoverComponent } from '../shared/popover.component';
   `,
   styles: [
     `
+      .sleeve-sub {
+        margin: 2px 0 0;
+        font-size: 12.5px;
+        color: var(--text-3);
+      }
+      .sleeve-sub b {
+        color: var(--text-2);
+      }
+      .sleeve-sub .warn-inline {
+        color: var(--acc-short-fg);
+      }
+      .sub-link {
+        text-decoration: underline;
+        color: var(--acc-info-fg);
+      }
+      .sleeve-note {
+        font-size: 12px;
+        margin: -4px 0 10px;
+      }
       /* Section cards hold content directly (no .card-bd), so the shell .card has no
        inner padding and no separation — restore comfortable padding + gaps. */
       section.card {

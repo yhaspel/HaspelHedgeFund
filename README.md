@@ -193,14 +193,24 @@ pnpm build
 
 ## Autonomous Fund (paper, educational)
 
-Provision the 3-account autonomous **paper** fund (one strategy per account):
+The fund trades **one** Alpaca paper account. Every strategy you add to it gets a
+*sleeve* — a slice of that account's cash (equal split by default, editable) — and
+trades only its own slice, so several strategies share the pool without touching
+each other's positions. Everything is managed on the **Autonomous Fund** tab:
+**Manage fund** → choose the shared paper account, tick the strategies and their
+share of the pool, then **Reset** to split the account's cash between them (Reset
+needs a flat account — **Flatten** queues the closing orders first).
+
+The CLI shortcut provisions the same thing from `.env`:
 
 ```bash
 # Reads the ALPACA_PAPER_{1,2,3}_* triples + ALPACA_FUND_OWNER_EMAIL from .env.
+# The FIRST complete triple (or --slot N) is the fund's shared account; the three
+# template strategies become members at an equal split.
 uv run python manage.py bootstrap_autonomous_fund
 
 # Demo/educational shortcut — also seed a passing validation backtest per
-# strategy so each account's autopilot is enable-able out of the box:
+# strategy so each member's autopilot is enable-able out of the box:
 uv run python manage.py bootstrap_autonomous_fund --broker mock --no-verify --seed-validation-backtest
 ```
 

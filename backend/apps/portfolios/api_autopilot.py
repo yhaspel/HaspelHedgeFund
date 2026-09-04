@@ -49,6 +49,23 @@ def _autopilot_dict(ap: StrategyAutopilot) -> dict:
         "last_run_at": ap.last_run_at.isoformat() if ap.last_run_at else None,
         "next_run_at": ap.next_run_at.isoformat() if ap.next_run_at else None,
         "validation": validation_status(ap.strategy),
+        # P14: the fund sleeve this strategy trades (None = not a fund member).
+        "sleeve": _sleeve_dict(ap.strategy),
+    }
+
+
+def _sleeve_dict(strategy) -> dict | None:
+    from . import sleeves
+
+    sl = sleeves.sleeve_for(strategy)
+    if sl is None:
+        return None
+    return {
+        "fund_id": sl.fund_id,
+        "fund_configured": sl.fund.broker_account_id is not None,
+        "allocation_pct": str(sl.allocation_pct),
+        "initial_capital": str(sl.initial_capital_usd),
+        "portfolio_id": sl.portfolio_id,
     }
 
 
@@ -149,6 +166,13 @@ class StrategyAutopilotView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
         if not StrategyBrokerLink.objects.filter(strategy=strategy, is_active=True).exists():
+            from . import sleeves
+
+            if sleeves.sleeve_for(strategy) is not None:
+                return Response(
+                    {"detail": "the fund has no paper account yet — choose one in Fund settings"},
+                    status=409,
+                )
             return Response({"detail": "no active broker link"}, status=409)
         # §6.0: autopilot REQUIRES auto_run_council — force it on enable.
         if not strategy.auto_run_council:
@@ -259,20 +283,28 @@ class StrategyAutopilotHistoryView(APIView):
 
 
 class StrategyExecutedView(APIView):
-    """The account's broker book (real fills) + recent autopilot runs."""
+    """The strategy's executed book (real fills): its fund SLEEVE on the shared
+    account (P14) or, for a legacy stand-alone link, the whole account book."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request: Request, pk: int) -> Response:
+        from . import sleeves
+
         strategy = _get_strategy(request, pk)
         if strategy is None:
             return Response({"detail": "not found"}, status=404)
+        sleeve = sleeves.sleeve_for(strategy)
         link = (
             StrategyBrokerLink.objects.filter(strategy=strategy, is_active=True)
             .select_related("broker_account__portfolio").first()
         )
-        if link is None:
+        if sleeve is None and link is None:
             return Response({"linked": False, "positions": [], "nav": None})
-        pf = link.broker_account.portfolio
+        account = (
+            sleeve.fund.broker_account if (sleeve is not None and sleeve.fund.broker_account_id)
+            else (link.broker_account if link is not None else None)
+        )
+        pf = sleeve.portfolio if sleeve is not None else link.broker_account.portfolio
         positions = [
             {"ticker": p.ticker, "quantity": str(p.quantity), "avg_cost": str(p.avg_cost)}
             for p in pf.positions.all().order_by("ticker")
@@ -284,10 +316,11 @@ class StrategyExecutedView(APIView):
         except Exception:  # noqa: BLE001
             nav = str(pf.cash_balance)
         return Response({
-            "linked": True,
-            "account_id": link.broker_account_id,
-            "account_label": link.broker_account.label,
-            "connection_status": link.broker_account.connection_status,
+            "linked": account is not None,
+            "is_sleeve": sleeve is not None,
+            "account_id": account.id if account is not None else None,
+            "account_label": account.label if account is not None else None,
+            "connection_status": account.connection_status if account is not None else None,
             "cash": str(pf.cash_balance),
             "nav": nav,
             "positions": positions,

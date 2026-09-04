@@ -202,7 +202,7 @@ def guardrail_sweep() -> dict:
     halted = 0
     snapshots = 0
     for ap in StrategyAutopilot.objects.filter(is_enabled=True).select_related(
-        "broker_account__portfolio"
+        "broker_account__portfolio", "strategy",
     ):
         try:
             dd = autopilot_risk.evaluate_drawdown(ap)
@@ -212,9 +212,10 @@ def guardrail_sweep() -> dict:
         # P10 §C2: persist the marked equity this sweep just computed — it used
         # to be discarded, which is why no NAV history existed anywhere. One
         # row per (portfolio, day); the hourly upsert converges on the
-        # post-close mark. record_snapshot never raises.
+        # post-close mark. record_snapshot never raises. P14: the book is the
+        # member's sleeve on the shared account (its own equity curve).
         equity = dd.get("equity") or dd.get("seeded_peak")
-        pf = ap.broker_account.portfolio if ap.broker_account_id else None
+        pf = autopilot_risk.member_book(ap)
         if equity is not None and pf is not None:
             if record_snapshot(pf, equity=equity, cash=pf.cash_balance) is not None:
                 snapshots += 1
@@ -228,7 +229,19 @@ def guardrail_sweep() -> dict:
     from apps.portfolios.fund import evaluate_fund_drawdown
     from apps.portfolios.models import AutonomousFund
 
-    for fund in AutonomousFund.objects.filter(state=AutonomousFund.STATE_ACTIVE):
+    for fund in AutonomousFund.objects.select_related("broker_account__portfolio"):
+        # P14: the fund's own NAV history = the shared account's book (the truth
+        # the aggregate chart and the fund breaker read) — snapshot it hourly
+        # too, halted or not.
+        acct_pf = fund.broker_account.portfolio if fund.broker_account_id else None
+        if acct_pf is not None and (acct_pf.cash_balance or acct_pf.positions.exists()):
+            from apps.portfolios.sleeves import book_value
+
+            eq = book_value(acct_pf)
+            if eq is not None and record_snapshot(acct_pf, equity=eq, cash=acct_pf.cash_balance):
+                snapshots += 1
+        if fund.state != AutonomousFund.STATE_ACTIVE:
+            continue
         try:
             res = evaluate_fund_drawdown(fund)
             if res.get("halted"):
@@ -270,16 +283,35 @@ def release_pending_open_orders() -> dict:
     held = list(
         BrokerOrder.objects.filter(
             status=BrokerOrder.STATUS_PENDING_OPEN, release_after__lte=now,
-        ).select_related("broker_account")
+        ).select_related("broker_account").order_by("created_at", "id")
     )
+    # P14: N sleeves share one account, so two held orders can name the same
+    # ticker on opposite sides (sleeve A buys XLE while sleeve B trims it).
+    # Alpaca rejects the second as a potential wash trade while the first is
+    # live — so release one order per (account, ticker) per tick and DEFER the
+    # rest to the next minute, after the earlier one has filled. Orders already
+    # live at the broker for the ticker defer too.
+    live = {
+        (o.broker_account_id, o.ticker.upper())
+        for o in BrokerOrder.objects.filter(
+            broker_account_id__in={o.broker_account_id for o in held},
+            status__in=BrokerOrder.OPEN_STATUSES,
+        ).only("broker_account_id", "ticker")
+    }
     released = 0
+    deferred = 0
     for order in held:
+        key = (order.broker_account_id, order.ticker.upper())
+        if key in live:
+            deferred += 1
+            continue
         try:
             if submit_held_order(order):
                 released += 1
+                live.add(key)
         except Exception:  # noqa: BLE001 — one bad release can't block the rest
             log.exception("release failed order=%s", order.pk)
-    return {"released": released, "candidates": len(held)}
+    return {"released": released, "candidates": len(held), "deferred": deferred}
 
 
 def trigger_autopilot_now(autopilot: StrategyAutopilot) -> AutopilotRun:

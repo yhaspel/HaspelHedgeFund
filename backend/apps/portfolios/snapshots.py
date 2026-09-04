@@ -137,19 +137,24 @@ def fund_history(fund, *, days: int | None = None) -> dict:
     SPY/QQQ overlays. ``days`` limits the window (None = everything)."""
     from apps.brokers.models import StrategyBrokerLink
 
+    from . import sleeves
     from .fund_composite import record_of_record
 
     since = (dt.date.today() - dt.timedelta(days=days)) if days else None
-    strategies = list(fund.strategies.all())
+    strategies = [sl.strategy for sl in fund.active_sleeves()]
     per_account: list[dict] = []
     series_by_id: dict[int, list[dict]] = {}
     for s in strategies:
-        link = (
-            StrategyBrokerLink.objects.filter(strategy=s, is_active=True)
-            .select_related("broker_account__portfolio")
-            .first()
-        )
-        pf = link.broker_account.portfolio if link else None
+        # P14: a member's history is its SLEEVE's (its slice of the shared
+        # account); a legacy stand-alone link falls back to the whole account.
+        pf = sleeves.member_book(s)
+        if pf is None:
+            link = (
+                StrategyBrokerLink.objects.filter(strategy=s, is_active=True)
+                .select_related("broker_account__portfolio")
+                .first()
+            )
+            pf = link.broker_account.portfolio if link else None
         points = _series_for(pf, since) if pf is not None else []
         series_by_id[s.id] = points
         idx = twr_index(points) if points else []
@@ -175,10 +180,20 @@ def fund_history(fund, *, days: int | None = None) -> dict:
             "expected_backtest_id": bt.id if bt is not None else None,
         })
 
-    # Aggregate on the union grid; carry each member's last equity forward.
+    # Aggregate: P14 — the shared ACCOUNT's own snapshot series is the truth
+    # (it includes unallocated residue the sleeves don't claim). Fall back to
+    # the union-of-members roll-up while the fund has no account, or the account
+    # has fewer than two daily points (a one-point series carries no return —
+    # at reset Σ sleeves == the account anyway, so the hand-over is seamless).
+    acct_pf = sleeves.account_book(fund)
+    acct_points = _series_for(acct_pf, since) if acct_pf is not None else []
     grid = sorted({p["date"] for pts in series_by_id.values() for p in pts})
     agg_points: list[dict] = []
-    if grid:
+    if len(acct_points) >= 2:
+        # The account series defines the aggregate grid (benchmarks align to it).
+        grid = [p["date"] for p in acct_points]
+        agg_points = [dict(p) for p in acct_points]
+    elif grid:
         last: dict[int, float] = {}
         by_date: dict[int, dict] = {
             sid: {p["date"]: p for p in pts} for sid, pts in series_by_id.items()

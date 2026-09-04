@@ -296,6 +296,14 @@ class BrokerOrder(models.Model):
         "portfolios.RebalanceOrder", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="broker_orders",
     )
+    # P14: the fund sleeve this order trades FOR. Set by the autopilot bridge /
+    # flatten paths on the shared fund account; fills are then applied to the
+    # sleeve ledger as well as the account book (attribution). Null = an
+    # order that belongs to the account as a whole (manual ticket, legacy).
+    sleeve = models.ForeignKey(
+        "portfolios.FundSleeve", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="broker_orders",
+    )
     submitted_at = models.DateTimeField(null=True, blank=True)
     filled_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)

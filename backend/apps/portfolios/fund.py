@@ -1,20 +1,24 @@
-"""P7 §7 — fund-level layer over the 3 isolated paper accounts.
+"""P7 §7 / P14 — the fund layer over ONE shared paper account.
 
-Per-account §6 is where risk is *enforced*; this layer is reporting + a global
-stop (NOT auto-reallocation — isolated paper accounts can't share cash):
+Per-sleeve §6 is where risk is *enforced*; this layer is reporting + a global
+stop:
 
-  * ``fund_overview`` — per-account NAV/return/state cards + aggregate
-    NAV/return/drawdown + the realized 3×3 return-correlation matrix (suppressed
-    below a minimum sample) + rolling-Sharpe *recommendations*.
-  * ``evaluate_fund_drawdown`` — aggregate-equity drawdown past
-    ``fund_dd_halt_pct`` halts all member accounts (the firm-level cap).
+  * ``fund_overview`` — the shared account (NAV / cash / connection), one card
+    per member sleeve (allocation, capital, NAV, P&L, state, schedule, set-up
+    hints), aggregate NAV/drawdown off the ACCOUNT book, the unallocated
+    residual (Σ sleeves vs account), reset readiness, the realized N×N
+    return-correlation matrix (suppressed below a minimum sample) and rolling-
+    Sharpe *recommendations*.
+  * ``evaluate_fund_drawdown`` — account-equity drawdown past
+    ``fund_dd_halt_pct`` halts every member (the firm-level cap).
   * ``halt_fund`` / ``resume_fund`` — the manual fund kill switch. Resume is
-    the full-restart acknowledgment: it rebases the fund + member-account
-    peaks to current equity so the breakers re-arm from today's level (an
-    un-rebased resume would be re-halted by the next sweep, forever).
+    the full-restart acknowledgment: it rebases the fund + sleeve peaks to
+    current equity so the breakers re-arm from today's level (an un-rebased
+    resume would be re-halted by the next sweep, forever).
 
-The realized correlation is "measure, don't assume": Accounts 1 & 2 are both
-equity, so expect their pairwise number to run high — that is information.
+Before the shared account is chosen (``fund.broker_account`` is None) the fund
+is "not configured": members are listed with their (still empty) sleeves and
+nothing trades — Reset funds the sleeves once the account is in place.
 """
 from __future__ import annotations
 
@@ -25,22 +29,23 @@ from django.utils import timezone
 
 from apps.schedules.triggers import describe_cron
 
+from . import sleeves
 from .models import AutonomousFund, AutopilotRun, StrategyAutopilot
 from .validation import validation_status
 
 log = logging.getLogger(__name__)
 
-MIN_CORRELATION_SAMPLE = 8  # weekly returns; below this the 3×3 matrix is noise.
+MIN_CORRELATION_SAMPLE = 8  # weekly returns; below this the N×N matrix is noise.
 
 
-def _account_setup(strategy, ap) -> dict:
-    """Why an account is (not) live + the single next step, so the fund cards
-    can be honest instead of showing a schedule that will never fire.
+def _account_setup(strategy, ap, *, fund_configured: bool) -> dict:
+    """Why a member is (not) live + the single next step, so the fund cards can
+    be honest instead of showing a schedule that will never fire.
 
     Returns ``{validation_passed, can_enable, setup_hint}``. ``setup_hint`` is a
     short, action-oriented line (``None`` once enabled). ``can_enable`` is True
-    only when the §9 gate passes AND a paper broker link exists AND it isn't
-    already on — i.e. one click on the Autopilot page away from trading.
+    only when the §9 gate passes AND the fund has its shared account AND it
+    isn't already on — i.e. one click on the member's panel away from trading.
     """
     from apps.brokers.models import StrategyBrokerLink
 
@@ -52,14 +57,16 @@ def _account_setup(strategy, ap) -> dict:
         strategy=strategy, is_active=True
     ).exists()
 
-    if ap is None:
-        hint = "Open Autopilot to set this account up."
+    if not fund_configured and not has_link:
+        hint = "Choose the fund's paper account (Fund settings) to make members enable-able."
+    elif ap is None:
+        hint = "Open the strategy's panel to set up its autopilot."
     elif not passed:
         hint = "Run a validation backtest to unlock the enable toggle."
     elif not has_link:
-        hint = "Connect a paper broker account to enable."
+        hint = "Choose the fund's paper account to enable."
     else:
-        hint = "Validated — open Autopilot and enable."
+        hint = "Validated — open the strategy's panel and enable."
     return {
         "validation_passed": passed,
         "can_enable": ap is not None and passed and has_link,
@@ -68,22 +75,9 @@ def _account_setup(strategy, ap) -> dict:
 
 
 def account_equity(strategy) -> Decimal | None:
-    """Current marked NAV of the strategy's linked broker book (real fills)."""
-    from apps.brokers.models import StrategyBrokerLink
-
-    from .valuation import value_portfolio
-
-    link = (
-        StrategyBrokerLink.objects.filter(strategy=strategy, is_active=True)
-        .select_related("broker_account__portfolio")
-        .first()
-    )
-    if link is None or link.broker_account.portfolio is None:
-        return None
-    try:
-        return Decimal(str(value_portfolio(link.broker_account.portfolio).total_value))
-    except Exception:  # noqa: BLE001
-        return None
+    """Current marked NAV of the strategy's book of record: its fund sleeve (P14)
+    or, for a legacy stand-alone link, its whole broker account."""
+    return sleeves.book_value(sleeves.member_book(strategy))
 
 
 def _equity_series(strategy) -> list[float]:
@@ -159,23 +153,70 @@ def correlation_matrix(strategies) -> dict:
     return {"available": True, "matrix": matrix}
 
 
+def _account_dict(fund: AutonomousFund) -> dict | None:
+    """The shared account as the Fund tab shows it (None while unconfigured)."""
+    acc = fund.broker_account
+    if acc is None:
+        return None
+    from apps.brokers.capabilities import get_capabilities
+
+    cap = get_capabilities(acc.broker)
+    pf = acc.portfolio
+    nav = sleeves.book_value(pf)
+    return {
+        "id": acc.id,
+        "label": acc.label,
+        "broker": acc.broker,
+        "broker_display": cap.display_name if cap else acc.broker,
+        "mode": acc.mode,
+        "connection_status": acc.connection_status,
+        "last_synced_at": acc.last_synced_at.isoformat() if acc.last_synced_at else None,
+        "cash": str(pf.cash_balance),
+        "nav": str(nav) if nav is not None else None,
+        "positions_count": pf.positions.count(),
+        "portfolio_id": pf.id,
+    }
+
+
+def fund_equity(fund: AutonomousFund) -> Decimal:
+    """Fund NAV: the shared account's marked book (the truth). Falls back to the
+    sum of the members' books while the fund is unconfigured (legacy layout)."""
+    book = sleeves.account_book(fund)
+    if book is not None:
+        return sleeves.book_value(book) or Decimal("0")
+    total = Decimal("0")
+    for s in fund.strategies.all():
+        eq = account_equity(s)
+        if eq is not None:
+            total += eq
+    return total
+
+
 def fund_overview(fund: AutonomousFund) -> dict:
-    """The 3-account rollup for ``/api/fund/``."""
+    """The rollup for ``/api/fund/``."""
     # Local import — portfolios → backtests would otherwise be a cycle (mirrors
     # validation.py). phase-09a §6.3: drives the card's Run/Re-run verb.
     from apps.backtests.models import Backtest
 
-    strategies = list(fund.strategies.select_related("autopilot").all())
-    per_account = []
-    agg_nav = Decimal("0")
-    for s in strategies:
+    configured = fund.is_configured
+    active_sleeves = list(fund.active_sleeves())
+    strategies = [sl.strategy for sl in active_sleeves]
+    members = []
+    sleeve_nav_total = Decimal("0")
+    for sl in active_sleeves:
+        s = sl.strategy
         ap = getattr(s, "autopilot", None)
         eq = account_equity(s)
         if eq is not None:
-            agg_nav += eq
+            sleeve_nav_total += eq
         series = _equity_series(s)
         rets = _returns(series)
-        per_account.append({
+        initial = Decimal(sl.initial_capital_usd or 0)
+        pnl_pct = (
+            round(float((eq - initial) / initial * 100), 3)
+            if (eq is not None and initial > 0) else None
+        )
+        members.append({
             "strategy_id": s.id,
             "name": s.name,
             "kind": s.kind,
@@ -189,42 +230,73 @@ def fund_overview(fund: AutonomousFund) -> dict:
             # Run vs Re-run verb. Any linked backtest (any status) counts — distinct
             # from validation_passed, which gates the §9 enable toggle.
             "has_backtest": Backtest.objects.filter(strategy=s).exists(),
+            # P14 sleeve: the slice of the shared pool this strategy trades.
+            "allocation_pct": str(sl.allocation_pct),
+            "initial_capital": str(initial),
+            "cash": str(sl.portfolio.cash_balance),
+            "positions_count": sl.portfolio.positions.count(),
+            "pnl_pct": pnl_pct,
+            "sleeve_portfolio_id": sl.portfolio_id,
             # Why it's not live + the one next step (drives the card CTA/reason).
-            **_account_setup(s, ap),
+            **_account_setup(s, ap, fund_configured=configured),
         })
-    # Recommendation (NOT auto-reallocation — paper accounts can't share cash).
+    # Members that were removed while still holding positions — their closes
+    # keep attributing here until flat; surfaced so it's never a mystery why the
+    # account still holds a name no card claims.
+    leaving = []
+    for sl in fund.sleeves.filter(is_active=False).select_related("strategy", "portfolio"):
+        n = sl.portfolio.positions.count()
+        if n:
+            leaving.append({
+                "strategy_id": sl.strategy_id, "name": sl.strategy.name, "positions_count": n,
+            })
+
+    # Recommendation (NOT auto-reallocation — slices float by design).
     recs = []
     sharpes = [
-        (p["name"], p["rolling_sharpe"])
-        for p in per_account if p["rolling_sharpe"] is not None
+        (m["name"], m["rolling_sharpe"])
+        for m in members if m["rolling_sharpe"] is not None
     ]
     if len(sharpes) >= 2:
         worst = min(sharpes, key=lambda x: x[1])
         if worst[1] is not None and worst[1] < 0:
             recs.append(
                 f"{worst[0]} has a negative rolling Sharpe — "
-                "consider reducing its mandate."
+                "consider reducing its allocation at the next reset."
             )
+    agg_nav = fund_equity(fund)
     # Current drawdown-from-peak (what the halt breaker sees) — surfaced so the
     # dashboard can show WHY the fund is halted / how close it is to the limit.
     peak = fund.peak_equity_usd
     drawdown_pct = None
     if peak and peak > 0 and agg_nav > 0:
         drawdown_pct = round(max(0.0, float((peak - agg_nav) / peak * 100)), 3)
+    unallocated = (agg_nav - sleeve_nav_total).quantize(Decimal("0.01")) if configured else None
+    allocation_total = sum((Decimal(sl.allocation_pct) for sl in active_sleeves), Decimal("0"))
     return {
         "fund_id": fund.id,
         "name": fund.name,
         "state": fund.state,
+        "is_configured": configured,
+        "broker_account": _account_dict(fund),
         # "active" only means "not halted" — a fund can be active with every
-        # account disabled (nothing trades). is_live is the "actually running"
-        # signal: not halted AND ≥1 account enabled. (Drives the dashboard banner.)
-        "is_live": fund.state == AutonomousFund.STATE_ACTIVE
-        and any(p["is_enabled"] for p in per_account),
+        # member disabled (nothing trades). is_live is the "actually running"
+        # signal: configured AND not halted AND ≥1 member enabled.
+        "is_live": configured
+        and fund.state == AutonomousFund.STATE_ACTIVE
+        and any(m["is_enabled"] for m in members),
         "aggregate_nav": str(agg_nav),
         "peak_equity": str(fund.peak_equity_usd) if fund.peak_equity_usd else None,
         "drawdown_pct": drawdown_pct,
         "fund_dd_halt_pct": str(fund.fund_dd_halt_pct),
-        "per_account": per_account,
+        "members": members,
+        "members_count": len(members),
+        "allocation_total_pct": str(allocation_total),
+        "unallocated_nav": str(unallocated) if unallocated is not None else None,
+        "attribution_gap": sleeves.attribution_gap(fund) if configured else None,
+        "leaving": leaving,
+        "reset": sleeves.reset_readiness(fund),
+        "inflight_orders": sleeves.inflight_orders(fund).count() if configured else 0,
         "correlation": correlation_matrix(strategies),
         "recommendations": recs,
     }
@@ -232,14 +304,9 @@ def fund_overview(fund: AutonomousFund) -> dict:
 
 def evaluate_fund_drawdown(fund: AutonomousFund) -> dict:
     """Aggregate-equity drawdown breaker: past ``fund_dd_halt_pct`` halts every
-    member account (the firm-level cap over the per-pod caps). Cold-start seeds
-    the fund peak."""
-    strategies = list(fund.strategies.all())
-    equity = Decimal("0")
-    for s in strategies:
-        eq = account_equity(s)
-        if eq is not None:
-            equity += eq
+    member (the firm-level cap over the per-sleeve caps). Cold-start seeds the
+    fund peak. Equity is the shared ACCOUNT's marked book."""
+    equity = fund_equity(fund)
     if equity <= 0:
         return {"skipped": "no equity"}
     peak = fund.peak_equity_usd
@@ -261,7 +328,7 @@ def evaluate_fund_drawdown(fund: AutonomousFund) -> dict:
 
 
 def halt_fund(fund: AutonomousFund, *, reason: str = "manual") -> int:
-    """Fund kill switch: halt every member account at once. Returns the count."""
+    """Fund kill switch: halt every member at once. Returns the count."""
     fund.state = AutonomousFund.STATE_HALTED
     fund.save(update_fields=["state", "updated_at"])
     n = StrategyAutopilot.objects.filter(
@@ -269,7 +336,7 @@ def halt_fund(fund: AutonomousFund, *, reason: str = "manual") -> int:
     ).exclude(state=StrategyAutopilot.STATE_HALTED).update(
         state=StrategyAutopilot.STATE_HALTED, updated_at=timezone.now(),
     )
-    log.warning("fund halted fund=%s reason=%s accounts=%s", fund.id, reason, n)
+    log.warning("fund halted fund=%s reason=%s members=%s", fund.id, reason, n)
     return n
 
 
@@ -280,21 +347,17 @@ def resume_fund(fund: AutonomousFund) -> dict:
     equity stays pinned below the stored peak and an un-rebased resume would be
     re-halted by the next guardrail sweep, forever. Resuming therefore means
     "I acknowledge the loss — restart from here": the fund peak is rebased to
-    current aggregate equity AND every member account is un-halted with its own
-    peak rebased to its book's current equity, so each drawdown breaker re-arms
-    at the configured distance below TODAY's level. Fail-safety is preserved —
-    a fresh breach from the acknowledged level halts again. A peak that can't
-    be valued right now is cleared instead (None), which re-seeds at the next
+    current account equity AND every member is un-halted with its own peak
+    rebased to its sleeve's current equity, so each drawdown breaker re-arms at
+    the configured distance below TODAY's level. Fail-safety is preserved — a
+    fresh breach from the acknowledged level halts again. A peak that can't be
+    valued right now is cleared instead (None), which re-seeds at the next
     evaluation (same effect: drawdown restarts at 0).
     """
     from . import autopilot_risk
 
     strategies = list(fund.strategies.select_related("autopilot").all())
-    equity = Decimal("0")
-    for s in strategies:
-        eq = account_equity(s)
-        if eq is not None:
-            equity += eq
+    equity = fund_equity(fund)
     fund.state = AutonomousFund.STATE_ACTIVE
     fund.peak_equity_usd = equity if equity > 0 else None
     fund.save(update_fields=["state", "peak_equity_usd", "updated_at"])
@@ -309,12 +372,12 @@ def resume_fund(fund: AutonomousFund) -> dict:
         if ap.state != StrategyAutopilot.STATE_ACTIVE:
             ap.state = StrategyAutopilot.STATE_ACTIVE
             accounts_resumed += 1
-        # A halted account skipped its fires; recompute the next one (no-op /
+        # A halted member skipped its fires; recompute the next one (no-op /
         # clears when disabled — reschedule() guards internally).
         ap.reschedule()
         ap.save(update_fields=["state", "peak_equity_usd", "next_run_at", "updated_at"])
     log.warning(
-        "fund resumed fund=%s peak_rebased_to=%s accounts_resumed=%s",
+        "fund resumed fund=%s peak_rebased_to=%s members_resumed=%s",
         fund.id, fund.peak_equity_usd, accounts_resumed,
     )
     return {

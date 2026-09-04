@@ -10,11 +10,16 @@ from .api_autopilot import (
     StrategyExecutedView,
 )
 from .api_fund import (
+    FundAccountsView,
+    FundCandidatesView,
     FundCompositeView,
+    FundFlattenView,
     FundHaltView,
     FundHistoryView,
-    FundOverviewView,
+    FundMembersView,
+    FundResetView,
     FundResumeView,
+    FundView,
 )
 from .manual_book_views import (
     PortfolioCashView,
@@ -137,7 +142,14 @@ urlpatterns = [
          name="strategy-autopilot-history"),
     path("strategies/<int:pk>/executed/", StrategyExecutedView.as_view(),
          name="strategy-executed"),
-    path("fund/", FundOverviewView.as_view(), name="fund-overview"),
+    path("fund/", FundView.as_view(), name="fund-overview"),
+    # P14 — everything the Fund tab manages: roster + allocations, pickable
+    # strategies / paper accounts, reset (fresh start) and flatten.
+    path("fund/members/", FundMembersView.as_view(), name="fund-members"),
+    path("fund/candidates/", FundCandidatesView.as_view(), name="fund-candidates"),
+    path("fund/accounts/", FundAccountsView.as_view(), name="fund-accounts"),
+    path("fund/reset/", FundResetView.as_view(), name="fund-reset"),
+    path("fund/flatten/", FundFlattenView.as_view(), name="fund-flatten"),
     # P10 §B5: the pods' validation curves combined vs SPY-TR/QQQ-TR.
     path("fund/composite/", FundCompositeView.as_view(), name="fund-composite"),
     # P10 §C2: persisted NAV history (per-account + aggregate + SPY/QQQ, TWR).

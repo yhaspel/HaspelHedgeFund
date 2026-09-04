@@ -30,6 +30,7 @@ from apps.backtests.metrics import (
 from apps.backtests.models import Backtest, BacktestDay, BacktestFold, BacktestMetrics
 from apps.backtests.serializers import BacktestCreateSerializer
 from apps.data.models import DailyBar
+from apps.portfolios import sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     Portfolio,
@@ -389,7 +390,7 @@ def test_fund_composite_endpoint(db, client, user):
     rates = [0.01, 0.02]
     for j, daily in enumerate(rates):
         s = _strategy(user, name=f"pod{j}")
-        fund.strategies.add(s)
+        sleeves.create_sleeve(fund, s, 50)
         bt, _, _ = _make_done_backtest_with_days(
             user, universe=["AAA"], n_days=6, daily=daily,
         )
@@ -415,7 +416,7 @@ def test_fund_composite_custom_weights(db, client, user):
     sids = []
     for j, daily in enumerate([0.01, 0.02]):
         s = _strategy(user, name=f"podw{j}")
-        fund.strategies.add(s)
+        sleeves.create_sleeve(fund, s, 50)
         bt, _, _ = _make_done_backtest_with_days(
             user, universe=["AAA"], n_days=6, daily=daily,
         )
@@ -458,7 +459,7 @@ def _two_pod_fund(user):
     fund = AutonomousFund.objects.create(owner=user, name="Fund")
     for j, daily in enumerate([0.01, 0.02]):
         s = _strategy(user, name=f"lev{j}")
-        fund.strategies.add(s)
+        sleeves.create_sleeve(fund, s, 50)
         bt, _, _ = _make_done_backtest_with_days(
             user, universe=["AAA"], n_days=6, daily=daily,
         )
@@ -494,7 +495,7 @@ def test_fund_composite_carries_calendar_and_subperiod(db, client, user):
 def test_fund_composite_excludes_price_only_records(db, client, user):
     fund = AutonomousFund.objects.create(owner=user, name="Fund")
     s = _strategy(user, name="pold")
-    fund.strategies.add(s)
+    sleeves.create_sleeve(fund, s, 50)
     bt, _, _ = _make_done_backtest_with_days(user, universe=["AAA"], n_days=6)
     bt.strategy = s
     bt.data_era = Backtest.ERA_PRICE_ONLY

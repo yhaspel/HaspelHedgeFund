@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { Observable } from 'rxjs';
 import { FundStore } from '../../abstraction/fund.store';
 import { MacroStore } from '../../abstraction/macro.store';
-import { FundAccountCard, FundOverview } from '../../core/models/autopilot.model';
+import { FundMemberCard, FundOverview } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
@@ -11,9 +12,14 @@ import { PopoverComponent } from '../shared/popover.component';
 import { RegimeStripComponent } from '../dashboard/regime-strip.component';
 import { FundCompositeComponent } from './fund-composite.component';
 import { FundHistoryComponent } from './fund-history.component';
+import { FundMembersEditorComponent } from './fund-members-editor.component';
+import { FundSettingsComponent } from './fund-settings.component';
 
-// P7 §14 — the headline fund view: 3 account cards + aggregate panel +
-// realized correlation matrix + the fund-level kill switch. Paper-only.
+// P7 §14 / P14 — the headline fund view AND the one place the fund is managed:
+// the shared paper account (settings), the member strategies + their share of
+// the pool (roster editor), one card per member sleeve, the aggregate panel,
+// reset / flatten, the realized correlation matrix and the fund-level kill
+// switch. Paper-only.
 @Component({
   selector: 'hf-fund-dashboard',
   standalone: true,
@@ -26,6 +32,8 @@ import { FundHistoryComponent } from './fund-history.component';
     RegimeStripComponent,
     FundCompositeComponent,
     FundHistoryComponent,
+    FundMembersEditorComponent,
+    FundSettingsComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund' }]">
@@ -37,8 +45,13 @@ import { FundHistoryComponent } from './fund-history.component';
               <span class="dot"></span>{{ f.state }}
             </span>
             @if (f.state === 'active') {
-              <button class="btn btn-danger" (click)="halt()" [disabled]="busy()">
-                Halt all 3 accounts
+              <button
+                class="btn btn-danger"
+                (click)="halt()"
+                [disabled]="busy() || !f.members_count"
+                [title]="f.members_count ? '' : 'No strategies in the fund yet'"
+              >
+                {{ haltLabel() }}
               </button>
             }
             @if (f.state === 'halted') {
@@ -46,30 +59,63 @@ import { FundHistoryComponent } from './fund-history.component';
                 Clear fund halt
               </button>
             }
+            <button
+              class="btn"
+              (click)="toggleManage()"
+              [attr.aria-expanded]="manageOpen()"
+              aria-controls="fund-manage"
+            >
+              {{ manageOpen() ? 'Hide settings' : 'Manage fund' }}
+            </button>
           </div>
         }
       </div>
 
       <p class="disclaimer">Educational use only — not investment advice. Paper trading only.</p>
 
-      @if (notLive()) {
-        <div class="banner-warn">
-          ⚠ This fund is <b>active</b> but no strategies are enabled — nothing will trade yet. Use
-          <b>Set up</b> on a card below, or
-          <a [routerLink]="setupLink()" class="banner-link">open a strategy’s Autopilot page</a>, to
-          validate and enable it.
-        </div>
+      <!-- No fund yet: the set-up flow IS the page. -->
+      @if (!fund() && !loading()) {
+        <hf-empty-state
+          message="No autonomous fund yet"
+          detail="Choose the one paper account the fund will trade, then pick the strategies that share its pool."
+        />
+        <hf-fund-settings [fund]="null" (saved$)="onSaved($event)" />
       }
 
       @if (fund(); as f) {
-        <!-- Aggregate panel -->
+        @if (!f.is_configured) {
+          <div class="banner-warn" role="status">
+            ⚠ The fund has <b>no paper account yet</b> — nothing can trade. Choose the shared
+            account under <b>Manage fund</b>, add your strategies, then <b>Reset</b> to split its
+            cash between them.
+          </div>
+        } @else if (notLive()) {
+          <div class="banner-warn" role="status">
+            ⚠ This fund is <b>active</b> but no strategies are enabled — nothing will trade yet.
+            @if (f.members_count) {
+              Use <b>Set up</b> on a card below, or
+              <a [routerLink]="setupLink()" class="banner-link">open a strategy’s panel</a>, to
+              validate and enable it.
+            } @else {
+              Add strategies under <b>Manage fund</b> to give the pool something to trade.
+            }
+          </div>
+        }
+
+        <!-- Aggregate panel: the shared ACCOUNT is the truth. -->
         <section class="card agg">
           <div class="kpi">
-            <div class="kpi-label">Aggregate NAV</div>
+            <div class="kpi-label">{{ f.is_configured ? 'Account NAV' : 'Aggregate NAV' }}</div>
             <div class="kpi-value">
               {{ +f.aggregate_nav | currency: 'USD' : 'symbol' : '1.0-0' }}
             </div>
           </div>
+          @if (f.broker_account; as acc) {
+            <div class="kpi">
+              <div class="kpi-label">Cash</div>
+              <div class="kpi-value">{{ +acc.cash | currency: 'USD' : 'symbol' : '1.0-0' }}</div>
+            </div>
+          }
           <div class="kpi">
             <div class="kpi-label">Drawdown</div>
             <div class="kpi-value" [class.dd-breach]="ddBreached()">
@@ -86,20 +132,114 @@ import { FundHistoryComponent } from './fund-history.component';
               {{ f.peak_equity ? (+f.peak_equity | currency: 'USD' : 'symbol' : '1.0-0') : '—' }}
             </div>
           </div>
+          @if (unallocated() !== null) {
+            <div class="kpi">
+              <div class="kpi-label">Unallocated</div>
+              <div class="kpi-value" [class.muted-val]="unallocated() === 0">
+                {{ unallocated()! | currency: 'USD' : 'symbol' : '1.0-0' }}
+              </div>
+            </div>
+          }
         </section>
 
-        <!-- Macro regime strip (HMM/Markov consensus + investment clock).
-             Lived on the old manual dashboard; restored to the landing page
-             when P10 §C1 made / the fund — the regime gate (P10 Part F) makes
-             it fund-level context, not manual-book detail. -->
+        <!-- The shared account row. -->
+        @if (f.broker_account; as acc) {
+          <section class="card acct-row">
+            <div>
+              <b>Trading account:</b> {{ acc.label }}
+              <span class="muted">
+                · {{ acc.broker_display }} · {{ acc.mode }} ·
+                <span
+                  class="pill"
+                  [class.ok]="acc.connection_status === 'active'"
+                  [class.err]="acc.connection_status !== 'active'"
+                  ><span class="dot"></span>{{ acc.connection_status }}</span
+                >
+                · {{ acc.positions_count }} position{{ acc.positions_count === 1 ? '' : 's' }}
+                @if (f.inflight_orders) {
+                  · {{ f.inflight_orders }} order{{ f.inflight_orders === 1 ? '' : 's' }} in flight
+                }
+              </span>
+            </div>
+            <div class="manual-actions">
+              <a class="btn btn-sm" [routerLink]="['/broker-accounts', acc.id]">Account →</a>
+            </div>
+          </section>
+        }
+
+        <!-- Macro regime strip (HMM/Markov consensus + investment clock). -->
         <hf-regime-strip [snapshot]="macro.snapshot()" />
 
-        <!-- 3 account cards -->
+        <!-- Manage: settings + roster + reset. Open by default until the fund is configured
+             and has members. -->
+        @if (manageOpen()) {
+          <div id="fund-manage" class="manage">
+            <hf-fund-settings [fund]="f" (saved$)="onSaved($event)" />
+            <hf-fund-members-editor [fund]="f" (saved$)="onSaved($event)" />
+
+            <!-- Reset / flatten: the fresh-start controls. -->
+            <section class="card reset-card">
+              <h2>Fresh start</h2>
+              <p class="muted lead">
+                <b>Reset</b> splits the account's cash between the members by their share and
+                re-arms every drawdown breaker from today. It needs a <b>flat</b> account — use
+                <b>Flatten</b> first to queue closing orders for every position (or reset the paper
+                account on the broker's side to a clean $100k and Sync).
+              </p>
+              <div class="reset-status" role="status">
+                @if (f.reset.ready) {
+                  <span class="pill ok"><span class="dot"></span>ready to reset</span>
+                  <span class="muted"
+                    >Account is flat; {{ f.members_count }} member{{
+                      f.members_count === 1 ? '' : 's'
+                    }}
+                    will be funded by their share.</span
+                  >
+                } @else {
+                  <span class="pill warn"><span class="dot"></span>not ready</span>
+                  <span class="muted">{{ resetReason() }}</span>
+                }
+              </div>
+              <div class="reset-actions">
+                <button
+                  class="btn"
+                  (click)="flatten()"
+                  [disabled]="busy() || !f.is_configured || !f.broker_account?.positions_count"
+                  [title]="f.broker_account?.positions_count ? '' : 'Nothing to flatten'"
+                >
+                  Flatten account
+                </button>
+                <button class="btn primary" (click)="reset()" [disabled]="busy() || !f.reset.ready">
+                  Reset fund
+                </button>
+                @if (actionNote()) {
+                  <span class="action-note">{{ actionNote() }}</span>
+                }
+                @if (actionError()) {
+                  <span class="action-error" role="alert">{{ actionError() }}</span>
+                }
+              </div>
+            </section>
+          </div>
+        }
+
+        <!-- Member cards: one per sleeve. -->
+        <div class="members-head">
+          <h2>Strategies · {{ f.members_count }}</h2>
+          @if (!manageOpen()) {
+            <button class="btn btn-sm" (click)="toggleManage()">Add / change strategies</button>
+          }
+        </div>
+        @if (!f.members_count) {
+          <p class="muted empty-members">
+            No strategies in the fund yet — pick them under <b>Manage fund</b>.
+          </p>
+        }
         <section class="cards">
-          @for (a of f.per_account; track a) {
+          @for (a of f.members; track a.strategy_id) {
             <div class="card acct">
               <div class="acct-head">
-                <a [routerLink]="['/strategies', a.strategy_id, 'autopilot']" class="acct-name">{{
+                <a [routerLink]="['/fund/strategies', a.strategy_id]" class="acct-name">{{
                   a.name
                 }}</a>
                 <!-- Enabled: a plain status pill. -->
@@ -146,10 +286,29 @@ import { FundHistoryComponent } from './fund-history.component';
                   </span>
                 }
               </div>
-              <div class="acct-kind">{{ a.kind }}</div>
+              <div class="acct-kind">
+                {{ a.kind }} · <b>{{ +a.allocation_pct | number: '1.0-2' }}%</b> of the pool
+              </div>
               <div class="acct-row">
-                <span>NAV</span
+                <span>Sleeve NAV</span
                 ><b>{{ a.nav ? (+a.nav | currency: 'USD' : 'symbol' : '1.0-0') : '—' }}</b>
+              </div>
+              <div class="acct-row">
+                <span>Capital / P&amp;L</span
+                ><b>
+                  {{ +a.initial_capital | currency: 'USD' : 'symbol' : '1.0-0' }}
+                  @if (a.pnl_pct !== null) {
+                    <span class="pnl" [class.up]="a.pnl_pct > 0" [class.down]="a.pnl_pct < 0"
+                      >{{ a.pnl_pct > 0 ? '+' : '' }}{{ a.pnl_pct | number: '1.1-1' }}%</span
+                    >
+                  }
+                </b>
+              </div>
+              <div class="acct-row">
+                <span>Cash · positions</span
+                ><b
+                  >{{ +a.cash | currency: 'USD' : 'symbol' : '1.0-0' }} · {{ a.positions_count }}</b
+                >
               </div>
               <div class="acct-row">
                 <span>Rolling Sharpe</span
@@ -181,6 +340,13 @@ import { FundHistoryComponent } from './fund-history.component';
                   >
                     {{ runningId() === a.strategy_id ? 'Queuing…' : 'Run now' }}
                   </button>
+                  <button
+                    class="btn btn-sm"
+                    (click)="disable(a)"
+                    [disabled]="memberBusy() === a.strategy_id"
+                  >
+                    Disable
+                  </button>
                   @if (queuedId() === a.strategy_id) {
                     <span class="queued">Cycle queued ✓</span>
                   }
@@ -192,12 +358,24 @@ import { FundHistoryComponent } from './fund-history.component';
                   @if (a.setup_hint) {
                     <p class="setup-hint">{{ a.setup_hint }}</p>
                   }
-                  <a
-                    class="btn btn-sm btn-primary"
-                    [routerLink]="['/strategies', a.strategy_id, 'autopilot']"
-                  >
-                    {{ a.can_enable ? 'Review & enable →' : 'Set up →' }}
-                  </a>
+                  <div class="acct-actions">
+                    @if (a.can_enable) {
+                      <button
+                        class="btn btn-sm primary"
+                        (click)="enable(a)"
+                        [disabled]="memberBusy() === a.strategy_id"
+                      >
+                        {{ memberBusy() === a.strategy_id ? 'Enabling…' : 'Enable' }}
+                      </button>
+                    }
+                    <a
+                      class="btn btn-sm"
+                      [class.btn-primary]="!a.can_enable"
+                      [routerLink]="['/fund/strategies', a.strategy_id]"
+                    >
+                      {{ a.can_enable ? 'Review →' : 'Set up →' }}
+                    </a>
+                  </div>
                 </div>
               }
               <!-- phase-09a — always-visible validation-backtest launcher (verb from
@@ -214,6 +392,17 @@ import { FundHistoryComponent } from './fund-history.component';
             </div>
           }
         </section>
+
+        @if (f.leaving.length) {
+          <p class="muted leaving" role="status">
+            Leaving the fund (closing orders in progress):
+            @for (l of f.leaving; track l.strategy_id) {
+              <b>{{ l.name }}</b> ({{ l.positions_count }} position{{
+                l.positions_count === 1 ? '' : 's'
+              }})
+            }
+          </p>
+        }
 
         <!-- P10 §C2/§C4: live NAV history (TWR) vs SPY/QQQ. -->
         <hf-fund-history />
@@ -241,9 +430,9 @@ import { FundHistoryComponent } from './fund-history.component';
           <h2>Realized cross-strategy correlation</h2>
           @if (!f.correlation.available) {
             <p class="muted">
-              Insufficient data — need ≥ {{ f.correlation.min_sample }} weekly returns per account
-              (measure, don't assume). Accounts 1 &amp; 2 are both equity, so expect their pairwise
-              number to run high once available.
+              Insufficient data — need ≥ {{ f.correlation.min_sample }} weekly returns per strategy
+              (measure, don't assume). Two equity strategies will run a high pairwise number once
+              available — that is information, not a bug.
             </p>
           }
           @if (f.correlation.available && f.correlation.matrix; as m) {
@@ -285,13 +474,6 @@ import { FundHistoryComponent } from './fund-history.component';
             </ul>
           </section>
         }
-      } @else {
-        @if (!loading()) {
-          <hf-empty-state
-            message="No autonomous fund yet"
-            detail="Run bootstrap_autonomous_fund to provision the 3-account fund."
-          />
-        }
       }
     </hf-app-shell>
   `,
@@ -301,13 +483,14 @@ import { FundHistoryComponent } from './fund-history.component';
         display: flex;
         gap: 32px;
         padding: 16px;
+        flex-wrap: wrap;
       }
       hf-regime-strip {
         display: block;
         margin-top: 12px;
       }
       /* These section cards hold content directly (no .card-bd), so the shell .card gives no inner padding — restore it. */
-      .card:not(.agg):not(.acct) {
+      .card:not(.agg):not(.acct):not(.acct-row):not(.manual-row) {
         padding: 16px;
       }
       .kpi-label {
@@ -318,11 +501,87 @@ import { FundHistoryComponent } from './fund-history.component';
         font-size: 22px;
         font-weight: 600;
       }
+      .kpi-value.muted-val {
+        color: var(--text-3);
+      }
+      .acct-row.card,
+      .acct-row {
+        font-size: 12.5px;
+      }
+      section.acct-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        margin: 12px 0 0;
+        border-top: none;
+      }
+      section.acct-row .pill {
+        vertical-align: middle;
+      }
+      .members-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 18px 0 4px;
+      }
+      .members-head h2,
+      .reset-card > h2 {
+        font-size: var(--fs-11);
+        line-height: 16px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-3);
+        font-weight: 500;
+        margin: 0;
+      }
+      .reset-card > h2 {
+        margin-bottom: 8px;
+      }
+      .reset-card .lead {
+        font-size: 12.5px;
+        margin: 0 0 10px;
+        max-width: 78ch;
+      }
+      .reset-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+      .reset-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .action-note {
+        color: var(--acc-long-fg);
+        font-size: 12px;
+      }
+      .action-error {
+        color: var(--acc-short-fg);
+        font-size: 12px;
+      }
+      .manage {
+        margin-top: 12px;
+      }
+      .empty-members {
+        margin: 6px 0 12px;
+        font-size: 12.5px;
+      }
+      .leaving {
+        font-size: 12.5px;
+        margin: 0 0 12px;
+      }
       .cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 12px;
-        margin: 12px 0;
+        margin: 8px 0 12px;
       }
       .acct {
         padding: 14px;
@@ -383,7 +642,10 @@ import { FundHistoryComponent } from './fund-history.component';
         font-size: 12px;
         margin: 2px 0 8px;
       }
-      .acct-row {
+      .acct-kind b {
+        color: var(--text-2);
+      }
+      .acct .acct-row {
         display: flex;
         justify-content: space-between;
         padding: 3px 0;
@@ -395,11 +657,23 @@ import { FundHistoryComponent } from './fund-history.component';
         text-align: right;
         max-width: 60%;
       }
+      .pnl {
+        font-size: 11px;
+        margin-left: 4px;
+        color: var(--text-3);
+      }
+      .pnl.up {
+        color: var(--acc-long-fg);
+      }
+      .pnl.down {
+        color: var(--acc-short-fg);
+      }
       .acct-actions {
         display: flex;
         align-items: center;
         gap: 8px;
         margin-top: 8px;
+        flex-wrap: wrap;
       }
       .btn-sm {
         padding: 2px 10px;
@@ -429,6 +703,9 @@ import { FundHistoryComponent } from './fund-history.component';
         padding-top: 8px;
         border-top: 1px solid var(--border);
       }
+      .acct-setup .acct-actions {
+        margin-top: 0;
+      }
       .acct-setup .setup-hint {
         color: var(--text-3);
         font-size: 11.5px;
@@ -449,7 +726,7 @@ import { FundHistoryComponent } from './fund-history.component';
         margin: 12px 0;
         font-size: 12.5px;
       }
-      .manual-row .muted {
+      .muted {
         color: var(--text-3);
       }
       .manual-actions {
@@ -515,12 +792,24 @@ export class FundDashboardPage implements OnInit {
   readonly busy = signal(false);
   readonly runningId = signal<number | null>(null);
   readonly queuedId = signal<number | null>(null);
+  readonly memberBusy = signal<number | null>(null);
+  readonly actionNote = signal<string | null>(null);
+  readonly actionError = signal<string | null>(null);
+  // The manage drawer (settings + roster + reset). Opens itself while the fund
+  // still needs setting up; the user toggles it afterwards.
+  private readonly manageToggled = signal<boolean | null>(null);
+  readonly manageOpen = computed(() => {
+    const t = this.manageToggled();
+    if (t !== null) return t;
+    const f = this.fund();
+    return !!f && (!f.is_configured || f.members_count === 0);
+  });
 
   // The disabled-badge tooltip copy. Mirrors the backend `setup_hint`; falls back
   // to the validation-gate message when the API didn't send one.
   readonly defaultHint = 'Run a validation backtest to unlock the enable toggle.';
 
-  hintFor(a: Pick<FundAccountCard, 'setup_hint'>): string {
+  hintFor(a: Pick<FundMemberCard, 'setup_hint'>): string {
     return a.setup_hint?.trim() || this.defaultHint;
   }
 
@@ -531,7 +820,7 @@ export class FundDashboardPage implements OnInit {
   });
 
   // "active" only means "not halted" — flag the case where the fund is active
-  // but every account is disabled, so nothing is actually trading.
+  // but every member is disabled, so nothing is actually trading.
   readonly notLive = computed(() => {
     const f = this.fund();
     return !!f && f.state === 'active' && !f.is_live;
@@ -543,13 +832,47 @@ export class FundDashboardPage implements OnInit {
     return !!f && f.drawdown_pct !== null && f.drawdown_pct >= +f.fund_dd_halt_pct;
   });
 
-  // Deep link the banner to the first account that still needs setup (else the
-  // first account), so the warning is one click from the fix.
+  // The kill switch names what it stops — the live member count, never a
+  // hard-coded "3" (the fund had shrunk to 2 accounts while the label said 3).
+  readonly haltLabel = computed(() => {
+    const n = this.fund()?.members_count ?? 0;
+    return n ? `Halt all ${n} strateg${n === 1 ? 'y' : 'ies'}` : 'Halt fund';
+  });
+
+  // Account NAV − Σ sleeve NAV (null while unconfigured).
+  readonly unallocated = computed(() => {
+    const f = this.fund();
+    if (!f || f.unallocated_nav === null) return null;
+    return Math.round(+f.unallocated_nav);
+  });
+
+  readonly resetReason = computed(() => {
+    const f = this.fund();
+    switch (f?.reset.reason) {
+      case 'no_account':
+        return 'Choose the fund’s paper account first.';
+      case 'positions':
+        return `The account still holds ${f!.reset.positions} position${
+          f!.reset.positions === 1 ? '' : 's'
+        } — flatten first.`;
+      case 'inflight_orders':
+        return `${f!.reset.inflight_orders} order${
+          f!.reset.inflight_orders === 1 ? ' is' : 's are'
+        } still in flight — wait for them to settle.`;
+      case 'no_members':
+        return 'Add at least one strategy first.';
+      default:
+        return '';
+    }
+  });
+
+  // Deep link the banner to the first member that still needs setup (else the
+  // first member), so the warning is one click from the fix.
   readonly setupLink = computed(() => {
     const f = this.fund();
-    const accts = f?.per_account ?? [];
-    const target = accts.find((a) => !a.is_enabled) ?? accts[0];
-    return target ? ['/strategies', target.strategy_id, 'autopilot'] : ['/fund'];
+    const members = f?.members ?? [];
+    const target = members.find((a) => !a.is_enabled) ?? members[0];
+    return target ? ['/fund/strategies', target.strategy_id] : ['/fund'];
   });
 
   ngOnInit(): void {
@@ -561,10 +884,20 @@ export class FundDashboardPage implements OnInit {
     }
   }
 
+  toggleManage(): void {
+    this.manageToggled.set(!this.manageOpen());
+  }
+
+  onSaved(_f: FundOverview): void {
+    // The store already holds the fresh overview; refresh dependents that read
+    // their own endpoints (history, composite) lazily on their next load.
+    this.actionError.set(null);
+  }
+
   async halt(): Promise<void> {
-    const n = this.fund()?.per_account.length ?? 0;
+    const n = this.fund()?.members_count ?? 0;
     const ok = await this.confirm.ask({
-      title: n ? `Halt all ${n} accounts?` : 'Halt the fund?',
+      title: n ? `Halt all ${n} strateg${n === 1 ? 'y' : 'ies'}?` : 'Halt the fund?',
       body: 'Every autopilot stops immediately. Open positions are unaffected — nothing new will trade until you clear the halt.',
       confirmLabel: 'Halt fund',
       danger: true,
@@ -578,7 +911,7 @@ export class FundDashboardPage implements OnInit {
   }
 
   // Clearing a drawdown halt is an acknowledgment, not a retry: the backend
-  // rebases the fund + account peaks to current equity so the breakers re-arm
+  // rebases the fund + sleeve peaks to current equity so the breakers re-arm
   // from today's level (otherwise the stale peak would re-halt on the next
   // sweep, forever). Spell that out before acting.
   async resumeFund(): Promise<void> {
@@ -587,8 +920,8 @@ export class FundDashboardPage implements OnInit {
     const ok = await this.confirm.ask({
       title: 'Clear halt & re-arm breakers?',
       body:
-        'Resuming acknowledges the drawdown: the fund and account peaks reset to current ' +
-        'equity, all accounts resume on their schedules, and the drawdown breakers re-arm' +
+        'Resuming acknowledges the drawdown: the fund and sleeve peaks reset to current ' +
+        'equity, all strategies resume on their schedules, and the drawdown breakers re-arm' +
         (limit ? ` — a fresh ${limit}% drawdown from here halts again.` : '.'),
       confirmLabel: 'Clear & re-arm',
     });
@@ -597,6 +930,104 @@ export class FundDashboardPage implements OnInit {
     this.store
       .resumeFund()
       .subscribe({ next: () => this.busy.set(false), error: () => this.busy.set(false) });
+  }
+
+  // Fresh start: the account's cash is split by allocation; every breaker re-arms.
+  async reset(): Promise<void> {
+    const f = this.fund();
+    if (!f) return;
+    const ok = await this.confirm.ask({
+      title: 'Reset the fund?',
+      body:
+        `The account's cash (${this.money(f.broker_account?.cash)}) is split between the ` +
+        `${f.members_count} member strateg${f.members_count === 1 ? 'y' : 'ies'} by their share, ` +
+        'every drawdown peak is rebased to today, and the fund halt (if any) is cleared. ' +
+        'Enabled strategies start trading their fresh slice on their next scheduled run.',
+      confirmLabel: 'Reset fund',
+      danger: true,
+      requireText: 'RESET',
+    });
+    if (!ok) return;
+    this.runAction(this.store.resetFund(), 'Fund reset — sleeves funded by their share.');
+  }
+
+  // Queue closing orders for every position in the shared account.
+  async flatten(): Promise<void> {
+    const f = this.fund();
+    if (!f) return;
+    const n = f.broker_account?.positions_count ?? 0;
+    const ok = await this.confirm.ask({
+      title: `Flatten ${n} position${n === 1 ? '' : 's'}?`,
+      body:
+        'Closing orders are queued for every position in the account (held for the next open if ' +
+        'the market is closed) and attributed to the strategies that hold them. Once the account ' +
+        'is flat you can Reset.',
+      confirmLabel: 'Flatten account',
+      danger: true,
+    });
+    if (!ok) return;
+    this.runAction(this.store.flattenFund(), 'Closing orders queued.');
+  }
+
+  enable(a: FundMemberCard): void {
+    this.memberBusy.set(a.strategy_id);
+    this.store.enable(a.strategy_id).subscribe({
+      next: () => this.reloadAfterMember(),
+      error: (e) => {
+        this.memberBusy.set(null);
+        this.actionError.set(e?.error?.detail ?? `Could not enable ${a.name}.`);
+      },
+    });
+  }
+
+  async disable(a: FundMemberCard): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Disable ${a.name}?`,
+      body: 'Its autopilot stops firing; its open positions are left as they are.',
+      confirmLabel: 'Disable',
+    });
+    if (!ok) return;
+    this.memberBusy.set(a.strategy_id);
+    this.store.disable(a.strategy_id).subscribe({
+      next: () => this.reloadAfterMember(),
+      error: (e) => {
+        this.memberBusy.set(null);
+        this.actionError.set(e?.error?.detail ?? `Could not disable ${a.name}.`);
+      },
+    });
+  }
+
+  private reloadAfterMember(): void {
+    this.store.loadFund().subscribe({
+      next: () => this.memberBusy.set(null),
+      error: () => this.memberBusy.set(null),
+    });
+  }
+
+  private runAction(obs: Observable<unknown>, note: string): void {
+    this.actionNote.set(null);
+    this.actionError.set(null);
+    this.busy.set(true);
+    obs.subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.actionNote.set(note);
+        setTimeout(() => this.actionNote.set(null), 4000);
+      },
+      error: (e: { error?: { detail?: string } }) => {
+        this.busy.set(false);
+        this.actionError.set(e?.error?.detail ?? 'The action failed.');
+      },
+    });
+  }
+
+  private money(v: string | undefined | null): string {
+    const n = v ? +v : 0;
+    return n.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    });
   }
 
   runNow(strategyId: number): void {

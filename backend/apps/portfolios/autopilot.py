@@ -7,18 +7,23 @@ which:
 
   1. vol-scales + caps the cycle's target weights (``autopilot_risk``) — the demo
      path is covered here because it skips ``confirmation.gate``;
-  2. recomputes the rebalance against the **account's real broker book**
-     (``rebalance.compute_orders``) so we trade the delta, not the full target;
+  2. recomputes the rebalance against the strategy's **real book of record**
+     (``rebalance.compute_orders``) so we trade the delta, not the full target.
+     P14: for a fund member that book is its SLEEVE — its attributed slice of
+     the fund's shared broker account (``sleeves.execution_context``) — so N
+     strategies size against their own capital and never touch each other's
+     holdings; a legacy strategy linked to an account of its own still uses the
+     whole account book;
   3. for each resulting order: creates a ``BrokerOrder`` with a deterministic
      ``client_order_id = rbo-<rebalance_order_id>`` (overriding the UUID4
-     default), holds it ``pending_open`` if the market is closed, otherwise gates
-     it (``risk_check`` wired in) and submits idempotently — honoring the daily
-     order/notional caps;
+     default) tagged with the sleeve, holds it ``pending_open`` if the market is
+     closed, otherwise gates it (``risk_check`` wired in) and submits
+     idempotently — honoring the daily order/notional caps;
   4. marks the target ``AUTOPILOT_SUBMITTED`` (terminal, out of ACTIVE_STATUSES).
 
 Paper-only and autonomous: the gate hard-blocks live × scheduled_job, and there
-is no human review step. Backward-compatible: a strategy with no active link is a
-no-op (the cycle stays ``done``).
+is no human review step. Backward-compatible: a strategy with no sleeve and no
+active link is a no-op (the cycle stays ``done``).
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from decimal import ROUND_DOWN, Decimal
 
 from django.utils import timezone
 
-from . import autopilot_risk, cost_model
+from . import autopilot_risk, cost_model, sleeves
 from .models import AutopilotRun, PortfolioTarget, RebalanceOrder
 from .rebalance import CurrentPosition, RebalanceConfig, compute_orders
 
@@ -68,15 +73,18 @@ def _active_link(strategy):
 def _finalize_target(target: PortfolioTarget) -> dict | None:
     """Terminal hook: bridge a finished council cycle to the broker, if linked.
 
-    No-op (returns None) for any strategy without an active link or whose
-    autopilot is absent / disabled / halted — so the default, non-autopilot
-    cycle path is byte-identical to pre-P7.
+    No-op (returns None) for any strategy without an execution context (no fund
+    sleeve on a configured fund, no legacy link) or whose autopilot is absent /
+    disabled / halted — so the default, non-autopilot cycle path is
+    byte-identical to pre-P7.
     """
     from .models import StrategyAutopilot
 
     strategy = target.strategy
-    link = _active_link(strategy)
-    if link is None:
+    ctx = sleeves.execution_context(strategy)
+    if ctx is None:
+        if sleeves.sleeve_for(strategy, include_inactive=True) is not None:
+            log.info("fund not configured / member leaving; no emission strategy=%s", strategy.pk)
         return None
     autopilot = getattr(strategy, "autopilot", None)
     if autopilot is None or not autopilot.is_enabled:
@@ -85,7 +93,7 @@ def _finalize_target(target: PortfolioTarget) -> dict | None:
         log.info("autopilot halted; skipping emission strategy=%s", strategy.pk)
         return None
     try:
-        return maybe_emit_and_submit(target, link=link, autopilot=autopilot)
+        return maybe_emit_and_submit(target, link=ctx.link, autopilot=autopilot, ctx=ctx)
     except Exception:  # noqa: BLE001 — a bridge failure must not flip the cycle to failed
         log.exception("autopilot bridge failed target=%s", target.pk)
         return None
@@ -105,17 +113,17 @@ def _resolve_run(autopilot) -> AutopilotRun | None:
     )
 
 
-def _seed_last_close(target: PortfolioTarget, account) -> dict[str, float]:
-    """Prices for the broker-book rebalance: the cycle's own limit prices
-    (computed by finalize_cycle from last closes) for target names, plus each
-    held broker position's avg_cost as a fallback for names being closed."""
+def _seed_last_close(target: PortfolioTarget, book) -> dict[str, float]:
+    """Prices for the book rebalance: the cycle's own limit prices (computed by
+    finalize_cycle from last closes) for target names, plus each held position's
+    avg_cost as a fallback for names being closed. ``book`` is the Portfolio
+    being rebalanced (the sleeve, or the whole account on the legacy path)."""
     last_close: dict[str, float] = {}
     for ro in target.orders.all():
         if ro.limit_price:
             last_close[ro.ticker] = float(ro.limit_price)
-    pf = getattr(account, "portfolio", None)
-    if pf is not None:
-        for pos in pf.positions.all():
+    if book is not None:
+        for pos in book.positions.all():
             last_close.setdefault(pos.ticker, float(pos.avg_cost or _FALLBACK_PRICE))
     return last_close
 
@@ -133,15 +141,29 @@ def _market_closed_for(account) -> bool:
     return not is_market_open()
 
 
-def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
-    """Convert the finished cycle's target into paper broker orders on ``link``'s
-    account and submit them (autonomously, paper-only). Returns an audit dict.
+def maybe_emit_and_submit(target: PortfolioTarget, *, link=None, autopilot, ctx=None) -> dict:
+    """Convert the finished cycle's target into paper broker orders on the
+    strategy's account and submit them (autonomously, paper-only). Returns an
+    audit dict. ``ctx`` (``sleeves.ExecutionContext``) names the account, the
+    book of record (sleeve or whole account) and the sleeve tag; it is resolved
+    from the strategy when omitted (``link`` alone is the legacy call shape).
     """
     from apps.brokers.capabilities import AUTH_NONE, get_capabilities
     from apps.brokers.market_calendar import next_open
 
     strategy = target.strategy
-    account = link.broker_account
+    if ctx is None:
+        ctx = sleeves.execution_context(strategy)
+    if ctx is None and link is not None:
+        ctx = sleeves.ExecutionContext(
+            account=link.broker_account, book=link.broker_account.portfolio,
+            sleeve=None, link=link,
+        )
+    if ctx is None:
+        return {"enabled": False, "skipped_all": "no execution context"}
+    account = ctx.account
+    book = ctx.book
+    sleeve = ctx.sleeve
     user = strategy.user
     run = _resolve_run(autopilot)
     if run is not None and run.status not in (AutopilotRun.PENDING, AutopilotRun.RUNNING):
@@ -200,8 +222,11 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
         if cap_notes:
             guardrail["sector_caps"] = cap_notes
 
-    # 2. Recompute the rebalance against the account's REAL broker book.
-    pf = account.portfolio
+    # 2. Recompute the rebalance against the strategy's REAL book of record —
+    #    its sleeve inside the shared fund account (P14), or the whole account
+    #    on the legacy one-strategy-per-account path. Sizing NAV is the BOOK's
+    #    marked value, so a sleeve trades its own capital only.
+    pf = book
     current = [
         CurrentPosition(
             ticker=p.ticker, quantity=float(p.quantity),
@@ -209,26 +234,35 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
         )
         for p in pf.positions.all()
     ]
-    last_close = _seed_last_close(target, account)
+    last_close = _seed_last_close(target, pf)
     from .valuation import value_portfolio
 
     try:
         nav = float(value_portfolio(pf).total_value)
-    except Exception:  # noqa: BLE001 — fall back to the link allocation if marks fail
-        nav = float(link.allocation_usd)
+    except Exception:  # noqa: BLE001 — fall back to the allocation if marks fail
+        nav = float(ctx.fallback_nav)
     if nav <= 0:
-        nav = float(link.allocation_usd) or 100000.0
+        # An unfunded sleeve (fund not reset yet) must not size off a phantom
+        # $100k — trade nothing and say why.
+        if sleeve is not None:
+            guardrail["unfunded_sleeve"] = True
+            log.warning("sleeve unfunded; no orders strategy=%s sleeve=%s", strategy.pk, sleeve.pk)
+            nav = 0.0
+        else:
+            nav = float(ctx.fallback_nav) or 100000.0
+    if sleeve is not None:
+        guardrail["sleeve"] = {"id": sleeve.pk, "nav": round(nav, 2)}
     cfg = RebalanceConfig(
         portfolio_value=max(1.0, nav),
         last_close=last_close,
         min_trade_notional_usd=float(strategy.min_trade_notional_usd),
         max_turnover_pct=float(strategy.max_turnover_pct),
     )
-    orders = compute_orders(current, weights, cfg)
+    orders = compute_orders(current, weights, cfg) if nav > 0 else []
 
     # Replace the cycle's strategy-book RebalanceOrders (computed against the
-    # un-enrolled strategy portfolio) with these broker-book deltas — for a
-    # linked strategy the broker book is the book of record.
+    # un-enrolled strategy portfolio) with these book deltas — for a fund member
+    # / linked strategy the sleeve / broker book is the book of record.
     target.orders.all().delete()
     rebalance_rows = RebalanceOrder.objects.bulk_create([
         RebalanceOrder(
@@ -246,11 +280,13 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
     cap = get_capabilities(account.broker)
     is_demo = cap is not None and cap.auth_kind == AUTH_NONE
     market_closed = _market_closed_for(account)
-    risk_check = autopilot_risk.make_risk_check(strategy)
+    risk_check = autopilot_risk.make_risk_check(strategy, book=pf)
 
     max_orders = int(autopilot.max_orders_per_day or 0)
     max_notional = Decimal(str(autopilot.max_notional_per_day_usd or 0))
-    n_today, notional_today = _prior_24h(account)
+    # Daily caps are per strategy: on the shared fund account count only THIS
+    # sleeve's orders, else a busy sibling would starve it.
+    n_today, notional_today = _prior_24h(account, sleeve=sleeve)
 
     try:
         provider = autopilot_risk._data_provider(user)
@@ -297,7 +333,7 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
                 broker_side=_BROKER_SIDE.get(ro.side, "buy"), quantity=venue_qty,
                 rebalance_order=ro, is_demo=is_demo,
                 market_closed=market_closed, risk_check=risk_check,
-                next_open_fn=next_open,
+                next_open_fn=next_open, sleeve=sleeve,
             )
         except _RiskRejected as exc:
             items.append({"ticker": ro.ticker, "rejected": str(exc)[:200]})
@@ -324,6 +360,7 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link, autopilot) -> dict:
     decision = {
         "enabled": True,
         "account": account.id,
+        "sleeve": sleeve.id if sleeve is not None else None,
         "mode": "demo" if is_demo else "paper",
         "market_closed": market_closed,
         "orders": len(rebalance_rows),
@@ -368,12 +405,20 @@ def flatten_to_cash(autopilot) -> dict:
     from apps.brokers.market_calendar import next_open
     from apps.brokers.models import BrokerOrder
 
-    account = autopilot.broker_account
-    if account is None or getattr(account, "portfolio", None) is None:
-        return {"flattened": 0}
     strategy = autopilot.strategy
+    # The book to liquidate is the strategy's OWN: its sleeve on the shared fund
+    # account (never the siblings' holdings), else the legacy whole account.
+    ctx = sleeves.execution_context(strategy)
+    if ctx is not None:
+        account, book, sleeve = ctx.account, ctx.book, ctx.sleeve
+    else:
+        account = autopilot.broker_account
+        book = getattr(account, "portfolio", None) if account is not None else None
+        sleeve = None
+    if account is None or book is None:
+        return {"flattened": 0}
     user = strategy.user
-    positions = list(account.portfolio.positions.all())
+    positions = list(book.positions.all())
     if not positions:
         return {"flattened": 0}
     current = [
@@ -392,7 +437,7 @@ def flatten_to_cash(autopilot) -> dict:
     cap = get_capabilities(account.broker)
     is_demo = cap is not None and cap.auth_kind == AUTH_NONE
     market_closed = _market_closed_for(account)
-    risk_check = autopilot_risk.make_risk_check(strategy)
+    risk_check = autopilot_risk.make_risk_check(strategy, book=book)
     placed = []
     for o in orders:
         cid = f"flat-{autopilot.id}-{o.ticker.upper()}"
@@ -404,7 +449,7 @@ def flatten_to_cash(autopilot) -> dict:
                 broker_side=_BROKER_SIDE.get(o.side, "sell"),
                 quantity=Decimal(str(round(o.quantity, 6))),
                 is_demo=is_demo, market_closed=market_closed,
-                risk_check=risk_check, next_open_fn=next_open,
+                risk_check=risk_check, next_open_fn=next_open, sleeve=sleeve,
             ))
         except Exception:  # noqa: BLE001 — one bad close can't abort the liquidation
             log.exception("flatten emit failed ticker=%s", o.ticker)
@@ -413,7 +458,8 @@ def flatten_to_cash(autopilot) -> dict:
 
 def _strategy_for_account(account):
     """The strategy whose active link points at this account (or the order's
-    cycle strategy). Used to resolve the risk_check on release."""
+    cycle strategy). Used to resolve the risk_check on release — legacy path;
+    a sleeve-tagged order resolves through its sleeve instead."""
     from apps.brokers.models import StrategyBrokerLink
 
     link = (
@@ -422,6 +468,19 @@ def _strategy_for_account(account):
         .first()
     )
     return link.strategy if link else None
+
+
+def _risk_check_for_order(order):
+    """The submit-time cap check for a held order: against its sleeve's book when
+    tagged (P14), else the account's linked strategy on the whole account."""
+    account = order.broker_account
+    sleeve = getattr(order, "sleeve", None)
+    if sleeve is not None:
+        return autopilot_risk.make_risk_check(sleeve.strategy, book=sleeve.portfolio)
+    strategy = _strategy_for_account(account)
+    if strategy is None:
+        return lambda o: []
+    return autopilot_risk.make_risk_check(strategy, book=account.portfolio)
 
 
 def submit_held_order(order) -> bool:
@@ -438,8 +497,7 @@ def submit_held_order(order) -> bool:
     cap = get_capabilities(account.broker)
     is_demo = cap is not None and cap.auth_kind == AUTH_NONE
     user = account.user
-    strategy = _strategy_for_account(account)
-    risk_check = autopilot_risk.make_risk_check(strategy) if strategy else (lambda o: [])
+    risk_check = _risk_check_for_order(order)
 
     # gate() only confirms a draft, so clear the local hold first.
     BrokerOrder.objects.filter(pk=order.pk).update(
@@ -483,16 +541,19 @@ class _RiskRejected(Exception):
 def _emit_one(
     *, account, user, client_order_id, ticker, broker_side, quantity,
     rebalance_order=None, is_demo, market_closed, risk_check, next_open_fn,
+    sleeve=None,
 ):
     """Create one BrokerOrder and route it: held ``pending_open`` if the market
     is closed, demo-filled, or gated (risk_check wired) + submitted idempotently.
-    Shared by the cycle bridge and the flatten-on-halt path — no side channel."""
+    Shared by the cycle bridge, the flatten paths and the fund reset — no side
+    channel. ``sleeve`` tags the order so its fills attribute to that sleeve."""
     from apps.brokers.models import BrokerOrder
 
     order = BrokerOrder.objects.create(
         broker_account=account,
         client_order_id=client_order_id,  # deterministic — overrides the UUID4 default
         rebalance_order=rebalance_order,
+        sleeve=sleeve,
         ticker=ticker.upper(),
         side=broker_side,
         quantity=quantity,
@@ -548,9 +609,10 @@ def _emit_one(
     return order
 
 
-def _prior_24h(account) -> tuple[int, Decimal]:
+def _prior_24h(account, *, sleeve=None) -> tuple[int, Decimal]:
     """(count, notional) of autopilot orders submitted on this account in the
-    trailing 24h — the daily-cap basis across staggered fires."""
+    trailing 24h — the daily-cap basis across staggered fires. With ``sleeve``
+    (a fund member on the shared account) only that sleeve's orders count."""
     import datetime as dt
 
     from apps.brokers.models import BrokerOrder
@@ -565,6 +627,8 @@ def _prior_24h(account) -> tuple[int, Decimal]:
         .exclude(status=BrokerOrder.STATUS_PENDING_OPEN)
         .distinct()
     )
+    if sleeve is not None:
+        prior = prior.filter(sleeve=sleeve)
     fallback = Decimal(str(_FALLBACK_PRICE))
     notional = sum(
         (

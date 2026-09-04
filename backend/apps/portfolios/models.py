@@ -38,10 +38,15 @@ class Portfolio(models.Model):
     KIND_STRATEGY = "strategy"
     KIND_MANUAL = "manual"
     KIND_BROKER = "broker"
+    # P14: a fund sleeve — one strategy's attributed slice (cash + positions)
+    # of the fund's SHARED broker account. Not real capital on its own: the
+    # broker book already holds it; sleeves are the attribution layer.
+    KIND_SLEEVE = "sleeve"
     KIND_CHOICES = [
         (KIND_STRATEGY, "Strategy"),
         (KIND_MANUAL, "Manual"),
         (KIND_BROKER, "Broker"),
+        (KIND_SLEEVE, "Fund sleeve"),
     ]
 
     user = models.ForeignKey(
@@ -1183,12 +1188,16 @@ class AutopilotRun(models.Model):
 
 
 class AutonomousFund(models.Model):
-    """The fund-level layer over the (up to 3) isolated paper accounts.
+    """The fund: ONE shared paper broker account whose pool is split between
+    the member strategies (P14, superseding ADR 0018's one-account-per-strategy
+    layout).
 
     Persisted (not a settings roster) because the fund kill switch needs a
     mutable, persisted halt flag the ``/api/fund/halt/`` endpoint writes and the
-    guardrail sweep reads. The roster is an M2M of strategies (one fund per
-    strategy). See ADR 0018."""
+    guardrail sweep reads. Membership is the ``FundSleeve`` through model — each
+    member carries its allocation % and its sleeve ledger (the strategy's
+    attributed slice of the shared account). ``broker_account`` is the shared
+    pool; ``None`` means the fund is not configured yet (nothing can trade)."""
 
     STATE_ACTIVE = "active"
     STATE_HALTED = "halted"
@@ -1198,10 +1207,15 @@ class AutonomousFund(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="funds",
     )
-    strategies = models.ManyToManyField(
-        PortfolioStrategy, related_name="funds", blank=True,
+    # P14: the single shared paper account every member sleeve trades in.
+    broker_account = models.ForeignKey(
+        "brokers.BrokerAccount", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="funds",
     )
-    # Whole-percent fund-wide drawdown halt (tighter than any single account).
+    strategies = models.ManyToManyField(
+        PortfolioStrategy, through="FundSleeve", related_name="funds", blank=True,
+    )
+    # Whole-percent fund-wide drawdown halt (tighter than any single sleeve).
     fund_dd_halt_pct = models.DecimalField(
         max_digits=5, decimal_places=2, default=Decimal("6"),
     )
@@ -1214,3 +1228,57 @@ class AutonomousFund(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"fund {self.name} ({self.state})"
+
+    @property
+    def is_configured(self) -> bool:
+        """A shared account is chosen — the precondition for any sleeve to trade."""
+        return self.broker_account_id is not None
+
+    def active_sleeves(self):
+        return self.sleeves.filter(is_active=True).select_related(
+            "strategy", "strategy__autopilot", "portfolio",
+        ).order_by("id")
+
+
+class FundSleeve(models.Model):
+    """P14 — one strategy's slice of the fund's shared broker account.
+
+    The sleeve ``portfolio`` (``kind="sleeve"``) is the attribution ledger: its
+    cash is the capital allocated to the strategy, its positions are the fills
+    of the broker orders this strategy emitted (``BrokerOrder.sleeve``). The
+    bridge sizes the strategy's target against the SLEEVE's NAV and trades the
+    delta against the SLEEVE's positions, so N strategies can share one account
+    without touching each other's holdings. Slices float with their own P&L:
+    ``allocation_pct`` is applied to the account's cash only at set-up / reset
+    (``initial_capital_usd`` records what that came to); the account book stays
+    the truth, and Σ sleeves vs the account is the "unallocated" residual.
+
+    ``is_active=False`` marks a member that was removed while still holding
+    positions — its closing orders keep attributing fills here until flat.
+    """
+
+    fund = models.ForeignKey(AutonomousFund, on_delete=models.CASCADE, related_name="sleeves")
+    strategy = models.OneToOneField(
+        PortfolioStrategy, on_delete=models.CASCADE, related_name="fund_sleeve",
+    )
+    portfolio = models.OneToOneField(
+        Portfolio, on_delete=models.PROTECT, related_name="fund_sleeve",
+    )
+    # Whole percent of the pool (33.33 = a third). Active sleeves sum to 100.
+    allocation_pct = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    # What allocation_pct came to in dollars at the last set-up / reset / join.
+    initial_capital_usd = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0"),
+    )
+    is_active = models.BooleanField(default=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["fund", "strategy"], name="uniq_sleeve_per_fund"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"sleeve s={self.strategy_id} f={self.fund_id} {self.allocation_pct}%"

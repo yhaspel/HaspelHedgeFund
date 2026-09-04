@@ -152,7 +152,7 @@ export interface MutationResponse {
 
 /** One row in the Portfolios hub — a single book the user owns. */
 export interface PortfolioHubBook {
-  kind: 'manual' | 'broker' | 'strategy';
+  kind: 'manual' | 'broker' | 'strategy' | 'sleeve';
   portfolio_id: number;
   name: string;
   subtitle: string;

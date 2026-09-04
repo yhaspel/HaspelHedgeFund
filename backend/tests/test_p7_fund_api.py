@@ -13,6 +13,7 @@ from apps.backtests.models import Backtest, BacktestMetrics
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
 from apps.notifications.models import NotificationChannel, NotificationEvent
 from apps.portfolios import fund as fund_layer
+from apps.portfolios import sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     Portfolio,
@@ -276,22 +277,36 @@ def test_executed_returns_broker_book(client, user):
 # --------------------------------------------------------------------------
 # Fund layer + API.
 # --------------------------------------------------------------------------
-def _fund_of_three(user):
+def _fund_of_three(user, *, cash="300000"):
+    """P14 layout: ONE shared paper account, three member sleeves at an equal
+    split, funded by Reset (33.33 / 33.33 / 33.34 % of the pool), all enabled."""
     fund = AutonomousFund.objects.create(owner=user, name="Autonomous Fund")
-    for i in range(3):
+    acc = _account(user, label="POOL", cash=cash)
+    sleeves.configure_account(fund, acc)
+    members = []
+    for i, pct in enumerate(sleeves.equal_split(3)):
         s = _strategy(user, name=f"S{i}")
-        acc = _account(user, label=f"A{i}")
-        StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
-        StrategyAutopilot.objects.create(strategy=s, broker_account=acc, is_enabled=True)
-        fund.strategies.add(s)
+        members.append({"strategy_id": s.id, "allocation_pct": str(pct)})
+    sleeves.set_members(fund, members)
+    sleeves.reset_fund(fund)
+    StrategyAutopilot.objects.filter(strategy__in=fund.strategies.all()).update(is_enabled=True)
+    fund.refresh_from_db()
     return fund
 
 
 def test_fund_overview_aggregates_and_suppresses_correlation(user):
     fund = _fund_of_three(user)
     out = fund_layer.fund_overview(fund)
-    assert len(out["per_account"]) == 3
-    assert Decimal(out["aggregate_nav"]) == Decimal("300000")     # 3 × $100k demo books
+    assert len(out["members"]) == 3
+    assert out["is_configured"] is True
+    assert out["broker_account"]["label"] == "POOL"
+    assert Decimal(out["aggregate_nav"]) == Decimal("300000")     # the ONE shared book
+    # The pool is split by allocation: 33.33% / 33.33% / 33.34% of $300k.
+    navs = sorted(Decimal(m["nav"]) for m in out["members"])
+    assert navs == [Decimal("99990.00"), Decimal("99990.00"), Decimal("100020.00")]
+    assert sum(navs) == Decimal("300000")
+    assert Decimal(out["unallocated_nav"]) == Decimal("0")        # every dollar attributed
+    assert out["allocation_total_pct"] == "100.00"
     assert out["correlation"]["available"] is False               # cold start
     assert out["correlation"]["reason"] == "insufficient_data"
 
@@ -301,7 +316,7 @@ def test_fund_overview_exposes_has_backtest(user):
     False with no linked backtest, True once one exists (any status)."""
     fund = _fund_of_three(user)
     out = fund_layer.fund_overview(fund)
-    assert all(p["has_backtest"] is False for p in out["per_account"])
+    assert all(p["has_backtest"] is False for p in out["members"])
 
     # Link a backtest (even a non-DONE one) to the first strategy.
     first = fund.strategies.order_by("id").first()
@@ -311,9 +326,9 @@ def test_fund_overview_exposes_has_backtest(user):
         status=Backtest.QUEUED,
     )
     out2 = fund_layer.fund_overview(fund)
-    by_id = {p["strategy_id"]: p for p in out2["per_account"]}
+    by_id = {p["strategy_id"]: p for p in out2["members"]}
     assert by_id[first.id]["has_backtest"] is True
-    assert sum(1 for p in out2["per_account"] if p["has_backtest"]) == 1
+    assert sum(1 for p in out2["members"] if p["has_backtest"]) == 1
 
 
 def test_fund_overview_is_live_tracks_enablement(user):
@@ -327,7 +342,7 @@ def test_fund_overview_is_live_tracks_enablement(user):
     out = fund_layer.fund_overview(fund)
     assert out["state"] == "active"                   # still not halted
     assert out["is_live"] is False                    # but nothing trades
-    assert all("cron_description" in p for p in out["per_account"])
+    assert all("cron_description" in p for p in out["members"])
 
 
 def test_fund_halt_halts_all_then_resume(user):
@@ -357,7 +372,7 @@ def test_fund_resume_rebases_peaks_and_breaks_the_rehalt_loop(user):
     drawdown vs. a stale all-time peak can never shrink — clearing the halt
     without rebasing the peak just re-halts on the next guardrail sweep.
     Resume must rebase fund + account peaks to current equity (drawdown 0)."""
-    fund = _fund_of_three(user)                        # 3 × $100k books
+    fund = _fund_of_three(user)                        # one $300k book, 3 sleeves
     fund.fund_dd_halt_pct = Decimal("20")
     fund.peak_equity_usd = Decimal("400000")           # stale peak → dd 25%
     fund.save()
@@ -370,11 +385,12 @@ def test_fund_resume_rebases_peaks_and_breaks_the_rehalt_loop(user):
     out = fund_layer.resume_fund(fund)
     fund.refresh_from_db()
     assert fund.state == AutonomousFund.STATE_ACTIVE
-    assert fund.peak_equity_usd == Decimal("300000")   # rebased to current equity
+    assert fund.peak_equity_usd == Decimal("300000")   # rebased to the account's equity
     assert out["peak_rebased_to"] == str(fund.peak_equity_usd)
-    for ap in StrategyAutopilot.objects.all():
+    for ap in StrategyAutopilot.objects.select_related("strategy__fund_sleeve__portfolio"):
         assert ap.state == StrategyAutopilot.STATE_ACTIVE
-        assert ap.peak_equity_usd == Decimal("100000")  # each book's own equity
+        # each sleeve's OWN equity (its share of the pool), not the account's
+        assert ap.peak_equity_usd == ap.strategy.fund_sleeve.portfolio.cash_balance
 
     # The next sweep evaluation is clean — no immediate re-halt (loop broken).
     res2 = fund_layer.evaluate_fund_drawdown(fund)
@@ -400,8 +416,10 @@ def test_fund_resume_without_valuable_equity_clears_peak_for_reseed(user):
 
 def test_fund_overview_reports_drawdown_pct(user):
     fund = _fund_of_three(user)
-    assert fund_layer.fund_overview(fund)["drawdown_pct"] is None  # no peak yet
-    fund.peak_equity_usd = Decimal("400000")           # books total $300k → 25%
+    fund.peak_equity_usd = None                        # (reset seeded it) → no peak yet
+    fund.save()
+    assert fund_layer.fund_overview(fund)["drawdown_pct"] is None
+    fund.peak_equity_usd = Decimal("400000")           # the book is $300k → 25%
     fund.save()
     assert fund_layer.fund_overview(fund)["drawdown_pct"] == 25.0
 

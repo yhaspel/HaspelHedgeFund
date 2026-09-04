@@ -101,6 +101,14 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/fund/composite/', respond: () => json({ available: false, reason: 'no member strategy has a total-return-era validation backtest', missing: [] }) },
   { method: 'POST', spec: '/fund/halt/', respond: () => json({ ...(fixture('fund') as object), state: 'halted', is_live: false }) },
   { method: 'POST', spec: '/fund/resume/', respond: () => json({ ...(fixture('fund') as object), state: 'active', is_live: true }) },
+  // P14 — the Fund tab manages the fund: settings (shared account), the roster
+  // + allocations, pickable strategies / accounts, reset and flatten.
+  { method: 'PUT', spec: '/fund/', respond: ({ body }) => json({ ...(fixture('fund') as object), ...(body as object), created: false }) },
+  { method: 'PUT', spec: '/fund/members/', respond: ({ body }) => json({ ...(fixture('fund') as object), changes: { added: [], removed: [], updated: ((body as { members?: unknown[] })?.members ?? []).map((_m, i) => i), flattening: [], warnings: [] } }) },
+  { method: 'GET', spec: '/fund/candidates/', respond: () => json(fixture('fund-candidates')) },
+  { method: 'GET', spec: '/fund/accounts/', respond: () => json(fixture('fund-accounts')) },
+  { method: 'POST', spec: '/fund/reset/', respond: () => json({ ...(fixture('fund') as object), reset: { account_cash: '300000.00', sleeves: [], wiped_positions: 0 } }) },
+  { method: 'POST', spec: '/fund/flatten/', respond: () => json({ ...(fixture('fund') as object), flatten: { orders: 6, skipped_inflight: [] } }) },
   { method: 'GET', spec: '/strategies/:id/autopilot/', respond: () => json(fixture('autopilot')) },
   { method: 'PUT', spec: '/strategies/:id/autopilot/', respond: ({ body }) => json({ autopilot: { ...((fixture('autopilot') as { autopilot: object }).autopilot), ...(body as object) } }) },
   { method: 'POST', spec: '/strategies/:id/autopilot/enable/', respond: () => json(autopilotWith({ is_enabled: true, state: 'active' })) },

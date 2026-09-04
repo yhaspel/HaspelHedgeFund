@@ -1,0 +1,48 @@
+{
+  "strategies": [
+    {
+      "id": 48,
+      "name": "Cross-Asset Trend (CTA-lite)",
+      "kind": "global_macro",
+      "kind_display": "Global macro (ETF)",
+      "is_active": true,
+      "is_member": true,
+      "allocation_pct": "33.34",
+      "validation_passed": true,
+      "has_backtest": true
+    },
+    {
+      "id": 46,
+      "name": "Multi-Factor Long/Short Equity",
+      "kind": "long_short",
+      "kind_display": "Long/short equity",
+      "is_active": true,
+      "is_member": true,
+      "allocation_pct": "33.33",
+      "validation_passed": true,
+      "has_backtest": true
+    },
+    {
+      "id": 47,
+      "name": "Sector Rotation",
+      "kind": "sector_rotation",
+      "kind_display": "Sector rotation",
+      "is_active": true,
+      "is_member": true,
+      "allocation_pct": "33.33",
+      "validation_passed": true,
+      "has_backtest": true
+    },
+    {
+      "id": 56,
+      "name": "Risk Parity (validation sleeve)",
+      "kind": "risk_parity",
+      "kind_display": "Risk parity",
+      "is_active": true,
+      "is_member": false,
+      "allocation_pct": null,
+      "validation_passed": false,
+      "has_backtest": false
+    }
+  ]
+}

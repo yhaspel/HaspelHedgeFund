@@ -19,6 +19,7 @@ from apps.backtests.seed import seed_validation_backtest
 from apps.backtests.serializers import BacktestCreateSerializer
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
 from apps.portfolios import fund as fund_layer
+from apps.portfolios import sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     Portfolio,
@@ -84,13 +85,17 @@ def _real_validation_backtest(strategy):
 
 
 def _disabled_fund_of_three(user):
+    """P14: one shared account, three member sleeves (autopilots created disabled
+    by the roster write, funded by Reset)."""
     fund = AutonomousFund.objects.create(owner=user, name="Autonomous Fund")
-    for i in range(3):
-        s = _strategy(user, name=f"S{i}")
-        acc = _account(user, label=f"A{i}")
-        StrategyBrokerLink.objects.create(strategy=s, broker_account=acc)
-        StrategyAutopilot.objects.create(strategy=s, broker_account=acc, is_enabled=False)
-        fund.strategies.add(s)
+    sleeves.configure_account(fund, _account(user, label="POOL", cash="300000"))
+    members = [
+        {"strategy_id": _strategy(user, name=f"S{i}").id, "allocation_pct": str(pct)}
+        for i, pct in enumerate(sleeves.equal_split(3))
+    ]
+    sleeves.set_members(fund, members)
+    sleeves.reset_fund(fund)
+    fund.refresh_from_db()
     return fund
 
 
@@ -101,7 +106,7 @@ def test_per_account_hint_points_to_backtest_when_unvalidated(user):
     fund = _disabled_fund_of_three(user)               # links + disabled APs, no backtest
     out = fund_layer.fund_overview(fund)
     assert out["is_live"] is False
-    for p in out["per_account"]:
+    for p in out["members"]:
         assert p["validation_passed"] is False
         assert p["can_enable"] is False
         assert "backtest" in p["setup_hint"].lower()   # tells the user the next step
@@ -112,7 +117,7 @@ def test_per_account_can_enable_when_validated_but_off(user):
     s = fund.strategies.first()
     _real_validation_backtest(s)                        # gate now passes, still disabled
     out = fund_layer.fund_overview(fund)
-    card = next(p for p in out["per_account"] if p["strategy_id"] == s.id)
+    card = next(p for p in out["members"] if p["strategy_id"] == s.id)
     assert card["validation_passed"] is True
     assert card["can_enable"] is True
     assert "enable" in card["setup_hint"].lower()
@@ -122,7 +127,7 @@ def test_per_account_enabled_has_no_hint(user):
     fund = _disabled_fund_of_three(user)
     StrategyAutopilot.objects.filter(strategy__in=fund.strategies.all()).update(is_enabled=True)
     out = fund_layer.fund_overview(fund)
-    for p in out["per_account"]:
+    for p in out["members"]:
         assert p["is_enabled"] is True
         assert p["setup_hint"] is None
         assert p["can_enable"] is False
