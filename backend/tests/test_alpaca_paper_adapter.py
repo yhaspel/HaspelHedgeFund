@@ -443,6 +443,36 @@ def test_raise_translated_maps_auth_errors_to_broker_auth_error():
         _raise_translated(_make_apierror(503, "upstream down"), "get_account")
 
 
+def test_raise_translated_handles_auth_error_whose_body_has_no_code():
+    """Alpaca's real auth rejection is a bare ``{"message": "unauthorized."}`` —
+    no ``code`` key. ``APIError.code`` is a *property* doing ``error["code"]``,
+    so reading it raises KeyError, which ``getattr(..., None)`` does NOT swallow
+    (its default only covers AttributeError).
+
+    Regression: that KeyError escaped ``_raise_translated`` before it could reach
+    the 401/403 arm, so the account never flipped to needs_reauth and the
+    overview endpoint returned an opaque 502. Seen in production 2026-09-04 when
+    an Alpaca paper account was reset and its API keys regenerated.
+    """
+    import json as _json
+
+    from alpaca.common.exceptions import APIError
+
+    from apps.brokers.adapters.alpaca_paper import _alpaca_error_code, _raise_translated
+    from apps.brokers.interfaces import BrokerAuthError
+
+    for status in (401, 403):
+        exc = APIError(
+            _json.dumps({"message": "unauthorized."}),  # no "code" key
+            http_error=_FakeHTTPError(status),
+        )
+        # The extractor degrades to None instead of exploding...
+        assert _alpaca_error_code(exc) is None
+        # ...so the auth arm is reachable and the poll loop can flag the account.
+        with pytest.raises(BrokerAuthError):
+            _raise_translated(exc, "get_all_positions")
+
+
 def test_duplicate_submit_resolves_existing_order(broker, stub_client):
     """A retried POST with the same client_order_id gets HTTP 422 from
     Alpaca; the adapter resolves the pre-existing order via
