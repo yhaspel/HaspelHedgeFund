@@ -270,7 +270,8 @@ def guardrail_sweep() -> dict:
 def release_pending_open_orders() -> dict:
     """Submit locally-held pending_open orders once the market opens (§6.6).
     Daily caps are evaluated HERE (at release), not at create time, so a
-    Friday-close batch held over the weekend submits Monday."""
+    Friday-close batch held over the weekend submits Monday. Released orders are
+    venue-fitted to the account's net position at submit (``autopilot.venue_fit``)."""
     if skip_when_offline("release_pending_open_orders"):
         return {"status": "skipped_offline"}
     from apps.brokers.market_calendar import is_market_open
