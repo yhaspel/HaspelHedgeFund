@@ -75,6 +75,30 @@ def test_health_unauthenticated_and_online_payload():
 
 
 @pytest.mark.django_db
+@override_settings(BUILD_SHA="6640758aa0ea90b45202f0b7491a4d49cef92302")
+def test_health_reports_the_deployed_commit():
+    """P14-B: /api/health/ carries the deployed SHA so a deploy is verified
+    positively rather than by inference."""
+    client = APIClient()
+    with patch(
+        "apps.models_catalog.ollama_discovery.discover_ollama_models", return_value=[]
+    ):
+        resp = client.get(reverse("health"))
+    assert resp.json()["build"] == "6640758aa0ea"
+
+
+@pytest.mark.django_db
+@override_settings(BUILD_SHA="")
+def test_health_build_is_null_outside_railway():
+    client = APIClient()
+    with patch(
+        "apps.models_catalog.ollama_discovery.discover_ollama_models", return_value=[]
+    ):
+        resp = client.get(reverse("health"))
+    assert resp.json()["build"] is None
+
+
+@pytest.mark.django_db
 @override_settings(OFFLINE_MODE=True, OFFLINE_LLM_MODEL="qwen2.5:7b")
 def test_health_offline_payload():
     client = APIClient()

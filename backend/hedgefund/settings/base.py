@@ -269,6 +269,11 @@ TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 # per-user host to read).
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
+# The deployed commit, reported by /api/health/ as "build" so a deploy can be
+# verified positively instead of by inference. Railway sets this for
+# GitHub-triggered deploys; empty locally and in CI.
+BUILD_SHA = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")
+
 # --- Offline mode (P4-OFF, ADR 0029) -----------------------------------------
 # OFFLINE_MODE=1 puts the backend in "internet down, local stack up" (L1) mode:
 #   1. External data providers are fenced at their HTTP seam (apps/data/

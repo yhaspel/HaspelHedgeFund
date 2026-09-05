@@ -61,6 +61,7 @@ class HealthView(APIView):
             {
                 "status": "ok",
                 "offline_mode": offline,
+                "build": (getattr(settings, "BUILD_SHA", "") or "")[:12] or None,
                 "time": timezone.now().isoformat(),
                 "llm": {
                     "forced_preset": "local" if offline else None,
