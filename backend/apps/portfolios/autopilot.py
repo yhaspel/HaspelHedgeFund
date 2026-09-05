@@ -28,7 +28,7 @@ active link is a no-op (the cycle stays ``done``).
 from __future__ import annotations
 
 import logging
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, ROUND_FLOOR, Decimal
 
 from django.utils import timezone
 
@@ -483,10 +483,95 @@ def _risk_check_for_order(order):
     return autopilot_risk.make_risk_check(strategy, book=account.portfolio)
 
 
+def venue_fit(order) -> dict | None:
+    """Fit a sleeve's order to what the venue lets ONE account do (P14 follow-up).
+
+    On the shared fund account two sleeves can legitimately sit on opposite sides
+    of the same name, so a sleeve's order can be — at the ACCOUNT level — a
+    position flip or a fractional short, both of which Alpaca refuses in one shot:
+
+      * no zero-crossing in a single order ("insufficient qty available for order
+        (requested: N, available: M)" — flatten first);
+      * short positions are whole shares only ("fractional orders cannot be sold
+        short").
+
+    Fit the order instead of letting the venue reject it: a crossing order is
+    clamped to the quantity that takes the account FLAT (the sleeve books the
+    actual fill; the remainder is re-targeted next cycle), and any quantity that
+    leaves the account short is rounded DOWN to whole shares (a residual < 1
+    share is rejected locally with a clear message). Same-side adds, reductions
+    inside a long, and whole-share shorts opened/covered from flat pass through
+    unchanged. Credentialed venues only.
+
+    Returns the audit record when the order was changed, else ``None``.
+    """
+    from apps.brokers.models import BrokerOrder
+
+    pf = getattr(order.broker_account, "portfolio", None)
+    if pf is None:
+        return None
+    pos = pf.positions.filter(ticker=order.ticker.upper()).first()
+    held = Decimal(str(pos.quantity)) if pos is not None else Decimal("0")
+    requested = Decimal(str(order.quantity))
+    qty = requested
+    sign = Decimal("1") if order.side == "buy" else Decimal("-1")
+    after = held + sign * qty
+    notes: list[str] = []
+    if held != 0 and after != 0 and ((held > 0) != (after > 0)):
+        qty = abs(held)  # close to flat, never through zero
+        after = Decimal("0")
+        notes.append(f"clamped to account-flat (held {held}, requested {requested})")
+    if held < 0 or after < 0:  # the account is / ends up short here
+        whole = qty.to_integral_value(rounding=ROUND_FLOOR)
+        if whole != qty:
+            notes.append(f"rounded {qty} -> {whole} (venue: whole-share shorts only)")
+            qty = whole
+    if not notes:
+        return None
+    record = {
+        "order_id": order.pk, "ticker": order.ticker, "side": order.side,
+        "requested": str(requested), "held": str(held), "quantity": str(qty),
+        "notes": notes,
+    }
+    if qty <= 0:
+        message = (
+            "venue fit: nothing left to trade on the shared account — "
+            + "; ".join(notes)
+        )[:500]
+        BrokerOrder.objects.filter(pk=order.pk).update(
+            status=BrokerOrder.STATUS_REJECTED, error_message=message,
+        )
+        order.status = BrokerOrder.STATUS_REJECTED
+        order.error_message = message
+        record["rejected"] = True
+    else:
+        BrokerOrder.objects.filter(pk=order.pk).update(quantity=qty)
+        order.quantity = qty
+    _record_venue_fit(order, record)
+    return record
+
+
+def _record_venue_fit(order, record: dict) -> None:
+    """Audit trail for :func:`venue_fit`: the linked AutopilotRun's
+    ``guardrail_actions["account_venue_fit"]`` (a list — one run can fit several
+    orders) plus a warning log. Best-effort: never raises into the submit path."""
+    log.warning("venue fit order=%s %s", order.pk, record)
+    try:
+        run = order.autopilot_runs.order_by("-fire_time_utc").first()
+        if run is None:
+            return
+        actions = dict(run.guardrail_actions or {})
+        actions["account_venue_fit"] = [*actions.get("account_venue_fit", []), record]
+        AutopilotRun.objects.filter(pk=run.pk).update(guardrail_actions=actions)
+    except Exception:  # noqa: BLE001 — the audit must never block a fitted submit
+        log.exception("venue fit audit failed order=%s", order.pk)
+
+
 def submit_held_order(order) -> bool:
-    """Release a ``pending_open`` order at the open: reset to draft, then gate
-    (risk_check wired) + submit idempotently — or demo-fill. The daily-cap check
-    is the caller's (evaluated at release time, §6.6). Returns True if submitted."""
+    """Release a ``pending_open`` order at the open: reset to draft, venue-fit it
+    to the account's net position, then gate (risk_check wired) + submit
+    idempotently — or demo-fill. The daily-cap check is the caller's (evaluated
+    at release time, §6.6). Returns True if submitted."""
     from apps.brokers.capabilities import AUTH_NONE, get_capabilities
     from apps.brokers.confirmation import ConfirmationError, GateContext, gate
     from apps.brokers.idempotency import submit_idempotent
@@ -519,6 +604,11 @@ def submit_held_order(order) -> bool:
             confirmation_method=BrokerOrder.CONFIRM_SCHEDULED,
         )
         return True
+
+    # Two sleeves share this account, so fit the order to its NET position first.
+    fit = venue_fit(order)
+    if fit is not None and fit.get("rejected"):
+        return False
 
     try:
         gate(order, GateContext(
@@ -590,6 +680,11 @@ def _emit_one(
     from apps.brokers.confirmation import ConfirmationError, GateContext, gate
     from apps.brokers.idempotency import submit_idempotent
     from apps.brokers.reconcile import get_broker
+
+    # Two sleeves can share this account, so fit the order to its NET position.
+    fit = venue_fit(order)
+    if fit is not None and fit.get("rejected"):
+        raise _RiskRejected(order.error_message)
 
     try:
         gate(order, GateContext(

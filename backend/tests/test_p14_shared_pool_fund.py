@@ -463,6 +463,53 @@ def test_flatten_fund_attributes_closes_per_sleeve_and_residual(user, price_200)
     assert _positions(s["B"].fund_sleeve.portfolio) == {}
 
 
+def test_rolling_stats_start_at_the_sleeves_last_funding(user, price_200):
+    """Production 2026-09-05: right after the cut-over both pods showed a rolling
+    Sharpe of about −2.3 and a 1.00 pairwise correlation. Their AutopilotRun
+    equity series chained the retired $100k-account era straight into the new
+    ~$50k sleeves, so the Reset's funding step read as a −50% weekly return.
+    The series must start at the sleeve's last external cash flow."""
+    from apps.portfolios.models import AutopilotRun
+
+    fund, s = _fund(user, {"A": 50, "B": 50})
+    reset_at = timezone.now()
+    for name in ("A", "B"):
+        ap = s[name].autopilot
+        # Old-account era: two cycles on a $100k book, before the reset.
+        for weeks, eq in ((3, "100000"), (2, "100500")):
+            AutopilotRun.objects.create(
+                autopilot=ap, fire_time_utc=reset_at - dt.timedelta(weeks=weeks),
+                status=AutopilotRun.SUBMITTED,
+                guardrail_actions={"drawdown": {"equity": eq}},
+            )
+        # Sleeve era: two cycles after the reset on the ~$50k slice.
+        for days, eq in ((1, "50000"), (8, "50250" if name == "A" else "49900")):
+            AutopilotRun.objects.create(
+                autopilot=ap, fire_time_utc=reset_at + dt.timedelta(days=days),
+                status=AutopilotRun.SUBMITTED,
+                guardrail_actions={"drawdown": {"equity": eq}},
+            )
+    assert fund_layer._equity_series(s["A"]) == [50000.0, 50250.0]   # no $100k → $50k step
+    assert fund_layer._equity_series(s["B"]) == [50000.0, 49900.0]
+    out = fund_layer.fund_overview(fund)
+    by = {m["name"]: m for m in out["members"]}
+    # One post-reset return each: too short for a Sharpe (needs ≥ 2) — and
+    # certainly not the −2.3 the funding step used to fabricate.
+    assert by["A"]["rolling_sharpe"] is None and by["B"]["rolling_sharpe"] is None
+    assert out["recommendations"] == []
+    # A strategy with no sleeve (legacy link) keeps its whole history.
+    legacy = _strategy(user, "L")
+    acc = _account(user, label="LEGACY")
+    StrategyBrokerLink.objects.create(strategy=legacy, broker_account=acc)
+    ap = StrategyAutopilot.objects.create(strategy=legacy, broker_account=acc, is_enabled=True)
+    for weeks, eq in ((2, "100000"), (1, "101000")):
+        AutopilotRun.objects.create(
+            autopilot=ap, fire_time_utc=reset_at - dt.timedelta(weeks=weeks),
+            status=AutopilotRun.SUBMITTED, guardrail_actions={"drawdown": {"equity": eq}},
+        )
+    assert fund_layer._equity_series(legacy) == [100000.0, 101000.0]
+
+
 def test_fund_drawdown_and_resume_use_the_account_and_sleeves(user, price_200):
     fund, s = _fund(user, {"A": 50, "B": 50})
     fund.fund_dd_halt_pct = Decimal("6")

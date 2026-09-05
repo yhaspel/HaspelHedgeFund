@@ -80,15 +80,44 @@ def account_equity(strategy) -> Decimal | None:
     return sleeves.book_value(sleeves.member_book(strategy))
 
 
+def _series_start(strategy):
+    """When this strategy's current capital base began: a fund sleeve's latest
+    external cash flow (Reset, join, account change). Cycles fired before it ran
+    on a different base — the retired per-strategy account, or a previous split
+    — so chaining their equity into today's would print the funding step as a
+    return (a $100k account → $50k sleeve reset read as −50% in one week, i.e. a
+    deeply negative rolling Sharpe and a spurious 1.00 correlation between pods
+    that merely shared the same Reset). None = no sleeve / never funded."""
+    sleeve = sleeves.sleeve_for(strategy)
+    if sleeve is None:
+        return None
+    from .models import LedgerEntry
+
+    last_flow = (
+        LedgerEntry.objects.filter(
+            portfolio_id=sleeve.portfolio_id,
+            kind__in=(LedgerEntry.KIND_DEPOSIT, LedgerEntry.KIND_WITHDRAWAL),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    return last_flow.created_at if last_flow is not None else None
+
+
 def _equity_series(strategy) -> list[float]:
     """Equity snapshots over time for a strategy, from its AutopilotRun history
     (each cycle records the drawdown eval's equity in guardrail_actions). Used
-    only for the correlation/rolling-Sharpe reporting."""
+    only for the correlation/rolling-Sharpe reporting. For a fund member the
+    series starts at the sleeve's last funding (see ``_series_start``)."""
     ap = getattr(strategy, "autopilot", None)
     if ap is None:
         return []
+    runs = AutopilotRun.objects.filter(autopilot=ap)
+    start = _series_start(strategy)
+    if start is not None:
+        runs = runs.filter(fire_time_utc__gte=start)
     series: list[float] = []
-    for run in AutopilotRun.objects.filter(autopilot=ap).order_by("fire_time_utc"):
+    for run in runs.order_by("fire_time_utc"):
         eq = (run.guardrail_actions or {}).get("drawdown", {}).get("equity")
         if eq is not None:
             try:
