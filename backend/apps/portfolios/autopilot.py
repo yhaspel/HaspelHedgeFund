@@ -558,13 +558,13 @@ def _record_venue_fit(order, record: dict) -> None:
     log.warning("venue fit order=%s %s", order.pk, record)
     try:
         run = order.autopilot_runs.order_by("-fire_time_utc").first()
-    except Exception:  # noqa: BLE001
-        run = None
-    if run is None:
-        return
-    actions = dict(run.guardrail_actions or {})
-    actions["account_venue_fit"] = [*actions.get("account_venue_fit", []), record]
-    AutopilotRun.objects.filter(pk=run.pk).update(guardrail_actions=actions)
+        if run is None:
+            return
+        actions = dict(run.guardrail_actions or {})
+        actions["account_venue_fit"] = [*actions.get("account_venue_fit", []), record]
+        AutopilotRun.objects.filter(pk=run.pk).update(guardrail_actions=actions)
+    except Exception:  # noqa: BLE001 — the audit must never block a fitted submit
+        log.exception("venue fit audit failed order=%s", order.pk)
 
 
 def submit_held_order(order) -> bool:

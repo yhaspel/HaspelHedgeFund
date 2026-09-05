@@ -235,6 +235,27 @@ def test_venue_fit_records_on_the_linked_run(user):
     assert len(run.guardrail_actions["account_venue_fit"]) == 2
 
 
+def test_venue_fit_audit_failure_never_blocks_the_fit(user, monkeypatch):
+    """The audit trail is best-effort: a write failure must not abort a submit
+    whose order has already been fitted."""
+    account = _account(user)
+    _hold(account, "TLT", "63.800071")
+    run = _run(_strategy(user, name="TREND"))
+    order = _order(account, "TLT", "sell", "66")
+    run.broker_orders.add(order)
+
+    def _boom(*a, **kw):
+        raise RuntimeError("audit table is down")
+
+    monkeypatch.setattr(bridge.AutopilotRun.objects, "filter", _boom)
+
+    record = bridge.venue_fit(order)
+
+    assert record is not None
+    order.refresh_from_db()
+    assert order.quantity == Decimal("63.800071")
+
+
 # --------------------------------------------------------------------------
 # 3. The release path (§6.6) fits before the gate.
 # --------------------------------------------------------------------------
