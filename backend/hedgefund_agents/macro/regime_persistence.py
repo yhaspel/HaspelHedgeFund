@@ -234,9 +234,12 @@ def get_latest_snapshot(
 ) -> RegimeSnapshot | None:
     """Read the latest persisted snapshot ``as_of_date <= given``.
 
-    Mutates ``stale`` to True (in memory) when the snapshot's
-    ``as_of_date`` is older than ``staleness_days`` so callers can decide
-    whether to use it or fall back. Never writes; never re-fits.
+    Mutates ``stale`` to True (in memory) when the newest PRICE the fit
+    actually consumed (``last_price_date``) is older than ``staleness_days``,
+    so callers can decide whether to use it or fall back. Deriving staleness
+    from ``as_of_date`` (the fit date) labelled a fit on months-old bars
+    "fresh" and let it vote in the Markov consensus — the fit date only says
+    when the job ran, not what data it saw. Never writes; never re-fits.
     """
     cfg = config or MarkovConfig(model_type=model_type)
     config_hash = cfg.hash()
@@ -253,7 +256,11 @@ def get_latest_snapshot(
     )
     if snap is None:
         return None
-    age = (as_of_date - snap.as_of_date).days
+    # Age the snapshot by its DATA, not by when the fit ran. `last_price_date`
+    # is always <= as_of_date, so this is never more permissive than the old
+    # rule; it is stricter exactly when the bars were stale.
+    reference = snap.last_price_date or snap.as_of_date
+    age = (as_of_date - reference).days
     snap.stale = age > staleness_days
     return snap
 
@@ -348,6 +355,11 @@ def compute_markov_consensus(
             "bull_minus_bear_1d": round(float(snap.bull_minus_bear_1d), 4),
             "persistence": round(float(snap.current_state_persistence), 4),
             "as_of_date": snap.as_of_date.isoformat(),
+            # The newest bar the fit actually consumed — what `stale` is
+            # derived from, and what a reader needs to judge the vote.
+            "last_price_date": (
+                snap.last_price_date.isoformat() if snap.last_price_date else None
+            ),
             "stale": bool(snap.stale),
         }
         if snap.stale:

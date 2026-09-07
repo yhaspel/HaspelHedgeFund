@@ -30,6 +30,16 @@ class LLMResponse:
     latency_ms: int = 0
     finish_reason: str = ""
     raw: dict = field(default_factory=dict)
+    # Billed-but-rejected attempts that preceded this one (structured.py
+    # retries up to 3× on empty/invalid JSON). The provider charges for every
+    # one of them, so `_persist.record_llm_call` writes an LLMCall row per
+    # entry — otherwise Run.total_cost_usd, /costs/summary/ and the mid-run
+    # budget guard all under-count the real spend.
+    prior_attempts: list[LLMResponse] = field(default_factory=list)
+
+    @property
+    def attempts(self) -> int:
+        return 1 + len(self.prior_attempts)
 
 
 @runtime_checkable

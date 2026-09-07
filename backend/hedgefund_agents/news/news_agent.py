@@ -18,6 +18,8 @@ import json
 import logging
 import re
 
+import httpx
+
 from apps.data.models import FilingRecord, NewsItem
 from apps.data.providers.edgar import EdgarProvider
 from apps.data.providers.factory import get_news_service
@@ -45,6 +47,24 @@ register(NEWS_SPEC)
 MAX_ITEMS = 40
 MAX_PER_SOURCE = 6
 RISK_FACTORS_MAX_CHARS = 12_000
+
+# Failures this node absorbs into a skeletal digest without flagging the
+# transcript: the model returned something unparseable, or the transport failed.
+# LookupError covers UnknownModelPriceError (unpriced model → post-spend raise).
+_DEGRADABLE_ERRORS = (ValueError, LookupError, httpx.HTTPError, TimeoutError)
+
+
+def _hard_stops() -> tuple[type[BaseException], ...]:
+    """Exceptions no agent node may absorb: the mid-run spend abort, a dead
+    model/key, and the offline-mode guarantee."""
+    from apps.backtests.exceptions import BudgetExceeded, ModelUnavailable
+
+    from ..errors import OfflineLLMViolation
+
+    return (BudgetExceeded, ModelUnavailable, OfflineLLMViolation)
+
+
+_HARD_STOPS = _hard_stops()
 
 # Cheap deterministic denylist — drops obvious listicles / generic pumps
 # before they hit the LLM. Pattern matches the full headline lowercase.
@@ -220,7 +240,15 @@ def run_news(state: AgentState) -> AgentState:
         payload = parsed.model_dump()
         payload["_freshness"] = _news_freshness(items, as_of)
         return {"news_digest": payload}  # type: ignore[return-value]
+    except _HARD_STOPS:
+        # NOT swallowable. This used to be a blanket `except Exception`, which
+        # ate BudgetExceeded (the mid-run spend abort — the run then kept
+        # spending through the whole persona fan-out) and ModelUnavailable
+        # (which _node_fallback deliberately re-raises so a dead key/credit
+        # surfaces instead of masquerading as an all-neutral council).
+        raise
     except Exception as e:
+        expected = isinstance(e, _DEGRADABLE_ERRORS)
         log.warning("news synthesis failed: %s; returning skeletal digest", e)
         skel = NewsOutput(
             ticker=ticker,
@@ -237,4 +265,9 @@ def run_news(state: AgentState) -> AgentState:
         fresh = _news_freshness(items, as_of)
         fresh["fallback"] = True
         payload["_freshness"] = fresh
+        if not expected:
+            # Something we did not anticipate. Name it on the transcript
+            # (AgentMessage.status == "error") instead of passing silently.
+            log.exception("unexpected failure in news_digest")
+            payload["_error"] = type(e).__name__
         return {"news_digest": payload}  # type: ignore[return-value]

@@ -56,11 +56,24 @@ def _safe(x, default=0.0) -> float:
         return default
 
 
+def _placeholder_features_enabled() -> bool:
+    """Synthetic (sha1-derived) feature rows are a *local development* prop
+    only. They are never produced in a normal deployment: a ticker with no
+    price history must not be scored against real names."""
+    try:
+        from django.conf import settings
+    except Exception:  # pragma: no cover — Django always present in-app
+        return False
+    return bool(getattr(settings, "OFFLINE_MODE", False))
+
+
 def _synthetic_fallback(ticker: str, as_of: date) -> ScreenerFeatures:
     """Deterministic features derived from sha1(ticker+as_of) so the screener
     still produces a stable, reproducible ranking when the data provider has
-    nothing cached (offline dev, test environment). Real P3 will rely on the
-    FMP fundamentals cache for this entirely."""
+    nothing cached (offline dev only — see ``_placeholder_features_enabled``).
+
+    Rows produced here are always ``synthetic=True`` and are EXCLUDED from the
+    ranking by ``screener_agent.run_screener``."""
     h = hashlib.sha1(f"{ticker}|{as_of.isoformat()}".encode()).digest()
     def f(i, lo, hi):
         return lo + (h[i] / 255.0) * (hi - lo)
@@ -86,10 +99,11 @@ def _synthetic_fallback(ticker: str, as_of: date) -> ScreenerFeatures:
 def compute_features(
     ticker: str, sector: str, as_of: date, *, provider: FmpProvider
 ) -> ScreenerFeatures:
-    """Try the FMP cache; on anything missing/failing, fall back to a
-    deterministic synthetic feature so the screener keeps producing a
-    full ranking. The result is always reproducible for a given (ticker,
-    as_of) pair, which is what the idempotency acceptance criterion needs.
+    """Try the FMP cache. When the provider has no usable price history the
+    row is returned ``available=False`` so the ranker can drop it — a ticker
+    with no data must never compete with real names (it used to be filled
+    from sha1(ticker|as_of), which handed no-data tickers random
+    fundamentals/news scores the real path never populates).
 
     P2n: ``provider`` is now required — callers must obtain one from
     ``apps.data.providers.factory.get_fmp_provider(user=...)`` so the BYOK
@@ -100,14 +114,19 @@ def compute_features(
     try:
         start = as_of - timedelta(days=400)
         bars = provider.get_daily_bars(ticker, start=start, end=as_of, as_of=as_of)
-        closes = [float(b.close) for b in bars if b.close]
+        # Total-return series: adjusted_close matches the Markov classifier and
+        # the backtest engine (dividends credited). Fall back to close only for
+        # providers/fixtures that do not populate it.
+        closes = [float(b.adjusted_close or b.close) for b in bars if (b.adjusted_close or b.close)]
     except Exception:
         closes = []
     if len(closes) >= 30:
         feats.last_close = closes[-1]
         feats.momentum_1m = (closes[-1] / closes[-min(21, len(closes))] - 1.0)
         feats.momentum_3m = (closes[-1] / closes[-min(63, len(closes))] - 1.0)
-        feats.momentum_6m = (closes[-1] / closes[0] - 1.0)
+        # ~6 calendar months of sessions (was closes[0] over a 400-CALENDAR-day
+        # window, i.e. a ~13-month return labelled "6m").
+        feats.momentum_6m = (closes[-1] / closes[-min(127, len(closes))] - 1.0)
         rolling_high = max(closes[-min(252, len(closes)):])
         feats.drawdown_from_high = closes[-1] / rolling_high - 1.0
         # P7 low-vol factor: annualised realised vol over the trailing window
@@ -123,15 +142,26 @@ def compute_features(
         feats.real_signals = ("price_momentum", "drawdown", "low_vol")
         feats.sector = sector
         return feats
-    # Fallback to synthetic so ranking still produces a stable list.
-    syn = _synthetic_fallback(ticker, as_of)
-    syn.sector = sector
-    return syn
+    # No usable price history. Offline dev keeps the deterministic placeholder
+    # (still flagged synthetic, still excluded from the ranking); production
+    # marks the row unavailable so it is dropped rather than scored.
+    if _placeholder_features_enabled():
+        syn = _synthetic_fallback(ticker, as_of)
+        syn.sector = sector
+        return syn
+    feats.available = False
+    feats.synthetic = True
+    feats.real_signals = ()
+    return feats
 
 
 def long_score(f: ScreenerFeatures, weights: dict[str, float]) -> float:
-    """Higher = better long candidate."""
-    if not f.available:
+    """Higher = better long candidate.
+
+    Unavailable *and* synthetic rows score -1e9 so ``run_screener``'s
+    ``s > -1e8`` filter drops them: placeholder values must never rank.
+    """
+    if not f.available or f.synthetic:
         return -1e9
     return (
         weights.get("momentum_3m", 1.0) * f.momentum_3m
@@ -146,7 +176,7 @@ def long_score(f: ScreenerFeatures, weights: dict[str, float]) -> float:
 
 def short_score(f: ScreenerFeatures, weights: dict[str, float]) -> float:
     """Higher = better short candidate (most negative momentum/quality)."""
-    if not f.available:
+    if not f.available or f.synthetic:
         return -1e9
     return (
         weights.get("short_drawdown", 1.0) * (-f.drawdown_from_high)

@@ -14,6 +14,15 @@ from ..pricing import estimate_cost
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
 RETRY_STATUSES = {408, 429, 500, 502, 503, 504, 529}
+# Permanently-broken config for THIS model/key: a bad key, no credit, no access,
+# or a model id that doesn't exist. Every subsequent call fails identically, so
+# these must surface as ModelUnavailable (which the node self-heal wrapper
+# re-raises) instead of a generic HTTPStatusError that degrades every agent to a
+# neutral signal and lets the run "complete" with all-hold garbage. Mirrors
+# openrouter.MODEL_UNAVAILABLE_STATUSES.
+MODEL_UNAVAILABLE_STATUSES = {401, 402, 403, 404}
+# Anthropic's shared-capacity signals: 429 rate limit and 529 "overloaded".
+CAPACITY_STATUSES = {429, 529}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
 # Cap on a single retry sleep — mirrors OpenRouterClient so the agent layer sees
@@ -77,7 +86,7 @@ class AnthropicClient:
         t0 = time.perf_counter()
         resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
-        resp.raise_for_status()
+        self._raise_for_status(model, resp)
         payload = resp.json()
         text = "".join(
             block.get("text", "")
@@ -99,6 +108,35 @@ class AnthropicClient:
             latency_ms=latency_ms,
             raw=payload,
         )
+
+    @staticmethod
+    def _raise_for_status(model: str, resp: httpx.Response) -> None:
+        """Map Anthropic HTTP errors onto the same classes OpenRouter raises.
+
+        Before this, every error status fell through ``resp.raise_for_status()``
+        as a generic ``httpx.HTTPStatusError`` — which ``wrap_backtest_tolerant``
+        treats as "one flaky agent" and degrades. With Anthropic as the default
+        route for all 8 personas + risk + CIO, a single bad key therefore
+        produced a DONE run whose entire council was a silent neutral/hold.
+
+        - 401/402/403/404  → ``ModelUnavailable`` (non-retryable config error);
+        - terminal 429/529 → ``RateLimited`` (capacity exhausted for this run);
+        - terminal 5xx     → ``httpx.HTTPStatusError``, same as OpenRouter, so a
+          genuinely transient upstream blip still self-heals per agent;
+        - other 4xx        → ``httpx.HTTPStatusError`` (bad request: our bug).
+        """
+        if resp.status_code < 400:
+            return
+        from apps.backtests.exceptions import ModelUnavailable, RateLimited
+
+        if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
+            raise ModelUnavailable(
+                model=model, status_code=resp.status_code, body=resp.text
+            )
+        if resp.status_code in CAPACITY_STATUSES:
+            # _post_with_retry already burned MAX_RETRIES of backoff on these.
+            raise RateLimited(model=model, body=resp.text)
+        resp.raise_for_status()
 
     def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:
         """Exponential backoff on 408/429/5xx including 529 overload.

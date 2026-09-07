@@ -139,6 +139,25 @@ class RunCreateSerializer(serializers.ModelSerializer):
                   "max_budget_usd")
         read_only_fields = ("id", "status")
 
+    # P5-SH WS1.2 review: a per-run LLM-spend cap must be a real amount. A
+    # negative/zero cap was accepted verbatim and then compared as
+    # `spent >= cap`, so it aborted the run on the FIRST recorded call; an
+    # absurdly large one is a typo, not an intent. NULL stays "no cap".
+    MAX_BUDGET_USD_CEILING = 1000
+
+    def validate_max_budget_usd(self, v):
+        if v is None:
+            return v
+        if v <= 0:
+            raise serializers.ValidationError(
+                "max_budget_usd must be greater than 0 (omit it for no cap)"
+            )
+        if v > self.MAX_BUDGET_USD_CEILING:
+            raise serializers.ValidationError(
+                f"max_budget_usd must be at most {self.MAX_BUDGET_USD_CEILING}"
+            )
+        return v
+
     def validate(self, attrs: dict) -> dict:
         version = attrs.get("graph_version")
         if version is not None:

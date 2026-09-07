@@ -72,9 +72,13 @@ def run_screener(
         )
     weights = {**DEFAULT_WEIGHTS, **(weights or {})}
 
-    feats: list[ScreenerFeatures] = [
+    all_feats: list[ScreenerFeatures] = [
         compute_features(t, s, as_of_date, provider=provider) for t, s in members
     ]
+    # A ticker with no usable price history (or a synthetic placeholder row)
+    # must not be ranked against real names — it is dropped here and reported.
+    feats = [f for f in all_feats if f.available and not f.synthetic]
+    excluded = [f.ticker for f in all_feats if not (f.available and not f.synthetic)]
 
     longs = [(f, long_score(f, weights)) for f in feats]
     longs.sort(key=lambda x: x[1], reverse=True)
@@ -104,6 +108,9 @@ def run_screener(
     return {
         "as_of_date": as_of_date.isoformat(),
         "universe_size_evaluated": len(members),
+        "universe_size_ranked": len(feats),
+        "excluded_no_data_count": len(excluded),
+        "excluded_no_data": excluded[:200],
         "long_candidates": long_candidates,
         "short_candidates": short_candidates,
     }

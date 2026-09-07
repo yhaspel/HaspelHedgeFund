@@ -85,6 +85,11 @@ def build_council_graph(personas: list[str] | None = None):
     graph.add_node("portfolio_manager", wrap_backtest_tolerant(run_portfolio_manager, "decision"))
     graph.add_node("cio", wrap_backtest_tolerant(run_cio, "cio"))
 
+    # NOTE: sentiment and news_digest deliberately stay in the same parallel
+    # fan-out. Sequencing them (entry → news_digest → sentiment) makes the
+    # `analytical_join` barrier fire twice and LangGraph raises
+    # InvalidUpdateError downstream; the sentiment node sources its own news
+    # instead (see analytical/sentiment.py::resolve_news_batch).
     for name, fn in ANALYTICAL_NODES.items():
         graph.add_node(name, wrap_backtest_tolerant(fn, name))
         graph.add_edge("entry", name)

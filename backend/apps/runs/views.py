@@ -1,9 +1,11 @@
 import datetime as dt
 import logging
+from decimal import Decimal
 
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,12 +25,94 @@ from .tasks import execute_run
 logger = logging.getLogger(__name__)
 
 
+def estimate_run_cost_usd(*, personas: list[str] | None, model_overrides: dict) -> float:
+    """Projected LLM cost of ONE ad-hoc council invocation, in USD.
+
+    Reuses the shared estimator the UI's cost readout is built on
+    (``apps.backtests.estimator``): the same per-agent-per-call pricing (recent
+    LLMCall average → catalog price → static PRICING → fallback) applied to the
+    agents an ad-hoc run actually executes — analytical + selected personas +
+    per-prime pipeline + macro + the CIO (ad-hoc runs do NOT disable it) — for a
+    single ticker on a single as-of date.
+    """
+    from apps.backtests.estimator import (
+        ANALYTICAL_AGENTS,
+        PER_DAY_AGENTS,
+        PER_PRIME_PIPELINE_AGENTS,
+        _per_call_cost,
+        _resolve_model,
+    )
+    from hedgefund_agents.personas import ALL_PERSONAS
+
+    overrides = {
+        str(k): v for k, v in (model_overrides or {}).items() if isinstance(v, str)
+    }
+    selected = [str(p) for p in (personas or ALL_PERSONAS)]
+    agents = (
+        [(a, False) for a in ANALYTICAL_AGENTS]
+        + [(p, True) for p in selected]
+        + [(a, False) for a in PER_PRIME_PIPELINE_AGENTS]
+        + [(a, False) for a in PER_DAY_AGENTS]
+        + [("cio", False)]
+    )
+    total = 0.0
+    for agent, is_persona in agents:
+        provider, model = _resolve_model(agent, overrides)
+        total += _per_call_cost(agent, provider, model, is_persona)
+    return total
+
+
+class RunsPagination(DefaultPageNumberPagination):
+    """Runs list pagination with an explicit, validated page_size cap.
+
+    The shared class allows page_size up to 200 and lets DRF turn a
+    non-integer ``page`` into a 404 "Invalid page". Both are wrong for this
+    endpoint: cap the page at 100 rows, and answer a malformed ``page`` /
+    ``page_size`` with a 400 naming the offending parameter.
+    """
+
+    max_page_size = 100
+
+    def get_page_size(self, request):
+        raw = request.query_params.get(self.page_size_query_param)
+        if raw in (None, ""):
+            return self.page_size
+        try:
+            size = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({self.page_size_query_param: "must be an integer"}) from None
+        if size < 1:
+            raise ValidationError(
+                {self.page_size_query_param: "must be a positive integer"}
+            )
+        return min(size, self.max_page_size)
+
+    def paginate_queryset(self, queryset, request, view=None):
+        raw = request.query_params.get(self.page_query_param)
+        if raw not in (None, "") and raw not in self.last_page_strings:
+            try:
+                page = int(raw)
+            except (TypeError, ValueError):
+                raise ValidationError(
+                    {self.page_query_param: "must be an integer"}
+                ) from None
+            if page < 1:
+                raise ValidationError(
+                    {self.page_query_param: "must be a positive integer"}
+                )
+        return super().paginate_queryset(queryset, request, view)
+
+
 class RunListCreateView(generics.ListCreateAPIView):
     # P10 §D4: runs are unbounded (386 rows shipped in one response at audit
     # time) — paginate at 50 and default the window to the last 30 days
     # (?days=N to widen, ?days=all for everything).
-    pagination_class = DefaultPageNumberPagination
+    pagination_class = RunsPagination
     DEFAULT_WINDOW_DAYS = 30
+    # timedelta overflows past ~2.7M days and PostgreSQL integer keys stop at
+    # 2**31-1; an out-of-range query param used to surface as an HTTP 500.
+    MAX_WINDOW_DAYS = 36_500  # 100 years — anything wider is "all"
+    MAX_PK = 2**31 - 1
 
     def get_queryset(self):
         qs = Run.objects.filter(user=self.request.user)
@@ -38,6 +122,7 @@ class RunListCreateView(generics.ListCreateAPIView):
                 days = int(days_raw) if days_raw else self.DEFAULT_WINDOW_DAYS
             except (TypeError, ValueError):
                 days = self.DEFAULT_WINDOW_DAYS
+            days = max(0, min(days, self.MAX_WINDOW_DAYS))
             qs = qs.filter(created_at__gte=timezone.now() - dt.timedelta(days=days))
         # P2l: optional source filter. "all" or missing = no filter.
         source = (self.request.query_params.get("source") or "").lower()
@@ -46,9 +131,16 @@ class RunListCreateView(generics.ListCreateAPIView):
         target_id = self.request.query_params.get("portfolio_target")
         if target_id:
             try:
-                qs = qs.filter(portfolio_target_id=int(target_id))
+                target_pk = int(target_id)
             except (TypeError, ValueError):
-                pass
+                target_pk = None
+            if target_pk is not None:
+                # Out-of-range ids can never match; short-circuit instead of
+                # letting the driver raise on an oversized integer.
+                if 0 < target_pk <= self.MAX_PK:
+                    qs = qs.filter(portfolio_target_id=target_pk)
+                else:
+                    qs = qs.none()
         # P3b: full-text transcript search. Postgres uses a tsvector query
         # (backed by the GIN index in migration 0010); sqlite (tests) falls back
         # to a substring match.
@@ -73,7 +165,44 @@ class RunListCreateView(generics.ListCreateAPIView):
     def get_serializer_class(self):
         return RunCreateSerializer if self.request.method == "POST" else RunListSerializer
 
+    def _cost_ceiling(self):
+        """The caller's Settings › Models per-run ceiling, or None if unset."""
+        from apps.models_catalog.models import UserModelPreferences
+
+        return (
+            UserModelPreferences.objects.filter(user=self.request.user)
+            .values_list("cost_ceiling_per_run_usd", flat=True)
+            .first()
+        )
+
     def perform_create(self, serializer: RunCreateSerializer) -> None:
+        # Owner decision (P-fix §4): Settings › Models "cost ceiling per run" is
+        # wired as a real per-run budget for AD-HOC runs only. Autopilot /
+        # strategy-cycle runs are dispatched elsewhere and are unchanged.
+        attrs = serializer.validated_data
+        ceiling = self._cost_ceiling()
+        if ceiling is not None and float(ceiling) <= 0:
+            ceiling = None  # a non-positive ceiling is "unset", not "reject everything"
+        if ceiling is not None and attrs.get("source", Run.ADHOC) == Run.ADHOC:
+            projected = estimate_run_cost_usd(
+                personas=attrs.get("personas"),
+                model_overrides=attrs.get("model_overrides") or {},
+            )
+            if projected > float(ceiling):
+                raise ValidationError({
+                    "detail": (
+                        f"Projected cost ${projected:.2f} exceeds your per-run "
+                        f"ceiling ${float(ceiling):.2f} (Settings › Models)."
+                    )
+                })
+            if attrs.get("max_budget_usd") is None:
+                # Seed the mid-run spend guard from the ceiling so the run is
+                # actually held to it, not just checked once up front. Clamped
+                # to the same bound the serializer enforces on user input.
+                serializer.validated_data["max_budget_usd"] = min(
+                    Decimal(str(ceiling)),
+                    Decimal(RunCreateSerializer.MAX_BUDGET_USD_CEILING),
+                )
         run = serializer.save(user=self.request.user)
         async_result = execute_run.delay(run.id)
         Run.objects.filter(pk=run.pk).update(celery_task_id=str(async_result.id or ""))
@@ -152,6 +281,12 @@ class RunRerunView(APIView):
             personas=list(original.personas or []),
             source=original.source,
             portfolio_target_id=original.portfolio_target_id,
+            # A rerun must reproduce the ORIGINAL run, and both of these are
+            # part of what was run: dropping max_budget_usd re-ran a
+            # deliberately capped run with no cap at all, and dropping
+            # graph_version silently fell back to the hardcoded council.
+            max_budget_usd=original.max_budget_usd,
+            graph_version_id=original.graph_version_id,
             rerun_of=original,
         )
         async_result = execute_run.delay(new_run.id)

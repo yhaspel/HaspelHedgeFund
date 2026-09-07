@@ -49,6 +49,10 @@ class FundamentalsOutput(BaseModel):
     debt_to_equity: float
     quality_score: int = Field(ge=0, le=100)
     notes: str
+    # False when the provider returned NO statements for the ticker (ETF, ADR,
+    # unknown symbol, thin FMP tier). Every numeric field above is then a
+    # placeholder zero that must NOT be read as measured data.
+    available: bool = True
     # --- P4 13F enrichment (optional; defaults keep existing cassettes valid)
     institutional_ownership_pct: float | None = None
     institutional_ownership_trend: Literal[
@@ -96,11 +100,16 @@ class ValuationOutput(BaseModel):
     dcf_fair_value: float | None = None
     multiples_fair_value: float | None = None
     residual_income_fair_value: float | None = None
-    fair_value_low: float
-    fair_value_high: float
+    # Nullable since the shares-outstanding fix: when a per-share fair value is
+    # not computable (no shares count, no positive cash-flow/earnings/equity, or
+    # no price) the node reports None + a note instead of a fabricated band that
+    # straddles the current price with a 0% upside.
+    fair_value_low: float | None = None
+    fair_value_high: float | None = None
     current_price: float
-    upside_pct: float
+    upside_pct: float | None = None
     most_sensitive_assumption: str
+    notes: str = ""
 
 
 class SentimentOutput(BaseModel):

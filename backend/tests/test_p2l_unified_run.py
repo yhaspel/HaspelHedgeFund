@@ -19,7 +19,7 @@ only the bridge / lifecycle logic, not the council itself.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -88,6 +88,29 @@ def strategy(user, db):
     )
 
 
+def _seed_bars(tickers, *, as_of: date, days: int = 420) -> None:
+    """Real cached price history for the screener.
+
+    ``compute_features`` needs >= 30 closes or it returns an unavailable /
+    synthetic row that ``run_screener`` drops, and ``FmpProvider`` only trusts a
+    cached window that is both dense (>= 68% of its calendar days) and fresh
+    (newest bar within 4 days of the end) — so seed every calendar day through
+    ``as_of`` for the whole 400-day feature window.
+    """
+    from apps.data.models import DailyBar
+
+    rows = []
+    for i, ticker in enumerate(tickers):
+        for k in range(days):
+            price = Decimal(str(round(100.0 + i * 10 + k * 0.05, 4)))
+            rows.append(DailyBar(
+                ticker=ticker, date=as_of - timedelta(days=days - 1 - k),
+                open=price, high=price, low=price, close=price,
+                adjusted_close=price, volume=1_000_000, source="fmp",
+            ))
+    DailyBar.objects.bulk_create(rows, ignore_conflicts=True)
+
+
 def _ranking(strategy: PortfolioStrategy, *, as_of: date) -> ScreenerRanking:
     return ScreenerRanking.objects.create(
         strategy=strategy, as_of_date=as_of,
@@ -137,6 +160,9 @@ def test_auto_run_council_true_dispatches_chord(strategy):
     strategy.auto_run_council = True
     strategy.save(update_fields=["auto_run_council"])
     as_of = date(2024, 12, 31)
+    # The screener drops tickers with no usable price history, so the universe
+    # needs real bars for any candidate (and hence any chord) to exist.
+    _seed_bars(("AAPL", "MSFT", "GOOG", "NVDA"), as_of=as_of)
 
     fake_async = MagicMock()
     fake_async.id = "fake-chord-id"

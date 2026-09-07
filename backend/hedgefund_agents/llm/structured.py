@@ -24,6 +24,21 @@ MAX_ATTEMPT_TOKENS = 16_384
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 
+class StructuredOutputError(ValueError):
+    """All attempts failed schema validation.
+
+    Subclasses ValueError so every existing ``except ValueError`` /
+    ``except Exception`` handler keeps working. ``response`` carries the last
+    attempt with the earlier billed attempts on ``prior_attempts``, so the
+    caller can still persist the spend the provider charged for (see
+    graphs/_node_fallback.py).
+    """
+
+    def __init__(self, message: str, response: LLMResponse) -> None:
+        super().__init__(message)
+        self.response = response
+
+
 def _extract_json(text: str) -> str:
     """Pull JSON out of fenced code blocks or raw text."""
     m = _FENCE_RE.search(text)
@@ -83,6 +98,10 @@ def call_structured[T: BaseModel](
     last_err: Exception | None = None
     last_resp: LLMResponse | None = None
     attempt_tokens = max_tokens
+    # Every attempt below is a real, billed request. Carry the rejected ones on
+    # the response we hand back so the caller records their tokens and cost too
+    # (previously only the LAST attempt was ever persisted).
+    billed: list[LLMResponse] = []
     for _attempt in range(3):
         resp = client.complete(
             model=model,
@@ -91,6 +110,8 @@ def call_structured[T: BaseModel](
             temperature=temperature,
             json_mode=True,
         )
+        resp.prior_attempts = []
+        billed.append(resp)
         last_resp = resp
         if not resp.text.strip():
             # Reasoning models (Qwen3, o1, etc.) can burn the full budget on
@@ -104,6 +125,8 @@ def call_structured[T: BaseModel](
             continue
         try:
             parsed = schema.model_validate_json(_extract_json(resp.text))
+            # Hand the caller every billed attempt, not just this one.
+            resp.prior_attempts = billed[:-1]
             if cache_ctx and cache_ctx.get("enabled"):
                 from apps.backtests import cache as bt_cache
 
@@ -116,9 +139,11 @@ def call_structured[T: BaseModel](
                     agent_name=cache_ctx["agent_name"],
                     agent_version=cache_ctx["agent_version"],
                     response_json=parsed.model_dump(),
-                    tokens_in=resp.prompt_tokens,
-                    tokens_out=resp.completion_tokens,
-                    cost_usd=float(resp.cost_usd or 0.0),
+                    # Sum across billed attempts so the L2 cache row reflects
+                    # what the retry chain actually cost.
+                    tokens_in=sum(r.prompt_tokens for r in billed),
+                    tokens_out=sum(r.completion_tokens for r in billed),
+                    cost_usd=float(sum(r.cost_usd or 0.0 for r in billed)),
                 )
                 bt_cache._bump("writes")
             return parsed, resp
@@ -136,8 +161,13 @@ def call_structured[T: BaseModel](
                 ),
             ]
     assert last_resp is not None
-    raise ValueError(
-        f"LLM structured output failed validation after 3 attempts: {last_err} "
-        f"(model={last_resp.model}, finish_reason={last_resp.finish_reason!r}, "
-        f"completion_tokens={last_resp.completion_tokens})"
+    # Carry every billed attempt on the exception so the node wrapper can still
+    # persist the spend (all three attempts were charged for).
+    last_resp.prior_attempts = billed[:-1]
+    raise StructuredOutputError(
+        f"LLM structured output failed validation after {len(billed)} attempts: "
+        f"{last_err} (model={last_resp.model}, "
+        f"finish_reason={last_resp.finish_reason!r}, "
+        f"completion_tokens={last_resp.completion_tokens})",
+        last_resp,
     )

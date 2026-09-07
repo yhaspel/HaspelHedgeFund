@@ -19,7 +19,14 @@ from ..versioning import AgentSpec, register
 METRICS = [
     "revenue", "operating_income", "net_income",
     "free_cash_flow", "total_equity", "total_assets",
+    # Needed to turn the enterprise-level estimates into PER-SHARE fair values.
+    # Providers that don't map a name simply omit it (FmpProvider filters
+    # unknown metrics), in which case the node reports upside_pct=None.
+    "shares_outstanding", "weighted_average_shares_outstanding",
 ]
+
+# Metric names, most authoritative first, that may carry a share count.
+SHARE_COUNT_METRICS = ("shares_outstanding", "weighted_average_shares_outstanding")
 
 DCF_WACC_DEFAULT = 0.09
 DCF_TERMINAL_GROWTH = 0.025
@@ -51,6 +58,21 @@ def _ttm(rows, metric: str) -> float | None:
     if not s:
         return None
     return sum(v for _, v in s[-4:])
+
+
+def resolve_shares_outstanding(rows) -> float | None:
+    """Latest positive share count from the fundamentals payload, or None.
+
+    Returns None when the provider does not carry a share count for this
+    ticker — the caller must then report `upside_pct=None` rather than invent
+    a per-share fair value.
+    """
+    for metric in SHARE_COUNT_METRICS:
+        series = _series(rows, metric)
+        for _, value in reversed(series):
+            if value and value > 0:
+                return float(value)
+    return None
 
 
 def _cagr(values: list[float], periods_per_year: int = 4) -> float | None:
@@ -122,32 +144,42 @@ def run_valuation(state: AgentState) -> AgentState:
     bars = data.get_daily_bars(ticker, as_of - dt.timedelta(days=10), as_of, as_of=as_of)
     current_price = float(bars[-1].close) if bars else 0.0
 
-    # Without authoritative shares-outstanding, model per-share via crude proxy:
-    # treat valuations as absolute dollars then scale to current_price's ratio.
-    # We surface the band as best-effort fair value; precision improves later.
-    shares_out = 1.0
-    dcf = compute_dcf(fcf_ttm or 0.0, growth, shares_out=shares_out)
-    mult = compute_multiples(ni_ttm, shares_out=shares_out)
-    ri = compute_residual_income(equity_latest, ni_ttm, shares_out=shares_out)
-
-    candidates = [v for v in (dcf, mult, ri) if v is not None and v > 0]
-    if candidates and current_price > 0:
-        # Express each as a per-share equivalent using market-implied share count
-        # derived from current_price × shares_out budget.
-        avg = sum(candidates) / len(candidates)
-        scale = current_price / avg if avg else 1.0
-        dcf_ps = dcf * scale if dcf else None
-        mult_ps = mult * scale if mult else None
-        ri_ps = ri * scale if ri else None
-        rescaled = [v for v in (dcf_ps, mult_ps, ri_ps) if v is not None and v > 0]
-        fv_low = min(rescaled) if rescaled else current_price
-        fv_high = max(rescaled) if rescaled else current_price
-        midpoint = sum(rescaled) / len(rescaled)
-        upside = (midpoint - current_price) / current_price * 100 if current_price else 0.0
-    else:
+    # Per-share fair values need an authoritative share count. The old code
+    # divided by 1.0 and then rescaled the whole band by
+    # `current_price / mean(candidates)`, which forced mean == price — so the
+    # midpoint upside was 0.0% for EVERY ticker and the band always straddled
+    # the price. Now: divide by the real share count, or report nothing.
+    shares_out = resolve_shares_outstanding(rows)
+    note = ""
+    if shares_out is None or shares_out <= 0:
         dcf_ps = mult_ps = ri_ps = None
-        fv_low = fv_high = current_price
-        upside = 0.0
+        fv_low = fv_high = None
+        upside = None
+        note = (
+            "Fair value not computable: no shares-outstanding figure in the "
+            "fundamentals payload, so the DCF / multiples / residual-income "
+            "estimates cannot be expressed per share."
+        )
+    else:
+        dcf_ps = compute_dcf(fcf_ttm or 0.0, growth, shares_out=shares_out)
+        mult_ps = compute_multiples(ni_ttm, shares_out=shares_out)
+        ri_ps = compute_residual_income(equity_latest, ni_ttm, shares_out=shares_out)
+        candidates = [v for v in (dcf_ps, mult_ps, ri_ps) if v is not None and v > 0]
+        if not candidates:
+            fv_low = fv_high = None
+            upside = None
+            note = (
+                "Fair value not computable: none of the DCF, multiples or "
+                "residual-income methods produced a positive estimate."
+            )
+        elif current_price <= 0:
+            fv_low, fv_high = min(candidates), max(candidates)
+            upside = None
+            note = "Upside not computable: no price bar on or before the as-of date."
+        else:
+            fv_low, fv_high = min(candidates), max(candidates)
+            midpoint = sum(candidates) / len(candidates)
+            upside = (midpoint - current_price) / current_price * 100
 
     summary_input = {
         "dcf_fair_value": dcf_ps,
@@ -157,9 +189,11 @@ def run_valuation(state: AgentState) -> AgentState:
         "fair_value_high": fv_high,
         "current_price": current_price,
         "upside_pct": upside,
+        "shares_outstanding": shares_out,
         "growth_used": growth,
         "wacc": DCF_WACC_DEFAULT,
         "terminal_growth": DCF_TERMINAL_GROWTH,
+        "note": note,
     }
 
     default = DEFAULT_MODELS.get("valuation", ("openrouter", "qwen/qwen3.6-27b"))
@@ -196,5 +230,7 @@ def run_valuation(state: AgentState) -> AgentState:
         "fair_value_high": fv_high,
         "current_price": current_price,
         "upside_pct": upside,
+        "shares_outstanding": shares_out,
+        "notes": note or out.get("notes", ""),
     })
     return {"valuation": out}  # type: ignore[return-value]

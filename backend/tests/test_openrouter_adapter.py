@@ -371,10 +371,10 @@ def test_empty_content_falls_back_to_same_tier_model():
 
 
 def test_empty_content_fallback_does_not_loop_when_fallback_also_empty(settings):
-    """If the same-tier fallback is ALSO empty, the chain now makes ONE further
-    bounded hop to the non-reasoning last resort (L2 self-heal), then surfaces
-    the empty response. Each model is tried at most once (guarded by _tried), so
-    there is still no recursion: gpt-oss:free → llama:free → llama (last resort)."""
+    """If the same-tier fallback is ALSO empty, the chain stops: every hop is
+    bounded (each model tried at most once, guarded by _tried) AND price-class
+    disciplined, so a `:free` chain never silently bills the PAID last resort.
+    The same chain started from a PAID route does take that final rung."""
     settings.LLM_SELF_HEAL = True
     settings.LLM_LAST_RESORT_MODEL = _LAST_RESORT
     settings.LLM_FREE_ONLY = False
@@ -382,14 +382,27 @@ def test_empty_content_fallback_does_not_loop_when_fallback_also_empty(settings)
         "choices": [{"message": {"content": None}, "finish_reason": ""}],
         "usage": {"completion_tokens": 91},
     })
-    http = _seq_http(empty(), empty(), empty())
+    # gpt-oss:free (empty) → llama:free same-tier (empty) → stop. The paid last
+    # resort is NOT a rung of a free chain: hopping there was a cost leak on a
+    # route the caller had explicitly picked to cost nothing.
+    http = _seq_http(empty(), empty())
     resp = _build_client(http).complete(
         model="openai/gpt-oss-120b:free", messages=[Message("user", "hi")]
     )
     assert resp.text == ""
-    # gpt-oss:free (empty) → llama:free same-tier (empty) → llama last resort
-    # (empty) → stop. Three distinct models, each tried once, no loop.
-    assert http.post.call_count == 3
+    assert http.post.call_count == 2
+    models = [c.kwargs["json"]["model"] for c in http.post.call_args_list]
+    assert models == ["openai/gpt-oss-120b:free", "meta-llama/llama-3.3-70b-instruct:free"]
+    assert _LAST_RESORT not in models      # no free → paid escalation
+
+    # A PAID origin is already in the last resort's price class, so it makes the
+    # one bounded hop, finds that empty too, and stops. No loop either way.
+    http = _seq_http(empty(), empty())
+    resp = _build_client(http).complete(
+        model="openai/gpt-oss-120b", messages=[Message("user", "hi")]
+    )
+    assert resp.text == ""
+    assert http.post.call_count == 2
     assert http.post.call_args_list[-1].kwargs["json"]["model"] == _LAST_RESORT
 
 
@@ -612,7 +625,9 @@ def _heal(settings):
 
 def test_self_heal_model_unavailable_hops_to_last_resort(_heal):
     """Bug A: a 404/dead route used to raise ModelUnavailable and fail the whole
-    run. Self-heal hops ONCE to the known-good non-reasoning last resort."""
+    run. Self-heal hops ONCE to the known-good non-reasoning last resort. The
+    origin is a PAID slug: the last resort is paid, and price-class discipline
+    keeps it off the end of a `:free` chain."""
     dead = _resp({}, status_code=404, text="No endpoints found")
     good = _resp({
         "choices": [{"message": {"content": '{"signal":"buy"}'}, "finish_reason": "stop"}],
@@ -620,12 +635,25 @@ def test_self_heal_model_unavailable_hops_to_last_resort(_heal):
     })
     http = _seq_http(dead, good)
     resp = _build_client(http).complete(
-        model="arcee-ai/trinity-large-thinking:free", messages=[Message("user", "hi")]
+        model="arcee-ai/trinity-large-thinking", messages=[Message("user", "hi")]
     )
     assert resp.text == '{"signal":"buy"}'
     assert resp.model == _LAST_RESORT
     assert http.post.call_count == 2
     assert http.post.call_args_list[1].kwargs["json"]["model"] == _LAST_RESORT
+
+
+def test_self_heal_free_route_never_hops_to_the_paid_last_resort(_heal):
+    """The cost-leak fix: a dead `:free` route has no free rung left, and the
+    PAID last resort is out of its price class — so ModelUnavailable surfaces
+    after ONE post instead of silently billing the account."""
+    http = _seq_http(_resp({}, status_code=404, text="No endpoints found"))
+    with pytest.raises(ModelUnavailable):
+        _build_client(http).complete(
+            model="arcee-ai/trinity-large-thinking:free", messages=[Message("user", "hi")]
+        )
+    assert http.post.call_count == 1
+    assert http.post.call_args_list[0].kwargs["json"]["model"] != _LAST_RESORT
 
 
 def test_self_heal_model_unavailable_both_dead_raises_no_loop(_heal):
@@ -635,7 +663,7 @@ def test_self_heal_model_unavailable_both_dead_raises_no_loop(_heal):
     http = _seq_http(dead, _resp({}, status_code=404, text="No endpoints found"))
     with pytest.raises(ModelUnavailable):
         _build_client(http).complete(
-            model="minimax/minimax-m2.5:free", messages=[Message("user", "hi")]
+            model="minimax/minimax-m2.5", messages=[Message("user", "hi")]
         )
     assert http.post.call_count == 2  # original + one last-resort hop, no loop
 
