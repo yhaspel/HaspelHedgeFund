@@ -8,17 +8,18 @@ from rest_framework.test import APIClient
 from apps.screener.capabilities import ScreenerCapability
 from apps.screener.datasource import FmpScreenerDataSource
 from apps.screener.models import SavedScreen
-from apps.screener.views import ScreenerRunView
 
 User = get_user_model()
 
 
 @pytest.fixture(autouse=True)
 def _reset_run_rate_limit():
-    # Pytest-django rolls back the DB between tests but user-id values
-    # often recycle, so the class-level rate-limit dict leaks 429s across
-    # tests. Clear it before each test.
-    ScreenerRunView._last_run_at.clear()
+    # The /run/ rate limiter lives in django.core.cache (WAVE-3 P2), which is
+    # shared across the whole test session; pytest-django rolls back the DB but
+    # user-id values recycle, so a stale key leaks 429s across tests.
+    from django.core.cache import cache
+
+    cache.clear()
 
 
 @pytest.fixture

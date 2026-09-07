@@ -15,6 +15,7 @@ from unittest import mock
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -486,6 +487,7 @@ def test_is_allowed_sentiment_model(sentiment_models) -> None:
 
 
 @pytest.mark.django_db
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_classify_one_batched_call(sentiment_models) -> None:
     rows = [_make_row(headline=f"News {i}") for i in range(3)]
     parsed = MarketNewsSentimentBatch(
@@ -519,6 +521,7 @@ def test_classify_one_batched_call(sentiment_models) -> None:
 
 
 @pytest.mark.django_db
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_classify_skips_rows_already_scored_by_active_model(sentiment_models) -> None:
     row = _make_row(headline="Already scored")
     row.sentiment = "bullish"
@@ -541,6 +544,7 @@ def test_classify_skips_rows_already_scored_by_active_model(sentiment_models) ->
 
 
 @pytest.mark.django_db
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_classify_missing_key_returns_actionable_warning(sentiment_models) -> None:
     row = _make_row(headline="Hello")
     with mock.patch(
@@ -594,16 +598,34 @@ def test_news_preferences_auto_create(auth_client, user, sentiment_models) -> No
 
 
 @pytest.mark.django_db
-def test_news_preferences_accepts_nonfrugal_via_show_all(
+def test_news_preferences_nonfrugal_needs_the_user_s_own_key(
     auth_client, user, sentiment_models
 ) -> None:
-    """Opt-in: a non-frugal catalogued model (Haiku) is now selectable."""
+    """WAVE-3 P2: the "show all models" pool is BYOK-gated.
+
+    The old expectation (any catalogued model selectable by anyone) WAS the
+    bug — it put a frontier model on the operator's key, per page view.
+    """
     resp = auth_client.put(
         "/api/news/preferences/",
         {"sentiment_model": "anthropic:claude-haiku-4-5-20251001"},
         format="json",
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 400
+    assert "own OpenRouter key" in resp.json()["detail"]
+
+    # With their own key, the whole active catalog is fair game again.
+    from apps.models_catalog.models import ProviderKey
+
+    pk = ProviderKey.objects.create(user=user)
+    pk.set_key("openrouter", "sk-or-user-key")
+    pk.save()
+    resp = auth_client.put(
+        "/api/news/preferences/",
+        {"sentiment_model": "anthropic:claude-haiku-4-5-20251001"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
     assert resp.json()["preferences"]["sentiment_model"] == (
         "anthropic:claude-haiku-4-5-20251001"
     )
