@@ -309,10 +309,15 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     const bt = this.store.current();
     if (!bt) return 'Stitched out-of-sample equity curve.';
     const m = bt.metrics;
-    const ret = m?.total_return_pct ?? bt.total_return_pct;
-    const sharpe = m?.sharpe ?? bt.stitched_sharpe ?? bt.oos_sharpe;
+    // The computed-metrics block serialises DecimalFields as STRINGS ("18.5000"),
+    // so these have to be coerced before toFixed — calling it on a string throws
+    // inside the computed and the canvas silently loses its accessible name.
+    const asNumber = (v: unknown): number =>
+      v === null || v === undefined ? NaN : Number(v);
+    const ret = asNumber(m?.total_return_pct ?? bt.total_return_pct);
+    const sharpe = asNumber(m?.sharpe ?? bt.stitched_sharpe ?? bt.oos_sharpe);
     const numbers =
-      ret === null || ret === undefined || sharpe === null || sharpe === undefined
+      !Number.isFinite(ret) || !Number.isFinite(sharpe)
         ? 'Results are not available yet.'
         : `Portfolio OOS return ${ret.toFixed(2)}%, stitched OOS Sharpe ${sharpe.toFixed(2)}.`;
     const engine = engineVersionLabel(bt.engine_version);
