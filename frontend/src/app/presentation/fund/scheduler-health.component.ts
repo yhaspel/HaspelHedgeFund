@@ -117,7 +117,9 @@ import { ErrorStateComponent } from '../shared/error-state.component';
             }
 
             @if (warnings().length) {
-              <ul class="warnings" role="status" data-test="scheduler-warnings">
+              <!-- aria-live rather than role="status": the status role would
+                   REPLACE the list role and orphan the <li> children. -->
+              <ul class="warnings" aria-live="polite" data-test="scheduler-warnings">
                 @for (w of warnings(); track w) {
                   <li>{{ w }}</li>
                 }
