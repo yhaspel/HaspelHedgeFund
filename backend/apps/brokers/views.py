@@ -47,8 +47,9 @@ from .brackets import create_group, is_child_leg, is_group_anchor
 from .capabilities import (
     AUTH_GATEWAY,
     AUTH_NONE,
-    all_capabilities,
+    disabled_reason,
     get_capabilities,
+    registry_payload,
 )
 from .confirmation import ConfirmationError, GateContext, gate, gate_bracket
 from .credentials import set_api_key_secret, zero_credential
@@ -91,12 +92,16 @@ def _client_ip(request) -> str | None:
 class BrokerRegistryView(APIView):
     """GET /api/brokers/ — list every known broker + its capabilities.
 
-    Drives the connect wizard tile grid on the frontend.
+    Drives the connect wizard tile grid on the frontend. Each row carries the
+    deployment gate (wave 3): ``enabled`` (may this broker back a NEW account),
+    ``status`` (``enabled`` | ``deferred`` | ``disabled`` | ``unavailable``) and
+    a human-readable ``note`` explaining a non-enabled status. IBKR and
+    TradeStation ship ``deferred`` — their code is intact but the phases
+    (P3a-2 / P3a-3) have not landed, so the wizard must not imply otherwise.
     """
 
     def get(self, request) -> Response:
-        caps = [c.to_dict() for c in all_capabilities()]
-        return Response({"brokers": caps})
+        return Response({"brokers": registry_payload()})
 
 
 class MarketCalendarView(APIView):
@@ -132,6 +137,12 @@ class BrokerAccountListCreateView(generics.ListCreateAPIView):
             raise ValidationError({
                 "broker": f"{cap.display_name} is not yet available — {cap.description}"
             })
+        # Wave 3: the deployment gate. A deferred/disabled broker cannot back a
+        # NEW account; existing accounts are untouched so a config change never
+        # orphans a connected book. ``ENABLED_BROKERS`` re-enables one.
+        gate_note = disabled_reason(broker_code)
+        if gate_note:
+            raise ValidationError({"broker": gate_note})
         if mode not in (BrokerAccount.MODE_PAPER, BrokerAccount.MODE_LIVE):
             raise ValidationError({"mode": "mode must be 'paper' or 'live'"})
         if mode == BrokerAccount.MODE_PAPER and not cap.supports_paper:
@@ -860,6 +871,12 @@ class BrokerAccountDeleteView(APIView):
     represent broker-side commitments the user must resolve first
     (cancel or reconcile). Cleanly drafted / disconnected / errored
     accounts delete in one transaction along with their portfolio.
+
+    It also refuses (409) when the account still has orders WORKING AT THE
+    VENUE (`submitted` / `partial`) or held for the next open (`pending_open`).
+    Deleting cascaded those rows away while the order stayed live at Alpaca:
+    the fund lost every local trace of a position it was about to acquire, and
+    nothing was left to cancel it with.
     """
 
     def delete(self, request, account_id: int) -> Response:
@@ -877,6 +894,31 @@ class BrokerAccountDeleteView(APIView):
                     "unknown). Cancel or reconcile them before deleting."
                 ),
             })
+        open_orders = list(
+            account.orders.filter(
+                status__in=(
+                    *BrokerOrder.OPEN_STATUSES,
+                    BrokerOrder.STATUS_PENDING_OPEN,
+                ),
+            ).values_list("id", "ticker", "status")[:20],
+        )
+        if open_orders:
+            return Response(
+                {
+                    "detail": (
+                        f"this account has {len(open_orders)} open order(s) "
+                        "still working at the broker. Cancel them first — "
+                        "deleting the account would leave them live at the "
+                        "venue with no local record."
+                    ),
+                    "code": "open_orders",
+                    "open_orders": [
+                        {"id": pk, "ticker": ticker, "status": st}
+                        for pk, ticker, st in open_orders
+                    ],
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         portfolio = account.portfolio
         with transaction.atomic():
             account.delete()
@@ -944,6 +986,22 @@ class BrokerAccountSettingsView(APIView):
 # --- Orders -----------------------------------------------------------------
 
 
+def _finite_decimal(raw, field: str) -> Decimal:
+    """Parse a user-supplied number, rejecting NaN / sNaN / ±Infinity.
+
+    ``Decimal("NaN")`` parses happily, then every ordering comparison against
+    it raises ``InvalidOperation`` — so `quantity=NaN` escaped validation as a
+    500 and `quantity=Infinity` sailed through to the order row. Both are
+    client input errors: 400."""
+    try:
+        value = Decimal(str(raw))
+    except Exception as exc:  # noqa: BLE001 — any parse failure is a 400
+        raise ValidationError({field: "must be a number"}) from exc
+    if not value.is_finite():
+        raise ValidationError({field: "must be a finite number"})
+    return value
+
+
 class BrokerOrderListCreateView(generics.ListCreateAPIView):
     serializer_class = BrokerOrderSerializer
 
@@ -951,7 +1009,12 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
         qs = BrokerOrder.objects.filter(broker_account__user=self.request.user)
         account = self.request.query_params.get("account")
         if account:
-            qs = qs.filter(broker_account_id=account)
+            # A non-numeric ?account= reached the ORM and raised ValueError →
+            # 500. It is a client input error, not a server fault.
+            try:
+                qs = qs.filter(broker_account_id=int(account))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError({"account": "must be an integer id"}) from exc
         status_filter = self.request.query_params.get("status")
         if status_filter:
             statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
@@ -985,10 +1048,7 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
             raise ValidationError({"side": "must be 'buy' or 'sell'"})
         if not ticker:
             raise ValidationError({"ticker": "required"})
-        try:
-            raw_quantity = Decimal(str(data.get("quantity") or "0"))
-        except Exception as exc:
-            raise ValidationError({"quantity": "must be a number"}) from exc
+        raw_quantity = _finite_decimal(data.get("quantity") or "0", "quantity")
         if raw_quantity <= 0:
             raise ValidationError({"quantity": "must be positive"})
 
@@ -1032,10 +1092,7 @@ class BrokerOrderListCreateView(generics.ListCreateAPIView):
             raw = data.get(field)
             if raw is None or str(raw).strip() == "":
                 return None
-            try:
-                value = Decimal(str(raw))
-            except Exception as exc:  # noqa: BLE001
-                raise ValidationError({field: "must be a number"}) from exc
+            value = _finite_decimal(raw, field)
             if value <= 0:
                 raise ValidationError({field: "must be positive"})
             return value
@@ -1208,9 +1265,12 @@ class BrokerOrderConfirmView(APIView):
 
         typed = (request.data.get("typed_confirmation") or "").strip()
         live = (request.data.get("live_confirmation") or "").strip()
-        method = (
-            request.data.get("confirmation_method") or BrokerOrder.CONFIRM_MANUAL
-        ).strip()
+        # SERVER-SET, never client-set. This endpoint IS the human-in-the-loop
+        # confirmation, so the audit trail records `manual_ui` whatever the
+        # client claims — a caller could otherwise stamp their own click as
+        # `scheduled_job` and hide a manual live trade inside the automation
+        # audit. Machine paths (autopilot, schedules) don't come through here.
+        method = BrokerOrder.CONFIRM_MANUAL
 
         ctx = GateContext(
             user=request.user,
@@ -1309,10 +1369,32 @@ class BrokerOrderCancelView(APIView):
             raise ValidationError({"detail": "not found"}) from exc
         cancellable = (
             order.status in BrokerOrder.OPEN_STATUSES
-            or order.status == BrokerOrder.STATUS_DRAFT
+            or order.status in (
+                BrokerOrder.STATUS_DRAFT, BrokerOrder.STATUS_PENDING_OPEN,
+            )
         )
         if not cancellable:
             return Response({"detail": "order is not cancellable"}, status=409)
+        # A `pending_open` order is held LOCALLY for the next session open — it
+        # has never reached a venue, so there is nothing to cancel remotely.
+        # Cancelling it in the database is the only way the owner can stop a
+        # queued order before the release task fires; refusing here meant a
+        # weekend batch could not be called off at all.
+        if order.status == BrokerOrder.STATUS_PENDING_OPEN:
+            now = timezone.now()
+            order.status = BrokerOrder.STATUS_CANCELLED
+            order.cancelled_at = now
+            order.release_after = None
+            order.confirmation_audit = {
+                **(order.confirmation_audit or {}),
+                "cancel_note": "cancelled before release",
+                "cancelled_at": now.isoformat(),
+                "cancelled_by": request.user.pk,
+            }
+            order.save(update_fields=[
+                "status", "cancelled_at", "release_after", "confirmation_audit",
+            ])
+            return Response(BrokerOrderSerializer(order).data)
         # Drafts (never sent) and demo orders (no external venue) cancel
         # straight in the database — there is no adapter round-trip.
         cap = get_capabilities(order.broker_account.broker)
