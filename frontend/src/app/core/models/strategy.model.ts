@@ -25,6 +25,14 @@ export interface Position {
   opened_at: string;
 }
 
+/**
+ * Every `PortfolioStrategy.KIND_CHOICES` code the backend can store.
+ *
+ * WAVE 3: `trend`, `sector_momentum` and `news_sentiment` (the deterministic
+ * P7c kinds) and `xsec_long_short` (the P11-F scaffolding kind) existed
+ * server-side but were missing here, so a fund card holding one rendered the
+ * raw slug — "sector_momentum" — instead of a name.
+ */
 export type StrategyKind =
   | 'long_only'
   | 'short_only'
@@ -34,7 +42,11 @@ export type StrategyKind =
   | 'sector_rotation'
   | 'global_macro'
   | 'risk_parity'
-  | 'pairs';
+  | 'pairs'
+  | 'trend'
+  | 'sector_momentum'
+  | 'news_sentiment'
+  | 'xsec_long_short';
 
 export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'long_only', label: 'Long-only' },
@@ -46,7 +58,24 @@ export const STRATEGY_KIND_OPTIONS: { value: StrategyKind; label: string }[] = [
   { value: 'global_macro', label: 'Global macro (ETF expression)' },
   { value: 'risk_parity', label: 'Risk-parity / multi-asset lite' },
   { value: 'pairs', label: 'Pairs trading (cointegration)' },
+  // WAVE 3 — the deterministic (council-free) kinds. `POST /strategies/`
+  // accepts them: `kind` is a plain ModelSerializer field validated against
+  // KIND_CHOICES, and every knob their constructors read
+  // (`target_gross_pct`, `vol_window_days`, `max_etfs_held`, `max_positions`)
+  // is already in `StrategySerializer.Meta.fields`.
+  { value: 'trend', label: 'Deterministic trend (TSMOM)' },
+  { value: 'sector_momentum', label: 'Deterministic sector momentum' },
+  { value: 'news_sentiment', label: 'News-sentiment single-name (council overlay)' },
 ];
+
+/**
+ * Kinds the backend stores but the new-strategy form does NOT offer.
+ * `xsec_long_short` is SCAFFOLDING (P11 F / R5): it backtests, but the §9 gate
+ * hard-blocks live arming until survivorship-clean single-name data exists, so
+ * offering it in a creation form would only manufacture dead strategies. It is
+ * still labelled everywhere it can appear.
+ */
+export const STRATEGY_KIND_CLI_ONLY: StrategyKind[] = ['xsec_long_short'];
 
 export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
   long_only:
@@ -65,9 +94,30 @@ export const STRATEGY_KIND_DESCRIPTIONS: Record<StrategyKind, string> = {
     'A multi-asset basket (stocks + bonds + gold) where each sleeve is sized so that risk is roughly equal across sleeves — not dollars. Calmer assets like bonds get a bigger dollar slice, more volatile assets like tech a smaller one, so no single sleeve dominates the book\'s ups and downs. Fully mechanical and very cheap to run; rebalances only when allocations have drifted enough to be worth the trading cost.',
   pairs:
     'Picks pairs of stocks in the same industry that historically move together — like Coke and Pepsi, or Visa and Mastercard — and trades the gap between them. When one stock rallies far ahead of its partner and history says the gap usually closes again, the strategy buys the laggard and short-sells the leader, betting the two will re-converge. Because both legs are in the same sector, broad market moves cancel out: profit or loss comes almost entirely from the gap narrowing (good) or widening further (bad). Pre-set rules close each pair when the gap has reverted to normal, or force-close it if it keeps widening past a "this isn\'t reverting — get out" threshold. An optional AI-council sanity-check vets each candidate to filter out cases where the divergence has a real reason (earnings miss, lawsuit) and isn\'t just noise.',
+  trend:
+    'Deterministic time-series momentum (TSMOM), no AI council at all. Each name in the universe is scored on its own recent trend across several lookback windows; anything trending up is held, anything that is not goes flat. Position sizes are set by a volatility target, so a calm name gets a bigger slice than a jumpy one and the book\'s overall swing stays roughly constant. Fully mechanical and free to run — no LLM cost per cycle — and it sizes identically in the backtest and live, because both read the same config. Long/flat by default; a long/short variant exists but is set from the CLI.',
+  sector_momentum:
+    'Deterministic cross-sectional momentum over sector / theme ETFs, no AI council. Instead of asking "is this trending up?" it asks "which of these is trending up the MOST?" and holds the top handful, re-ranked every cycle. Same volatility-targeted sizing as trend, same zero LLM cost, same code path in backtest and live. The number of ETFs held is the "max ETFs held" setting.',
+  news_sentiment:
+    'A long-only single-name book sized off news sentiment: each cycle, headlines for the universe are scored, and the most positively-covered names are bought equal-weighted. Only positive-sentiment names are eligible — it never shorts. An optional persona conviction overlay can veto a name the council distrusts, and the platform measures that overlay against the same book without it, so you can see whether the AI layer is actually adding anything. The number of names held is the "max positions" setting.',
+  xsec_long_short:
+    'Single-name cross-sectional long/short: rank the universe, buy the top, short the bottom, hedge the market exposure. SCAFFOLDING ONLY — it backtests, but today\'s index membership is survivorship-biased, so any result is an upper bound, and the validation gate refuses to arm it live. Created from the CLI / fund bootstrap.',
   sector_rotation:
     'Buys a handful of sector / theme ETFs (e.g. tech, banks, energy, semiconductors, gold-miners, biotech) instead of individual stocks. Each cycle the strategy ranks ETFs by recent strength, drawdown, and how well they fit the current macro regime, then concentrates in the top few. Long-only by default; overlapping ETFs (e.g. broad tech + semiconductors) are de-duplicated so you don\'t accidentally double-bet the same theme.',
 };
+
+/**
+ * Human label for any stored kind — including the ones the creation form does
+ * not offer. Fund cards, leaderboard rows and roster pickers use this instead
+ * of printing the raw slug.
+ */
+export function strategyKindLabel(kind: string | null | undefined): string {
+  if (!kind) return '—';
+  const opt = STRATEGY_KIND_OPTIONS.find((o) => o.value === kind);
+  if (opt) return opt.label;
+  if (kind === 'xsec_long_short') return 'Single-name L/S (cross-sectional) — scaffolding';
+  return kind;
+}
 
 export interface Strategy {
   id: number;
@@ -162,6 +212,20 @@ export interface CycleEstimate {
 export interface CycleOverrideBody {
   preset?: string;
   model_overrides?: Record<string, string>;
+}
+
+/**
+ * POST /strategies/<id>/run-now/ success payload.
+ *
+ * `status: "reused"` means a same-day DONE cycle already exists and NOTHING was
+ * dispatched — `target_id` points at it. Every other status is a real dispatch
+ * carrying `task_id`. (Failures are 400 for a bad/non-today as_of and 409
+ * `{detail, autopilot_run_now}` when the autopilot owns the schedule.)
+ */
+export interface RunNowResponse {
+  task_id?: string;
+  status: string;
+  target_id?: number;
 }
 
 export interface RebalanceOrder {

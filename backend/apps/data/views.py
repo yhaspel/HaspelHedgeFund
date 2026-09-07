@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 import time
 from decimal import Decimal
+from typing import Any
 
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import permissions
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,6 +29,8 @@ from .models import (
     RegimeSnapshot,
     UserNewsPreferences,
 )
+from .news_llm_policy import llm_status as news_llm_status
+from .news_llm_policy import user_has_openrouter_key
 
 log = logging.getLogger(__name__)
 
@@ -35,16 +40,56 @@ _PROFILE_TTL_SECONDS = 30 * 60
 _BATCH_MAX_SYMBOLS = 50
 
 
+class BadAsOf(ValidationError):
+    """Malformed ``?as_of=``. A ``ValidationError`` subclass, so DRF's own
+    exception handler turns it into a 400 on every view that calls
+    ``_parse_as_of`` — no per-view try/except to forget."""
+
+    def __init__(self, raw: str) -> None:
+        super().__init__(
+            {"detail": f"Invalid as_of '{raw}': expected an ISO date (YYYY-MM-DD)."}
+        )
+
+
 def _parse_as_of(request: Request) -> dt.date:
+    """``?as_of=`` as a date. Raises :class:`BadAsOf` (-> HTTP 400) rather
+    than letting ``ValueError`` escape as an unhandled 500."""
     raw = request.query_params.get("as_of")
     if not raw:
         return dt.date.today()
-    return dt.date.fromisoformat(raw)
+    try:
+        return dt.date.fromisoformat(raw)
+    except (ValueError, TypeError) as exc:
+        raise BadAsOf(raw) from exc
+
+
+def _provider_unavailable(where: str, exc: Exception) -> Response:
+    """A provider outage is a 503 with a readable detail, not a 500."""
+    log.warning("%s provider_unavailable err=%s: %s", where, type(exc).__name__, exc)
+    return Response(
+        {
+            "detail": (
+                f"Upstream data provider is unavailable ({type(exc).__name__}). "
+                "Try again shortly."
+            ),
+            "provider_error": type(exc).__name__,
+        },
+        status=503,
+    )
 
 
 def _parse_model_type(request: Request) -> str:
     raw = request.query_params.get("model_type") or "labelled_markov"
     return raw if raw in {"labelled_markov", "gaussian_hmm"} else "labelled_markov"
+
+
+# A snapshot older than this is served with ``stale: true``. Matches the
+# macro agent's own 14-day freshness rule (``_macro_freshness``).
+_MACRO_STALE_AFTER_DAYS = 14
+# Only ``as_of`` dates within this window may enqueue a rebuild. Older dates
+# are historical archaeology: they are served from the newest stored row,
+# marked stale, and never trigger a FRED sweep + LLM narrative in-request.
+_MACRO_REBUILD_WINDOW_DAYS = 7
 
 
 class MacroSnapshotView(APIView):
@@ -57,12 +102,36 @@ class MacroSnapshotView(APIView):
             .order_by("-as_of_date")
             .first()
         )
-        if not snap:
+        # Never rebuild synchronously for an arbitrary historical as_of: that
+        # was an unbounded, unauthenticated-by-cost trigger (8 ALFRED calls +
+        # one LLM narrative on the platform key, PER REQUEST, and walking
+        # backwards one day at a time never hit the `as_of_date__lte` cache).
+        recent = abs((dt.date.today() - as_of).days) <= _MACRO_REBUILD_WINDOW_DAYS
+        if recent and (snap is None or snap.as_of_date < as_of):
             from .tasks import prewarm_macro_snapshot
-            prewarm_macro_snapshot(as_of.isoformat())
-            snap = MacroSnapshot.objects.filter(as_of_date=as_of).first()
+
+            if snap is None:
+                # Nothing at all to serve — build inline, once, so the very
+                # first request after a deploy is not a 503.
+                try:
+                    prewarm_macro_snapshot(as_of.isoformat())
+                except Exception as exc:  # noqa: BLE001 — FRED/LLM outage
+                    return _provider_unavailable("macro_snapshot", exc)
+                snap = (
+                    MacroSnapshot.objects.filter(as_of_date__lte=as_of)
+                    .order_by("-as_of_date")
+                    .first()
+                )
+            else:
+                # We already have something usable — refresh in the background
+                # and serve the stored row now.
+                try:
+                    prewarm_macro_snapshot.delay(as_of.isoformat())
+                except Exception as exc:  # noqa: BLE001 — broker down is not fatal
+                    log.warning("macro_snapshot enqueue_failed err=%s", exc)
         if not snap:
             return Response({"detail": "no macro snapshot available"}, status=503)
+        age_days = (as_of - snap.as_of_date).days
         return Response(
             {
                 "as_of_date": snap.as_of_date.isoformat(),
@@ -74,9 +143,15 @@ class MacroSnapshotView(APIView):
                 "sector_implications": snap.sector_implications,
                 "series_used": snap.series_used,
                 "markov_consensus": snap.markov_consensus,
+                "classifier_version": snap.classifier_version,
+                "snapshot_age_days": age_days,
                 # P4-OFF: at L1 the FRED refresh is fenced; this is the last
-                # persisted snapshot.
-                "stale": bool(getattr(settings, "OFFLINE_MODE", False)),
+                # persisted snapshot. Age counts too — an 8-month-old snapshot
+                # is stale whether or not we are offline.
+                "stale": (
+                    bool(getattr(settings, "OFFLINE_MODE", False))
+                    or age_days > _MACRO_STALE_AFTER_DAYS
+                ),
             }
         )
 
@@ -170,7 +245,11 @@ class RegimeBatchView(APIView):
         as_of = _parse_as_of(request)
         model_type = _parse_model_type(request)
         raw = request.query_params.get("tickers") or ""
-        tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+        requested = list(dict.fromkeys(t.strip().upper() for t in raw.split(",") if t.strip()))
+        # One DB query per ticker: cap the fan-out the same way the profile
+        # batch endpoint does (previously unbounded — 500 tickers = 500 queries).
+        tickers = requested[:_BATCH_MAX_SYMBOLS]
+        truncated = len(requested) > len(tickers)
         items: list[dict] = []
         for ticker in tickers:
             snap = get_latest_snapshot(
@@ -190,6 +269,9 @@ class RegimeBatchView(APIView):
                 "as_of": as_of.isoformat(),
                 "model_type": model_type,
                 "items": items,
+                "requested_count": len(requested),
+                "truncated": truncated,
+                "max_tickers": _BATCH_MAX_SYMBOLS,
             }
         )
 
@@ -652,6 +734,8 @@ class MarketNewsFeedView(APIView):
             "needs_keys": needs_keys,
             "chyron_enabled": prefs.chyron_enabled,
             "chyron_item_count": _clamp(prefs.chyron_item_count, 5, 10),
+            # WAVE-3 P2: why the LLM features did (not) run — BYOK + daily cap.
+            "llm_status": news_llm_status(request.user.id),
             "ranking_basis": (
                 "Ranked by recency, breadth of coverage & source weight."
             ),
@@ -661,8 +745,12 @@ class MarketNewsFeedView(APIView):
         }
         if sentiment_warning:
             payload["sentiment_warning"] = sentiment_warning
+            if sentiment_warning not in payload["warnings"]:
+                payload["warnings"].append(sentiment_warning)
         if translation_warning:
             payload["translation_warning"] = translation_warning
+            if translation_warning not in payload["warnings"]:
+                payload["warnings"].append(translation_warning)
         return Response(payload)
 
 
@@ -679,9 +767,11 @@ def _serialize_prefs(prefs: UserNewsPreferences) -> dict:
     }
 
 
-def _serialize_model_choice(m, frugal_ids: set[str]) -> dict:
+def _serialize_model_choice(m, frugal_ids: set[str], *, has_key: bool) -> dict:
     """One News model-picker option. ``frugal`` marks the cheap default subset;
-    ``supports_reasoning`` drives the 🧠 icon in the UI."""
+    ``supports_reasoning`` drives the 🧠 icon in the UI. ``selectable`` is False
+    for the non-frugal models a user without their own OpenRouter key may not
+    pick (WAVE-3 P2) — ``PUT`` rejects those with a 400."""
     return {
         "id": m.id,
         "display_name": m.display_name,
@@ -693,24 +783,50 @@ def _serialize_model_choice(m, frugal_ids: set[str]) -> dict:
         ),
         "supports_reasoning": m.supports_reasoning,
         "frugal": m.id in frugal_ids,
+        "selectable": has_key or m.id in frugal_ids,
     }
 
 
-def _serialize_translation_choices() -> list[dict]:
+def _serialize_translation_choices(*, has_key: bool) -> list[dict]:
     from .market_news_translation import (
         all_translation_models,
         frugal_translation_models,
     )
 
     frugal_ids = {m.id for m in frugal_translation_models()}
-    return [_serialize_model_choice(m, frugal_ids) for m in all_translation_models()]
+    return [
+        _serialize_model_choice(m, frugal_ids, has_key=has_key)
+        for m in all_translation_models()
+    ]
 
 
-def _serialize_sentiment_choices() -> list[dict]:
+def _serialize_sentiment_choices(*, has_key: bool) -> list[dict]:
     from .market_news_sentiment import all_sentiment_models, frugal_sentiment_models
 
     frugal_ids = {m.id for m in frugal_sentiment_models()}
-    return [_serialize_model_choice(m, frugal_ids) for m in all_sentiment_models()]
+    return [
+        _serialize_model_choice(m, frugal_ids, has_key=has_key)
+        for m in all_sentiment_models()
+    ]
+
+
+def _prefs_payload(user) -> dict:
+    """The shared ``GET``/``PUT`` body of ``/news/preferences/``."""
+    prefs = _get_or_create_news_prefs(user)
+    has_key = user_has_openrouter_key(user.id)
+    return {
+        "preferences": _serialize_prefs(prefs),
+        "sentiment_model_choices": _serialize_sentiment_choices(has_key=has_key),
+        "translation_model_choices": _serialize_translation_choices(has_key=has_key),
+        "llm_status": news_llm_status(user.id),
+    }
+
+
+_FRUGAL_ONLY_DETAIL = (
+    "That {what} model is only available with your own OpenRouter key. "
+    "Add one at /settings/providers, or pick a model marked \u201cfrugal\u201d "
+    "in {what}_model_choices."
+)
 
 
 class NewsPreferencesView(APIView):
@@ -719,20 +835,23 @@ class NewsPreferencesView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request: Request) -> Response:
-        prefs = _get_or_create_news_prefs(request.user)
-        return Response(
-            {
-                "preferences": _serialize_prefs(prefs),
-                "sentiment_model_choices": _serialize_sentiment_choices(),
-                "translation_model_choices": _serialize_translation_choices(),
-            }
-        )
+        return Response(_prefs_payload(request.user))
 
     def put(self, request: Request) -> Response:
-        from .market_news_sentiment import is_allowed_sentiment_model
-        from .market_news_translation import is_allowed_translation_model
+        from .market_news_sentiment import (
+            frugal_sentiment_models,
+            is_allowed_sentiment_model,
+        )
+        from .market_news_translation import (
+            frugal_translation_models,
+            is_allowed_translation_model,
+        )
 
         prefs = _get_or_create_news_prefs(request.user)
+        # WAVE-3 P2: without their own OpenRouter key the user picks from the
+        # frugal preset menu only — the expensive half of the catalog would be
+        # spending the operator's credit, per page view.
+        has_key = user_has_openrouter_key(request.user.id)
         body = request.data or {}
         if not isinstance(body, dict):
             return Response({"detail": "Body must be an object."}, status=400)
@@ -771,11 +890,19 @@ class NewsPreferencesView(APIView):
                     },
                     status=400,
                 )
+            if model_id and not has_key:
+                frugal_ids = {m.id for m in frugal_sentiment_models()}
+                if model_id not in frugal_ids:
+                    return Response(
+                        {"detail": _FRUGAL_ONLY_DETAIL.format(what="sentiment")},
+                        status=400,
+                    )
             if model_id:
                 prefs.sentiment_model = model_id
 
         if "translation_enabled" in body:
             prefs.translation_enabled = bool(body["translation_enabled"])
+        frugal_translation_ids: set[str] | None = None
         for key in ("translation_model", "translation_fallback_model"):
             if key in body:
                 model_id = str(body[key]).strip()
@@ -789,14 +916,308 @@ class NewsPreferencesView(APIView):
                         },
                         status=400,
                     )
+                if model_id and not has_key:
+                    if frugal_translation_ids is None:
+                        frugal_translation_ids = {
+                            m.id for m in frugal_translation_models()
+                        }
+                    if model_id not in frugal_translation_ids:
+                        return Response(
+                            {"detail": _FRUGAL_ONLY_DETAIL.format(what="translation")},
+                            status=400,
+                        )
                 if model_id:
                     setattr(prefs, key, model_id)
 
         prefs.save()
-        return Response(
+        return Response(_prefs_payload(request.user))
+
+
+# ---------------------------------------------------------------------------
+# Data provenance (WAVE-3 P2 item 4)
+# ---------------------------------------------------------------------------
+
+#: Hard bound on ``?tickers=`` for both provenance endpoints.
+PROVENANCE_MAX_TICKERS = 50
+_TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,16}$")
+
+
+class BadTickers(ValidationError):
+    """Malformed ``tickers`` input — a 400, never a 500."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__({"detail": detail})
+
+
+def _parse_tickers(raw: Any) -> list[str]:
+    """Normalise a comma-separated string or a list into unique upper tickers.
+
+    Raises :class:`BadTickers` (-> HTTP 400) on anything malformed or beyond
+    ``PROVENANCE_MAX_TICKERS``.
+    """
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",")]
+    elif isinstance(raw, list | tuple):
+        parts = [str(p).strip() for p in raw]
+    else:
+        raise BadTickers("tickers must be a comma-separated string or a list.")
+    out: list[str] = []
+    for p in parts:
+        if not p:
+            continue
+        up = p.upper()
+        if not _TICKER_RE.match(up):
+            raise BadTickers(f"Invalid ticker {p!r}.")
+        if up not in out:
+            out.append(up)
+    if len(out) > PROVENANCE_MAX_TICKERS:
+        raise BadTickers(
+            f"Too many tickers ({len(out)}); the limit is {PROVENANCE_MAX_TICKERS}."
+        )
+    return out
+
+
+def _bars_provenance(tickers: list[str]) -> dict[str, dict]:
+    from django.db.models import Count, F, Max
+
+    out = {
+        t: {
+            "last_date": None, "source": None, "count": 0,
+            "adjusted_differs_from_close": False,
+        }
+        for t in tickers
+    }
+    agg = (
+        DailyBar.objects.filter(ticker__in=tickers)
+        .values("ticker")
+        .annotate(last_date=Max("date"), count=Count("id"))
+    )
+    for row in agg:
+        out[row["ticker"]]["last_date"] = row["last_date"].isoformat()
+        out[row["ticker"]]["count"] = int(row["count"])
+    # Source of the NEWEST bar per ticker, and whether that bar is
+    # total-return adjusted (adjusted_close != close).
+    for t in tickers:
+        newest = (
+            DailyBar.objects.filter(ticker=t).order_by("-date", "-id").first()
+        )
+        if newest is None:
+            continue
+        out[t]["source"] = newest.source
+        out[t]["adjusted_differs_from_close"] = newest.adjusted_close != newest.close
+    # Any adjusted bar at all in the series is the more useful signal for a
+    # total-return audit than the last bar alone.
+    adjusted_anywhere = set(
+        DailyBar.objects.filter(ticker__in=tickers)
+        .exclude(adjusted_close=F("close"))
+        .values_list("ticker", flat=True)
+        .distinct()
+    )
+    for t in adjusted_anywhere:
+        out[t]["adjusted_differs_from_close"] = True
+    return out
+
+
+def _dividend_provenance(tickers: list[str]) -> dict[str, dict]:
+    from django.db.models import Count, Max
+
+    from .models import CorporateAction
+
+    out = {t: {"last_ex_date": None, "count": 0} for t in tickers}
+    agg = (
+        CorporateAction.objects.filter(
+            ticker__in=tickers, kind=CorporateAction.CASH_DIVIDEND
+        )
+        .values("ticker")
+        .annotate(last_ex_date=Max("as_of_date"), count=Count("id"))
+    )
+    for row in agg:
+        out[row["ticker"]]["last_ex_date"] = row["last_ex_date"].isoformat()
+        out[row["ticker"]]["count"] = int(row["count"])
+    return out
+
+
+def _filing_provenance(tickers: list[str]) -> dict[str, dict]:
+    from django.db.models import Count, Max
+
+    from .models import FilingRecord
+
+    out = {t: {"count": 0, "newest_filed_at": None} for t in tickers}
+    agg = (
+        FilingRecord.objects.filter(ticker__in=tickers)
+        .values("ticker")
+        .annotate(newest=Max("filed_at"), count=Count("id"))
+    )
+    for row in agg:
+        out[row["ticker"]]["count"] = int(row["count"])
+        out[row["ticker"]]["newest_filed_at"] = row["newest"].isoformat()
+    return out
+
+
+def _news_provenance(tickers: list[str]) -> dict[str, list[dict]]:
+    from django.db.models import Count, Max
+
+    out: dict[str, list[dict]] = {t: [] for t in tickers}
+    agg = (
+        NewsItem.objects.filter(ticker__in=tickers)
+        .values("ticker", "provider")
+        .annotate(newest=Max("published_at"), count=Count("id"))
+        .order_by("ticker", "provider")
+    )
+    for row in agg:
+        out[row["ticker"]].append(
             {
-                "preferences": _serialize_prefs(prefs),
-                "sentiment_model_choices": _serialize_sentiment_choices(),
-                "translation_model_choices": _serialize_translation_choices(),
+                "provider": row["provider"],
+                "newest_published_at": row["newest"].isoformat(),
+                "count": int(row["count"]),
             }
         )
+    return out
+
+
+def _regime_provenance(tickers: list[str]) -> dict[str, dict | None]:
+    out: dict[str, dict | None] = dict.fromkeys(tickers)
+    for t in tickers:
+        snap = (
+            RegimeSnapshot.objects.filter(ticker=t)
+            .order_by("-as_of_date", "-id")
+            .first()
+        )
+        if snap is None:
+            continue
+        out[t] = {
+            "as_of_date": snap.as_of_date.isoformat(),
+            "last_price_date": snap.last_price_date.isoformat(),
+            "stale": bool(snap.stale),
+            "model_type": snap.model_type,
+        }
+    return out
+
+
+def _macro_provenance() -> dict:
+    from django.db.models import Max
+
+    from .models import MacroSeries
+
+    series = [
+        {
+            "series_id": row["series_id"],
+            "newest_observation_date": row["newest"].isoformat(),
+            "newest_vintage_date": row["vintage"].isoformat(),
+        }
+        for row in (
+            MacroSeries.objects.values("series_id")
+            .annotate(newest=Max("date"), vintage=Max("vintage_date"))
+            .order_by("series_id")
+        )
+    ]
+    snap = MacroSnapshot.objects.order_by("-as_of_date").first()
+    return {
+        "series": series,
+        "classifier_version": snap.classifier_version if snap else None,
+        "snapshot_as_of": snap.as_of_date.isoformat() if snap else None,
+    }
+
+
+class DataProvenanceView(APIView):
+    """``GET /api/data/provenance/[?tickers=AAPL,MSFT]``.
+
+    Where every number on the screen came from and how old it is: per ticker
+    the newest bar (with its source and whether it is total-return adjusted),
+    the newest cash dividend, the cached filing count, the newest news item per
+    provider, and the ticker's regime snapshot; plus a global block with the
+    macro series vintages, the provider key/freshness state (reused verbatim
+    from ``/diagnostics/providers/``) and each provider's last success.
+
+    With no ``tickers`` it serves the global block alone.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        tickers = _parse_tickers(request.query_params.get("tickers"))
+
+        bars = _bars_provenance(tickers)
+        dividends = _dividend_provenance(tickers)
+        filings = _filing_provenance(tickers)
+        news = _news_provenance(tickers)
+        regimes = _regime_provenance(tickers)
+
+        # Reuse the diagnostics view's own computation rather than restating
+        # it — one source of truth for key state + per-provider freshness.
+        from apps.runs.views import ProviderDiagnosticsView
+
+        diagnostics = ProviderDiagnosticsView().get(request).data
+        providers = diagnostics.get("providers", {})
+        last_success = {
+            name: (info.get("freshness") or {}).get("last_at")
+            for name, info in providers.items()
+        }
+
+        return Response(
+            {
+                "as_of": timezone.now().isoformat(),
+                "tickers": {
+                    t: {
+                        "ticker": t,
+                        "bars": bars[t],
+                        "dividends": dividends[t],
+                        "filings": filings[t],
+                        "news": news[t],
+                        "regime": regimes[t],
+                    }
+                    for t in tickers
+                },
+                "global": {
+                    "macro": _macro_provenance(),
+                    "providers": providers,
+                    "provider_last_success": last_success,
+                    "policy": diagnostics.get("policy", {}),
+                },
+            }
+        )
+
+
+class DataProvenanceRefreshView(APIView):
+    """``POST /api/data/provenance/refresh/`` ``{"tickers": [...]}``.
+
+    Enqueues the existing bar / dividend / filings refresh for each ticker and
+    returns the Celery task ids. No new refresh logic lives here — the task is
+    a thin delegation to ``freshness.refresh_universe_bars`` and
+    ``EdgarProvider.get_recent_filings``.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request: Request) -> Response:
+        body = request.data
+        if not isinstance(body, dict):
+            return Response({"detail": "Body must be an object."}, status=400)
+        tickers = _parse_tickers(body.get("tickers"))
+        if not tickers:
+            return Response(
+                {"detail": "tickers is required and must name at least one ticker."},
+                status=400,
+            )
+
+        from .tasks import refresh_ticker_data
+
+        task_ids: list[str] = []
+        for t in tickers:
+            try:
+                res = refresh_ticker_data.delay(t, request.user.id)
+            except Exception as exc:  # noqa: BLE001 — a broker outage is a 503.
+                log.warning("provenance refresh enqueue failed err=%s", exc)
+                return Response(
+                    {
+                        "detail": (
+                            "Could not queue the refresh — the task broker is "
+                            f"unavailable ({type(exc).__name__})."
+                        )
+                    },
+                    status=503,
+                )
+            task_ids.append(str(getattr(res, "id", "")))
+        return Response({"queued": len(task_ids), "task_ids": task_ids})

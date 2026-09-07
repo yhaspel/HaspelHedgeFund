@@ -6,8 +6,12 @@ from @BotFather + @userinfobot. Returns ``(ok, error)`` — never raises.
 """
 from __future__ import annotations
 
+import logging
+
 import httpx
 from django.conf import settings
+
+log = logging.getLogger(__name__)
 
 _TIMEOUT = 15.0
 
@@ -27,12 +31,17 @@ def send_telegram(
     if is_offline():  # P4-OFF: external delivery paused at L1
         return False, "skipped: offline"
     cfg = channel.config or {}
-    token = cfg.get("bot_token")
+    token = channel.get_secret("bot_token")  # Fernet-decrypted at read time
     chat_id = cfg.get("chat_id")
     if not token or not chat_id:
         return False, "missing bot_token or chat_id"
 
     text = f"*{_escape_markdown(subject)}*\n\n{_escape_markdown(body)}"
+    # The bot token is part of the URL PATH, so the URL is itself a credential:
+    # it must never be logged, put in an exception message, or handed to
+    # anything that logs its argument. Everything below reports the chat id and
+    # the HTTP status only. (httpx's own INFO request line is silenced in
+    # settings.LOGGING, with a bot-token rule in RedactSecretsFilter behind it.)
     url = f"{settings.TELEGRAM_API_BASE}/bot{token}/sendMessage"
     try:
         resp = httpx.post(
@@ -46,8 +55,12 @@ def send_telegram(
             timeout=_TIMEOUT,
         )
     except Exception as exc:  # noqa: BLE001
-        return False, f"{type(exc).__name__}: {exc}"[:300]
+        # str(exc) on a transport error can embed the request URL — report the
+        # exception TYPE only.
+        log.warning("telegram send failed chat_id=%s error=%s", chat_id, type(exc).__name__)
+        return False, f"{type(exc).__name__}: connection error"
 
+    log.info("telegram send chat_id=%s status=%s", chat_id, resp.status_code)
     if resp.status_code == 200:
         try:
             ok = bool(resp.json().get("ok"))
@@ -55,4 +68,9 @@ def send_telegram(
             ok = False
         if ok:
             return True, ""
-    return False, f"telegram HTTP {resp.status_code}: {resp.text[:200]}"
+    # The body ("Bad Request: chat not found") is what makes this actionable;
+    # scrub it anyway — it is persisted on NotificationEvent.error and returned
+    # by the API, where the log filter can never reach it.
+    from hedgefund.logging_filters import scrub_secrets
+
+    return False, f"telegram HTTP {resp.status_code}: {scrub_secrets(resp.text[:200])}"

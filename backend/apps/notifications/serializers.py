@@ -10,19 +10,25 @@ class NotificationChannelSerializer(serializers.ModelSerializer):
     # redacted ``config_summary`` instead so secrets never leave the server.
     config = serializers.JSONField(write_only=True, required=False)
     config_summary = serializers.SerializerMethodField()
+    # Whether a credential is on file, without revealing anything about it —
+    # the flag the UI needs to render "Bot token: set / not set".
+    has_token = serializers.SerializerMethodField()
 
     class Meta:
         model = NotificationChannel
         fields = (
             "id", "kind", "name", "is_active",
-            "config", "config_summary", "created_at", "updated_at",
+            "config", "config_summary", "has_token", "created_at", "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+
+    def get_has_token(self, obj: NotificationChannel) -> bool:
+        return bool(obj.get_secret("bot_token"))
 
     def get_config_summary(self, obj: NotificationChannel) -> dict:
         cfg = obj.config or {}
         if obj.kind == NotificationChannel.TELEGRAM:
-            token = cfg.get("bot_token") or ""
+            token = obj.get_secret("bot_token")
             masked = ("…" + token[-4:]) if len(token) >= 4 else ("set" if token else "")
             return {"chat_id": cfg.get("chat_id", ""), "bot_token": masked}
         if obj.kind == NotificationChannel.EMAIL:

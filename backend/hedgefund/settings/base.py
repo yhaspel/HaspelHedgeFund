@@ -30,6 +30,9 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.postgres",  # P3b: tsvector search lookups (Postgres FTS)
     "rest_framework",
+    # Revocation list for rotated/logged-out refresh tokens (see SIMPLE_JWT
+    # below and POST /api/auth/logout/). Ships its own migrations.
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_celery_beat",
     "apps.accounts",
@@ -115,6 +118,23 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    # The browsable API renders every view's docstring + a live HTML form for
+    # any endpoint the caller can reach; it is a debugging aid, never a
+    # production surface. JSON only unless DEBUG is explicitly on.
+    "DEFAULT_RENDERER_CLASSES": (
+        ["rest_framework.renderers.JSONRenderer",
+         "rest_framework.renderers.BrowsableAPIRenderer"]
+        if DEBUG
+        else ["rest_framework.renderers.JSONRenderer"]
+    ),
+    # No global throttle (a per-run analysis endpoint must not be rate limited).
+    # Only the credential endpoints opt in, via ScopedRateThrottle + these
+    # scopes — see apps/accounts/views.py and apps/notifications/views.py.
+    "DEFAULT_THROTTLE_CLASSES": [],
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": os.environ.get("THROTTLE_RATE_AUTH", "10/min"),
+        "notif_test": os.environ.get("THROTTLE_RATE_NOTIF_TEST", "5/min"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -124,11 +144,26 @@ SIMPLE_JWT = {
     # Rotate the refresh token on every /auth/refresh/ call so an actively-used
     # session never expires: each refresh issues a fresh 7-day refresh token,
     # giving a sliding window. A user is only logged out after 7 days of zero
-    # activity (or on explicit logout). BLACKLIST_AFTER_ROTATION stays at its
-    # default (False) so this needs no token_blacklist app / migration; rotated
-    # tokens simply lapse at their natural expiry instead of being revoked.
+    # activity (or on explicit logout).
     "ROTATE_REFRESH_TOKENS": True,
+    # ... and the token it replaced is revoked immediately (token_blacklist),
+    # so a stolen refresh token stops working the moment the legitimate client
+    # next refreshes, instead of staying valid for its full 7-day life. This is
+    # also what makes POST /api/auth/logout/ a real logout.
+    "BLACKLIST_AFTER_ROTATION": True,
 }
+
+# Django's four stock validators. Minimum length 10 (Django's default 8 is below
+# every current guideline) — the signup serializer runs them explicitly.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
 # SimpleJWT emits a UserWarning when SIGNING_KEY is shorter than 32 bytes.
 # In dev/test we already guarantee a 32+ byte sentinel above; in non-dev envs
 # the guard at the bottom of this module raises if the key is short. The
@@ -321,6 +356,29 @@ ALPACA_FUND_OWNER_EMAIL = os.environ.get("ALPACA_FUND_OWNER_EMAIL", "")
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# The default cache backend is LocMemCache, which is PER PROCESS. Two things
+# depend on the cache being SHARED across processes: the operator-alert
+# strike/cooldown counters (apps/notifications/operator.py — under
+# `--concurrency=N` every worker child would otherwise keep its own count and
+# never reach the alert threshold) and the auth/test-send rate throttles (a
+# gunicorn worker each). Redis is already a hard dependency (Celery broker), so
+# use it when REDIS_URL is configured and fall back to LocMemCache only for a
+# bare `manage.py` invocation with no Redis at all.
+CACHES = {
+    "default": (
+        {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "hf",
+        }
+        if REDIS_URL
+        else {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "hedgefund-locmem",
+        }
+    )
+}
+
 # P3a-2: IBKR Client Portal Gateway URLs. The gateway is a docker-compose
 # sidecar (`ibkr-gateway` service) reached two different ways:
 #   - The Django app / Celery workers reach it over the compose network at
@@ -427,6 +485,31 @@ PAPER_AUTO_SUBMIT_ENABLED = os.environ.get("PAPER_AUTO_SUBMIT_ENABLED", "1") == 
 # guides/telegram-setup.md.
 TELEGRAM_API_BASE = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
 
+# --- Wave-3 review settings (2026-09-07 adversarial review) -------------------
+# News sentiment/translation are BYOK-only: without the user's own OpenRouter
+# key the feature is skipped and the feed still renders. Flip this on only if
+# you accept that every account on the instance spends the operator's key.
+ALLOW_PLATFORM_LLM_FOR_NEWS = os.environ.get("ALLOW_PLATFORM_LLM_FOR_NEWS", "0") == "1"
+# Per-user daily ceiling on news-LLM spend (USD). Over it, scoring/translation
+# is skipped with a reason — never raised.
+NEWS_LLM_DAILY_CAP_USD = Decimal(os.environ.get("NEWS_LLM_DAILY_CAP_USD", "0.50"))
+# Screener stage 2 enriches from cached DailyBar rows and lazily fetches at most
+# this many uncached tickers per run (a cold run used to burst ~604 FMP calls
+# against the same key the live pods depend on). 0 = DB only.
+SCREENER_LAZY_FILL_MAX = int(os.environ.get("SCREENER_LAZY_FILL_MAX", "40"))
+# Broker codes a user may connect. IBKR (P3a-2) and TradeStation (P3a-3) are
+# deferred phases: their adapters exist but were never validated end to end, so
+# the registry marks them deferred and account creation is refused. Add a code
+# here to re-enable one.
+ENABLED_BROKERS = [
+    code.strip()
+    for code in os.environ.get("ENABLED_BROKERS", "alpaca_paper,demo").split(",")
+    if code.strip()
+]
+# Annual stock-borrow fee charged daily on |short notional| by backtest engine
+# v2, on top of Backtest.financing_bps. Shorts used to be financed for free.
+BACKTEST_SHORT_BORROW_BPS = Decimal(os.environ.get("BACKTEST_SHORT_BORROW_BPS", "50"))
+
 MEDIA_ROOT = BASE_DIR / "media"
 MEDIA_URL = "/media/"
 
@@ -452,6 +535,16 @@ LOGGING = {
         },
     },
     "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        # httpx logs EVERY request line at INFO, including the full URL. Some of
+        # those URLs carry credentials in the PATH (Telegram's
+        # /bot<token>/sendMessage) where a query-param scrub cannot reach them.
+        # The redact filter has a bot-token rule as a second line of defence,
+        # but the request log itself has no operational value here — keep it at
+        # WARNING so the secret is never rendered in the first place.
+        "httpx": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "httpcore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+    },
 }
 
 # --- Optional Sentry (P5-SH WS2.3) --------------------------------------

@@ -121,8 +121,21 @@ const COLUMNS: ColumnDef[] = [
         </thead>
         <tbody>
           @for (row of sortedRows(); track row.ticker) {
-            <tr>
-              <td><hf-ticker [ticker]="row.ticker"></hf-ticker></td>
+            <!-- WAVE 3: a partial row's momentum / 52-week / MA fields are
+                 NULL, not zero — the enrichment could not complete. Mark it so
+                 an em dash is read as missing data, never as a real value. -->
+            <tr [class.partial]="row.enrichment === 'partial'"
+                [attr.data-test]="row.enrichment === 'partial' ? 'screener-partial-row' : null">
+              <td>
+                <hf-ticker [ticker]="row.ticker"></hf-ticker>
+                @if (row.enrichment === 'partial') {
+                  <span class="pill warn partial-pill"
+                        [title]="row.warnings.join(' · ') || 'Price-history enrichment did not complete for this row.'"
+                        [attr.data-test]="'screener-partial-' + row.ticker">
+                    <span class="dot"></span>partial
+                  </span>
+                }
+              </td>
               <td class="text-text-2">{{ row.name || resolveName(row.ticker) }}</td>
               <td class="num mono">{{ formatDecimal(row.price, 2) }}</td>
               <td class="num mono" [class.long]="(row.change_pct ?? 0) > 0" [class.short]="(row.change_pct ?? 0) < 0">
@@ -135,8 +148,11 @@ const COLUMNS: ColumnDef[] = [
               <td class="num mono">{{ formatInt(row.volume) }}</td>
               <td class="num mono">{{ formatInt(row.adv_14d) }}</td>
               <td class="num mono">{{ formatBig(row.market_cap) }}</td>
-              <td class="num mono" [class.long]="(row.momentum_3m ?? 0) > 0" [class.short]="(row.momentum_3m ?? 0) < 0">
-                {{ formatPct(row.momentum_3m) }}
+              <td class="num mono"
+                  [class.long]="(row.momentum_3m ?? 0) > 0"
+                  [class.short]="(row.momentum_3m ?? 0) < 0"
+                  [class.missing]="row.momentum_3m === null || row.momentum_3m === undefined">
+                {{ row.momentum_3m === null || row.momentum_3m === undefined ? '—' : formatPct(row.momentum_3m) }}
               </td>
               <td>{{ row.sector }}</td>
               <td class="right action-cell">
@@ -196,6 +212,16 @@ const COLUMNS: ColumnDef[] = [
       .num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+      }
+      tr.partial {
+        background: var(--acc-hold-soft);
+      }
+      .partial-pill {
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .missing {
+        color: var(--text-3);
       }
       .long { color: var(--acc-long-fg); }
       .short { color: var(--acc-short-fg); }

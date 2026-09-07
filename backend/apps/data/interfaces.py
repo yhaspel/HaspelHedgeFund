@@ -172,42 +172,17 @@ class IssuerOwnershipSummary:
     source: str
 
 
-@dataclass(frozen=True)
-class FilerHolding:
-    """One position in a filer's portfolio (by-filer view)."""
-
-    issuer_cusip: str
-    issuer_name: str
-    ticker: str
-    shares: int
-    value_usd: int
-    put_call: str
-    weight_pct: float | None = None
-
-
-@dataclass(frozen=True)
-class FilerPortfolio:
-    """A filer's full 13F portfolio at one period (by-filer view)."""
-
-    filer_cik: str
-    filer_name: str
-    period_end: date
-    as_of: date
-    total_value_usd: int
-    holdings: list[FilerHolding]
-    source: str
-
-
 @runtime_checkable
 class OwnershipProvider(Protocol):
-    """Institutional-ownership (13F) data access used by the agents."""
+    """Institutional-ownership (13F) data access used by the agents.
+
+    By-issuer only. The by-filer view and the SEC bulk data-set ingest were
+    deleted in WAVE-3 P2 — they were dead end-to-end (no CUSIP producer, no
+    callers, no UI, and SEC renamed the archives in 2024).
+    """
 
     name: str
 
     def get_issuer_ownership(
         self, ticker: str, *, as_of: date
     ) -> IssuerOwnershipSummary | None: ...
-
-    def get_filer_portfolio(
-        self, filer_cik: str, *, as_of: date
-    ) -> FilerPortfolio | None: ...

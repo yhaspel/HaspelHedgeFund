@@ -36,8 +36,13 @@ def test_estimate_cost_basic_shape():
     assert est["n_universe"] == 2
     assert est["n_rebalance_days"] >= 1
     assert est["n_invocations"] == est["n_rebalance_days"] * 2
-    # Per-invocation: 4 analytical + 8 personas + 4 pipeline = 16 agents.
-    assert est["n_llm_calls"] == est["n_invocations"] * 16
+    assert est["n_primes"] == est["n_invocations"]
+    # Per-invocation: 4 analytical + 8 personas + news_digest + risk_manager =
+    # 14 agents. macro is cached per as_of_date (one call per rebalance DAY, not
+    # per ticker-day) and portfolio_manager is a deterministic aggregate() with
+    # no LLM call at all — billing both per invocation over-stated every
+    # estimate by (2 - 1/n_universe) calls per prime. See WP B3a §3.
+    assert est["n_llm_calls"] == est["n_invocations"] * 14 + est["n_rebalance_days"]
     assert est["est_total_usd"] > 0
     assert est["budget_cap_usd"] == 4.0
     assert est["exceeds_budget"] in (True, False)
@@ -184,15 +189,17 @@ def test_compare_endpoint_returns_paired_payload_p02c():
     from apps.backtests.models import Backtest
 
     u = User.objects.create_user(email="c@x.com", password="x" * 12)
+    # WP B3a §5: compare now requires both ids to be the caller's own DONE
+    # backtests (a queued/running row has no curve and rendered an empty side).
     bt_a = Backtest.objects.create(
         user=u, name="A", universe=["AAA"],
         start_date=dt.date(2024, 1, 1), end_date=dt.date(2024, 2, 1),
-        starting_cash=Decimal("100000"),
+        starting_cash=Decimal("100000"), status=Backtest.DONE,
     )
     bt_b = Backtest.objects.create(
         user=u, name="B", universe=["AAA"],
         start_date=dt.date(2024, 1, 1), end_date=dt.date(2024, 2, 1),
-        starting_cash=Decimal("100000"),
+        starting_cash=Decimal("100000"), status=Backtest.DONE,
     )
     client = APIClient()
     client.force_authenticate(u)

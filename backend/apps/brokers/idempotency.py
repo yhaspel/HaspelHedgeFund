@@ -33,6 +33,24 @@ class IdempotencyConflict(Exception):
     """Raised when a duplicate submit is attempted locally."""
 
 
+def _stamp_submit_attempt(order: BrokerOrder) -> None:
+    """Record the instant we are about to hand the order to the broker.
+
+    Every "how long has this been in flight?" question (the unknown-state
+    grace window, the stuck-order sweep) measures from HERE. ``created_at``
+    is the wrong clock for a ``pending_open`` order: one created Friday and
+    released at Tuesday's open is days old but seconds into its submission,
+    and would otherwise be declared rejected on the first reconcile pass."""
+    now = timezone.now()
+    BrokerOrder.objects.filter(pk=order.pk).update(submit_attempted_at=now)
+    order.submit_attempted_at = now
+
+
+def submit_deadline_anchor(order: BrokerOrder):
+    """The timestamp in-flight grace windows are measured from."""
+    return order.submit_attempted_at or order.created_at
+
+
 def submit_idempotent(
     *,
     order: BrokerOrder,
@@ -80,6 +98,7 @@ def submit_idempotent(
         trail_price=order.trail_price,
         trail_percent=order.trail_percent,
     )
+    _stamp_submit_attempt(order)
     try:
         snapshot = broker.submit_order(ticket)
     except BrokerTransientError as exc:
@@ -247,6 +266,7 @@ def submit_bracket_idempotent(
         anchor.refresh_from_db()
 
     ticket, order_class = _carrier_ticket(anchor)
+    _stamp_submit_attempt(anchor)
     try:
         if order_class == "oco":
             snapshot = broker.submit_protective(ticket)
@@ -344,7 +364,10 @@ def resolve_unknown(order: BrokerOrder, broker: Broker) -> str | None:
                 _backfill_legs(order, snapshot)
         return _map_status(snapshot.status)
     # No record on the broker side. Wait one grace window then fail closed.
-    age = timezone.now() - order.created_at
+    # The clock starts at the SUBMIT ATTEMPT, not at creation — otherwise a
+    # held order released days after it was drafted burns its whole grace
+    # window before the first reconcile pass even runs.
+    age = timezone.now() - submit_deadline_anchor(order)
     if age >= UNKNOWN_GRACE:
         with transaction.atomic():
             BrokerOrder.objects.filter(pk=order.pk).update(

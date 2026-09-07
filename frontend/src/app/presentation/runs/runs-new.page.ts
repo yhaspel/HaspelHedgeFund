@@ -13,6 +13,14 @@ import { PersonaCardComponent } from '../shared/persona-card.component';
 import { SparklineComponent } from '../shared/sparkline.component';
 import { GlossaryTermComponent } from '../shared/glossary-term.component';
 import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { normalizeTicker, tickerError } from '../shared/format';
+
+/** Today's date in the USER's timezone as YYYY-MM-DD (toISOString is UTC). */
+function localDateString(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 @Component({
   selector: 'hf-runs-new',
@@ -35,9 +43,16 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
               <div class="flex items-center gap-2.5">
                 <input id="run-ticker" class="input uppercase flex-1" name="ticker" [(ngModel)]="ticker"
                   (ngModelChange)="onTickerChange($event)"
+                  (blur)="touched.set(true)"
+                  [attr.aria-invalid]="touched() && tickerError() ? 'true' : null"
+                  [attr.aria-describedby]="touched() && tickerError() ? 'run-ticker-err' : null"
                   placeholder="AAPL" required autocomplete="off" />
                 <hf-sparkline [points]="tickerSpark()" [width]="80" [height]="22" [loading]="sparkLoading()" />
               </div>
+              @if (touched() && tickerError()) {
+                <p id="run-ticker-err" class="text-[var(--acc-short-fg)] text-2xs mt-1 mb-0"
+                   data-test="ticker-error">{{ tickerError() }}</p>
+              }
               @if (tickerSpark() && tickerSpark()!.length >= 2) {
                 <div class="mono text-[11px] text-text-3 mt-1">
                   {{ ticker.toUpperCase() }} · last {{ tickerSpark()!.length }}d ·
@@ -106,7 +121,8 @@ import { TickerHistoryStore } from '../../abstraction/ticker-history.store';
         <div class="flex gap-2">
           <a class="btn ghost" routerLink="/runs">Cancel</a>
           <button type="submit" class="btn primary flex-1 h-9 justify-center"
-            [disabled]="submitting() || (!graphVersionId() && selected().size === 0)">
+            [disabled]="submitting() || !!tickerError() || !asOfDate
+                        || (!graphVersionId() && selected().size === 0)">
             {{ submitting() ? 'Submitting…' : 'Run council' }}
           </button>
         </div>
@@ -136,9 +152,18 @@ export class RunsNewPage implements OnInit {
 
   readonly allPersonas = ALL_PERSONAS;
   ticker = 'AAPL';
-  asOfDate = new Date().toISOString().slice(0, 10);
+  /**
+   * The LOCAL calendar date, not the UTC one. `toISOString()` is UTC, so a user
+   * in New York at 21:30 on Sep 7 was pre-filled with Sep 8 — a future as_of the
+   * backend rejects.
+   */
+  asOfDate = localDateString();
   submitting = signal(false);
   error = signal<string | null>(null);
+  /** Mirror of `ticker` as a signal so the inline field error is reactive. */
+  readonly tickerValue = signal('AAPL');
+  /** The field error only shows after a blur or a submit attempt. */
+  readonly touched = signal(false);
   selected = signal<Set<string>>(new Set(DEFAULT_PERSONA_IDS));
   overrides = signal<Record<string, string>>({});
   graphVersionId = signal<number | null>(null);
@@ -179,19 +204,23 @@ export class RunsNewPage implements OnInit {
     this.modelsStore.loadAll().subscribe();
     this.graphs.loadGraphs().subscribe();
     this.route.queryParamMap.pipe(take(1)).subscribe((params) => {
-      const t = (params.get('ticker') || '').trim().toUpperCase();
+      const t = normalizeTicker(params.get('ticker'));
       if (t) {
         this.ticker = t;
       }
-      this.loadSpark(this.ticker);
+      this.tickerValue.set(this.ticker);
+      if (!tickerError(this.ticker)) this.loadSpark(this.ticker);
     });
   }
 
   onTickerChange(v: string): void {
+    this.tickerValue.set(v ?? '');
     if (this.sparkDebounce) clearTimeout(this.sparkDebounce);
     this.tickerSpark.set(null);
     const t = (v ?? '').trim();
     if (t.length < 1) return;
+    // Don't burn a history fetch on a symbol the backend would reject anyway.
+    if (tickerError(t)) return;
     this.sparkDebounce = setTimeout(() => this.loadSpark(t), 350);
   }
 
@@ -221,13 +250,27 @@ export class RunsNewPage implements OnInit {
     return (((p[p.length - 1] - p[0]) / p[0]) * 100).toFixed(2);
   }
 
+  /** null when the ticker is acceptable to the backend, else the reason. */
+  readonly tickerError = computed(() => tickerError(this.tickerValue()));
+
   submit(): void {
     this.error.set(null);
+    // Validate before spending a round trip; the field error is rendered inline.
+    this.touched.set(true);
+    const bad = this.tickerError();
+    if (bad) {
+      this.error.set(bad);
+      return;
+    }
+    if (!this.asOfDate) {
+      this.error.set('Pick an as-of date.');
+      return;
+    }
     this.submitting.set(true);
     const gv = this.graphVersionId();
     this.runs
       .submitRun({
-        tickers: [this.ticker.toUpperCase()],
+        tickers: [normalizeTicker(this.ticker)],
         as_of_date: this.asOfDate,
         // When a graph is chosen, the backend flattens its models + personas;
         // omit the ad-hoc model/persona pickers.
@@ -237,9 +280,12 @@ export class RunsNewPage implements OnInit {
       })
       .subscribe({
         next: (run) => this.router.navigate(['/runs', run.id]),
-        error: (e) => {
+        error: (e: unknown) => {
           this.submitting.set(false);
-          this.error.set(e?.error?.detail ?? 'Failed to submit run');
+          // DRF field errors ({"tickers": [...]}) have no `detail` key; the old
+          // `e?.error?.detail ?? 'Failed to submit run'` threw away the one
+          // sentence that says what to change.
+          this.error.set(apiErrorMessage(e, 'Failed to submit run'));
         },
       });
   }

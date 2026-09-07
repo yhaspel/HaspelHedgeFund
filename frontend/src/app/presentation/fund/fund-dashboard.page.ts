@@ -8,12 +8,18 @@ import { FundMemberCard, FundOverview } from '../../core/models/autopilot.model'
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { isOverdue, nextRunLabel, scheduleWithZone } from '../shared/schedule-format';
+import { apiErrorMessage } from '../../core/api/api-error';
 import { PopoverComponent } from '../shared/popover.component';
 import { RegimeStripComponent } from '../dashboard/regime-strip.component';
+import { strategyKindLabel } from '../../core/models/strategy.model';
+import { FundActivityComponent } from './fund-activity.component';
 import { FundCompositeComponent } from './fund-composite.component';
 import { FundHistoryComponent } from './fund-history.component';
 import { FundMembersEditorComponent } from './fund-members-editor.component';
 import { FundSettingsComponent } from './fund-settings.component';
+import { SchedulerHealthComponent } from './scheduler-health.component';
 
 // P7 §14 / P14 — the headline fund view AND the one place the fund is managed:
 // the shared paper account (settings), the member strategies + their share of
@@ -28,12 +34,15 @@ import { FundSettingsComponent } from './fund-settings.component';
     RouterLink,
     AppShellComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     PopoverComponent,
     RegimeStripComponent,
+    FundActivityComponent,
     FundCompositeComponent,
     FundHistoryComponent,
     FundMembersEditorComponent,
     FundSettingsComponent,
+    SchedulerHealthComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Fund' }]">
@@ -73,8 +82,18 @@ import { FundSettingsComponent } from './fund-settings.component';
 
       <p class="disclaimer">Educational use only — not investment advice. Paper trading only.</p>
 
-      <!-- No fund yet: the set-up flow IS the page. -->
-      @if (!fund() && !loading()) {
+      <!-- The fetch failed: say so and offer a retry. NEVER the create flow —
+           a 5xx must not invite the owner of a live fund to build a new one. -->
+      @if (!fund() && loadError()) {
+        <hf-error-state
+          title="Couldn't load your fund"
+          [detail]="loadError()"
+          (retry)="loadFund()"
+        ></hf-error-state>
+      }
+
+      <!-- No fund yet (a SUCCESSFUL {fund: null}): the set-up flow IS the page. -->
+      @if (!fund() && !loading() && !loadError() && loaded()) {
         <hf-empty-state
           message="No autonomous fund yet"
           detail="Choose the one paper account the fund will trade, then pick the strategies that share its pool."
@@ -286,8 +305,9 @@ import { FundSettingsComponent } from './fund-settings.component';
                   </span>
                 }
               </div>
-              <div class="acct-kind">
-                {{ a.kind }} · <b>{{ +a.allocation_pct | number: '1.0-2' }}%</b> of the pool
+              <div class="acct-kind" [attr.data-test]="'member-kind-' + a.strategy_id">
+                {{ kindLabel(a.kind) }} ·
+                <b>{{ +a.allocation_pct | number: '1.0-2' }}%</b> of the pool
               </div>
               <div class="acct-row">
                 <span>Sleeve NAV</span
@@ -314,18 +334,23 @@ import { FundSettingsComponent } from './fund-settings.component';
                 <span>Rolling Sharpe</span
                 ><b>{{ a.rolling_sharpe !== null ? (a.rolling_sharpe | number: '1.2-2') : '—' }}</b>
               </div>
-              <!-- Always a cadence; label it inactive while disabled so it doesn't imply an imminent fire. -->
+              <!-- Always a cadence; label it inactive while disabled so it doesn't imply an imminent fire.
+                   The cron text is the AUTOPILOT's local time, so its zone is spelled out. -->
               @if (a.cron_description) {
                 <div class="acct-row">
                   <span>{{ a.is_enabled ? 'Schedule' : 'Cadence' }}</span>
-                  <b class="sched" [title]="a.cron_description">{{ a.cron_description }}</b>
+                  <b class="sched" [title]="memberSchedule(a)">{{ memberSchedule(a) }}</b>
                 </div>
               }
-              <!-- Next run is meaningful only when enabled; otherwise say so plainly. -->
+              <!-- Next run is meaningful only when enabled; otherwise say so plainly.
+                   Rendered in the same zone as the cadence above, with a date, and
+                   flagged when the scheduler has already missed it. -->
               @if (a.is_enabled) {
                 <div class="acct-row">
                   <span>Next run</span
-                  ><b>{{ a.next_run_at ? (a.next_run_at | date: 'EEE HH:mm') : '—' }}</b>
+                  ><b data-test="member-next-run" [class.overdue]="memberOverdue(a)"
+                    >{{ a.next_run_at ? memberNextRun(a) : '—' }}</b
+                  >
                 </div>
               }
               @if (!a.is_enabled) {
@@ -403,6 +428,11 @@ import { FundSettingsComponent } from './fund-settings.component';
             }
           </p>
         }
+
+        <!-- WAVE 3 item 3: is the scheduler dispatching, and what has the fund
+             actually done? A dead beat used to look exactly like a quiet week. -->
+        <hf-scheduler-health class="block mb-[18px]" />
+        <hf-fund-activity class="block mb-[18px]" />
 
         <!-- P10 §C2/§C4: live NAV history (TWR) vs SPY/QQQ. -->
         <hf-fund-history />
@@ -507,6 +537,10 @@ import { FundSettingsComponent } from './fund-settings.component';
       .acct-row.card,
       .acct-row {
         font-size: 12.5px;
+      }
+      /* A next_run_at in the past means the scheduler missed the fire. */
+      .acct-row b.overdue {
+        color: var(--acc-short-fg);
       }
       section.acct-row {
         display: flex;
@@ -785,10 +819,19 @@ import { FundSettingsComponent } from './fund-settings.component';
 })
 export class FundDashboardPage implements OnInit {
   private readonly store = inject(FundStore);
+
+  /** WAVE 3 — `trend` / `sector_momentum` / `news_sentiment` used to render as
+   *  raw slugs on member cards because the frontend kind list was stale. */
+  readonly kindLabel = strategyKindLabel;
   private readonly confirm = inject(ConfirmService);
   readonly macro = inject(MacroStore);
   readonly fund = this.store.fund;
   readonly loading = signal(true);
+  /** GET /fund/ failed. Distinct from "the user has no fund". */
+  readonly loadError = signal<string | null>(null);
+  /** GET /fund/ succeeded at least once, so `fund() === null` really means
+   *  "no fund yet" and the create flow is the right thing to show. */
+  readonly loaded = signal(false);
   readonly busy = signal(false);
   readonly runningId = signal<number | null>(null);
   readonly queuedId = signal<number | null>(null);
@@ -876,12 +919,32 @@ export class FundDashboardPage implements OnInit {
   });
 
   ngOnInit(): void {
-    this.store
-      .loadFund()
-      .subscribe({ next: () => this.loading.set(false), error: () => this.loading.set(false) });
+    this.loadFund();
     if (!this.macro.snapshot()) {
       this.macro.loadSnapshot().subscribe({ error: () => {} });
     }
+  }
+
+  /**
+   * A failed GET /fund/ used to be indistinguishable from "no fund exists":
+   * the template branched on `!fund() && !loading()` and showed the create
+   * flow, so a 503 (or an expired session) invited the owner of a live fund to
+   * set one up from scratch. Track the failure separately and only offer the
+   * create flow on a successful `{fund: null}`.
+   */
+  loadFund(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
+    this.store.loadFund().subscribe({
+      next: () => {
+        this.loading.set(false);
+        this.loaded.set(true);
+      },
+      error: (e: unknown) => {
+        this.loading.set(false);
+        this.loadError.set(apiErrorMessage(e, 'Could not load your fund.'));
+      },
+    });
   }
 
   toggleManage(): void {
@@ -1030,15 +1093,46 @@ export class FundDashboardPage implements OnInit {
     });
   }
 
-  runNow(strategyId: number): void {
+  /**
+   * "Run now" on a member card fires a LIVE autopilot cycle: the council runs
+   * and the resulting orders go straight to the fund's paper brokerage account.
+   * Every other live action on this page (halt / resume / reset / flatten /
+   * disable) is confirm-gated; this one was not, and a refusal (409 "autopilot
+   * halted") was swallowed entirely.
+   */
+  async runNow(strategyId: number): Promise<void> {
+    if (this.runningId() !== null) return;
+    const name = this.fund()?.members.find((m) => m.strategy_id === strategyId)?.name;
+    const ok = await this.confirm.ask({
+      title: name ? `Run ${name} now?` : 'Run this strategy now?',
+      body:
+        'This runs the council immediately, outside the schedule, and submits the resulting '
+        + 'orders to the fund’s paper brokerage account with no further confirmation. '
+        + 'It also bills the LLM cost to your account.',
+      confirmLabel: 'Run now and submit orders',
+    });
+    if (!ok) return;
     this.runningId.set(strategyId);
     this.queuedId.set(null);
+    this.actionError.set(null);
     this.store.runNow(strategyId).subscribe({
       next: () => {
         this.runningId.set(null);
         this.queuedId.set(strategyId);
       },
-      error: () => this.runningId.set(null),
+      error: (e: unknown) => {
+        this.runningId.set(null);
+        this.actionError.set(
+          apiErrorMessage(e, name ? `Could not run ${name}.` : 'Could not run this strategy.'),
+        );
+      },
     });
   }
+
+  // --- schedule / next-run rendering (one clock face, the autopilot's) ------
+  readonly memberSchedule = (a: FundMemberCard): string =>
+    scheduleWithZone(a.cron_description, a.timezone);
+  readonly memberNextRun = (a: FundMemberCard): string =>
+    nextRunLabel(a.next_run_at, a.timezone);
+  readonly memberOverdue = (a: FundMemberCard): boolean => isOverdue(a.next_run_at);
 }

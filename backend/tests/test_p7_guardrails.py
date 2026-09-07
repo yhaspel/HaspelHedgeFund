@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.brokers import demo_fills
 from apps.brokers.adapters import mock as mock_adapter
@@ -17,6 +18,8 @@ from apps.brokers.reconcile import Drift, drift_within_tolerance
 from apps.portfolios import autopilot as bridge
 from apps.portfolios import autopilot_risk, cost_model, tasks_autopilot
 from apps.portfolios.models import (
+    AutonomousFund,
+    FundSleeve,
     Portfolio,
     PortfolioStrategy,
     PortfolioTarget,
@@ -138,8 +141,33 @@ def test_drawdown_soft_then_hard_then_resume(user, monkeypatch):
     ap.save(update_fields=["state"])
     assert _eval() == StrategyAutopilot.STATE_HALTED  # fail-safe: peak not reset
 
-    equity["v"] = Decimal("100000")                  # recovered → clears
-    assert _eval() == StrategyAutopilot.STATE_ACTIVE
+    # HALTED LATCHES. Recovery does not auto-clear it: this evaluation runs on
+    # the hourly guardrail sweep, and un-halting on recovery silently undid the
+    # manual kill switch (and lost the halt reason with it) within the hour.
+    equity["v"] = Decimal("100000")                  # recovered to the old peak
+    assert _eval() == StrategyAutopilot.STATE_HALTED
+    equity["v"] = Decimal("120000")                  # ...and on to a NEW high
+    assert _eval() == StrategyAutopilot.STATE_HALTED
+
+    # Only a human clears it. POST /api/fund/resume/ is the acknowledgment: it
+    # un-halts every member and rebases its peak to today's equity, so the
+    # breaker re-arms at the configured distance below the level just accepted.
+    fund = AutonomousFund.objects.create(owner=user, name="Autonomous Fund")
+    FundSleeve.objects.create(
+        fund=fund, strategy=strategy, allocation_pct=Decimal("100"),
+        portfolio=Portfolio.objects.create(user=user, kind=Portfolio.KIND_SLEEVE, name="sl"),
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    r = client.post("/api/fund/resume/")
+    assert r.status_code == 200, r.json()
+    ap.refresh_from_db()
+    assert ap.state == StrategyAutopilot.STATE_ACTIVE
+    assert ap.peak_equity_usd == Decimal("120000")   # rebased, not the stale peak
+
+    # ...and it is fail-safe again: a FRESH breach from there re-halts.
+    equity["v"] = Decimal("110000")                  # −8.3% from 120k
+    assert _eval() == StrategyAutopilot.STATE_HALTED
 
 
 # --------------------------------------------------------------------------

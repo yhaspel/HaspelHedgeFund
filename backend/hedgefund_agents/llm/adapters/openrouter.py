@@ -179,7 +179,17 @@ def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
     resort — so the previous single-hop behavior is the chain's final rung."""
     if len(tried) >= _max_fallbacks():
         return None
-    for candidate in [*_fallback_candidates(model, tried), _last_resort_model()]:
+    candidates = list(_fallback_candidates(model, tried))
+    # Price-class discipline, same rule _fallback_candidates enforces: a `:free`
+    # route must never silently chain onto a PAID one (and vice versa). The
+    # static last resort used to bypass it, so once a :free chain exhausted its
+    # free siblings it hopped straight onto the paid analytical default and
+    # billed a route the caller had explicitly picked to cost nothing.
+    # settings.OPENROUTER_PAID_FALLBACK remains the ONLY paid escape hatch.
+    last_resort = _last_resort_model()
+    if last_resort.endswith(":free") == model.endswith(":free"):
+        candidates.append(last_resort)
+    for candidate in candidates:
         if candidate != model and candidate not in tried:
             return candidate
     return None

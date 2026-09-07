@@ -116,7 +116,9 @@ def test_verify_models_filters_to_requested_ids() -> None:
 def test_verify_endpoint_returns_results_and_refreshed_models() -> None:
     mid = "openrouter:test/api:free"
     _make_entry(mid=mid, p_in="0", p_out="0")
-    User.objects.create_user(email="v@v.com", password="x" * 12)
+    # /api/models/verify-pricing/ mutates the shared catalog → staff-only
+    # (review finding F12); the old non-staff expectation was the bug.
+    User.objects.create_user(email="v@v.com", password="x" * 12, is_staff=True)
     c = APIClient()
     tok = c.post(
         reverse("login"),

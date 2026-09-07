@@ -19,7 +19,7 @@ const ROUTES: { name: string; path: string }[] = [
   { name: 'backtests-list', path: '/backtests' },
   { name: 'backtests-new', path: '/backtests/new' },
   { name: 'backtest-detail', path: '/backtests/24' },
-  { name: 'backtest-compare', path: '/backtests/24/compare' },
+  { name: 'backtest-compare', path: '/backtests/24?compare=1' },
   { name: 'strategies-list', path: '/strategies' },
   { name: 'strategies-new', path: '/strategies/new' },
   { name: 'strategy-detail', path: '/strategies/48' },

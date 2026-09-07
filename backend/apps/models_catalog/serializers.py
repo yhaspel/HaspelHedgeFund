@@ -1,8 +1,104 @@
 from __future__ import annotations
 
+import ipaddress
+from urllib.parse import urlsplit
+
 from rest_framework import serializers
 
 from .models import ModelEntry, ProviderKey, UserModelPreferences
+
+# --- ollama_host SSRF guard --------------------------------------------------
+# `ollama_host` is a user-supplied URL the SERVER fetches (GET <host>/api/tags on
+# every /api/models/ and /api/presets/<name>/ read), which makes it a
+# server-side request forgery primitive unless it is constrained. Ollama is a
+# LAN/loopback daemon, so the allowed shape is deliberately narrow:
+#
+#   allowed  http(s)://localhost:11434, ://127.0.0.1, ://192.168.x.x,
+#            ://10.x.x.x, ://172.16-31.x.x, ://ollama.home.lan
+#   rejected any non-http(s) scheme (file:, gopher:, dict:, …), embedded
+#            userinfo (`http://user:pw@host` — an easy parser-confusion trick),
+#            the cloud metadata / link-local ranges 169.254.0.0/16 and fe80::/10,
+#            a port outside 1-65535, and the well-known ports of the internal
+#            services a compose/Railway deployment runs next to this app
+#            (`http://redis:6379`, `http://db:5432`, …) — those are the pivot an
+#            attacker actually wants, and no Ollama daemon listens there.
+#
+# Loopback and RFC1918 stay allowed on purpose: Ollama is a LAN daemon, and
+# blocking private ranges would break the product's main configuration.
+_ALLOWED_SCHEMES = ("http", "https")
+_LINK_LOCAL_V4 = ipaddress.ip_network("169.254.0.0/16")
+_LINK_LOCAL_V6 = ipaddress.ip_network("fe80::/10")
+_BLOCKED_PORTS = frozenset({
+    22, 23, 25, 53, 110, 143, 445, 465, 587, 993, 995,          # shell / mail / dns
+    1433, 1521, 3306, 5432, 5984, 9042, 27017, 27018,           # databases
+    6379, 6380, 11211,                                          # caches
+    2181, 2375, 2376, 2379, 2380, 5672, 8500, 9200, 9300, 15672,  # infra / queues
+})
+
+
+def _validate_ollama_host(value: str) -> str:
+    """Return ``value`` if it is a safe Ollama base URL, else raise.
+
+    Blank means "unset" and is always allowed. A string ``urlsplit`` cannot
+    parse at all (e.g. ``http://[::1``) is left alone: httpx raises
+    ``InvalidURL`` on it, so it can never become an outbound request, and
+    rejecting it here would not repair the rows already stored — the discovery
+    path re-checks with this same function before it fetches anything.
+    """
+    host_url = (value or "").strip()
+    if not host_url:
+        return ""
+    try:
+        parts = urlsplit(host_url)
+    except ValueError:
+        return host_url  # unparseable ⇒ unfetchable; see docstring
+    if parts.scheme.lower() not in _ALLOWED_SCHEMES:
+        raise serializers.ValidationError(
+            f"ollama_host must be an http:// or https:// URL (got {host_url!r})."
+        )
+    if "@" in parts.netloc:
+        raise serializers.ValidationError(
+            "ollama_host must not contain credentials (an '@' in the host)."
+        )
+    try:
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError as exc:
+        raise serializers.ValidationError(f"ollama_host is not a valid URL: {exc}") from exc
+    if not hostname:
+        raise serializers.ValidationError(
+            f"ollama_host must include a host name (got {host_url!r})."
+        )
+    if port is not None and not (1 <= port <= 65535):
+        raise serializers.ValidationError(f"ollama_host port {port} is out of range.")
+    if port in _BLOCKED_PORTS:
+        raise serializers.ValidationError(
+            f"Port {port} belongs to a well-known internal service (database, "
+            "cache, queue, mail); an Ollama daemon does not listen there."
+        )
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return host_url
+    if ip in _LINK_LOCAL_V4 or ip in _LINK_LOCAL_V6 or ip.is_link_local:
+        raise serializers.ValidationError(
+            "ollama_host must not point at the link-local / cloud-metadata "
+            "range (169.254.0.0/16, fe80::/10)."
+        )
+    return host_url
+
+
+def is_safe_ollama_host(value: str) -> bool:
+    """Non-raising form of :func:`_validate_ollama_host`, for the fetch path.
+
+    Rows saved before the validator existed are still in the database, so
+    discovery re-checks the host it is about to contact rather than trusting
+    that it was validated on the way in.
+    """
+    try:
+        return bool(_validate_ollama_host(value))
+    except serializers.ValidationError:
+        return False
 
 # Tiers a USER may set a per-tier default for. Mirrors the frontend's
 # USER_TIER_DEFAULT_PRESETS. Excludes 'hybrid', whose non-persona roles are
@@ -100,3 +196,6 @@ class ProviderKeyWriteSerializer(serializers.Serializer):
     tiingo_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     fred_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     resend_api_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_ollama_host(self, value):
+        return _validate_ollama_host(value or "")

@@ -19,6 +19,14 @@ export interface BacktestSummary {
   // OOS/IS ratio guards nothing — render "n/a", never a green ✓.
   deflation_meaningful: boolean;
   engine_mode: string;
+  /**
+   * Which economics produced these numbers. 1 = legacy (book reset each fold,
+   * no short-borrow financing, no split inference); 2 = current (book carried
+   * across folds + borrow financing + split inference). Two backtests are only
+   * comparable when their engine_version matches, so every surface that puts
+   * two results side by side has to show it. Older rows may omit the field.
+   */
+  engine_version?: number | null;
   // P10 §B3: "price_only" rows predate the dividend fix (PR #50) and are
   // excluded as §9-gate evidence; badge them.
   data_era: 'price_only' | 'total_return';
@@ -179,4 +187,22 @@ export interface DeflationPayload {
   // P10 §B4: false when the ratio guards nothing (deterministic / 1 candidate).
   deflation_meaningful: boolean;
   red_flag: boolean;
+}
+
+/**
+ * One-line provenance for a backtest's numbers, for the surfaces that compare
+ * two results. Engine v1 reset the book at every fold boundary, charged no
+ * short-borrow financing and did not infer splits, so its returns are not
+ * comparable with v2's.
+ */
+export function engineVersionLabel(version: number | null | undefined): string {
+  if (version === 2) return 'Engine v2 (carried book, borrow financing, split inference).';
+  if (version === 1) return 'Engine v1 (legacy economics) — not comparable with v2 results.';
+  return 'Engine version not recorded — treat comparisons with care.';
+}
+
+/** Short badge text for the same thing, for table cells and pills. */
+export function engineVersionBadge(version: number | null | undefined): string {
+  if (version === 2 || version === 1) return `engine v${version}`;
+  return 'engine v?';
 }

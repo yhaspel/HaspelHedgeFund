@@ -5,6 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount, BrokerCapability } from '../../core/models/broker.model';
+import { apiErrorMessage } from '../../core/api/api-error';
 import { AlpacaConnectFlowComponent } from './alpaca-connect-flow.component';
 import { IBKRConnectFlowComponent } from './ibkr-connect-flow.component';
 import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.component';
@@ -56,8 +57,11 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
                   <div class="font-medium">{{ cap.display_name }}</div>
                   <div class="text-[11.5px] text-text-3 mono mt-0.5">code: {{ cap.code }}</div>
                 </div>
-                @if (!cap.available || cap.code === 'ibkr' || cap.code === 'tradestation') {
-                  <span class="pill"><span class="dot"></span>later release</span>
+                @if (!canConnect(cap)) {
+                  <span class="pill" [class.warn]="cap.status === 'deferred'"
+                        [attr.data-test]="'broker-status-' + cap.code">
+                    <span class="dot"></span>{{ statusLabel(cap) }}
+                  </span>
                 } @else if (cap.community_unverified) {
                   <span class="pill warn"><span class="dot"></span>unverified</span>
                 } @else {
@@ -65,6 +69,12 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
                 }
               </div>
               <p class="text-xs text-text-2 mt-2">{{ cap.description }}</p>
+              <!-- WAVE 3: the deployment gate's own reason. "available" stays
+                   true for IBKR/TradeStation, so "enabled" is what decides. -->
+              @if (!canConnect(cap) && cap.note) {
+                <p class="text-[11.5px] text-[var(--acc-hold-fg)] mt-1.5"
+                   [attr.data-test]="'broker-note-' + cap.code">{{ cap.note }}</p>
+              }
               <ul class="text-[11px] text-text-3 mt-2 space-y-0.5">
                 <li>auth: <span class="mono">{{ cap.auth_kind }}</span></li>
                 <li>order types: <span class="mono">{{ cap.supported_order_types.join(', ') }}</span></li>
@@ -78,14 +88,16 @@ import { TradeStationConnectFlowComponent } from './tradestation-connect-flow.co
                 }
               </ul>
               <div class="mt-2.5 text-right">
-                @if (cap.available && cap.code !== 'ibkr' && cap.code !== 'tradestation') {
+                @if (canConnect(cap)) {
                   <button class="btn primary btn-sm" (click)="select(cap)"
                           [attr.data-test]="'select-broker-' + cap.code">
                     Continue
                   </button>
                 } @else {
-                  <button class="btn ghost btn-sm" disabled aria-disabled="true">
-                    Available in a later release
+                  <button class="btn ghost btn-sm" disabled aria-disabled="true"
+                          [title]="cap.note || ''"
+                          [attr.data-test]="'select-broker-disabled-' + cap.code">
+                    {{ cap.status === 'deferred' ? 'Not yet connectable' : 'Unavailable' }}
                   </button>
                 }
               </div>
@@ -220,7 +232,38 @@ export class BrokerConnectWizardPage implements OnInit {
     });
   }
 
+  /**
+   * WAVE 3 — key off `enabled`, NOT `available`.
+   *
+   * `available` reports that the ADAPTER exists and stays `true` for IBKR and
+   * TradeStation; `enabled` is the deployment gate (`ENABLED_BROKERS` plus the
+   * deferred list) and is what `POST /broker-accounts/` actually enforces. The
+   * old hard-coded `code !== 'ibkr' && code !== 'tradestation'` check meant a
+   * newly-deferred broker stayed clickable and only failed at submit.
+   *
+   * `enabled === undefined` is a pre-wave-3 server: fall back to `available`
+   * so an older backend does not disable the whole grid.
+   */
+  canConnect(cap: BrokerCapability): boolean {
+    if (cap.enabled !== undefined) return cap.enabled;
+    return !!cap.available;
+  }
+
+  statusLabel(cap: BrokerCapability): string {
+    switch (cap.status) {
+      case 'deferred':
+        return 'later release';
+      case 'disabled':
+        return 'switched off';
+      case 'unavailable':
+        return 'unavailable';
+      default:
+        return cap.available ? 'unavailable' : 'later release';
+    }
+  }
+
   select(cap: BrokerCapability): void {
+    if (!this.canConnect(cap)) return;
     this.selected.set(cap);
     this.label = cap.code === 'mock' ? 'Demo book' : '';
     this.mode = cap.supports_paper ? 'paper' : 'live';
@@ -257,13 +300,15 @@ export class BrokerConnectWizardPage implements OnInit {
             this.router.navigate(['/broker-accounts', acc.id]);
           }
         },
-        error: (err) =>
-          this.error.set(
-            err?.error?.detail ??
-              err?.error?.broker ??
-              err?.error?.label ??
-              'Failed to create account.',
-          ),
+        error: (err) => {
+          // WAVE 3: a gated broker answers 400 `{broker: "<note>"}` — a plain
+          // STRING, not a DRF list. `apiErrorMessage` flattens both shapes (and
+          // `{detail}`, and field errors), so the note reaches the user verbatim
+          // instead of collapsing to "Failed to create account."
+          this.error.set(apiErrorMessage(err, 'Failed to create account.'));
+          // Refresh the registry: the gate may have changed under us.
+          this.store.loadRegistry().subscribe({ error: () => undefined });
+        },
       });
   }
 

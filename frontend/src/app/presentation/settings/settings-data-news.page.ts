@@ -8,6 +8,7 @@ import { NewsStore } from '../../abstraction/news.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { OfflineState } from '../../core/offline/offline-state.service';
 import { NewsPreferences } from '../../core/models/news.model';
+import { ProvenancePanelComponent } from '../shared/provenance-panel.component';
 import { MarkCadence } from '../../core/models/portfolio.model';
 
 /**
@@ -20,7 +21,14 @@ import { MarkCadence } from '../../core/models/portfolio.model';
 @Component({
   selector: 'hf-settings-data-news',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, SettingsTabsComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterLink,
+    AppShellComponent,
+    SettingsTabsComponent,
+    ProvenancePanelComponent,
+  ],
   template: `
     <hf-app-shell [crumbs]="[{ label: 'Settings', link: '/settings/models' }, { label: 'Data & News' }]">
       <div class="page-head">
@@ -45,6 +53,56 @@ import { MarkCadence } from '../../core/models/portfolio.model';
               <a routerLink="/news" class="text-[var(--acc-info-fg)] underline">News</a>
               page itself paginates 12 stories at a time, up to 48 total.
             </p>
+
+            <!-- WAVE 3: the news LLM features are BYOK-gated with a daily USD
+                 cap. Without this block a user whose sentiment silently stopped
+                 running has no way to find out why. -->
+            @if (llm(); as st) {
+              <div class="llm-status" data-test="news-llm-status"
+                   [class.blocked]="!st.allowed">
+                <div class="llm-row">
+                  <span class="llm-k">AI features</span>
+                  <span class="pill" [class.ok]="st.allowed" [class.err]="!st.allowed"
+                        data-test="news-llm-allowed">
+                    <span class="dot"></span>{{ st.allowed ? 'running' : 'skipped' }}
+                  </span>
+                </div>
+                <div class="llm-row">
+                  <span class="llm-k">Your OpenRouter key</span>
+                  <span class="pill" [class.ok]="st.has_user_key" [class.warn]="!st.has_user_key"
+                        data-test="news-llm-key">
+                    <span class="dot"></span>{{ st.has_user_key ? 'present' : 'not set' }}
+                  </span>
+                  @if (!st.has_user_key) {
+                    <a routerLink="/settings/providers"
+                       class="text-[var(--acc-info-fg)] underline text-[11.5px]"
+                       data-test="news-llm-add-key">Add one</a>
+                  }
+                </div>
+                <div class="llm-row">
+                  <span class="llm-k">Today's spend</span>
+                  <span class="mono text-[11.5px]" data-test="news-llm-spend">
+                    \${{ st.spent_today_usd | number: '1.2-2' }} /
+                    \${{ st.daily_cap_usd | number: '1.2-2' }} cap
+                  </span>
+                </div>
+                @if (st.byok_required) {
+                  <p class="llm-note" data-test="news-llm-byok">
+                    This deployment does not lend its own key for News AI — sentiment and
+                    translation need your own OpenRouter key.
+                  </p>
+                }
+                @if (st.reason) {
+                  <p class="llm-note warn" role="status" data-test="news-llm-reason">{{ st.reason }}</p>
+                }
+                @if (st.model_choices_restricted) {
+                  <p class="llm-note" data-test="news-llm-restricted">
+                    Without your own key the pickers below are limited to the frugal preset
+                    models; the rest are disabled.
+                  </p>
+                }
+              </div>
+            }
 
             <div class="field">
               <label class="lbl flex items-center justify-between" for="news-show-all-models">
@@ -84,9 +142,12 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       [disabled]="!newsForm.sentiment_enabled"
                       data-test="news-sentiment-model">
                 @for (m of sentimentOptions(); track m.id) {
-                  <option [value]="m.id">
+                  <option [value]="m.id" [disabled]="m.selectable === false"
+                          [attr.data-test]="'news-sentiment-option-' + m.id">
                     {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
-                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok{{
+                      m.selectable === false ? ' · needs your own key' : ''
+                    }}
                   </option>
                 }
               </select>
@@ -94,6 +155,11 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                 {{ showAllModels()
                     ? 'Full catalogue — 🧠 marks reasoning models.'
                     : 'Frugal Llama/Qwen models for cost discipline.' }}
+                @if (lockedCount() > 0) {
+                  <span data-test="news-locked-count">
+                    {{ lockedCount() }} model(s) are disabled — they need your own OpenRouter key.
+                  </span>
+                }
               </p>
             </div>
 
@@ -119,9 +185,12 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       [disabled]="!newsForm.translation_enabled"
                       data-test="news-translation-model">
                 @for (m of translationOptions(); track m.id) {
-                  <option [value]="m.id">
+                  <option [value]="m.id" [disabled]="m.selectable === false"
+                          [attr.data-test]="'news-translation-option-' + m.id">
                     {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
-                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok{{
+                      m.selectable === false ? ' · needs your own key' : ''
+                    }}
                   </option>
                 }
               </select>
@@ -135,9 +204,12 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                       [disabled]="!newsForm.translation_enabled"
                       data-test="news-translation-fallback">
                 @for (m of translationOptions(); track m.id) {
-                  <option [value]="m.id">
+                  <option [value]="m.id" [disabled]="m.selectable === false"
+                          [attr.data-test]="'news-translation-option-' + m.id">
                     {{ m.supports_reasoning ? '🧠 ' : '' }}{{ m.display_name }} ·
-                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok
+                    {{ m.price_in_per_mtok ?? 0 }} / {{ m.price_out_per_mtok ?? 0 }} $/Mtok{{
+                      m.selectable === false ? ' · needs your own key' : ''
+                    }}
                   </option>
                 }
               </select>
@@ -183,7 +255,11 @@ import { MarkCadence } from '../../core/models/portfolio.model';
                   ? 'Saving…'
                   : (isNewsDirty() ? 'Save News settings' : 'No changes') }}
             </button>
-            @if (newsMsg()) {
+            @if (newsSaveError(); as e) {
+              <p role="alert"
+                 class="text-[11.5px] text-[var(--acc-short-fg)] m-0"
+                 data-test="news-prefs-error">{{ e }}</p>
+            } @else if (newsMsg()) {
               <p role="status" aria-live="polite"
                  class="text-[11.5px] text-[var(--acc-long-fg)] m-0"
                  data-test="news-prefs-msg">{{ newsMsg() }}</p>
@@ -243,6 +319,15 @@ import { MarkCadence } from '../../core/models/portfolio.model';
           </div>
         </section>
 
+        <!-- WAVE 3: the global data-provenance block — macro series vintages and
+             every provider's key + last-success age. This is the operator view
+             that makes a silently-dead provider visible. -->
+        <hf-provenance
+          class="col-span-2 block"
+          heading="Data provenance · macro &amp; providers"
+          [showGlobal]="true"
+        ></hf-provenance>
+
         <!-- Offline (P4-OFF WS-4.4) -->
         <section class="card" data-test="offline-settings-card">
           <div class="card-hd"><h2 class="title">Offline</h2></div>
@@ -271,6 +356,39 @@ import { MarkCadence } from '../../core/models/portfolio.model';
   `,
   styles: [
     `
+      .llm-status {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--r-6);
+        background: var(--surface-2);
+      }
+      .llm-status.blocked {
+        border-color: var(--acc-hold);
+        background: var(--acc-hold-soft);
+      }
+      .llm-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .llm-k {
+        font-size: var(--fs-11);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-3);
+        min-width: 130px;
+      }
+      .llm-note {
+        margin: 0;
+        font-size: var(--fs-11);
+        color: var(--text-2);
+      }
+      .llm-note.warn {
+        color: var(--acc-hold-fg);
+      }
       .cadence-row {
         display: grid;
         grid-template-columns: 24px 1fr;
@@ -324,6 +442,18 @@ export class SettingsDataNewsPage implements OnInit {
     const all = this.newsStore.translationChoices();
     return this.showAllModels() ? all : all.filter((m) => m.frugal);
   });
+
+  /** WAVE 3 — BYOK / daily-cap state, straight from the store. */
+  readonly llm = this.newsStore.llmStatus;
+  /** The 400 `detail` from a rejected save (e.g. a non-selectable model). */
+  readonly newsSaveError = this.newsStore.saveError;
+  /** How many catalogued models this user may NOT pick. */
+  readonly lockedCount = computed(
+    () =>
+      [...this.newsStore.sentimentChoices(), ...this.newsStore.translationChoices()].filter(
+        (m) => m.selectable === false,
+      ).length,
+  );
 
   // ---- Portfolio mark cadence -----------------------------------------
   readonly cadenceOptions: { value: MarkCadence; label: string; help: string }[] = [
@@ -405,9 +535,12 @@ export class SettingsDataNewsPage implements OnInit {
         this.newsMsg.set('Saved.');
         setTimeout(() => this.newsMsg.set(null), 2500);
       },
-      error: (err) => {
+      error: () => {
         this.savingNews.set(false);
-        this.newsMsg.set(err?.error?.detail || 'Failed to save News settings.');
+        this.newsMsg.set(null);
+        // The store already flattened the 400 `detail` into `saveError`, which
+        // the template renders inline with role="alert" — a non-selectable
+        // model names itself in that message.
       },
     });
   }

@@ -53,6 +53,10 @@ class SimulatedPortfolio:
     # borrow. Default 0 = no drag (backward-compatible for callers that don't
     # set it); real backtests thread Backtest.financing_bps (default 2%/yr).
     financing_bps: float = 0.0
+    # Engine v2: annual stock-borrow rate (bps) charged on |short notional|, on
+    # top of financing_bps. None = read settings.BACKTEST_SHORT_BORROW_BPS
+    # (default 50 = 0.5%/yr, a general-collateral borrow) at construction.
+    short_borrow_bps: float | None = None
     cash: float = 0.0
     positions: dict[str, Position] = field(default_factory=dict)
     fills_today: list[Fill] = field(default_factory=list)
@@ -61,6 +65,12 @@ class SimulatedPortfolio:
     def __post_init__(self) -> None:
         if self.cash == 0.0:
             self.cash = float(self.starting_cash)
+        if self.short_borrow_bps is None:
+            from django.conf import settings
+
+            self.short_borrow_bps = float(
+                getattr(settings, "BACKTEST_SHORT_BORROW_BPS", 50)
+            )
 
     @property
     def total_value(self) -> float:
@@ -77,25 +87,37 @@ class SimulatedPortfolio:
                 p.mark = float(new_mark)
 
     def accrue_financing(self) -> float:
-        """Charge one trading day of financing on the margin borrow (P11 E2).
+        """Charge one trading day of financing + stock borrow (P11 E2, engine v2).
 
-        The engine lets a levered book borrow: a gross>1 book runs cash negative
-        (``-cash`` is the margin debit), yet ``execute`` only ever charged
-        commission + spread — so every gross>1 backtest overstated its return by
-        the full carry a live margined book pays. This accrues that carry daily.
+        Two legs, both charged daily:
 
-        Charged on the *actual* borrow ``max(0, -cash)`` at ``financing_bps/252``.
-        For a net-long levered book (the RP/Trend core this targets) the borrow
-        equals ``(gross-1)·equity`` — the paper's ``(L-1)·rf`` formula — while a
-        market-neutral book funds its longs with short proceeds (cash stays ~flat)
-        and correctly pays ~nothing. No-op when unlevered or ``financing_bps<=0``.
-        Returns the dollar charge (for diagnostics/tests)."""
+        * **Margin carry** on the actual cash debit ``max(0, -cash)`` at
+          ``financing_bps``. For a net-long levered book the debit equals
+          ``(gross-1)·equity`` — the paper's ``(L-1)·rf`` drag.
+        * **Short leg** on ``|short notional|`` at ``financing_bps +
+          short_borrow_bps``. This is what engine v1 missed entirely: short sale
+          proceeds land in cash, so a 100/100 long-short book (gross 2.0) and a
+          short-only "crisis sleeve" both showed a POSITIVE cash balance and were
+          charged $0/yr — a free levered book. A live prime broker charges the
+          rebate spread plus the borrow fee on the short market value regardless
+          of how much cash the proceeds put on the ledger.
+
+        ``financing_bps <= 0`` remains the master off-switch (the dataclass
+        default is 0, so callers that never opted into financing are unchanged).
+        Returns the total dollar charge (for diagnostics/tests)."""
         if self.financing_bps <= 0:
             return 0.0
-        borrow = max(0.0, -self.cash)
-        if borrow <= 0.0:
+        margin_borrow = max(0.0, -self.cash)
+        short_notional = sum(
+            -p.market_value for p in self.positions.values() if p.qty < 0
+        )
+        daily = self.financing_bps / 10_000.0 / 252.0
+        short_daily = (
+            self.financing_bps + float(self.short_borrow_bps or 0.0)
+        ) / 10_000.0 / 252.0
+        charge = margin_borrow * daily + max(0.0, short_notional) * short_daily
+        if charge <= 0.0:
             return 0.0
-        charge = borrow * (self.financing_bps / 10_000.0) / 252.0
         self.cash -= charge
         return charge
 

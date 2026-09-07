@@ -1,0 +1,95 @@
+{
+  "as_of": "2026-06-06T17:30:00+00:00",
+  "tickers": {
+    "AAPL": {
+      "ticker": "AAPL",
+      "bars": {
+        "last_date": "2026-06-05",
+        "source": "fmp",
+        "count": 1258,
+        "adjusted_differs_from_close": true
+      },
+      "dividends": { "last_ex_date": "2026-05-09", "count": 21 },
+      "filings": { "count": 34, "newest_filed_at": "2026-05-02T20:15:00+00:00" },
+      "news": [
+        { "provider": "fmp", "newest_published_at": "2026-06-06T12:04:00+00:00", "count": 118 },
+        { "provider": "tiingo", "newest_published_at": "2026-06-05T22:41:00+00:00", "count": 46 }
+      ],
+      "regime": {
+        "as_of_date": "2026-06-05",
+        "last_price_date": "2026-06-05",
+        "stale": false,
+        "model_type": "markov_2state"
+      }
+    },
+    "MSFT": {
+      "ticker": "MSFT",
+      "bars": {
+        "last_date": "2026-05-11",
+        "source": "tiingo",
+        "count": 1201,
+        "adjusted_differs_from_close": false
+      },
+      "dividends": { "last_ex_date": null, "count": 0 },
+      "filings": { "count": 0, "newest_filed_at": null },
+      "news": [],
+      "regime": {
+        "as_of_date": "2026-06-05",
+        "last_price_date": "2026-05-11",
+        "stale": true,
+        "model_type": "markov_2state"
+      }
+    }
+  },
+  "global": {
+    "macro": {
+      "series": [
+        {
+          "series_id": "DGS10",
+          "newest_observation_date": "2026-06-04",
+          "newest_vintage_date": "2026-06-05"
+        },
+        {
+          "series_id": "CPIAUCSL",
+          "newest_observation_date": "2026-04-01",
+          "newest_vintage_date": "2026-05-13"
+        }
+      ],
+      "classifier_version": "v3",
+      "snapshot_as_of": "2026-06-05"
+    },
+    "providers": {
+      "fmp": {
+        "key": "configured",
+        "user_byok": true,
+        "freshness": { "last_at": "2026-06-06T09:12:00+00:00", "age_days": 0, "count": 51240 }
+      },
+      "tiingo": {
+        "key": "configured",
+        "user_byok": false,
+        "freshness": { "last_at": "2026-06-05T22:41:00+00:00", "age_days": 1, "count": 3120 }
+      },
+      "fred": {
+        "key": "missing",
+        "user_byok": false,
+        "freshness": { "last_at": "2026-04-28T06:00:00+00:00", "age_days": 39, "count": 88 }
+      },
+      "edgar": {
+        "key": "configured",
+        "user_byok": false,
+        "freshness": { "last_at": "2026-06-02T03:20:00+00:00", "age_days": 4, "count": 940 }
+      },
+      "anthropic": { "key": "configured", "user_byok": false },
+      "openrouter": { "key": "missing", "user_byok": true }
+    },
+    "provider_last_success": {
+      "fmp": "2026-06-06T09:12:00+00:00",
+      "tiingo": "2026-06-05T22:41:00+00:00",
+      "fred": "2026-04-28T06:00:00+00:00",
+      "edgar": "2026-06-02T03:20:00+00:00",
+      "anthropic": null,
+      "openrouter": null
+    },
+    "policy": { "allow_platform_data_keys": false }
+  }
+}

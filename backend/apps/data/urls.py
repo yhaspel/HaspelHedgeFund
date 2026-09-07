@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    DataProvenanceRefreshView,
+    DataProvenanceView,
     MacroSnapshotView,
     MarketNewsFeedView,
     NewsPreferencesView,
@@ -14,6 +16,12 @@ from .views import (
 )
 
 urlpatterns = [
+    path("data/provenance/", DataProvenanceView.as_view(), name="data-provenance"),
+    path(
+        "data/provenance/refresh/",
+        DataProvenanceRefreshView.as_view(),
+        name="data-provenance-refresh",
+    ),
     path("macro/snapshot/", MacroSnapshotView.as_view(), name="macro-snapshot"),
     path("macro/regime/batch/", RegimeBatchView.as_view(), name="macro-regime-batch"),
     path("macro/regime/<str:ticker>/", RegimeSnapshotView.as_view(), name="macro-regime"),

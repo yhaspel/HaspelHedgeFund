@@ -36,6 +36,31 @@ NOT_APPLIED_EMPTY_META = {
 }
 
 
+def _seed_news_batch(run: Run, ticker: str):
+    """Fetch the ticker's news window once, before the graph fans out.
+
+    The sentiment node and the news_digest node are siblings in the analytical
+    fan-out, so sentiment can never see the digest's output — which is why it
+    scored 0.0 with no drivers on every production run. Seeding
+    ``state["news"]`` here fixes that without extra provider quota:
+    ``NewsService.fetch_and_persist`` is DB-cached, so the digest node's own
+    call is served from the rows persisted here.
+
+    Best-effort: a provider outage yields an empty batch and the sentiment node
+    falls back to neutral exactly as before.
+    """
+    from apps.data.providers.factory import get_news_service
+    from hedgefund_agents.analytical.sentiment import NewsBatch, batch_from_news_rows
+
+    try:
+        service = get_news_service(user=run.user)
+        rows = service.fetch_and_persist(ticker, as_of=run.as_of_date, lookback_days=30)
+        return batch_from_news_rows(rows)
+    except Exception:
+        log.warning("news seed failed for run=%s ticker=%s", run.id, ticker, exc_info=True)
+        return NewsBatch.empty()
+
+
 def _resolve_investor_profile(run: Run) -> tuple[dict, dict]:
     """Resolve the investor profile for a run, once per ``execute_run``.
 
@@ -148,49 +173,83 @@ PIPELINE_AGENTS = [
 ORPHAN_THRESHOLD_MIN = 15
 
 
+def _orphan_cutoff():
+    """Oldest `created_at` a run may have and still be considered live.
+
+    Must be at least the task's own wall-clock ceiling: a run that is legitimately
+    executing right up to ``RUN_HARD_TIME_LIMIT_SECONDS`` has not been abandoned,
+    and `created_at` is the QUEUE time, so the run's own execution window has to
+    fit inside the window before we call it orphaned.
+    """
+    hard_limit = int(getattr(settings, "RUN_HARD_TIME_LIMIT_SECONDS", 720) or 720)
+    seconds = max(ORPHAN_THRESHOLD_MIN * 60, hard_limit + 60)
+    return timezone.now() - dt.timedelta(seconds=seconds)
+
+
 @shared_task
 def sweep_orphan_runs() -> dict:
     """Mark abandoned runs as failed.
 
-    A run is "orphaned" if it's still in {queued, running} but has been sitting
-    that way for > ORPHAN_THRESHOLD_MIN minutes AND the Celery broker has no
-    active task with its task id. Happens after worker restarts /
-    container recreation kills the subprocess before the task wrapper can
-    record terminal status.
+    A run is "orphaned" only if ALL of these hold:
+      * it is RUNNING (a QUEUED run has not started — it is waiting in the
+        broker, and "no active task" is the normal state for it, not evidence
+        of a dead worker);
+      * it was dispatched through Celery (non-empty ``celery_task_id``) — the
+        synchronous schedule fan-out executes ``execute_run`` in-process and
+        never has one, so the broker can say nothing about it;
+      * at least one worker replied to ``inspect.active()`` and none of them is
+        running its task id;
+      * it has been sitting there longer than the task's own wall-clock ceiling
+        (see ``_orphan_cutoff``).
+
+    Happens after worker restarts / container recreation kills the subprocess
+    before the task wrapper can record terminal status.
     """
     from hedgefund.celery import app as celery_app  # local: avoid load-time cycle
 
-    cutoff = timezone.now() - dt.timedelta(minutes=ORPHAN_THRESHOLD_MIN)
     candidates = Run.objects.filter(
-        status__in=Run.ACTIVE_STATUSES, created_at__lt=cutoff
-    )
+        status=Run.RUNNING, created_at__lt=_orphan_cutoff()
+    ).exclude(celery_task_id="")
     if not candidates.exists():
         return {"swept": 0}
 
     active_ids: set[str] = set()
     try:
         inspect = celery_app.control.inspect(timeout=2.0)
-        for _worker, tasks in (inspect.active() or {}).items():
-            for t in tasks or []:
-                tid = t.get("id")
-                if tid:
-                    active_ids.add(tid)
+        replies = inspect.active()
     except Exception:  # broker unreachable etc. — better to do nothing than to clobber live runs
         log.warning("orphan sweep: could not inspect active tasks; aborting")
         return {"swept": 0, "error": "inspect_failed"}
+    if not replies:
+        # None = no worker answered within the 2s window (busy broker, slow or
+        # restarting worker). `(None or {})` used to read that as "nothing is
+        # running" and fail every live run.
+        log.warning("orphan sweep: no worker replied to inspect.active(); aborting")
+        return {"swept": 0, "error": "no_worker_reply"}
+    for _worker, tasks in replies.items():
+        for t in tasks or []:
+            tid = t.get("id")
+            if tid:
+                active_ids.add(tid)
 
     swept = 0
     swept_ids: list[int] = []
     for run in candidates:
-        if run.celery_task_id and run.celery_task_id in active_ids:
+        if run.celery_task_id in active_ids:
             continue  # still running, just slow
-        run.status = Run.FAILED
-        run.error_message = (
-            "Orphaned: no active Celery task for this run; worker likely "
-            "restarted mid-execution."
+        # Conditional: only sweep a run that is STILL running right now, so a
+        # run that finished (or was cancelled) between the query and here is
+        # never clobbered.
+        updated = Run.objects.filter(pk=run.pk, status=Run.RUNNING).update(
+            status=Run.FAILED,
+            error_message=(
+                "Orphaned: no active Celery task for this run; worker likely "
+                "restarted mid-execution."
+            ),
+            finished_at=timezone.now(),
         )
-        run.finished_at = timezone.now()
-        run.save(update_fields=["status", "error_message", "finished_at"])
+        if not updated:
+            continue
         swept += 1
         swept_ids.append(run.id)
     if swept:
@@ -215,9 +274,22 @@ def sweep_orphan_runs() -> dict:
     time_limit=getattr(settings, "RUN_HARD_TIME_LIMIT_SECONDS", 720),
 )
 def execute_run(run_id: int) -> None:
+    # CLAIM the run with a conditional update instead of an unconditional
+    # `status = RUNNING; save()`. Without this, a re-delivered task or a manual
+    # re-fire resurrected a run the user had CANCELLED (silently undoing the
+    # cancel and spending again) and appended a SECOND set of
+    # AgentMessage/Decision rows to a run that had already finished.
+    claimed = Run.objects.filter(
+        pk=run_id, status__in=Run.ACTIVE_STATUSES
+    ).update(status=Run.RUNNING)
+    if not claimed:
+        current = Run.objects.filter(pk=run_id).values_list("status", flat=True).first()
+        log.warning(
+            "execute_run: refusing to execute run %s in terminal status %r",
+            run_id, current,
+        )
+        return
     run = Run.objects.get(pk=run_id)
-    run.status = Run.RUNNING
-    run.save(update_fields=["status"])
 
     selected_personas = list(run.personas or ALL_PERSONAS)
     # P4c: resolve from the run's AgentGraphVersion when ENABLE_DB_GRAPHS is on;
@@ -303,6 +375,14 @@ def execute_run(run_id: int) -> None:
                 "ownership_provider": ownership_provider,
                 "investor_profile": profile_ctx,
                 "persona_evolution": persona_evolution_ctx,
+                # The sentiment node runs in the same parallel fan-out as
+                # news_digest, so it can never read the digest's output. Seed
+                # the news here instead — otherwise sentiment scores nothing
+                # and returns score 0 / top_drivers [] on every single run.
+                # This costs no extra provider quota: NewsService.fetch_and_persist
+                # is DB-cached, so the news_digest node's own call inside the
+                # graph is served from the rows this one just persisted.
+                "news": _seed_news_batch(run, ticker),
             }
             final_state = graph.invoke(initial_state)
             _persist_outputs(run, final_state, selected_personas)
@@ -321,42 +401,58 @@ def execute_run(run_id: int) -> None:
             run.search_text = _scrub_nul(build_search_text(run))
         except Exception:  # never let search indexing fail the run
             log.exception("search_text build failed for run=%s", run_id)
-        run.status = Run.DONE
-        run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at", "evidence", "search_text"])
+        # Conditional RUNNING→DONE: if the user cancelled while the council was
+        # mid-flight (or the sweeper already failed it), the cancel wins and we
+        # must not flip the row back to a successful terminal state.
+        finished = Run.objects.filter(pk=run.pk, status=Run.RUNNING).update(
+            status=Run.DONE,
+            finished_at=timezone.now(),
+            evidence=run.evidence,
+            search_text=run.search_text,
+        )
+        if not finished:
+            current = (
+                Run.objects.filter(pk=run.pk).values_list("status", flat=True).first()
+            )
+            log.warning(
+                "run %s finished executing but is already %r; leaving it alone",
+                run_id, current,
+            )
     except Exception as exc:  # pragma: no cover
         log.exception("Run %s failed", run_id)
-        # If the user already cancelled this run via the API, don't clobber
-        # the cancelled state with FAILED — the SIGTERM that revoke()
-        # delivered will surface here as an unhandled exception.
-        current = Run.objects.filter(pk=run_id).values_list("status", flat=True).first()
-        if current != Run.CANCELLED:
-            # L3: the wall-clock cap fired — give the operator a clear, actionable
-            # message instead of a bare "SoftTimeLimitExceeded".
-            if isinstance(exc, SoftTimeLimitExceeded):
-                soft = getattr(settings, "RUN_SOFT_TIME_LIMIT_SECONDS", 600)
-                msg = (
-                    f"Run exceeded the {soft}s wall-clock limit and was stopped. "
-                    "An LLM route was likely stalling; the run did not hang the "
-                    "worker (see self-healing layers L1/L2)."
-                )
-            elif isinstance(exc, BudgetExceeded):
-                # P5-SH WS1.2: the mid-run LLM-spend cap tripped. Prefix the
-                # message with the machine-readable "budget_exceeded:" token the
-                # API/UI and operator alert key off.
-                msg = f"budget_exceeded: {exc}"
-            else:
-                msg = f"{type(exc).__name__}: {exc}"
-            run.status = Run.FAILED
-            run.error_message = msg[:2000]
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "error_message", "finished_at"])
+        # L3: the wall-clock cap fired — give the operator a clear, actionable
+        # message instead of a bare "SoftTimeLimitExceeded".
+        if isinstance(exc, SoftTimeLimitExceeded):
+            soft = getattr(settings, "RUN_SOFT_TIME_LIMIT_SECONDS", 600)
+            msg = (
+                f"Run exceeded the {soft}s wall-clock limit and was stopped. "
+                "An LLM route was likely stalling; the run did not hang the "
+                "worker (see self-healing layers L1/L2)."
+            )
+        elif isinstance(exc, BudgetExceeded):
+            # P5-SH WS1.2: the mid-run LLM-spend cap tripped. Prefix the
+            # message with the machine-readable "budget_exceeded:" token the
+            # API/UI and operator alert key off.
+            msg = f"budget_exceeded: {exc}"
+        else:
+            msg = f"{type(exc).__name__}: {exc}"
+        # Conditional RUNNING→FAILED: if the user already cancelled this run via
+        # the API (the SIGTERM that revoke() delivered surfaces here as an
+        # unhandled exception), or the sweeper already terminalized it, the
+        # existing terminal state wins.
+        failed = Run.objects.filter(pk=run_id, status=Run.RUNNING).update(
+            status=Run.FAILED,
+            error_message=msg[:2000],
+            finished_at=timezone.now(),
+        )
+        if failed:
             # P5-SH WS2.2: alert the operator that a run failed (covers the
             # budget-cap abort too). Best-effort — never let notification errors
             # mask the original failure.
             try:
                 from apps.notifications.operator import notify_run_failed
 
+                run.refresh_from_db()
                 notify_run_failed(run)
             except Exception:  # pragma: no cover — defensive
                 log.exception("operator run-failed alert failed for run=%s", run_id)
@@ -402,12 +498,21 @@ def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> Non
         # it on the AgentMessage.status so the operator can see the council ran
         # with this agent degraded instead of a silent all-"ok" transcript.
         msg_status = "ok"
-        if isinstance(payload, dict) and payload.pop("_degraded", False):
-            msg_status = "degraded"
-            degraded.append(agent_name)
+        error_type = ""
+        if isinstance(payload, dict):
+            error_type = str(payload.pop("_error", "") or "")
+            if payload.pop("_degraded", False):
+                msg_status = "degraded"
+                degraded.append(agent_name)
+            if error_type:
+                # An unexpected exception must be named on the transcript rather
+                # than passing as a generic degradation (or, before the node
+                # `except` clauses were narrowed, passing silently as "ok").
+                msg_status = "error"
         AgentMessage.objects.create(
             run=run, agent_name=agent_name,
             parsed_output=_scrub_nul(payload), status=msg_status,
+            raw_response=error_type,
         )
     if degraded:
         log.warning(
@@ -418,11 +523,12 @@ def _persist_outputs(run: Run, state: dict, selected_personas: list[str]) -> Non
     decision = state.get("decision")
     if isinstance(decision, dict):
         decision.pop("_degraded", None)
+        decision.pop("_error", None)
         decision = _scrub_nul(decision)
     risk_overrides = state.get("risk", {})
     if isinstance(risk_overrides, dict):
         risk_overrides = _scrub_nul(
-            {k: v for k, v in risk_overrides.items() if k != "_degraded"}
+            {k: v for k, v in risk_overrides.items() if k not in ("_degraded", "_error")}
         )
     if decision:
         Decision.objects.create(

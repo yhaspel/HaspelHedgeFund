@@ -90,6 +90,17 @@ def _regime_fit(affinities: dict, regime: dict[str, float]) -> float:
     return sum(float(affinities.get(a, 0.0)) * regime.get(a, 0.0) for a in REGIME_AXES)
 
 
+def _placeholder_features_enabled() -> bool:
+    """sha1-derived sector features are an offline-dev prop only — see
+    ``hedgefund_agents/screener/features.py``. Synthetic rows are excluded
+    from the ranking either way."""
+    try:
+        from django.conf import settings
+    except Exception:  # pragma: no cover
+        return False
+    return bool(getattr(settings, "OFFLINE_MODE", False))
+
+
 def _synthetic_fallback(ticker: str, as_of: date) -> tuple[float, float, float, float, float]:
     h = hashlib.sha1(f"sector|{ticker}|{as_of.isoformat()}".encode()).digest()
     def f(i, lo, hi):
@@ -107,7 +118,10 @@ def _etf_momentum(provider: FmpProvider, ticker: str, as_of: date) -> tuple[list
     try:
         start = as_of - timedelta(days=400)
         bars = provider.get_daily_bars(ticker, start=start, end=as_of, as_of=as_of)
-        closes = [float(b.close) for b in bars if b.close]
+        # Total-return series (matches the Markov classifier / backtest engine).
+        closes = [
+            float(b.adjusted_close or b.close) for b in bars if (b.adjusted_close or b.close)
+        ]
         if len(closes) >= 30:
             return closes, True
     except Exception:
@@ -151,15 +165,22 @@ def compute_sector_features(
         feat.last_close = closes[-1]
         m1 = closes[-1] / closes[-min(21, len(closes))] - 1.0
         m3 = closes[-1] / closes[-min(63, len(closes))] - 1.0
-        m6 = closes[-1] / closes[0] - 1.0
+        # ~6 calendar months of sessions (was closes[0] over a 400-day window).
+        m6 = closes[-1] / closes[-min(127, len(closes))] - 1.0
         rolling_high = max(closes[-min(252, len(closes)):])
         feat.drawdown_from_high = closes[-1] / rolling_high - 1.0
         feat.synthetic = False
-    else:
+    elif _placeholder_features_enabled():
         m1, m3, m6, dd, last = _synthetic_fallback(ticker, as_of)
         feat.last_close = last
         feat.drawdown_from_high = dd
         feat.synthetic = True
+    else:
+        # No bars: unavailable, never ranked (see run_sector_screener).
+        m1 = m3 = m6 = 0.0
+        feat.synthetic = True
+        feat.available = False
+        feat.breadth_quality = "missing"
 
     bench = benchmark_returns or {}
     feat.relative_momentum_1m = m1 - bench.get("1m", 0.0)
@@ -171,8 +192,7 @@ def compute_sector_features(
     feat.markov_regime_state = state
     feat.markov_regime_stale = stale
     feat.breadth_quality = "missing"  # exact/approximate gated on holdings feed (P3+).
-    feat.available = True
-    return feat
+    return feat  # `available` was set above (False when there were no bars).
 
 
 def benchmark_returns(provider: FmpProvider, benchmark: str, as_of: date) -> dict[str, float]:
@@ -239,7 +259,11 @@ def run_sector_screener(
             regime_vector=regime_vector,
             provider=provider,
         ))
-    ranked = [(f, sector_score(f, weights)) for f in feats]
+    # Drop ETFs with no usable price history / synthetic placeholder rows —
+    # they must not be scored against real names.
+    rankable = [f for f in feats if f.available and not f.synthetic]
+    excluded = [f.ticker for f in feats if not (f.available and not f.synthetic)]
+    ranked = [(f, sector_score(f, weights)) for f in rankable]
     ranked.sort(key=lambda x: x[1], reverse=True)
     candidates = [
         {
@@ -255,6 +279,9 @@ def run_sector_screener(
     return {
         "as_of_date": as_of_date.isoformat(),
         "universe_size_evaluated": len(etfs),
+        "universe_size_ranked": len(rankable),
+        "excluded_no_data_count": len(excluded),
+        "excluded_no_data": excluded[:200],
         "long_candidates": candidates,
         "short_candidates": [],
         "benchmark": benchmark,

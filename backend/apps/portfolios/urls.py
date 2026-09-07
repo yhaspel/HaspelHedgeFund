@@ -11,6 +11,7 @@ from .api_autopilot import (
 )
 from .api_fund import (
     FundAccountsView,
+    FundActivityView,
     FundCandidatesView,
     FundCompositeView,
     FundFlattenView,
@@ -19,6 +20,7 @@ from .api_fund import (
     FundMembersView,
     FundResetView,
     FundResumeView,
+    FundSchedulerHealthView,
     FundView,
 )
 from .manual_book_views import (
@@ -47,6 +49,7 @@ from .views import (
     StrategyDetailView,
     StrategyEnrollView,
     StrategyEstimateView,
+    StrategyExpectedVsRealizedView,
     StrategyListCreateView,
     StrategyNewsDecisionsView,
     StrategyRunNowView,
@@ -70,6 +73,9 @@ urlpatterns = [
     path("strategies/<int:pk>/backtest-defaults/", StrategyBacktestDefaultsView.as_view(),
          name="strategy-backtest-defaults"),
     path("strategies/<int:pk>/run-now/", StrategyRunNowView.as_view(), name="strategy-run-now"),
+    # Wave 3: per-cycle realized return vs the validation fold that covers it.
+    path("strategies/<int:pk>/expected-vs-realized/",
+         StrategyExpectedVsRealizedView.as_view(), name="strategy-expected-vs-realized"),
     # P10 §E4: news-lab name-level decision scoreboard.
     path("strategies/<int:pk>/news-decisions/", StrategyNewsDecisionsView.as_view(),
          name="strategy-news-decisions"),
@@ -154,6 +160,10 @@ urlpatterns = [
     path("fund/composite/", FundCompositeView.as_view(), name="fund-composite"),
     # P10 §C2: persisted NAV history (per-account + aggregate + SPY/QQQ, TWR).
     path("fund/history/", FundHistoryView.as_view(), name="fund-history"),
+    # Wave 3: the merged fund activity feed + scheduler liveness.
+    path("fund/activity/", FundActivityView.as_view(), name="fund-activity"),
+    path("fund/scheduler-health/", FundSchedulerHealthView.as_view(),
+         name="fund-scheduler-health"),
     path("fund/halt/", FundHaltView.as_view(), name="fund-halt"),
     path("fund/resume/", FundResumeView.as_view(), name="fund-resume"),
 ]

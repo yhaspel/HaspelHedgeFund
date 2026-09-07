@@ -198,5 +198,15 @@
   "needs_keys": false,
   "chyron_enabled": true,
   "chyron_item_count": 8,
-  "ranking_basis": "Ranked by recency, breadth of coverage & source weight."
+  "ranking_basis": "Ranked by recency, breadth of coverage & source weight.",
+  "llm_status": {
+    "byok_required": true,
+    "has_user_key": false,
+    "platform_key_allowed": false,
+    "allowed": false,
+    "reason": "Sentiment analysis needs your own OpenRouter key \u2014 add one at /settings/providers. The news feed still works without it.",
+    "daily_cap_usd": 1.0,
+    "spent_today_usd": 0.0,
+    "model_choices_restricted": true
+  }
 }

@@ -22,11 +22,10 @@ from typing import Any
 import httpx
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Count, Max
 
 from ..interfaces import (
     Bar,
-    FilerHolding,
-    FilerPortfolio,
     FundamentalRow,
     IssuerOwnershipSummary,
     ProfileSnapshot,
@@ -55,6 +54,13 @@ METRIC_MAP: dict[str, tuple[str, str]] = {
     "total_assets": ("balance-sheet-statement", "totalAssets"),
     "total_debt": ("balance-sheet-statement", "totalDebt"),
     "total_equity": ("balance-sheet-statement", "totalStockholdersEquity"),
+    # Share counts — what turns the valuation node's enterprise-level DCF /
+    # multiples estimates into PER-SHARE fair values. Without them
+    # `hedgefund_agents.analytical.valuation` (SHARE_COUNT_METRICS) has no
+    # denominator and reports upside_pct=None on every ticker. Diluted first:
+    # it is the conservative count and the one the node prefers.
+    "shares_outstanding": ("income-statement", "weightedAverageShsOutDil"),
+    "weighted_average_shares_outstanding": ("income-statement", "weightedAverageShsOut"),
 }
 
 
@@ -321,6 +327,9 @@ class FmpProvider:
     ) -> list[Bar]:
         if end > as_of:
             end = as_of  # never look past as_of
+        # Normalise the cache key: a lower-case caller used to miss the cache
+        # entirely and re-fetch + duplicate the whole row set under "aapl".
+        ticker = ticker.upper()
         self._ensure_bars_cached(ticker, start, end)
         upper = min(end, as_of)
         rows = DailyBar.objects.filter(
@@ -340,13 +349,27 @@ class FmpProvider:
             for r in rows
         ]
 
+    # A cached window may only be trusted when its NEWEST bar is this recent.
+    # 4 calendar days covers a normal weekend plus a Monday holiday; anything
+    # older means the tail is missing regardless of how dense the window looks.
+    MAX_CACHED_TAIL_GAP_DAYS = 4
+
     def _ensure_bars_cached(self, ticker: str, start: dt.date, end: dt.date) -> None:
-        existing = DailyBar.objects.filter(
+        agg = DailyBar.objects.filter(
             ticker=ticker, source=SOURCE, date__gte=start, date__lte=end
-        ).count()
-        # Heuristic: ~252 trading days/year; if we already have most of the range, skip.
-        expected_min = max(1, int((end - start).days * 0.6))
-        if existing >= expected_min:
+        ).aggregate(n=Count("id"), newest=Max("date"))
+        existing = agg["n"] or 0
+        newest = agg["newest"]
+        # Density: real US trading-day density is ~0.69 bars/calendar day, so
+        # the old 0.6 bar let up to ~13% of the window (always the most RECENT
+        # part) go missing with no fetch — a 400-day-stale tail on the Markov
+        # window, ~55 days on TSMOM.
+        expected_min = max(1, int((end - start).days * 0.68))
+        fresh_tail = (
+            newest is not None
+            and (end - newest).days <= self.MAX_CACHED_TAIL_GAP_DAYS
+        )
+        if existing >= expected_min and fresh_tail:
             return
         url = f"{BASE_URL}/historical-price-eod/full"
         params = {
@@ -396,6 +419,7 @@ class FmpProvider:
         dividend-adjusted endpoint (callers run `normalize_adjusted_tail`
         afterwards to repair FMP's corrupt post-dividend tail). Returns the
         number of rows written."""
+        ticker = ticker.upper()  # one cache key per symbol, whatever the caller sends
         url = f"{BASE_URL}/historical-price-eod/full"
         params = {
             "symbol": ticker, "from": start.isoformat(),
@@ -502,6 +526,7 @@ class FmpProvider:
         as_of: dt.date,
         lookback_quarters: int = 8,
     ) -> list[FundamentalRow]:
+        ticker = ticker.upper()  # one Fundamental cache key per symbol
         statements = {METRIC_MAP[m][0] for m in metrics if m in METRIC_MAP}
         # FMP's `limit` returns the latest N quarters relative to *today*, not
         # to `as_of`. If as_of is far in the past we need extra depth so that
@@ -601,10 +626,8 @@ class FmpProvider:
         """By-issuer institutional ownership (Ultimate, behind the probe).
 
         The exact slug lives in the institutional-ownership/* family; a wrong
-        guess raises/falls through to EDGAR, so the resolver stays correct.
+        guess raises and the resolver degrades to ``None``.
         """
-        from ..models import IssuerOwnershipSnapshot
-
         data = self._ownership_get(
             "institutional-ownership/symbol-positions-summary",
             {"symbol": ticker},
@@ -646,21 +669,6 @@ class FmpProvider:
                     qoq_pct = float(qoq) / prior * 100
             except (TypeError, ValueError):
                 qoq_pct = None
-        IssuerOwnershipSnapshot.objects.update_or_create(
-            ticker=ticker.upper(),
-            period_end=period_end,
-            source="fmp",
-            defaults={
-                "as_of_date": filed_at,
-                "num_holders": num_holders,
-                "total_shares": total_shares,
-                "total_value_usd": total_value,
-                "institutional_ownership_pct": ownership_pct,
-                "ownership_pct": ownership_pct,
-                "qoq_value_change_pct": qoq_pct,
-                "top_holders": [],
-            },
-        )
         return IssuerOwnershipSummary(
             ticker=ticker.upper(),
             period_end=period_end,
@@ -674,84 +682,6 @@ class FmpProvider:
             top_holders=[],
             new_positions=[],
             closed_positions=[],
-            source="fmp",
-        )
-
-    def get_filer_portfolio(self, filer_cik, *, as_of):
-        """By-filer 13F portfolio (Ultimate, behind the probe)."""
-        from ..models import InstitutionalHolding
-
-        data = self._ownership_get(
-            "institutional-ownership/portfolio-holdings",
-            {"cik": filer_cik},
-        )
-        rows = data if isinstance(data, list) else [data]
-        if not rows:
-            return None
-        # PIT gate: group rows by report period, keep only periods whose filing
-        # date is knowable as of `as_of`, and take the latest qualifying one.
-        # Persist filed_at = the real filing date, never the caller's as_of.
-        by_period: dict[dt.date, list[dict]] = {}
-        for r in rows:
-            try:
-                pe = dt.date.fromisoformat(str(r.get("date"))[:10])
-            except (TypeError, ValueError):
-                continue
-            by_period.setdefault(pe, []).append(r)
-        qualifying = []
-        for pe, prows in by_period.items():
-            filed = _fmp_filing_date(prows[0], pe)
-            if filed <= as_of:
-                qualifying.append((pe, filed, prows))
-        if not qualifying:
-            return None
-        period_end, filed_at, prows = max(qualifying, key=lambda c: (c[0], c[1]))
-        filer_name = prows[0].get("investorName", "")
-        objs = []
-        total_value = 0
-        for r in prows:
-            value_usd = int(float(r.get("marketValue", 0) or 0))
-            total_value += value_usd
-            objs.append(
-                InstitutionalHolding(
-                    filer_cik=str(filer_cik),
-                    filer_name=filer_name,
-                    issuer_cusip=r.get("cusip", ""),
-                    issuer_name=r.get("securityName", ""),
-                    ticker=(r.get("symbol", "") or "").upper(),
-                    period_end=period_end,
-                    filed_at=filed_at,
-                    shares=int(float(r.get("sharesNumber", 0) or 0)),
-                    value_usd=value_usd,
-                    put_call="",
-                    source="fmp",
-                )
-            )
-        if objs:
-            InstitutionalHolding.objects.bulk_create(objs, ignore_conflicts=True)
-        holdings = [
-            FilerHolding(
-                issuer_cusip=o.issuer_cusip,
-                issuer_name=o.issuer_name,
-                ticker=o.ticker,
-                shares=int(o.shares),
-                value_usd=int(o.value_usd),
-                put_call=o.put_call,
-                weight_pct=(
-                    round(int(o.value_usd) / total_value * 100, 4)
-                    if total_value
-                    else None
-                ),
-            )
-            for o in objs
-        ]
-        return FilerPortfolio(
-            filer_cik=str(filer_cik),
-            filer_name=filer_name,
-            period_end=period_end,
-            as_of=filed_at,
-            total_value_usd=total_value,
-            holdings=holdings,
             source="fmp",
         )
 

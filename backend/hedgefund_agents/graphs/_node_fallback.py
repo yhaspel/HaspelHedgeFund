@@ -115,6 +115,35 @@ def _fallback_for(state_key: str) -> dict[str, Any] | None:
     return dict(template) if template is not None else None
 
 
+def _record_failed_attempts(exc: BaseException, state: dict, state_key: str) -> None:
+    """Persist the billed-but-unparseable attempts behind a node failure.
+
+    Only ``StructuredOutputError`` carries them (llm/structured.py). Any
+    bookkeeping error is swallowed — except ``BudgetExceeded``, which means the
+    newly-recorded spend crossed the run's cap and must stop the run.
+    """
+    from ..llm.structured import StructuredOutputError
+
+    if not isinstance(exc, StructuredOutputError):
+        return
+    from apps.backtests.exceptions import BudgetExceeded
+
+    from .._persist import record_llm_call
+
+    try:
+        record_llm_call(
+            run_id=state.get("run_id"),
+            backtest_id=state.get("backtest_id"),
+            portfolio_target_id=state.get("portfolio_target_id"),
+            agent_name=state_key,
+            resp=exc.response,
+        )
+    except BudgetExceeded:
+        raise
+    except Exception:  # pragma: no cover — bookkeeping must not mask the failure
+        log.exception("failed to record billed attempts for agent %r", state_key)
+
+
 def wrap_backtest_tolerant(
     node_fn: Callable[[dict], dict],
     state_key: str,
@@ -148,8 +177,15 @@ def wrap_backtest_tolerant(
             # run has crossed its LLM-spend cap, and null-signalling would let it
             # keep spending past the cap — so it must propagate, not degrade.
             from apps.backtests.exceptions import BudgetExceeded, ModelUnavailable
-            if isinstance(exc, (ModelUnavailable, BudgetExceeded)):
+            if isinstance(exc, ModelUnavailable | BudgetExceeded):
                 raise
+            # The retry chain in call_structured billed for every attempt even
+            # though none parsed. The node never reached its own
+            # record_llm_call, so persist the spend here — otherwise the run
+            # burns real money that never reaches Run.total_cost_usd or the
+            # budget guard. Recording can itself raise BudgetExceeded, which is
+            # the correct outcome (the cap really was crossed).
+            _record_failed_attempts(exc, state, state_key)
             fb = _fallback_for(state_key)
             if fb is None:
                 # No fallback registered: don't swallow silently.
@@ -164,6 +200,11 @@ def wrap_backtest_tolerant(
             # for degradation via prime_min_completeness, not this marker).
             if not is_backtest:
                 fb["_degraded"] = True
+                # An UNEXPECTED failure (not the LLM/parse errors the node
+                # itself knows how to absorb) must be named on the transcript,
+                # not filed under a generic "degraded". _persist_outputs turns
+                # this into AgentMessage.status == "error".
+                fb["_error"] = type(exc).__name__
             # Stamp the ticker so the null-signal dict is self-identifying
             # for downstream readers that key off it.
             ticker = state.get("ticker", "")

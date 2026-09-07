@@ -6,6 +6,7 @@ import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { BrokerAccount } from '../../core/models/broker.model';
+import { apiErrorMessage } from '../../core/api/api-error';
 
 @Component({
   selector: 'hf-broker-accounts-page',
@@ -158,9 +159,37 @@ export class BrokerAccountsPage implements OnInit {
       danger: true,
     });
     if (!ok) return;
+    this.error.set(null);
     this.store.deleteAccount(a.id).subscribe({
       next: () => this.store.loadAccounts().subscribe(),
-      error: (err) => this.error.set(err?.error?.detail ?? 'Delete failed.'),
+      // The backend refuses a delete while orders are still open, and names
+      // them: 409 {detail, code:"open_orders", open_orders:[{id,ticker,status}]}.
+      // A bare `detail` hid WHICH orders were blocking it.
+      error: (e: unknown) => this.error.set(deleteBlockedMessage(e)),
     });
   }
+}
+
+/** "…: 3 open orders — AAPL (pending_open), MSFT (submitted), NVDA (submitted)." */
+function deleteBlockedMessage(e: unknown): string {
+  const body = (e as { error?: OpenOrdersConflict }).error;
+  if (body?.code === 'open_orders' && body.open_orders?.length) {
+    const list = body.open_orders
+      .slice(0, 8)
+      .map((o) => `${o.ticker} (${o.status})`)
+      .join(', ');
+    const more = body.open_orders.length > 8 ? `, +${body.open_orders.length - 8} more` : '';
+    return (
+      `${body.detail ?? 'This account still has open orders.'} `
+      + `Cancel them first: ${list}${more}.`
+    );
+  }
+  return apiErrorMessage(e, 'Delete failed.');
+}
+
+/** 409 body for DELETE /api/broker-accounts/<id>/. */
+interface OpenOrdersConflict {
+  detail?: string;
+  code?: string;
+  open_orders?: { id: number; ticker: string; status: string }[];
 }

@@ -87,6 +87,23 @@ class AgentState(TypedDict, total=False):
     # engine — see apps/backtests/tests for the import-boundary guard.
     investor_profile: dict[str, Any]
 
+    # P3-D WS-D: per-persona evolution revisions resolved once per run by
+    # execute_run. Same TypedDict rule as agent_versions above — an undeclared
+    # key is silently dropped at the StateGraph boundary, which made
+    # Run.persona_evolution_applied (the run page's "Evolved" badge) claim an
+    # evolution that never reached a single persona prompt.
+    persona_evolution: dict[str, Any]
+
+    # Cost attribution for strategy-cycle councils (apps/portfolios/tasks.py):
+    # every LLMCall the council emits links to the parent PortfolioTarget as
+    # well as the Run. Undeclared ⇒ state.get("portfolio_target_id") is None in
+    # every node and the cycle-view / leaderboard cost rollup stays at $0.
+    portfolio_target_id: int
+
+    # Short-side borrow availability veto propagated from the screener/locate
+    # step into the risk manager (apps/portfolios/tasks.py).
+    borrow_veto: bool
+
 
 def pick_model(state: AgentState, agent_name: str, default: tuple[str, str]) -> tuple[str, str]:
     """Returns (provider, model) for an agent, honoring per-run overrides.

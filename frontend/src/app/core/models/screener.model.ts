@@ -83,6 +83,16 @@ export interface ScreenResultRow {
   has_positive_catalyst: boolean;
   in_watchlist: boolean;
   warnings: string[];
+  /**
+   * WAVE 3 — how this row's bar-derived metrics were sourced.
+   *   `cache`   — served from stored bars (no provider call).
+   *   `fetched` — bars were pulled for this run.
+   *   `partial` — the enrichment could not complete: momentum, 52-week
+   *               distances and MA flags are NULL on this row and a row-level
+   *               `warnings` entry says why. Treating those nulls as zero is
+   *               how a screener quietly ranks on missing data.
+   */
+  enrichment?: 'cache' | 'fetched' | 'partial';
 }
 
 export interface ScreenResult {
@@ -96,6 +106,8 @@ export interface ScreenResult {
   capabilities: string[];
   warnings: string[];
   preset_id?: string;
+  /** WAVE 3 — how the run's rows were sourced. Sums to `rows.length`. */
+  enrichment_counts?: { cache: number; fetched: number; partial: number };
 }
 
 export interface SavedScreen {

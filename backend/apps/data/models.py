@@ -90,6 +90,11 @@ class MacroSnapshot(models.Model):
     # universe. Optional — populated when prewarm has fresh snapshots; never
     # required by the macro agent.
     markov_consensus = models.JSONField(null=True, blank=True)
+    # Which deterministic classifier produced this row. 1 = index-LEVEL rules
+    # (CPIAUCSL >= 320 -> "high", INDPRO <= 100 recession gate); 2 = rates of
+    # change (CPI/INDPRO YoY, 3-month UNRATE change, 6-month fed-funds change).
+    # Existing rows keep 1 so old snapshots stay readable and comparable.
+    classifier_version = models.PositiveSmallIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
@@ -310,8 +315,9 @@ class MarketNewsItem(models.Model):
     path. The market-news view layer + service is the only legitimate consumer.
 
     Sentiment fields are populated by the frugal market-news sentiment
-    classifier (``apps.data.market_news_sentiment``) and keyed to the
-    ``sentiment_model`` that produced them so a model switch re-scores.
+    classifier (``apps.data.market_news_sentiment``); ``sentiment_model``
+    records which model produced them. WAVE-3 P2: switching the picker does
+    NOT re-score already-scored rows — only new/unscored rows are classified.
     """
 
     SENTIMENT_BULLISH = "bullish"
@@ -392,84 +398,47 @@ class UserNewsPreferences(models.Model):
         return f"news_prefs u={self.user_id}"
 
 
-class InstitutionalHolding(models.Model):
-    """A single (filer, issuer, period) position parsed from a 13F filing.
+class NewsLlmUsage(models.Model):
+    """Per-user attribution for the News LLM features' spend (WAVE-3 P2).
 
-    Source is either SEC EDGAR (public domain) or FMP (licensed).
+    ``LLMCall`` is owned by a Run / Backtest / PortfolioTarget and carries no
+    user FK, but the news sentiment + translation passes run under none of
+    those — they run per page view, for one user. This table is the index that
+    lets the per-user daily cap in ``apps.data.news_llm_policy`` sum exactly the
+    ``LLMCall`` rows a user's news features produced today.
+
+    ``cost_usd`` mirrors the billed cost of *every* attempt behind one
+    ``call_structured`` (a structured call can burn up to 3 requests before one
+    parses), which is what ``record_llm_call`` aggregates too.
     """
 
-    filer_cik = models.CharField(max_length=20, db_index=True)
-    filer_name = models.CharField(max_length=255, blank=True)
-    issuer_cusip = models.CharField(max_length=12, db_index=True)
-    issuer_name = models.CharField(max_length=255, blank=True)
-    ticker = models.CharField(max_length=20, blank=True, db_index=True)
-    period_end = models.DateField(db_index=True)
-    filed_at = models.DateField(null=True, blank=True)
-    shares = models.BigIntegerField(default=0)
-    value_usd = models.BigIntegerField(default=0)  # dollars, normalized
-    put_call = models.CharField(max_length=8, blank=True)
-    source = models.CharField(max_length=16, default="edgar")
-    fetched_at = models.DateTimeField(auto_now_add=True)
+    FEATURE_SENTIMENT = "sentiment"
+    FEATURE_TRANSLATION = "translation"
+    FEATURE_CHOICES = [
+        (FEATURE_SENTIMENT, "Sentiment"),
+        (FEATURE_TRANSLATION, "Translation"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="news_llm_usage",
+        on_delete=models.CASCADE,
+    )
+    llm_call = models.ForeignKey(
+        "hedgefund_agents.LLMCall",
+        related_name="news_llm_usage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    feature = models.CharField(max_length=16, choices=FEATURE_CHOICES)
+    cost_usd = models.DecimalField(
+        max_digits=10, decimal_places=6, default=Decimal("0")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        unique_together = [
-            ("filer_cik", "issuer_cusip", "period_end", "put_call", "source"),
-        ]
-        indexes = [
-            models.Index(fields=["ticker", "period_end"]),
-            models.Index(fields=["filer_cik", "period_end"]),
-            models.Index(fields=["issuer_cusip", "period_end"]),
-        ]
+        indexes = [models.Index(fields=["user", "created_at"])]
 
     def __str__(self) -> str:
-        return f"{self.filer_cik} {self.issuer_cusip} {self.period_end}"
-
-
-class IssuerOwnershipSnapshot(models.Model):
-    """Aggregated institutional ownership for one issuer at one period.
-
-    Built by aggregating InstitutionalHolding rows (EDGAR) or fetched
-    directly from FMP.
-    """
-
-    ticker = models.CharField(max_length=20, db_index=True)
-    issuer_cusip = models.CharField(max_length=12, blank=True, db_index=True)
-    period_end = models.DateField(db_index=True)
-    as_of_date = models.DateField(db_index=True)
-    num_holders = models.IntegerField(default=0)
-    total_shares = models.BigIntegerField(default=0)
-    total_value_usd = models.BigIntegerField(default=0)
-    institutional_ownership_pct = models.FloatField(null=True, blank=True)
-    ownership_pct = models.FloatField(null=True, blank=True)
-    qoq_value_change_pct = models.FloatField(null=True, blank=True)
-    top_holders = models.JSONField(default=list)
-    new_positions = models.JSONField(default=list)
-    closed_positions = models.JSONField(default=list)
-    source = models.CharField(max_length=16, default="edgar")
-    fetched_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = [("ticker", "period_end", "source")]
-        indexes = [
-            models.Index(fields=["ticker", "as_of_date"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.ticker} {self.period_end} ({self.num_holders} holders)"
-
-
-class CusipTicker(models.Model):
-    """CUSIP <-> ticker mapping, populated opportunistically from filings."""
-
-    cusip = models.CharField(max_length=12, unique=True)
-    ticker = models.CharField(max_length=20, db_index=True)
-    issuer_name = models.CharField(max_length=255, blank=True)
-    fetched_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["ticker"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.cusip} -> {self.ticker}"
+        return f"news_llm u={self.user_id} {self.feature} ${self.cost_usd}"

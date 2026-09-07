@@ -13,7 +13,15 @@ export class BacktestsPage {
   async gotoDetail(id: number): Promise<void> {
     await this.page.goto(`/backtests/${id}`);
   }
+  /**
+   * WAVE 3: the comparison is a panel on the DETAIL page. `?compare=1` opens
+   * it; the legacy `/backtests/:id/compare` route redirects here, and
+   * `gotoLegacyCompare` still exercises that redirect.
+   */
   async gotoCompare(id: number): Promise<void> {
+    await this.page.goto(`/backtests/${id}?compare=1`);
+  }
+  async gotoLegacyCompare(id: number): Promise<void> {
     await this.page.goto(`/backtests/${id}/compare`);
   }
 
@@ -41,8 +49,9 @@ export class BacktestsPage {
   equityCanvas(): Locator {
     return this.page.getByRole('img', { name: /equity curve/i });
   }
+  /** WAVE 3: a button that opens the in-page panel, no longer a route link. */
   compareLink(): Locator {
-    return this.page.getByRole('link', { name: 'Compare…' });
+    return this.page.locator('[data-test="open-compare"]');
   }
   backToList(): Locator {
     return this.page.getByRole('link', { name: 'Back to list' });
@@ -59,11 +68,17 @@ export class BacktestsPage {
     return this.page.getByRole('alert');
   }
 
-  // ---- compare ----
+  // ---- compare (in-page panel) ----
+  comparePanel(): Locator {
+    return this.page.locator('[data-test="compare-panel"]');
+  }
   compareBSelect(): Locator {
-    return this.page.locator('select').first();
+    return this.page.locator('[data-test="compare-pick-b"]');
   }
   metricsTable(): Locator {
-    return this.page.getByRole('table');
+    return this.page.locator('[data-test="compare-metrics"]');
+  }
+  compareClose(): Locator {
+    return this.page.locator('[data-test="compare-close"]');
   }
 }

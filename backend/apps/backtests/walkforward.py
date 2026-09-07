@@ -46,7 +46,17 @@ def generate_folds(
     *, start: dt.date, end: dt.date,
     is_window_days: int, oos_window_days: int, step_days: int,
 ) -> list[Fold]:
-    """Non-overlapping OOS by default (step = oos_window_days)."""
+    """Non-overlapping OOS by default (step = oos_window_days).
+
+    ``step_days`` must be positive: at 0 the ``cur`` cursor never advances and
+    this loop appends folds forever (one Celery prefork slot pinned at 100% CPU
+    until the worker OOMs); negative steps walk ``cur`` backwards until
+    ``datetime.date`` underflows with OverflowError after ~100k folds. The
+    create serializer rejects both, but this is the last line of defence for
+    rows that reach the engine another way.
+    """
+    if step_days is None or step_days <= 0:
+        raise ValueError(f"step_days must be >= 1 (got {step_days!r})")
     folds: list[Fold] = []
     cur = start + dt.timedelta(days=is_window_days)
     i = 0
@@ -83,13 +93,51 @@ def _persist_segment_days(
 
 
 def _save_progress(bt: Backtest, pct: int, msg: str) -> None:
-    Backtest.objects.filter(pk=bt.pk).update(progress_pct=pct, progress_message=msg[:200])
+    # heartbeat_at doubles as the orphan sweeper's liveness signal: a run that is
+    # slow but writing progress is never swept.
+    Backtest.objects.filter(pk=bt.pk).update(
+        progress_pct=pct, progress_message=msg[:200], heartbeat_at=timezone.now(),
+    )
+
+
+class BacktestNotClaimable(RuntimeError):
+    """The backtest was not QUEUED when the worker tried to claim it.
+
+    Raised (and swallowed by ``tasks.run_backtest``) when a task executes for a
+    row that has already reached a terminal state — a user cancel that raced the
+    worker, or a task the orphan sweeper already failed. Without the claim the
+    run would flip CANCELLED/FAILED → RUNNING → DONE, overwriting the terminal
+    state and manufacturing §9-gate-eligible evidence out of a cancelled run.
+    """
+
+
+def _claim(bt: Backtest) -> bool:
+    """Atomically move QUEUED → RUNNING. False if somebody else got there first
+    (or the row is already terminal)."""
+    claimed = Backtest.objects.filter(pk=bt.pk, status=Backtest.QUEUED).update(
+        status=Backtest.RUNNING,
+        started_at=timezone.now(),
+        heartbeat_at=timezone.now(),
+        engine_version=Backtest.ENGINE_VERSION,
+        error_message="",
+    )
+    if not claimed:
+        return False
+    bt.refresh_from_db(
+        fields=["status", "started_at", "heartbeat_at", "engine_version", "error_message"]
+    )
+    return True
 
 
 def run_walkforward(bt: Backtest) -> None:
-    bt.status = Backtest.RUNNING
-    bt.started_at = timezone.now()
-    bt.save(update_fields=["status", "started_at"])
+    if not _claim(bt):
+        current = (
+            Backtest.objects.filter(pk=bt.pk).values_list("status", flat=True).first()
+        )
+        log.warning(
+            "run_walkforward: backtest %s is %s, not queued — refusing to run", bt.pk, current
+        )
+        raise BacktestNotClaimable(f"backtest {bt.pk} is {current}, not queued")
     _save_progress(bt, 1, "generating folds")
 
     folds = generate_folds(
@@ -136,6 +184,21 @@ def run_walkforward(bt: Backtest) -> None:
 
     personas = list(bt.personas or ALL_PERSONAS)
 
+    # Engine v2: ONE book carried across every OOS fold, exactly as the
+    # deterministic path already did. Before this, run_segment built a fresh
+    # SimulatedPortfolio per fold, so at each boundary the whole book was
+    # liquidated and re-bought — full commission + spread on ~100% notional,
+    # turnover inflated by the fold count, and the market move over each fold's
+    # last session dropped from the stitched curve. Only fold 0 seeds from cash.
+    from .portfolio import SimulatedPortfolio
+
+    oos_pf = SimulatedPortfolio(
+        starting_cash=float(bt.starting_cash),
+        commission_bps=float(bt.commission_bps),
+        spread_bps=float(bt.spread_bps),
+        financing_bps=float(getattr(bt, "financing_bps", 0) or 0),
+    )
+
     fold_records: list[BacktestFold] = []
     for f_idx, fold in enumerate(folds):
         pct = 60 + int((f_idx + 1) / len(folds) * 35)
@@ -155,6 +218,7 @@ def run_walkforward(bt: Backtest) -> None:
             pm_config=winner.config,
             agent_outputs_cache=agent_outputs_cache,
             rebalance_dates=oos_rebal,
+            pf=oos_pf,
         )
         from .metrics import drawdown_pct, sharpe_ratio
 

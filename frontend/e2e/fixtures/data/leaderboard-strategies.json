@@ -3,6 +3,40 @@
   "as_of": "2026-06-06",
   "rows": [
     {
+      "id": 1799,
+      "strategy": 9,
+      "strategy_name": "Sector momentum (deterministic)",
+      "flavor": "sector_momentum",
+      "flavor_display": "Deterministic sector momentum",
+      "window": "90d",
+      "as_of": "2026-06-06",
+      "n_cycles": 31,
+      "total_return_pct": "9.4400",
+      "annualised_return_pct": "11.2000",
+      "sharpe": "0.8400",
+      "sortino": null,
+      "max_drawdown_pct": "6.1200",
+      "hit_rate": "0.6100",
+      "annualised_turnover_pct": "340.0000",
+      "avg_cost_per_cycle_usd": "0.0000",
+      "sharpe_p25": null,
+      "sharpe_p75": null,
+      "sortino_p25": null,
+      "sortino_p75": null,
+      "max_drawdown_p25_pct": null,
+      "max_drawdown_p75_pct": null,
+      "council_alpha_bps": null,
+      "council_cost_usd": "0.00",
+      "council_net_value_usd": null,
+      "baseline_version": "v1",
+      "provisional": false,
+      "last_updated": "2026-06-06T07:00:04.894792Z",
+      "n_observations": 28,
+      "periods_per_year": "26.00",
+      "sortino_note": "fewer than 3 negative periods",
+      "metrics_version": 2
+    },
+    {
       "id": 1712,
       "strategy": 1,
       "strategy_name": "Daily L/S 100/50",
@@ -30,7 +64,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.894792Z"
+      "last_updated": "2026-06-06T07:00:04.894792Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1716,
@@ -60,7 +98,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.900277Z"
+      "last_updated": "2026-06-06T07:00:04.900277Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1720,
@@ -90,7 +132,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.905239Z"
+      "last_updated": "2026-06-06T07:00:04.905239Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1724,
@@ -120,7 +166,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.909963Z"
+      "last_updated": "2026-06-06T07:00:04.909963Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1728,
@@ -150,7 +200,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.914666Z"
+      "last_updated": "2026-06-06T07:00:04.914666Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1736,
@@ -180,7 +234,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.923491Z"
+      "last_updated": "2026-06-06T07:00:04.923491Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1740,
@@ -210,7 +268,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.928003Z"
+      "last_updated": "2026-06-06T07:00:04.928003Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1744,
@@ -240,7 +302,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.932404Z"
+      "last_updated": "2026-06-06T07:00:04.932404Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1748,
@@ -270,7 +336,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.936760Z"
+      "last_updated": "2026-06-06T07:00:04.936760Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     },
     {
       "id": 1752,
@@ -300,7 +370,11 @@
       "council_net_value_usd": null,
       "baseline_version": "v1",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:04.941282Z"
+      "last_updated": "2026-06-06T07:00:04.941282Z",
+      "n_observations": 0,
+      "periods_per_year": null,
+      "sortino_note": "fewer than 20 observations",
+      "metrics_version": 2
     }
   ]
 }

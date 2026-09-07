@@ -61,11 +61,28 @@ describe('AuthStore', () => {
     expect(tokens.getAccess()).toBe('a');
   });
 
-  it('logout clears tokens and user and redirects to login', () => {
+  it('logout revokes the refresh token server-side, then clears tokens/user and redirects', () => {
     tokens.set('a', 'r');
     store.logout();
+    // The refresh token is read BEFORE the local clear and posted to the
+    // blacklist endpoint, so signing out really ends the session.
+    const req = http.expectOne((r) => r.url.endsWith('/auth/logout/'));
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ refresh: 'r' });
+    req.flush(null, { status: 205, statusText: 'Reset Content' });
+
     expect(tokens.getAccess()).toBeNull();
     expect(store.user()).toBeNull();
+    expect(navigatedTo).toContain('/login');
+  });
+
+  it('logout still ends the local session when the revoke call fails', () => {
+    tokens.set('a', 'r');
+    store.logout();
+    http
+      .expectOne((r) => r.url.endsWith('/auth/logout/'))
+      .flush(null, { status: 0, statusText: 'Unknown Error' });
+    expect(tokens.getAccess()).toBeNull();
     expect(navigatedTo).toContain('/login');
   });
 

@@ -98,6 +98,53 @@ def _fill_decision(order: BrokerOrder, price: Decimal) -> Decimal | None:
     return None
 
 
+def _book_cash(order: BrokerOrder) -> Decimal:
+    """Cash on the demo book, read fresh — a cached `portfolio` on the order's
+    account goes stale the moment a sibling order in the same poll fills."""
+    from apps.portfolios.models import Portfolio
+
+    cash = (
+        Portfolio.objects
+        .filter(pk=order.broker_account.portfolio_id)
+        .values_list("cash_balance", flat=True)
+        .first()
+    )
+    return Decimal(str(cash or 0))
+
+
+def insufficient_cash(order: BrokerOrder, fill_px: Decimal) -> Decimal | None:
+    """The shortfall if this BUY would overdraw the demo book, else ``None``.
+
+    The demo account is a cash book with no margin: a real broker refuses a
+    buy it cannot fund, and without this check the book simply went negative
+    (a 100k demo account "bought" $20M of AAPL and reported -$19.9M cash,
+    poisoning every NAV, drift and exposure number downstream). Sells are
+    unrestricted — a short is a legitimate demo position."""
+    if order.side != "buy":
+        return None
+    notional = (order.quantity * fill_px).quantize(Decimal("0.01"))
+    cash = _book_cash(order)
+    if notional <= cash:
+        return None
+    return notional - cash
+
+
+def _reject_for_cash(order: BrokerOrder, fill_px: Decimal, shortfall: Decimal) -> None:
+    now = timezone.now()
+    message = (
+        f"insufficient buying power: {order.quantity} {order.ticker} @ "
+        f"{fill_px} needs {(order.quantity * fill_px).quantize(Decimal('0.01'))} "
+        f"but the account holds {_book_cash(order)} (short by {shortfall})"
+    )
+    BrokerOrder.objects.filter(pk=order.pk).update(
+        status=BrokerOrder.STATUS_REJECTED,
+        error_message=message[:500],
+        cancelled_at=now,
+    )
+    order.refresh_from_db()
+    log.warning("demo order rejected id=%s — %s", order.pk, message)
+
+
 def try_fill_demo_order(order: BrokerOrder, *, price: Decimal | None = None) -> bool:
     """Evaluate one demo order against the live price; fill it if eligible.
 
@@ -118,6 +165,11 @@ def try_fill_demo_order(order: BrokerOrder, *, price: Decimal | None = None) -> 
     if fill_px is None:
         return False
     fill_px = Decimal(str(fill_px)).quantize(Decimal("0.0001"))
+
+    shortfall = insufficient_cash(order, fill_px)
+    if shortfall is not None:
+        _reject_for_cash(order, fill_px, shortfall)
+        return False
 
     snapshot = FillSnapshot(
         broker_fill_id=f"DEMOFILL-{uuid.uuid4().hex[:12]}",

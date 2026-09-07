@@ -6,6 +6,7 @@ return of a ticker as of a decision date, computed from ``DailyBar``. It is the
 """
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import math
 
@@ -58,3 +59,51 @@ def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, flo
 def brier(prob: float, outcome: int) -> float:
     """Squared error between a [0,1] probability and a {0,1} outcome."""
     return (prob - outcome) ** 2
+
+
+def batch_forward_returns(
+    pairs: list[tuple[str, dt.date]], n_days: int = DEFAULT_FORWARD_DAYS
+) -> dict[tuple[str, dt.date], float | None]:
+    """``forward_return`` for many ``(ticker, as_of)`` pairs in ONE query.
+
+    Same semantics as :func:`forward_return` (first close on/after ``as_of`` ->
+    the close ``n_days`` trading days later, ``None`` when the window has not
+    elapsed), but the scorecard recompute and the drill-down no longer issue one
+    ``DailyBar`` query per decision (the review's F-n+1 finding: the agent
+    drill-down grew a query per row, unbounded).
+    """
+    wanted = {(t.upper(), d) for t, d in pairs}
+    if not wanted:
+        return {}
+    tickers = sorted({t for t, _ in wanted})
+    earliest = min(d for _, d in wanted)
+    rows = (
+        DailyBar.objects.filter(ticker__in=tickers, date__gte=earliest)
+        .order_by("ticker", "date", "-fetched_at")
+        .values_list("ticker", "date", "adjusted_close")
+        .iterator()
+    )
+    series: dict[str, tuple[list[dt.date], list[float]]] = {}
+    for ticker, day, close in rows:
+        dates, prices = series.setdefault(ticker, ([], []))
+        if dates and dates[-1] == day:
+            continue  # freshest fetch for this date already kept
+        if close is None:
+            continue
+        dates.append(day)
+        prices.append(float(close))
+
+    out: dict[tuple[str, dt.date], float | None] = {}
+    for ticker, as_of in wanted:
+        entry = series.get(ticker)
+        if not entry:
+            out[(ticker, as_of)] = None
+            continue
+        dates, prices = entry
+        start = bisect.bisect_left(dates, as_of)
+        if start + n_days >= len(prices):
+            out[(ticker, as_of)] = None
+            continue
+        entry_px, exit_px = prices[start], prices[start + n_days]
+        out[(ticker, as_of)] = (exit_px - entry_px) / entry_px if entry_px > 0 else None
+    return out

@@ -103,7 +103,10 @@ export class StrategiesPage {
     // a cycle row "open" button in the cycles list
     return this.page.locator('[data-test="enter-strategy"]');
   }
+  /** The transient dispatch/apply notice. Scoped to the live-region pill: the
+   *  detail page also renders a static role="status" (expected-vs-realized),
+   *  so a bare [role="status"] is ambiguous. */
   notice(): Locator {
-    return this.page.locator('[role="status"]');
+    return this.page.locator('[role="status"][aria-live="polite"]');
   }
 }

@@ -113,6 +113,45 @@ def _resolve_run(autopilot) -> AutopilotRun | None:
     )
 
 
+def _pending_open(account, *, sleeve=None) -> list:
+    """Orders on this account still held locally for the open. Scoped to the
+    sleeve on the shared fund account (a busy sibling must not block a member),
+    account-wide on the legacy one-strategy-per-account path."""
+    from apps.brokers.models import BrokerOrder
+
+    qs = BrokerOrder.objects.filter(
+        broker_account=account, status=BrokerOrder.STATUS_PENDING_OPEN,
+    )
+    if sleeve is not None:
+        qs = qs.filter(sleeve=sleeve)
+    return list(qs.order_by("id"))
+
+
+def _skip_batch(run, account, sleeve, reason: str, message: str, *, extra=None) -> dict:
+    """Emit nothing and record WHY on the run audit (never a partial batch).
+    The cycle's target stays ``done`` — it was decided but not executed."""
+    decision = {
+        "enabled": True,
+        "account": account.id,
+        "sleeve": sleeve.id if sleeve is not None else None,
+        "orders": 0,
+        "submitted": 0,
+        "pending_open": 0,
+        "items": [],
+        "skipped": reason,
+        "skipped_all": reason,
+        "message": message,
+        **(extra or {}),
+    }
+    log.warning("autopilot batch skipped account=%s reason=%s", account.id, reason)
+    if run is not None:
+        run.status = AutopilotRun.SKIPPED
+        run.submit_decision = {**(run.submit_decision or {}), **decision}
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "submit_decision", "finished_at"])
+    return decision
+
+
 def _seed_last_close(target: PortfolioTarget, book) -> dict[str, float]:
     """Prices for the book rebalance: the cycle's own limit prices (computed by
     finalize_cycle from last closes) for target names, plus each held position's
@@ -169,6 +208,28 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link=None, autopilot, ctx=
     if run is not None and run.status not in (AutopilotRun.PENDING, AutopilotRun.RUNNING):
         # Already finalized for this fire — don't re-emit.
         return run.submit_decision or {"enabled": True, "skipped_all": "already_submitted"}
+
+    # The fund kill switch is firm-wide and latched — no member emits while it
+    # is on, whatever the member's own state says (a per-member Resume or an
+    # hourly sweep must never be an exit). POST /api/fund/resume/ is the only one.
+    if sleeves.fund_halted(strategy):
+        return _skip_batch(
+            run, account, sleeve, "fund halted",
+            "the fund kill switch is on — POST /api/fund/resume/ clears it.",
+        )
+
+    # In-flight awareness: the previous batch is still held for the open (a
+    # Friday fire over a weekend / holiday). Re-emitting now would DOUBLE the
+    # target — both batches release at the same open and nothing dedupes them —
+    # so skip the whole cycle rather than emit a partial batch.
+    held = _pending_open(account, sleeve=sleeve)
+    if held:
+        return _skip_batch(
+            run, account, sleeve, "skipped_pending_open",
+            f"{len(held)} order(s) from a previous cycle are still held for the open "
+            "— nothing emitted; the next cycle runs once they release.",
+            extra={"pending_open_order_ids": [o.id for o in held]},
+        )
 
     guardrail: dict = {}
     as_of = target.as_of_date
@@ -282,8 +343,17 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link=None, autopilot, ctx=
     market_closed = _market_closed_for(account)
     risk_check = autopilot_risk.make_risk_check(strategy, book=pf)
 
-    max_orders = int(autopilot.max_orders_per_day or 0)
-    max_notional = Decimal(str(autopilot.max_notional_per_day_usd or 0))
+    # `or 0` used to make a configured 0 mean "no cap" — the exact inversion of
+    # what an operator typing 0 wants. The fields are non-nullable, so a present
+    # value is ALWAYS the cap: 0 means zero orders / zero notional today.
+    max_orders = (
+        int(autopilot.max_orders_per_day)
+        if autopilot.max_orders_per_day is not None else None
+    )
+    max_notional = (
+        Decimal(str(autopilot.max_notional_per_day_usd))
+        if autopilot.max_notional_per_day_usd is not None else None
+    )
     # Daily caps are per strategy: on the shared fund account count only THIS
     # sleeve's orders, else a busy sibling would starve it.
     n_today, notional_today = _prior_24h(account, sleeve=sleeve)
@@ -316,10 +386,10 @@ def maybe_emit_and_submit(target: PortfolioTarget, *, link=None, autopilot, ctx=
             items.append({"ticker": ro.ticker, "skipped": "below min notional after liquidity cap"})
             continue
         order_notional = (ro.estimated_notional_usd or Decimal("0"))
-        if max_orders and n_today >= max_orders:
+        if max_orders is not None and n_today >= max_orders:
             items.append({"ticker": ro.ticker, "skipped": "daily order cap"})
             continue
-        if max_notional and (notional_today + order_notional) > max_notional:
+        if max_notional is not None and (notional_today + order_notional) > max_notional:
             items.append({"ticker": ro.ticker, "skipped": "daily notional cap"})
             continue
         venue_qty = _venue_quantity(ro.side, ro.quantity, is_demo=is_demo)
@@ -724,10 +794,17 @@ def _prior_24h(account, *, sleeve=None) -> tuple[int, Decimal]:
     )
     if sleeve is not None:
         prior = prior.filter(sleeve=sleeve)
-    fallback = Decimal(str(_FALLBACK_PRICE))
+    # A live market order carries no fill and no limit, so this used to fall
+    # back to a flat $100/share placeholder — a $650 SPY order counted as $100,
+    # a $30 ETF as $100. Price it off the row it was SIZED against instead
+    # (``_order_price``), which only reaches the placeholder as a last resort.
+    user = getattr(account, "user", None)
     notional = sum(
         (
-            Decimal(str(o.quantity)) * (o.avg_fill_price or o.limit_price or fallback)
+            Decimal(str(o.quantity)) * (
+                Decimal(str(o.avg_fill_price)) if o.avg_fill_price
+                else autopilot_risk._order_price(o, user=user)
+            )
             for o in prior
         ),
         Decimal("0"),

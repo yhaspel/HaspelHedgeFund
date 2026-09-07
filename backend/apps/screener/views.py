@@ -10,10 +10,12 @@ regression test asserts the boundary.
 """
 from __future__ import annotations
 
-import time
+import logging
 from dataclasses import asdict
 from typing import Any
 
+import httpx
+from django.core.cache import cache
 from rest_framework import generics, permissions, status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -34,6 +36,8 @@ from .serializers import (
     SavedScreenSerializer,
     serialize_fields,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _err(message: str, code: int = status.HTTP_400_BAD_REQUEST) -> Response:
@@ -96,7 +100,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 
 
 def _coerce_scalar(v: Any) -> Any:
-    if isinstance(v, (list, tuple)):
+    if isinstance(v, list | tuple):
         return [_coerce_scalar(x) for x in v]
     if isinstance(v, dict):
         return {k: _coerce_scalar(x) for k, x in v.items()}
@@ -110,19 +114,24 @@ def _coerce_scalar(v: Any) -> Any:
     return v
 
 
+#: ``/run/`` rate limit: 1 call / 5 s / user.
+RUN_RATE_LIMIT_SECONDS = 5
+
+
+def _rate_limit_key(user_id: int) -> str:
+    return f"screener:run:ratelimit:{user_id}"
+
+
 class ScreenerRunView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    _last_run_at: dict[int, float] = {}  # noqa: RUF012 — class-level rate limiter
-
     def post(self, request: Request) -> Response:
-        now = time.monotonic()
-        # `last is None` ⇒ "this user has never run a screen in this process".
-        # Bare `.get(..., 0.0)` incorrectly throttled the first call during
-        # the first 5s of process uptime (see data/views.py for the news
-        # variant of the same bug).
-        last = self._last_run_at.get(request.user.id)
-        if last is not None and now - last < 5.0:
+        # WAVE-3 P2 item 3: the limiter lives in ``django.core.cache`` (Redis in
+        # prod), not per-process module state. With N gunicorn workers the old
+        # class-level dict let a user issue N screens per window — N times the
+        # FMP fan-out — and reset the moment a worker recycled.
+        key = _rate_limit_key(request.user.id)
+        if cache.get(key) is not None:
             return _err(
                 "Running screens too quickly — please wait a few seconds.",
                 code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -154,10 +163,21 @@ class ScreenerRunView(APIView):
             )
         except RuntimeError as exc:
             return _err(str(exc), code=status.HTTP_400_BAD_REQUEST)
+        except (httpx.HTTPError, OSError) as exc:
+            # FMP unreachable / 429 / 5xx / a socket-level failure: a provider
+            # outage is a 503 with a readable ``detail``, not an unhandled 500.
+            log.warning(
+                "screener_run provider_unavailable err=%s: %s", type(exc).__name__, exc
+            )
+            return _err(
+                f"Market-data provider is unavailable ({type(exc).__name__}). "
+                "Try again shortly.",
+                code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
-        # Only set the rate-limit timestamp on a successful run so an
-        # invalid request does not lock the user out for 5 seconds.
-        self._last_run_at[request.user.id] = now
+        # Only arm the rate limit on a successful run so an invalid request
+        # does not lock the user out for 5 seconds.
+        cache.set(key, 1, timeout=RUN_RATE_LIMIT_SECONDS)
 
         payload = {
             "rows": [_row_to_dict(r) for r in result.rows],
@@ -170,8 +190,19 @@ class ScreenerRunView(APIView):
             "capabilities": result.capabilities,
             "warnings": result.warnings,
             "preset_id": body.get("preset_id") or "",
+            # WAVE-3 P2: how the bar-derived metrics were sourced this run.
+            "enrichment_counts": _enrichment_counts(result.rows),
         }
         return Response(payload)
+
+
+def _enrichment_counts(rows: list[Any]) -> dict[str, int]:
+    counts = {"cache": 0, "fetched": 0, "partial": 0}
+    for r in rows:
+        state = getattr(r, "enrichment", "cache")
+        if state in counts:
+            counts[state] += 1
+    return counts
 
 
 class SavedScreenListCreateView(generics.ListCreateAPIView):

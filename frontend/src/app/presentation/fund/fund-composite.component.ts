@@ -31,7 +31,8 @@ Chart.register(
           <p class="muted">
             The pods' walk-forward validation curves ({{ c.window?.start }} → {{ c.window?.end }},
             stitched out-of-sample only), each pod compounding independently at
-            {{ weightsLabel() }} weights — the same structure as the live 3-account fund.
+            {{ weightsLabel() }} weights — the same structure as the live fund
+            ({{ memberCountLabel() }}).
             This is the fund's <b>expected</b> shape from its records of record, not live performance.
           </p>
           <!-- P11 A3 — the review levers: re-lever the low-beta book toward market
@@ -237,6 +238,17 @@ export class FundCompositeComponent implements OnInit, AfterViewInit, OnDestroy 
 
   ngOnDestroy(): void {
     this.chart?.destroy();
+  }
+
+  /**
+   * "3 sleeves of one shared account". The old copy said "the live 3-account
+   * fund" — wrong twice: the fund trades ONE shared paper account (P14 sleeves,
+   * not three accounts), and the count was hard-coded while the roster is
+   * editable.
+   */
+  memberCountLabel(): string {
+    const n = this.store.composite()?.members?.length ?? 0;
+    return `${n} sleeve${n === 1 ? '' : 's'} of one shared account`;
   }
 
   weightsLabel(): string {

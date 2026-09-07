@@ -262,6 +262,55 @@ class FundHistoryView(APIView):
         return Response(fund_history(fund, days=days))
 
 
+class FundActivityView(APIView):
+    """Wave 3 — GET /api/fund/activity/?limit=&before=
+
+    One time-ordered feed merging the fund's broker orders / fills /
+    cancellations, autopilot dispatches and their outcomes (including the
+    ``skipped_pending_open`` and halt-skip audits and the shadow daily-cap
+    evaluation), fund halts / resumes / resets / flattens, guardrail state
+    transitions and sleeve reallocations. ``before`` is the ``next_before``
+    cursor from the previous page (an ISO-8601 instant)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        from .fund_activity import DEFAULT_LIMIT, fund_activity, parse_before
+
+        fund = _user_fund(request.user)
+        if fund is None:
+            return Response({"available": False, "reason": "no fund", "entries": []})
+        try:
+            limit = int(request.query_params.get("limit") or DEFAULT_LIMIT)
+        except (TypeError, ValueError):
+            limit = DEFAULT_LIMIT
+        before = parse_before(request.query_params.get("before"))
+        return Response({
+            "available": True,
+            **fund_activity(fund, limit=limit, before=before),
+        })
+
+
+class FundSchedulerHealthView(APIView):
+    """Wave 3 — GET /api/fund/scheduler-health/
+
+    Beat liveness (from the freshest REAL dispatch stamp), every armed
+    autopilot's ``next_run_at`` with an ``overdue_by_seconds``, and the count of
+    overdue autopilots. This is what distinguishes a dead scheduler from a quiet
+    Friday. Queue depth is deliberately not read (no broker round-trip on the
+    request path) and reports ``null`` with a reason."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        from .scheduler_health import scheduler_health
+
+        fund = _user_fund(request.user)
+        if fund is None:
+            return Response({"available": False, "reason": "no fund"})
+        return Response({"available": True, **scheduler_health(fund)})
+
+
 class FundHaltView(APIView):
     """Fund-level kill switch — halts all members at once (§7/§10)."""
     permission_classes = [permissions.IsAuthenticated]

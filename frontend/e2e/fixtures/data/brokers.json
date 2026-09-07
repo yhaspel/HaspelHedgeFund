@@ -34,29 +34,10 @@
           "label": "Secret key",
           "kind": "password"
         }
-      ]
-    },
-    {
-      "code": "ibkr",
-      "display_name": "Interactive Brokers",
-      "auth_kind": "gateway_session",
-      "supports_paper": true,
-      "supports_live": false,
-      "supports_fractional": true,
-      "quantity_increment": "0.0001",
-      "supported_order_types": [
-        "market",
-        "limit"
       ],
-      "supported_time_in_force": [
-        "day",
-        "gtc"
-      ],
-      "supports_bracket": false,
-      "description": "Interactive Brokers via headless Client Portal Gateway. Paper-only until P3a-6 ships native brackets.",
-      "available": true,
-      "community_unverified": false,
-      "connect_form": []
+      "enabled": true,
+      "status": "enabled",
+      "note": ""
     },
     {
       "code": "mock",
@@ -79,7 +60,35 @@
       "description": "An in-memory paper broker so you can walk through the order lifecycle end-to-end without a real brokerage.",
       "available": true,
       "community_unverified": false,
-      "connect_form": []
+      "connect_form": [],
+      "enabled": true,
+      "status": "enabled",
+      "note": ""
+    },
+    {
+      "code": "ibkr",
+      "display_name": "Interactive Brokers",
+      "auth_kind": "gateway_session",
+      "supports_paper": true,
+      "supports_live": false,
+      "supports_fractional": true,
+      "quantity_increment": "0.0001",
+      "supported_order_types": [
+        "market",
+        "limit"
+      ],
+      "supported_time_in_force": [
+        "day",
+        "gtc"
+      ],
+      "supports_bracket": false,
+      "description": "Interactive Brokers via headless Client Portal Gateway. Paper-only until P3a-6 ships native brackets.",
+      "available": true,
+      "community_unverified": false,
+      "connect_form": [],
+      "enabled": false,
+      "status": "deferred",
+      "note": "IBKR is a deferred phase (P3a-2). The adapter and the Client Portal Gateway plumbing exist but the integration has not been validated end to end, so it cannot be connected yet."
     },
     {
       "code": "tradestation",
@@ -101,7 +110,10 @@
       "description": "TradeStation Web API via OAuth 2.0. Paper uses the SIM environment; live is gated on bracket orders (P3a-6).",
       "available": true,
       "community_unverified": false,
-      "connect_form": []
+      "connect_form": [],
+      "enabled": false,
+      "status": "deferred",
+      "note": "TradeStation is a deferred phase (P3a-3). The OAuth adapter exists but the integration has not been validated end to end, so it cannot be connected yet."
     }
   ]
 }

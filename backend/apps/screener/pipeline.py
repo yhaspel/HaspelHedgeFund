@@ -24,7 +24,7 @@ from typing import Any
 
 from apps.data.cache import cache_get, cache_set
 from apps.data.interfaces import Bar, QuoteSnapshot, ScreenerRow
-from apps.data.models import NewsItem
+from apps.data.models import MarketNewsItem, NewsItem
 
 from .capabilities import ScreenerCapability
 from .datasource import ScreenerDataSource
@@ -53,9 +53,36 @@ log = logging.getLogger(__name__)
 MAX_UNIVERSE = 3000
 MAX_ENRICH = 300
 RESULT_CACHE_TTL_SECONDS = 90
+# WAVE-3 P2 item 3: how many uncached tickers ONE screen run may fetch bars for.
+# Everything else is enriched from the DB (``DailyBar``) or returned partial.
+# A cold run used to issue ~604 FMP calls (300 x /full + /dividend-adjusted, plus
+# the screener + quote batches) at up to 7,200/min against a 750/min budget
+# shared with the live trading pods.
+SCREENER_LAZY_FILL_MAX_DEFAULT = 40
+# A ticker needs at least this many cached sessions before its momentum /
+# 52-week / moving-average metrics mean anything; below it the row is a
+# lazy-fill candidate and, if not filled, is marked partial.
+MIN_CACHED_BARS = 60
+# Bar lookback the enrichment metrics need (mom_6m = 126 sessions).
+BAR_LOOKBACK_DAYS = 380
 NEWS_CATALYST_LOOKBACK_DAYS = 7
-NEWS_CATALYST_MIN_MATERIALITY = 0.6
-POSITIVE_MATERIALITY_TAGS = {"positive", "bullish", "beat"}
+# ``NewsItem.materiality_score`` is the news agent's 0-10 materiality
+# (``outputs.MaterialEvent``), NOT a 0-1 probability — 0.6 admitted everything.
+NEWS_CATALYST_MIN_MATERIALITY = 6.0
+# The news agent's ACTUAL tag vocabulary (hedgefund_agents/news/news_agent.py):
+# {guidance_change, executive_change, litigation, mna, product_launch, macro,
+# earnings, regulatory, noise}. "noise" and "litigation" are never a positive
+# catalyst; a blank/unknown tag no longer counts either (it used to, via an
+# `or not tag` clause, which is how "noise" and unscored rows slipped through).
+MATERIAL_EVENT_TAGS = {
+    "guidance_change",
+    "executive_change",
+    "mna",
+    "product_launch",
+    "earnings",
+    "regulatory",
+    "macro",
+}
 
 
 @dataclass
@@ -87,6 +114,12 @@ class ScreenResultRow:
     has_positive_catalyst: bool
     in_watchlist: bool
     warnings: list[str]
+    # WAVE-3 P2: how this row's bar-derived metrics were obtained —
+    # "cache" (served from DailyBar), "fetched" (one of this run's bounded
+    # lazy fills) or "partial" (no usable bar history: momentum / 52-week /
+    # moving-average fields are null and the row must be rendered as
+    # incomplete, never silently ranked).
+    enrichment: str = "cache"
 
 
 @dataclass
@@ -160,7 +193,7 @@ def validate_filters(
             for label, val in (("min", mn), ("max", mx)):
                 if val is None:
                     continue
-                if not isinstance(val, (int, float)):
+                if not isinstance(val, int | float):
                     raise ScreenerValidationError(
                         f"criterion {fid!r}.{label} must be a number"
                     )
@@ -289,18 +322,35 @@ def _enrich_row(
     in_watchlist: bool,
     catalyst_tickers: set[str],
     capabilities: frozenset,
+    bars: list[Bar] | None = None,
+    enrichment: str = "cache",
 ) -> ScreenResultRow:
-    """Compute enrichment metrics for a single candidate row."""
+    """Compute enrichment metrics for a single candidate row.
+
+    ``bars`` is supplied by the caller (WAVE-3 P2): stage 2 resolves the whole
+    candidate set's bars in one DB read plus a bounded number of lazy fetches,
+    so this function never issues an HTTP call of its own. When ``bars`` is
+    ``None`` the legacy per-row provider read is used — that path is only
+    reachable from callers that pass a single ticker (the watchlist panel).
+    """
     warnings: list[str] = []
-    bars: list[Bar] = []
-    if ScreenerCapability.DAILY_BARS in capabilities:
-        try:
-            bars = ds.daily_bars(row.ticker, end=today, lookback_days=380)
-        except Exception as exc:  # noqa: BLE001 — provider can raise any HTTP error
-            log.warning(
-                "screener_enrich daily_bars_failed ticker=%s err=%s", row.ticker, exc
-            )
-            warnings.append("daily bars unavailable")
+    if bars is None:
+        bars = []
+        if ScreenerCapability.DAILY_BARS in capabilities:
+            try:
+                bars = ds.daily_bars(
+                    row.ticker, end=today, lookback_days=BAR_LOOKBACK_DAYS
+                )
+            except Exception as exc:  # noqa: BLE001 — provider can raise any HTTP error
+                log.warning(
+                    "screener_enrich daily_bars_failed ticker=%s err=%s",
+                    row.ticker, exc,
+                )
+                warnings.append("daily bars unavailable")
+    if enrichment == "partial":
+        warnings.append(
+            "not enriched — no cached price history (metrics unavailable)"
+        )
 
     closes = _bar_closes(bars)
     volumes = _bar_volumes(bars)
@@ -407,6 +457,7 @@ def _enrich_row(
         has_positive_catalyst=row.ticker.upper() in catalyst_tickers,
         in_watchlist=in_watchlist,
         warnings=warnings,
+        enrichment=enrichment,
     )
 
 
@@ -471,7 +522,13 @@ def _row_value(row: ScreenResultRow, fid: str) -> Any:
 
 
 def _sort_key(row: ScreenResultRow, field_id: str) -> tuple[int, float]:
-    """Stable sort key with ``None`` always at the back."""
+    """Sort key for rows that HAVE a value for ``field_id``.
+
+    Rows without a value are not sorted with this key at all — see
+    ``_sort_rows``. A ``(1, 0.0)`` sentinel does not work here because
+    ``reverse=True`` flips it to the FRONT, which used to rank every row
+    missing the sort field above the best real one on the default (desc) sort.
+    """
     val = _row_value(row, field_id)
     if val is None:
         return (1, 0.0)
@@ -481,26 +538,71 @@ def _sort_key(row: ScreenResultRow, field_id: str) -> tuple[int, float]:
         return (0, 0.0)
 
 
+def _sort_rows(
+    rows: list[ScreenResultRow], field_id: str, *, reverse: bool
+) -> list[ScreenResultRow]:
+    """Two-pass sort: rows WITH a value for ``field_id`` first (in the
+    requested direction), rows without one appended in stable input order.
+
+    ``None`` means "no data", not "worst value" and certainly not "best" — it
+    must never outrank a real number in either direction.
+    """
+    valued = [r for r in rows if _row_value(r, field_id) is not None]
+    missing = [r for r in rows if _row_value(r, field_id) is None]
+    valued.sort(key=lambda r: _sort_key(r, field_id), reverse=reverse)
+    return valued + missing
+
+
 def _catalyst_tickers(tickers: list[str], today: dt.date) -> set[str]:
-    """Pre-fetch the set of tickers with a recent positive high-materiality NewsItem."""
+    """Tickers with a recent POSITIVE, material news catalyst.
+
+    Two independent signals have to agree, because neither one alone carries
+    both direction and importance:
+
+      * materiality — ``NewsItem.materiality_score`` >= 6/10 with one of the
+        news agent's real event tags (a 9/10 ``litigation`` item is material
+        but not a *positive* catalyst, and ``noise`` is neither);
+      * direction — the market-news sentiment classifier
+        (``MarketNewsItem.sentiment_score`` in [-1, 1]) scoring the same story
+        (matched by URL) or the same ticker (matched by ``symbols``) above 0.
+    """
     if not tickers:
         return set()
+    wanted = sorted({t.upper() for t in tickers})
     cutoff = dt.datetime.combine(
         today - dt.timedelta(days=NEWS_CATALYST_LOOKBACK_DAYS),
         dt.time(0, 0),
         tzinfo=dt.UTC,
     )
+    material: dict[str, set[str]] = {}
     qs = NewsItem.objects.filter(
-        ticker__in=[t.upper() for t in tickers],
+        ticker__in=wanted,
         published_at__gte=cutoff,
         materiality_score__gte=NEWS_CATALYST_MIN_MATERIALITY,
     )
-    out: set[str] = set()
-    for ni in qs.only("ticker", "materiality_tag", "materiality_score"):
-        tag = (ni.materiality_tag or "").lower()
-        if tag in POSITIVE_MATERIALITY_TAGS or not tag:
-            out.add(ni.ticker.upper())
-    return out
+    for ni in qs.only("ticker", "materiality_tag", "url"):
+        if (ni.materiality_tag or "").lower() not in MATERIAL_EVENT_TAGS:
+            continue
+        material.setdefault(ni.ticker.upper(), set()).add(ni.url)
+    if not material:
+        return set()
+
+    positive_urls: set[str] = set()
+    positive_symbols: set[str] = set()
+    mqs = MarketNewsItem.objects.filter(
+        published_at__gte=cutoff, sentiment_score__gt=0
+    ).only("url", "symbols")
+    for mn in mqs:
+        positive_urls.add(mn.url)
+        for sym in mn.symbols or []:
+            if isinstance(sym, str):
+                positive_symbols.add(sym.upper())
+
+    return {
+        t
+        for t, urls in material.items()
+        if t in positive_symbols or (urls & positive_urls)
+    }
 
 
 def _normalized_cache_key(filters: dict[str, Any], user_id: int | None) -> str:
@@ -529,6 +631,78 @@ def _result_from_dict(data: dict[str, Any]) -> ScreenResult:
         capabilities=list(data.get("capabilities", [])),
         warnings=list(data.get("warnings", [])),
     )
+
+
+def lazy_fill_max() -> int:
+    """How many uncached tickers one screen run may fetch bars for."""
+    from django.conf import settings
+
+    try:
+        return max(
+            0,
+            int(
+                getattr(
+                    settings, "SCREENER_LAZY_FILL_MAX", SCREENER_LAZY_FILL_MAX_DEFAULT
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        return SCREENER_LAZY_FILL_MAX_DEFAULT
+
+
+def _resolve_bars(
+    ds: ScreenerDataSource,
+    tickers: list[str],
+    *,
+    today: dt.date,
+    capabilities: frozenset,
+) -> tuple[dict[str, list[Bar]], dict[str, Any]]:
+    """Bars for the candidate set: DB first, then a bounded lazy fill.
+
+    Returns ``(bars_by_ticker, stats)`` where ``stats`` carries the counts for
+    the run's ``warnings`` entry plus a per-ticker ``source`` map
+    ("cache" / "fetched" / "partial") that marks each row's enrichment state.
+    """
+    keys = [t.upper() for t in tickers]
+    stats: dict[str, Any] = {
+        "cached": 0,
+        "fetched": 0,
+        "partial": 0,
+        "cap": lazy_fill_max(),
+        "source": {},
+    }
+    if not keys or ScreenerCapability.DAILY_BARS not in capabilities:
+        stats["partial"] = len(keys)
+        stats["source"] = dict.fromkeys(keys, "partial")
+        return {}, stats
+
+    try:
+        bars_by_ticker = ds.cached_daily_bars(
+            keys, end=today, lookback_days=BAR_LOOKBACK_DAYS
+        )
+    except Exception as exc:  # noqa: BLE001 — a DB hiccup must not 500 the screen
+        log.warning("screener_stage2 cached_bars_failed err=%s", exc)
+        bars_by_ticker = {}
+
+    missing = [t for t in keys if len(bars_by_ticker.get(t, ())) < MIN_CACHED_BARS]
+    budget = stats["cap"]
+    for t in missing[:budget]:
+        try:
+            fetched = ds.daily_bars(t, end=today, lookback_days=BAR_LOOKBACK_DAYS)
+        except Exception as exc:  # noqa: BLE001 — provider can raise any HTTP error
+            log.warning("screener_lazy_fill_failed ticker=%s err=%s", t, exc)
+            continue
+        if fetched:
+            bars_by_ticker[t] = fetched
+            stats["source"][t] = "fetched"
+    for t in keys:
+        if t in stats["source"]:
+            continue
+        stats["source"][t] = "cache" if bars_by_ticker.get(t) else "partial"
+    stats["fetched"] = sum(1 for v in stats["source"].values() if v == "fetched")
+    stats["cached"] = sum(1 for v in stats["source"].values() if v == "cache")
+    stats["partial"] = sum(1 for v in stats["source"].values() if v == "partial")
+    return bars_by_ticker, stats
 
 
 def run_screen(
@@ -626,18 +800,32 @@ def run_screen(
         else set()
     )
 
+    # WAVE-3 P2 item 3: bars come from the DB in ONE query; only a bounded
+    # number of uncached tickers are fetched from the provider per run.
+    bars_by_ticker, fill_stats = _resolve_bars(
+        datasource, tickers, today=today, capabilities=capabilities
+    )
+    if tickers:
+        warnings.append(
+            "Price history: {cached} from cache, {fetched} fetched, "
+            "{partial} not enriched (cap {cap}/run).".format(**fill_stats)
+        )
+
     enriched: list[ScreenResultRow] = []
     for cand in candidates:
+        key = cand.ticker.upper()
         try:
             enriched.append(
                 _enrich_row(
                     cand,
                     ds=datasource,
-                    quote=quotes.get(cand.ticker.upper()),
+                    quote=quotes.get(key),
                     today=today,
-                    in_watchlist=cand.ticker.upper() in watchlist_tickers,
+                    in_watchlist=key in watchlist_tickers,
                     catalyst_tickers=catalyst_tickers,
                     capabilities=capabilities,
+                    bars=bars_by_ticker.get(key, []),
+                    enrichment=fill_stats["source"].get(key, "cache"),
                 )
             )
         except Exception as exc:  # noqa: BLE001 — never let one row break the screen
@@ -670,7 +858,7 @@ def run_screen(
             survivors.append(row)
 
     reverse = sort["dir"] == "desc"
-    survivors.sort(key=lambda r: _sort_key(r, sort["field"]), reverse=reverse)
+    survivors = _sort_rows(survivors, sort["field"], reverse=reverse)
     final = survivors[:limit]
 
     result = ScreenResult(

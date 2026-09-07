@@ -32,9 +32,23 @@ export interface BrokerCapability {
   supported_time_in_force: string[];
   supports_bracket: boolean;
   description: string;
+  /**
+   * Whether the ADAPTER exists at all — still `true` for IBKR/TradeStation.
+   * Do NOT gate the connect UI on this: use `enabled` below.
+   */
   available: boolean;
   community_unverified: boolean;
   connect_form: Array<Record<string, string>>;
+  /**
+   * WAVE 3 — the DEPLOYMENT gate (`ENABLED_BROKERS` + the deferred list).
+   * `false` ⇒ `POST /api/broker-accounts/` answers 400 `{broker: "<note>"}`
+   * (a plain string, not a list) and no new account may be created. Existing
+   * accounts are untouched, so a config change never orphans a connected book.
+   */
+  enabled?: boolean;
+  status?: 'enabled' | 'deferred' | 'disabled' | 'unavailable';
+  /** The human reason a non-enabled broker cannot be connected. "" when enabled. */
+  note?: string;
 }
 
 export type BrokerOrderType =
@@ -136,6 +150,10 @@ export interface BrokerOrderRow {
   status:
     | 'draft'
     | 'confirmed'
+    /** Accepted and owned by the backend, but deliberately NOT sent to the
+     *  broker yet — it is released at (or shortly after) the next open. These
+     *  rows are live commitments the user can still cancel. */
+    | 'pending_open'
     | 'submitted'
     | 'partial'
     | 'filled'
@@ -147,6 +165,12 @@ export interface BrokerOrderRow {
   confirmed_at: string | null;
   confirmation_method: '' | 'manual_ui' | 'scheduled_job' | 'api';
   queued_until_open: boolean;
+  /** True while the order is held locally instead of being sent to the broker. */
+  is_held: boolean;
+  /** When the hold is expected to release (ISO-8601 UTC), null when unknown. */
+  release_eta: string | null;
+  /** The earliest instant the release job may submit it (ISO-8601 UTC). */
+  release_after: string | null;
   submitted_at: string | null;
   filled_at: string | null;
   cancelled_at: string | null;

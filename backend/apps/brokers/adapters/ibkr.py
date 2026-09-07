@@ -155,7 +155,7 @@ def _opt_dec(v: Any) -> Decimal | None:
 def _parse_trade_time(raw: Any) -> datetime:
     """IBKR trades carry `trade_time_r` (Unix epoch ms) and/or `trade_time`
     (string like '20260527-13:45:00'). Accept either."""
-    if isinstance(raw, (int, float)) and raw:
+    if isinstance(raw, int | float) and raw:
         return datetime.fromtimestamp(float(raw) / 1000.0, tz=UTC)
     if isinstance(raw, str) and raw:
         # `YYYYMMDD-HH:MM:SS` (UTC per IBKR docs).

@@ -5,6 +5,7 @@ import datetime as dt
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -145,6 +146,7 @@ def _patch_translate(monkeypatch, *, primary_ok=True, fallback_ok=True, calls=No
     return calls, record
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_translate_sends_only_foreign_untranslated(monkeypatch) -> None:
     from apps.data.market_news_translation import translate
 
@@ -169,6 +171,7 @@ def test_translate_sends_only_foreign_untranslated(monkeypatch) -> None:
     assert record["count"] == 1
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_translate_empty_targets_no_call(monkeypatch) -> None:
     from apps.data.market_news_translation import translate
 
@@ -183,6 +186,7 @@ def test_translate_empty_targets_no_call(monkeypatch) -> None:
     assert record["count"] == 0
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_translate_fallback_chain(monkeypatch) -> None:
     from apps.data.market_news_translation import translate
 
@@ -201,6 +205,7 @@ def test_translate_fallback_chain(monkeypatch) -> None:
     assert len(calls) == 2  # primary tried, then fallback
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_translate_double_failure_leaves_untranslated(monkeypatch) -> None:
     from apps.data.market_news_translation import translate
 
@@ -218,6 +223,7 @@ def test_translate_double_failure_leaves_untranslated(monkeypatch) -> None:
     assert record["count"] == 0
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_translate_empty_returned_headline_left_untranslated(monkeypatch) -> None:
     from apps.data.market_news_translation import (
         MarketNewsTranslationBatch,
@@ -265,6 +271,7 @@ def _patch_service(monkeypatch):
     )
 
 
+@override_settings(ALLOW_PLATFORM_LLM_FOR_NEWS=True)
 def test_feed_translates_foreign_rep(monkeypatch) -> None:
     user = _make_user()
     _make_item(url="https://example.com/zh", language="zh-cn",

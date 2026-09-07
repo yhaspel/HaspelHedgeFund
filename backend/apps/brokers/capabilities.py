@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from django.conf import settings
+
 if TYPE_CHECKING:
     pass  # circular-safe at type-check time
 
@@ -63,6 +65,119 @@ class BrokerCapabilities:
             "community_unverified": self.community_unverified,
             "connect_form": [dict(f) for f in self.connect_form],
         }
+
+
+# --- Deployment gate (wave 3, WP P3) ----------------------------------------
+#
+# Registering an adapter says "this code exists"; it does NOT say "this
+# integration is supported". IBKR (P3a-2) and TradeStation (P3a-3) are DEFERRED
+# phases whose adapters and connect-wizard tiles shipped ahead of the phases
+# themselves, so the wizard advertised a capability nobody could actually use.
+#
+# ``ENABLED_BROKERS`` is the single env-var switch: a broker whose code is not
+# in it is served with ``enabled=false`` and cannot back a new BrokerAccount.
+# Nothing is deleted — flipping the setting re-enables the whole path — and
+# EXISTING accounts on a disabled broker keep working (the gate is on the
+# create entry point only, so a live account is never orphaned by a config
+# change).
+
+# The "demo" spelling in the setting is an alias for the registered ``mock``
+# code, so an operator can write the setting the way the product names it.
+BROKER_CODE_ALIASES = {"demo": "mock"}
+
+DEFAULT_ENABLED_BROKERS = ("alpaca_paper", "mock")
+
+# code -> why it is off by default. A code listed here reports
+# ``status="deferred"``; anything else switched off reports ``status="disabled"``.
+DEFERRED_BROKERS = {
+    "ibkr": (
+        "Interactive Brokers is a deferred phase (P3a-2). The adapter and the "
+        "Client Portal Gateway plumbing exist but the integration has not been "
+        "validated end to end, so it cannot be connected yet."
+    ),
+    "tradestation": (
+        "TradeStation is a deferred phase (P3a-3). The OAuth adapter exists but "
+        "the integration has not been validated end to end, so it cannot be "
+        "connected yet."
+    ),
+}
+
+STATUS_ENABLED = "enabled"
+STATUS_DEFERRED = "deferred"
+STATUS_DISABLED = "disabled"
+STATUS_UNAVAILABLE = "unavailable"
+
+
+def normalize_broker_code(code: str) -> str:
+    """Resolve a settings/API spelling to the registered adapter code."""
+    code = (code or "").strip()
+    return BROKER_CODE_ALIASES.get(code, code)
+
+
+def enabled_broker_codes() -> frozenset[str]:
+    """The codes ``ENABLED_BROKERS`` switches on, normalized through the aliases.
+
+    Read through ``getattr`` so the setting is optional; an empty/invalid value
+    falls back to the default rather than disabling every broker (a typo in an
+    env var must not take the fund offline)."""
+    raw = getattr(settings, "ENABLED_BROKERS", None)
+    if not raw:
+        raw = DEFAULT_ENABLED_BROKERS
+    if isinstance(raw, str):
+        raw = [part.strip() for part in raw.split(",")]
+    codes = {normalize_broker_code(str(c)) for c in raw if str(c).strip()}
+    return frozenset(codes or {normalize_broker_code(c) for c in DEFAULT_ENABLED_BROKERS})
+
+
+def is_broker_enabled(code: str) -> bool:
+    return normalize_broker_code(code) in enabled_broker_codes()
+
+
+def broker_status(cap: BrokerCapabilities) -> tuple[str, str]:
+    """``(status, note)`` for one capability row. ``note`` is "" when enabled."""
+    code = normalize_broker_code(cap.code)
+    if not cap.available:
+        return STATUS_UNAVAILABLE, cap.description
+    if code in enabled_broker_codes():
+        return STATUS_ENABLED, ""
+    note = DEFERRED_BROKERS.get(code)
+    if note is not None:
+        return STATUS_DEFERRED, note
+    return (
+        STATUS_DISABLED,
+        f"{cap.display_name} is switched off for this deployment "
+        "(ENABLED_BROKERS does not list it).",
+    )
+
+
+def disabled_reason(code: str) -> str | None:
+    """The human-readable note for a broker that may NOT be connected, or None
+    when it may. Used by ``POST /api/broker-accounts/`` for its 400 body."""
+    cap = get_capabilities(normalize_broker_code(code))
+    if cap is None:
+        return None
+    status, note = broker_status(cap)
+    return None if status == STATUS_ENABLED else note
+
+
+def registry_payload() -> list[dict]:
+    """``all_capabilities()`` as dicts, each carrying the deployment gate.
+
+    Adds ``enabled`` / ``status`` / ``note`` to the existing capability shape
+    (additive — every pre-existing key is unchanged) and orders enabled brokers
+    first so the connect wizard leads with what can actually be connected.
+    """
+    rows = []
+    for cap in all_capabilities():
+        status, note = broker_status(cap)
+        rows.append({
+            **cap.to_dict(),
+            "enabled": status == STATUS_ENABLED,
+            "status": status,
+            "note": note,
+        })
+    rows.sort(key=lambda r: (not r["enabled"], r["code"]))
+    return rows
 
 
 # --- Registry ---------------------------------------------------------------

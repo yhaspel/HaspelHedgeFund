@@ -212,8 +212,15 @@ def aggregate(
 
     veto = bool(risk.get("veto"))
     borrow_veto = bool(risk.get("borrow_veto"))
-    cap = float(risk.get("max_position_pct_for_this_trade", 0.0))
-    if veto:
+    # A cap the Risk Manager did NOT state is "unconstrained" (compute_target_weight
+    # then sizes off cfg["max_weight"]). A cap it explicitly stated as 0 means
+    # "no room for this trade" — which used to fall into the very same branch and
+    # size the position at the FULL max_weight, so tightening the cap from 1% to
+    # 0% jumped the ticket from 0.8% to 80% of NAV.
+    cap_stated = risk.get("max_position_pct_for_this_trade") is not None
+    cap = float(risk.get("max_position_pct_for_this_trade") or 0.0)
+    zero_cap = cap_stated and cap <= 0.0
+    if veto or zero_cap:
         action = "hold"
     if borrow_veto and action == "open_short":
         action = "hold"
@@ -240,7 +247,7 @@ def aggregate(
             if p.get("signal") == opposing
             and int(p.get("confidence", 0)) >= threshold_int
         ]
-        blocked = veto or blockers or (short_side and borrow_veto)
+        blocked = veto or zero_cap or blockers or (short_side and borrow_veto)
         if blocked:
             action = "hold"
         else:
@@ -272,6 +279,11 @@ def aggregate(
     ]
     if veto:
         rationale_bits.append("Risk Manager veto in effect: forcing hold.")
+    if zero_cap:
+        rationale_bits.append(
+            "Risk Manager position cap is 0% for this trade: no room to size; "
+            "forcing hold with quantity 0."
+        )
     if risk.get("hard_caps_applied"):
         rationale_bits.append(f"Hard caps applied: {', '.join(risk['hard_caps_applied'])}.")
     if cfg.get("vol_target_annual") and trailing_returns:

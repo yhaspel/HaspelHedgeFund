@@ -401,6 +401,32 @@ def _trim_k_for_budget(
     return new_longs, new_shorts
 
 
+def _seed_news_batch(user_id, ticker: str, as_of, *, run_id=None):
+    """Fetch the candidate's news window once, before the graph fans out.
+
+    Mirrors ``apps.runs.tasks._seed_news_batch`` — the sentiment node and the
+    news_digest node are siblings in the analytical fan-out, so sentiment can
+    never see the digest's output. Without this seed a strategy-cycle council
+    scored sentiment 0.0 with no drivers on every candidate, while an ad-hoc
+    run of the same ticker got real sentiment.
+
+    Costs no extra provider quota: ``NewsService.fetch_and_persist`` is
+    DB-cached, so the digest node's own call is served from the rows persisted
+    here. Best-effort: a provider outage yields an empty batch and the
+    sentiment node falls back to neutral exactly as before.
+    """
+    from apps.data.providers.factory import get_news_service
+    from hedgefund_agents.analytical.sentiment import NewsBatch, batch_from_news_rows
+
+    try:
+        service = get_news_service(user=user_id)
+        rows = service.fetch_and_persist(ticker, as_of=as_of, lookback_days=30)
+        return batch_from_news_rows(rows)
+    except Exception:
+        log.warning("news seed failed for run=%s ticker=%s", run_id, ticker, exc_info=True)
+        return NewsBatch.empty()
+
+
 @shared_task(
     bind=True,
     # L3: per-candidate wall-clock cap (same rationale as execute_run) so one
@@ -517,6 +543,11 @@ def run_candidate_council(self, payload: dict) -> dict:
         "theme": payload.get("theme", ""),
         "borrow_veto": borrow_veto,
         "disable_cio": True,
+        # Seed the news window here, exactly as apps.runs.tasks.execute_run
+        # does: sentiment and news_digest are siblings in the fan-out, so
+        # without this the sentiment node has nothing to score and every
+        # strategy-cycle candidate came back score 0 / top_drivers [].
+        "news": _seed_news_batch(council_user_id, ticker, as_of, run_id=run_id),
     }
     failed = False
     try:

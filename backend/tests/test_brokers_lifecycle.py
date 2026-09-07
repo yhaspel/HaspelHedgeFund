@@ -47,6 +47,18 @@ from apps.portfolios.models import LedgerEntry, Portfolio
 User = get_user_model()
 
 
+# Wave 3 (WP P3): ``ENABLED_BROKERS`` gates which brokers can back a NEW
+# account, and IBKR / TradeStation ship deferred. These tests exercise those
+# adapters deliberately, so the module switches them on; the gate itself is
+# covered by tests/test_wave3_p3_broker_gate.py.
+@pytest.fixture(autouse=True)
+def _enable_deferred_brokers(settings):
+    settings.ENABLED_BROKERS = [
+        "alpaca_paper", "mock", "ibkr", "tradestation",
+        "fake_gateway", "fake_credentialed",  # test-only registrations below
+    ]
+
+
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------

@@ -60,18 +60,23 @@ def apply_caps(
 
 
 def book_nav(pf) -> Decimal:
-    """Cost-basis NAV proxy for a book: cash + Σ|qty|·avg_cost.
+    """Cost-basis NAV proxy for a book: cash + Σ qty·avg_cost (SIGNED).
 
     Deterministic (no market-data dependency), which keeps the submit-time risk
     gate testable without mocking marks. Stage B's vol-target / drawdown layer
     uses ``valuation.value_portfolio`` (marked-to-market) for the equity curve;
     this proxy is only the denominator for the per-name cap guard.
+
+    The quantity is signed on purpose: a SHORT's proceeds are already in cash,
+    so adding ``|qty|·avg_cost`` counted them twice and overstated NAV by 2× the
+    short notional — loosening the ``max_position_pct`` gate with every short
+    opened. A short subtracts its buy-back liability instead.
     """
     if pf is None:
         return Decimal("0")
     nav = Decimal(str(pf.cash_balance or 0))
     for pos in pf.positions.all():
-        nav += abs(Decimal(str(pos.quantity))) * Decimal(str(pos.avg_cost or 0))
+        nav += Decimal(str(pos.quantity)) * Decimal(str(pos.avg_cost or 0))
     return nav
 
 
@@ -276,6 +281,21 @@ def evaluate_drawdown(autopilot) -> dict:
     else:
         new_state = StrategyAutopilot.STATE_ACTIVE
 
+    # HALTED is a LATCHED state: it is entered by this evaluation, by a
+    # pre-flight guard (drift / auto_run_council) or by the fund kill switch,
+    # and it is cleared ONLY by a human (autopilot Resume / re-enable, or
+    # POST /api/fund/resume/) — each of which rebases the peak first. This
+    # evaluation may therefore RAISE severity but must never lower it: an
+    # hourly sweep that finds no drawdown used to silently un-halt a manually
+    # killed pod (and lose the halt's reason with it) so it traded again within
+    # the hour. active ↔ soft_cut still auto-transitions in both directions.
+    held_halt = False
+    if prior_state == StrategyAutopilot.STATE_HALTED and new_state != (
+        StrategyAutopilot.STATE_HALTED
+    ):
+        new_state = StrategyAutopilot.STATE_HALTED
+        held_halt = True
+
     autopilot.peak_equity_usd = peak
     autopilot.state = new_state
     autopilot.save(update_fields=["peak_equity_usd", "state", "updated_at"])
@@ -286,4 +306,5 @@ def evaluate_drawdown(autopilot) -> dict:
         "state": new_state,
         "transition": (prior_state != new_state),
         "prior_state": prior_state,
+        "held_halt": held_halt,
     }

@@ -110,10 +110,20 @@ class ScheduledRun(models.Model):
 
     def reschedule(self, after=None) -> None:
         """Recompute ``next_run_at`` from the cron expression. No-op (clears the
-        next fire) when inactive or the cron is invalid."""
-        if self.is_active and is_valid_cron(self.cron_expression):
-            self.next_run_at = compute_next(self.cron_expression, self.timezone, after=after)
-        else:
+        next fire) when inactive, or when the cron is invalid or never fires.
+
+        A syntactically valid expression can still have no next date (``0 0 31 2
+        *``); croniter raises for those, which used to escape as a 500 from the
+        create/update endpoint after the row had already been written.
+        """
+        self.next_run_at = None
+        if not (self.is_active and is_valid_cron(self.cron_expression)):
+            return
+        try:
+            self.next_run_at = compute_next(
+                self.cron_expression, self.timezone, after=after
+            )
+        except Exception:  # noqa: BLE001 — croniter/zoneinfo errors alike
             self.next_run_at = None
 
 

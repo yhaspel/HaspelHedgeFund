@@ -1,5 +1,6 @@
 import {
-  AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild, effect, inject,
+  AfterViewInit, Component, ElementRef, OnDestroy, OnInit, ViewChild, computed, effect, inject,
+  signal,
 } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -11,6 +12,10 @@ import {
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { BacktestsStore } from '../../abstraction/backtests.store';
+import { engineVersionBadge, engineVersionLabel } from '../../core/models/backtest.model';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { BacktestComparePanelComponent } from './backtest-compare-panel.component';
+import { Subscription } from 'rxjs';
 import { ENTRY_ANIMATION, baseLegend, personaColorById, readChartTheme } from '../shared/chart-defaults';
 
 Chart.register(
@@ -25,7 +30,10 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
 @Component({
   selector: 'hf-backtests-detail',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, RouterLink, AppShellComponent],
+  imports: [
+    CommonModule, DecimalPipe, RouterLink, AppShellComponent, ErrorStateComponent,
+    BacktestComparePanelComponent,
+  ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests', link:'/backtests'}, {label: store.current()?.name || ''}]">
       <div class="page-head">
@@ -38,12 +46,24 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             @if (store.current()?.status === 'synthetic') {
               <span class="pill warn" title="Fabricated demo record — not a real engine run; never §9-gate evidence."><span class="dot"></span>synthetic</span>
             }
+            @if (store.current(); as bt) {
+              <span class="pill" data-test="engine-version"
+                    [title]="engineLabel(bt.engine_version)"><span class="dot"></span>{{ engineBadge(bt.engine_version) }}</span>
+            }
           </h1>
         </div>
         <div class="head-actions">
           @if (store.current(); as bt) {
             <span class="pill"><span class="dot"></span>Run cost · $ {{ (bt.total_cost_usd || 0) | number: '1.2-2' }}</span>
-            <a class="btn" [routerLink]="['/backtests', bt.id, 'compare']">Compare…</a>
+            <!-- WAVE 3 item 9: comparison is a panel on THIS page now, not a
+                 separate bare route. /backtests/:id/compare still resolves and
+                 redirects here, so existing links keep working. -->
+            <button type="button" class="btn" (click)="toggleCompare()"
+                    [attr.aria-expanded]="compareOpen()"
+                    aria-controls="backtest-compare-panel"
+                    data-test="open-compare">
+              {{ compareOpen() ? 'Hide comparison' : 'Compare…' }}
+            </button>
             @if (bt.status === 'running' || bt.status === 'queued') {
               <button type="button" class="btn text-[color:var(--acc-short-fg)] border-[color:var(--acc-short-soft)]"
                 [disabled]="cancelling"
@@ -185,7 +205,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             <section class="card">
               <div class="card-hd"><h2 class="title">Stitched OOS equity vs baseline ({{ bt.baseline }})</h2></div>
               <div class="card-bd"><div class="relative h-[260px]"><canvas #equityChart role="img"
-                [attr.aria-label]="'Stitched out-of-sample equity curve vs the ' + bt.baseline + ' baseline for ' + bt.name + '. Portfolio OOS return ' + (bt.total_return_pct ?? 0) + '%, OOS Sharpe ' + (bt.oos_sharpe ?? 0) + '. See the Folds table below for the per-fold figures.'"></canvas></div></div>
+                [attr.aria-label]="equityChartLabel()"></canvas></div></div>
             </section>
             <section class="card">
               <div class="card-hd"><h2 class="title">IS vs OOS Sharpe per fold</h2></div>
@@ -232,6 +252,24 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             </tbody>
           </table>
         </section>
+      } @else if (store.pollError()) {
+        <hf-error-state
+          title="Couldn't load this backtest"
+          [detail]="store.pollError()"
+          (retry)="retryLoad()"
+        ></hf-error-state>
+      } @else {
+        <p class="text-text-3">Loading…</p>
+      }
+
+      @if (compareOpen() && id) {
+        <div id="backtest-compare-panel" class="mt-[18px]">
+          <hf-backtest-compare-panel
+            [backtestId]="id"
+            [initialCompareId]="compareWith()"
+            (closed)="closeCompare()"
+          ></hf-backtest-compare-panel>
+        </div>
       }
     </hf-app-shell>
   `,
@@ -259,6 +297,39 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
     effect(() => { this.store.rollingSharpe(); if (this.viewReady) setTimeout(() => this.renderRolling(), 0); });
   }
 
+  /**
+   * Screen-reader description of the equity chart.
+   *
+   * It used to read `bt.total_return_pct` / `bt.oos_sharpe` — LIST serializer
+   * fields that the detail payload leaves null — so every backtest announced
+   * "OOS return 0%, OOS Sharpe 0" no matter what it did. The computed metrics
+   * block is the authoritative source; the list fields are only a fallback.
+   */
+  readonly equityChartLabel = computed(() => {
+    const bt = this.store.current();
+    if (!bt) return 'Stitched out-of-sample equity curve.';
+    const m = bt.metrics;
+    // The computed-metrics block serialises DecimalFields as STRINGS ("18.5000"),
+    // so these have to be coerced before toFixed — calling it on a string throws
+    // inside the computed and the canvas silently loses its accessible name.
+    const asNumber = (v: unknown): number =>
+      v === null || v === undefined ? NaN : Number(v);
+    const ret = asNumber(m?.total_return_pct ?? bt.total_return_pct);
+    const sharpe = asNumber(m?.sharpe ?? bt.stitched_sharpe ?? bt.oos_sharpe);
+    const numbers =
+      !Number.isFinite(ret) || !Number.isFinite(sharpe)
+        ? 'Results are not available yet.'
+        : `Portfolio OOS return ${ret.toFixed(2)}%, stitched OOS Sharpe ${sharpe.toFixed(2)}.`;
+    const engine = engineVersionLabel(bt.engine_version);
+    return (
+      `Stitched out-of-sample equity curve vs the ${bt.baseline} baseline for ${bt.name}. ` +
+      `${numbers} ${engine} See the Folds table below for the per-fold figures.`
+    );
+  });
+
+  readonly engineLabel = engineVersionLabel;
+  readonly engineBadge = engineVersionBadge;
+
   // P10 §B2: ordered benchmark rows from the metrics JSON ({} for old rows).
   benchmarkRows(m: { benchmarks?: Record<string, any> }): { ticker: string; b: any }[] {
     const bench = m?.benchmarks || {};
@@ -267,9 +338,62 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
       .map((t) => ({ ticker: t, b: bench[t] }));
   }
 
+  /**
+   * The component instance survives /backtests/1 → /backtests/2 (default
+   * RouteReuseStrategy), so reading `route.snapshot` once left the previous
+   * backtest on screen under the new url. Follow paramMap instead.
+   */
+  /**
+   * WAVE 3 item 9 — the compare panel's open state.
+   *
+   * `?compare=1` opens it empty (what the folded-in `/…/compare` route sends);
+   * `?compare=<id>` opens it with B pre-selected, so an old deep link that
+   * named a specific pair still lands on the same comparison.
+   */
+  readonly compareOpen = signal(false);
+  readonly compareWith = signal<number | null>(null);
+
+  toggleCompare(): void {
+    this.compareOpen.set(!this.compareOpen());
+  }
+
+  closeCompare(): void {
+    this.compareOpen.set(false);
+    this.compareWith.set(null);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { compare: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
   ngOnInit(): void {
-    this.id = Number(this.route.snapshot.paramMap.get('id'));
-    this.store.poll(this.id, 3000);
+    this.paramSub = this.route.paramMap.subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!id || id === this.id) return;
+      this.id = id;
+      this.destroyCharts();
+      this.store.poll(this.id, 3000);
+      if (this.viewReady) this.startChartWarmup();
+    });
+    // `?.` because a test double / a route without query params has no
+    // `queryParamMap` — the compare panel is optional, the page is not.
+    this.querySub = this.route.queryParamMap?.subscribe((q) => {
+      const raw = q.get('compare');
+      if (raw === null) {
+        this.compareOpen.set(false);
+        this.compareWith.set(null);
+        return;
+      }
+      this.compareOpen.set(true);
+      const b = Number(raw);
+      this.compareWith.set(Number.isFinite(b) && b > 1 ? b : null);
+    });
+  }
+
+  retryLoad(): void {
+    if (this.id) this.store.poll(this.id, 3000);
   }
 
   cancelling = false;
@@ -318,26 +442,61 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
 
   ngAfterViewInit(): void {
     this.viewReady = true;
-    let n = 0;
-    const tick = () => {
-      this.renderCharts();
-      if (++n < 12) setTimeout(tick, 250);
-    };
-    setTimeout(tick, 100);
+    this.startChartWarmup();
   }
 
-  private id = 0;
+  /**
+   * Canvas elements appear behind @if blocks as the data arrives, so the charts
+   * are re-attempted for ~3 s. The handle is kept (and `destroyed` checked)
+   * because otherwise those timeouts kept firing after ngOnDestroy and called
+   * `new Chart()` on detached canvases — leaking a Chart instance per tick and
+   * throwing once the element was gone.
+   */
+  private startChartWarmup(): void {
+    if (this.warmupHandle) clearTimeout(this.warmupHandle);
+    let n = 0;
+    const tick = () => {
+      this.warmupHandle = null;
+      if (this.destroyed) return;
+      this.renderCharts();
+      if (++n < 12) this.warmupHandle = setTimeout(tick, 250);
+    };
+    this.warmupHandle = setTimeout(tick, 100);
+  }
+
+  // `id` is read by the template (the compare panel's A side), so it cannot
+  // stay private.
+  id = 0;
+  private paramSub: Subscription | null = null;
+  private querySub: Subscription | null = null;
+  private warmupHandle: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
 
   ngOnDestroy(): void {
+    this.destroyed = true;
+    if (this.warmupHandle) clearTimeout(this.warmupHandle);
+    this.warmupHandle = null;
+    this.paramSub?.unsubscribe();
+    this.paramSub = null;
+    this.querySub?.unsubscribe();
+    this.querySub = null;
     this.store.stopPolling();
+    this.destroyCharts();
+  }
+
+  private destroyCharts(): void {
     this.equityChartInstance?.destroy();
+    this.equityChartInstance = null;
     this.deflationChartInstance?.destroy();
+    this.deflationChartInstance = null;
     this.attributionChartInstance?.destroy();
+    this.attributionChartInstance = null;
     this.rollingChartInstance?.destroy();
+    this.rollingChartInstance = null;
   }
 
   private renderCharts(): void {
-    if (!this.viewReady) return;
+    if (!this.viewReady || this.destroyed) return;
     this.renderEquity();
     this.renderDeflation();
     this.renderAttribution();
@@ -345,6 +504,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private renderEquity(): void {
+    if (this.destroyed) return;
     const points = this.store.equity();
     const canvas = this.equityCanvas?.nativeElement;
     if (!canvas || points.length === 0) return;
@@ -388,7 +548,21 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
         animation: ENTRY_ANIMATION,
         plugins: { legend: baseLegend(t) },
         scales: {
-          x: { display: false, grid: { color: t.grid } },
+          // An equity curve with a hidden x axis is unreadable: nothing says
+          // which years the drawdown happened in. Show the dates (thinned so a
+          // multi-year daily series stays legible).
+          x: {
+            display: true,
+            grid: { color: t.grid },
+            ticks: {
+              color: t.axis,
+              font: { family: 'JetBrains Mono', size: 10 },
+              autoSkip: true,
+              maxTicksLimit: 8,
+              maxRotation: 0,
+              callback: (_v, index) => points[index]?.date ?? '',
+            },
+          },
           y: { grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
         },
       },
@@ -397,6 +571,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private renderDeflation(): void {
+    if (this.destroyed) return;
     const d = this.store.deflation();
     const canvas = this.deflationCanvas?.nativeElement;
     if (!canvas || !d || d.per_fold.length === 0) return;
@@ -426,6 +601,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
 
   // P10 §B2: rolling ~3y Sharpe sparkline of the stitched OOS curve.
   private renderRolling(): void {
+    if (this.destroyed) return;
     const series = this.store.rollingSharpe();
     const canvas = this.rollingCanvas?.nativeElement;
     if (!canvas || series.length === 0) return;
@@ -448,7 +624,18 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
         animation: ENTRY_ANIMATION,
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: false, grid: { color: t.grid } },
+          x: {
+            display: true,
+            grid: { color: t.grid },
+            ticks: {
+              color: t.axis,
+              font: { family: 'JetBrains Mono', size: 10 },
+              autoSkip: true,
+              maxTicksLimit: 6,
+              maxRotation: 0,
+              callback: (_v, index) => series[index]?.date ?? '',
+            },
+          },
           y: { grid: { color: t.grid }, ticks: { color: t.axis, font: { family: 'JetBrains Mono', size: 10 } } },
         },
       },
@@ -457,6 +644,7 @@ export class BacktestsDetailPage implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private renderAttribution(): void {
+    if (this.destroyed) return;
     const bt = this.store.current();
     const canvas = this.attributionCanvas?.nativeElement;
     if (!canvas || !bt?.metrics) return;

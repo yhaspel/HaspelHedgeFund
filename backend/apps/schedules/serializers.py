@@ -11,7 +11,7 @@ from apps.notifications.models import NotificationChannel
 from apps.watchlists.models import Watchlist
 
 from .models import ScheduledRun, ScheduledRunHistory
-from .triggers import describe_cron, is_valid_cron
+from .triggers import MIN_INTERVAL, describe_cron, is_valid_cron, next_fires
 
 
 class ScheduledRunSerializer(serializers.ModelSerializer):
@@ -54,7 +54,7 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
         return f"{acc.broker} ({acc.mode})" if acc else ""
 
     def get_cron_description(self, obj: ScheduledRun) -> str:
-        return describe_cron(obj.cron_expression)
+        return describe_cron(obj.cron_expression, obj.timezone)
 
     def _request_user(self):
         request = self.context.get("request")
@@ -63,9 +63,51 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
     def validate_cron_expression(self, value: str) -> str:
         if not is_valid_cron(value):
             raise serializers.ValidationError(
-                f"Invalid cron expression: {value!r} (expected 5 fields)."
+                f"Invalid cron expression: {value!r} (expected exactly 5 fields)."
             )
         return value
+
+    def validate_model_overrides(self, value):
+        """Same validation the ad-hoc run serializer applies.
+
+        A scheduled run reaches the very same execution path (with a 900s
+        timeout), so an override map that would be rejected on /api/runs/ must
+        not be accepted here just because it arrives via a schedule.
+        """
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("model_overrides must be an object")
+        non_string = sorted(k for k, v in value.items() if not isinstance(v, str))
+        if non_string:
+            raise serializers.ValidationError(
+                f"model_overrides values must be model id strings; "
+                f"non-string value(s) for: {non_string}"
+            )
+        from apps.models_catalog.overrides import validate_model_overrides
+
+        return validate_model_overrides(value, self._request_user())
+
+    def validate_personas(self, value):
+        """Reject unknown persona ids here rather than 30s into the council."""
+        if not value:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("personas must be a list of agent names")
+        from hedgefund_agents.personas import ALL_PERSONAS
+
+        known = set(ALL_PERSONAS)
+        normalized = [str(p).strip().lower() for p in value]
+        if any(not p for p in normalized):
+            raise serializers.ValidationError("personas contains an empty entry")
+        if len(set(normalized)) != len(normalized):
+            raise serializers.ValidationError("personas contains duplicates")
+        unknown = [p for p in normalized if p not in known]
+        if unknown:
+            raise serializers.ValidationError(
+                f"unknown personas: {unknown}. Known: {sorted(known)}"
+            )
+        return normalized
 
     def validate_timezone(self, value: str) -> str:
         try:
@@ -127,7 +169,46 @@ class ScheduledRunSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"auto_submit_broker_account": "Required when paper auto-submit is on."}
             )
+        self._validate_cadence(attrs)
         return attrs
+
+    def _validate_cadence(self, attrs) -> None:
+        """The cron must actually fire, and not too often.
+
+        ``croniter.is_valid`` only checks the SYNTAX: ``0 0 31 2 *`` (February
+        31st) parses and then raises ``CroniterBadDateError`` when the view asks
+        for the next fire — a 500 with a row already written and
+        ``next_run_at=None``. And a valid, frequent expression (``* * * * *``)
+        is a self-inflicted DoS: one council run per watchlist ticker, every
+        minute.
+        """
+        expr = attrs.get(
+            "cron_expression", getattr(self.instance, "cron_expression", "")
+        )
+        tz = attrs.get("timezone", None) or getattr(
+            self.instance, "timezone", None
+        ) or ScheduledRun._meta.get_field("timezone").default
+        if not expr:
+            return
+        try:
+            fires = next_fires(expr, tz, count=5)
+        except ValueError as exc:
+            raise serializers.ValidationError(
+                {"cron_expression": (
+                    f"{expr!r} never fires (no such date exists). {exc}"
+                )}
+            ) from exc
+        gaps = [b - a for a, b in zip(fires, fires[1:], strict=False)]
+        if gaps and min(gaps) < MIN_INTERVAL:
+            minutes = int(min(gaps).total_seconds() // 60)
+            raise serializers.ValidationError(
+                {"cron_expression": (
+                    f"{expr!r} fires every {minutes} minute(s); the minimum "
+                    f"interval is {int(MIN_INTERVAL.total_seconds() // 60)} "
+                    "minutes (each fire is a full council run per watchlist "
+                    "ticker)."
+                )}
+            )
 
 
 class ScheduledRunHistorySerializer(serializers.ModelSerializer):

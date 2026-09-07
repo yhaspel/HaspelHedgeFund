@@ -88,7 +88,12 @@ class VerifyOpenRouterPricingView(APIView):
     Empty body verifies every active openrouter:* row. Returns the same
     payload shape as the management command, plus refreshed model rows so
     the UI can update last_verified_at/note without a second fetch.
+
+    Staff-only: this mutates the INSTANCE-WIDE catalog (it rewrites pricing and
+    can deactivate rows for every user), exactly like the sibling tier editor.
     """
+
+    permission_classes = [IsAdminUser]
 
     def post(self, request: Request) -> Response:
         ids = request.data.get("model_ids") if isinstance(request.data, dict) else None
@@ -186,7 +191,12 @@ class FetchOpenRouterModelsView(APIView):
 
     Body (optional): {"dry_run": true}. Returns the SyncResult shape plus
     refreshed ModelEntry rows so the UI can update without a second fetch.
+
+    Staff-only: an instance-wide catalog rewrite (rows every user's dropdowns
+    and presets resolve against), so it takes the same bar as the tier editor.
     """
+
+    permission_classes = [IsAdminUser]
 
     def post(self, request: Request) -> Response:
         body = request.data if isinstance(request.data, dict) else {}

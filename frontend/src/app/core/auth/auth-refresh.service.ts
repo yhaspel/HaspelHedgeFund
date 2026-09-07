@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, finalize, map, shareReplay, tap, throwError } from 'rxjs';
+import { Observable, catchError, finalize, map, shareReplay, tap, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AuthTokens } from '../models/user.model';
 import { TokenStorage } from './token-storage';
@@ -25,6 +25,14 @@ export class AuthRefreshService {
   private readonly tokens = inject(TokenStorage);
 
   private inFlight: Observable<string> | null = null;
+  /**
+   * The refresh token whose /auth/refresh/ call was rejected. Rotated refresh
+   * tokens are blacklisted server-side, so a rejection is TERMINAL for that
+   * token: presenting it again can only ever fail. Remembering it keeps a burst
+   * of queued 401s from firing one doomed refresh each (and, with the throttled
+   * refresh view, from burning the auth throttle budget on a dead session).
+   */
+  private deadToken: string | null = null;
 
   /** Returns the new access token, or errors if no/expired refresh token. */
   refresh(): Observable<string> {
@@ -33,6 +41,9 @@ export class AuthRefreshService {
     const refreshToken = this.tokens.getRefresh();
     if (!refreshToken) {
       return throwError(() => new Error('No refresh token available'));
+    }
+    if (refreshToken === this.deadToken) {
+      return throwError(() => new Error('Refresh token was already rejected'));
     }
 
     this.inFlight = this.http
@@ -44,6 +55,11 @@ export class AuthRefreshService {
         // backend returns one (falls back to the current one if rotation is off).
         tap((t) => this.tokens.set(t.access, t.refresh ?? refreshToken)),
         map((t) => t.access),
+        // A rejected refresh token is burnt: record it so no later 401 replays it.
+        catchError((err: unknown) => {
+          this.deadToken = refreshToken;
+          return throwError(() => err);
+        }),
         // Reset the gate when the call settles (success or failure) so a later
         // expiry can start a brand-new refresh.
         finalize(() => {

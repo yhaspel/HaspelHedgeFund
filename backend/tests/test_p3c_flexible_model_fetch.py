@@ -321,7 +321,9 @@ def test_preset_view_returns_menu() -> None:
 
 @pytest.mark.django_db
 def test_fetch_endpoint_returns_documented_shape() -> None:
-    User.objects.create_user(email="fe@f.com", password="x" * 12)
+    # /api/models/fetch/ rewrites the INSTANCE-WIDE catalog, so it is now
+    # staff-only (review finding F12); the old non-staff expectation was the bug.
+    User.objects.create_user(email="fe@f.com", password="x" * 12, is_staff=True)
     c = APIClient()
     tok = c.post(
         reverse("login"),
@@ -347,7 +349,7 @@ def test_fetch_endpoint_returns_documented_shape() -> None:
 
 @pytest.mark.django_db
 def test_fetch_endpoint_returns_502_when_catalog_call_fails() -> None:
-    User.objects.create_user(email="fe2@f.com", password="x" * 12)
+    User.objects.create_user(email="fe2@f.com", password="x" * 12, is_staff=True)
     c = APIClient()
     tok = c.post(
         reverse("login"),

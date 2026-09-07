@@ -13,7 +13,7 @@ from apps.models_catalog.presets import SELECTABLE_PRESETS
 from apps.schedules.triggers import describe_cron, is_valid_cron
 
 from .models import AutopilotRun, PortfolioStrategy, StrategyAutopilot
-from .validation import validation_status
+from .validation import enable_gate, validation_status
 
 # Whole-percent / decimal config fields the PUT may set.
 _DEC_FIELDS = (
@@ -22,6 +22,40 @@ _DEC_FIELDS = (
 )
 _STR_FIELDS = ("cron_expression", "timezone", "model_preset", "on_breach", "short_mode")
 _BOOL_FIELDS = ("is_market_aware", "flatten_on_halt")
+
+# Inclusive bounds per decimal field: (low, high, low_is_exclusive). These are
+# the guardrail knobs the deterministic risk layer reads, so a nonsense value is
+# not a cosmetic bug: a 0 / negative dd_hard_halt_pct silently switches the live
+# breaker OFF (``hard > 0``) while the §9 gate keeps validating against 7.5%.
+_DEC_BOUNDS = {
+    # (0.5, 50] — below half a percent the breaker would fire on noise.
+    "dd_soft_cut_pct": (Decimal("0.5"), Decimal("50"), True),
+    "dd_hard_halt_pct": (Decimal("0.5"), Decimal("50"), True),
+    "target_vol_pct": (Decimal("0"), Decimal("200"), True),      # > 0
+    "max_notional_per_day_usd": (Decimal("0"), Decimal("1000000000"), False),
+    "liquidity_adv_cap_pct": (Decimal("0"), Decimal("100"), False),
+    "cost_ceiling_usd": (Decimal("0"), Decimal("100000"), False),
+}
+# Only this one is nullable on the model, so only it may be cleared with null.
+_NULLABLE_DEC_FIELDS = frozenset({"cost_ceiling_usd"})
+
+
+def _clean_decimal(field: str, raw) -> tuple[Decimal | None, str | None]:
+    """Parse + bounds-check one decimal config value. Returns ``(value, error)``;
+    a non-finite (NaN / Infinity) or out-of-range value is an error, never a
+    stored row."""
+    try:
+        value = Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
+        return None, f"invalid {field}"
+    if not value.is_finite():
+        return None, f"{field} must be a finite number"
+    low, high, low_exclusive = _DEC_BOUNDS[field]
+    too_low = value <= low if low_exclusive else value < low
+    if too_low or value > high:
+        op = ">" if low_exclusive else "≥"
+        return None, f"{field} must be {op} {low} and ≤ {high}"
+    return value, None
 
 
 def _autopilot_dict(ap: StrategyAutopilot) -> dict:
@@ -131,20 +165,72 @@ class StrategyAutopilotView(APIView):
         if "cron_expression" in data and not is_valid_cron(data["cron_expression"]):
             return Response({"detail": "invalid cron_expression"}, status=400)
 
+        # An unknown IANA zone makes reschedule()/compute_next() raise — a 500
+        # here, and (stored on a disabled row) a crash that stalls the whole
+        # dispatcher later.
+        if "timezone" in data:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(str(data["timezone"]))
+            except (ZoneInfoNotFoundError, ValueError, TypeError, ModuleNotFoundError):
+                return Response({"detail": "invalid timezone (use an IANA zone)"}, status=400)
+
+        for f, choices in (
+            ("short_mode", StrategyAutopilot.SHORT_MODE_CHOICES),
+            ("on_breach", StrategyAutopilot.ON_BREACH_CHOICES),
+        ):
+            if f in data and data[f] not in {c[0] for c in choices}:
+                valid = ", ".join(sorted(c[0] for c in choices))
+                return Response({"detail": f"invalid {f} (choose: {valid})"}, status=400)
+
+        # Decimals: parse + bounds-check BEFORE anything is assigned, so a bad
+        # value can never be half-applied.
+        decimals: dict[str, Decimal | None] = {}
+        for f in _DEC_FIELDS:
+            if f not in data:
+                continue
+            if data[f] is None or data[f] == "":
+                if f in _NULLABLE_DEC_FIELDS:
+                    decimals[f] = None
+                    continue
+                return Response({"detail": f"{f} must not be blank"}, status=400)
+            value, err = _clean_decimal(f, data[f])
+            if err is not None:
+                return Response({"detail": err}, status=400)
+            decimals[f] = value
+        soft = decimals.get("dd_soft_cut_pct", ap.dd_soft_cut_pct)
+        hard = decimals.get("dd_hard_halt_pct", ap.dd_hard_halt_pct)
+        if soft is not None and hard is not None and soft >= hard:
+            return Response(
+                {"detail": "dd_soft_cut_pct must be below dd_hard_halt_pct "
+                           f"(got soft {soft}, hard {hard})"},
+                status=400,
+            )
+        if "max_orders_per_day" in data:
+            raw = data["max_orders_per_day"]
+            if isinstance(raw, bool) or raw is None or raw == "":
+                return Response({"detail": "invalid max_orders_per_day"}, status=400)
+            try:
+                n_orders = int(raw)
+            except (TypeError, ValueError):
+                return Response({"detail": "invalid max_orders_per_day"}, status=400)
+            if n_orders < 0:
+                return Response(
+                    {"detail": "max_orders_per_day must be an integer ≥ 0 "
+                               "(0 means no orders at all)"},
+                    status=400,
+                )
+            ap.max_orders_per_day = n_orders
+
         for f in _STR_FIELDS:
             if f in data:
                 setattr(ap, f, data[f])
         for f in _BOOL_FIELDS:
             if f in data:
                 setattr(ap, f, bool(data[f]))
-        for f in _DEC_FIELDS:
-            if f in data and data[f] is not None:
-                try:
-                    setattr(ap, f, Decimal(str(data[f])))
-                except (InvalidOperation, ValueError):
-                    return Response({"detail": f"invalid {f}"}, status=400)
-        if "max_orders_per_day" in data:
-            ap.max_orders_per_day = int(data["max_orders_per_day"])
+        for f, value in decimals.items():
+            setattr(ap, f, value)
 
         # is_enabled can only be set true through the validated enable path.
         if data.get("is_enabled") and not ap.is_enabled:
@@ -159,10 +245,18 @@ class StrategyAutopilotView(APIView):
 
     @staticmethod
     def _enable(ap, strategy):
-        result = validation_status(strategy)
+        # §9 is STRICT for a new enable: the evidence must be of this strategy's
+        # universe, on the engine it trades live on, and long enough to mean
+        # something. (An already-enabled autopilot is never auto-disabled by the
+        # same checks — they surface as validation_warnings instead.)
+        result = enable_gate(strategy)
         if not result["passed"]:
             return Response(
-                {"detail": "validation gate not passed", "validation": result},
+                {
+                    "detail": "validation gate not passed",
+                    "reasons": result["reasons"],
+                    "validation": result,
+                },
                 status=status.HTTP_409_CONFLICT,
             )
         if not StrategyBrokerLink.objects.filter(strategy=strategy, is_active=True).exists():
@@ -232,6 +326,16 @@ class StrategyAutopilotResumeView(APIView):
         ap = getattr(strategy, "autopilot", None)
         if ap is None:
             return Response({"detail": "no autopilot"}, status=404)
+        from . import sleeves
+
+        if sleeves.fund_halted(strategy):
+            # A fund halt is firm-wide: clearing it one member at a time would
+            # leave the Fund page saying "halted" while the pod traded again.
+            return Response(
+                {"detail": "the fund is halted — resume the fund "
+                           "(POST /api/fund/resume/) to re-arm its members."},
+                status=status.HTTP_409_CONFLICT,
+            )
         _rearm_drawdown_breaker(ap)
         ap.state = StrategyAutopilot.STATE_ACTIVE
         ap.reschedule()

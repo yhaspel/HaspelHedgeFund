@@ -41,6 +41,9 @@ test.describe('WS-19 · Autonomous Fund', () => {
   test('FN-04 "Run now" on an enabled account queues a cycle', async ({ fund }) => {
     await fund.goto();
     await fund.runNowButton().click();
+    // Run now submits real orders to a live paper account, so it is gated on a
+    // confirm dialog.
+    await fund.confirmDialog().getByRole('button', { name: 'Run now and submit orders' }).click();
     await expect(fund.queuedNotice()).toBeVisible();
   });
 
@@ -255,6 +258,9 @@ test.describe('WS-19 · Autopilot panel', () => {
     await expect(fund.disableButton()).toBeVisible();
     const req = page.waitForRequest(/\/autopilot\/disable\/$/);
     await fund.disableButton().click();
+    // Disabling changes what a live paper account does, so it is gated on a
+    // confirm dialog.
+    await fund.confirmDialog().getByRole('button', { name: 'Disable autopilot' }).click();
     await req; // POST .../autopilot/disable/ dispatched
   });
 

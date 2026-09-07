@@ -1,0 +1,58 @@
+{
+  "available": true,
+  "now": "2026-06-06T17:30:00Z",
+  "fund_id": 1,
+  "fund_state": "active",
+  "beat_alive": null,
+  "last_beat_tick": {
+    "at": "2026-06-06T13:58:40Z",
+    "source": "AutopilotRun.started_at",
+    "age_seconds": 12680,
+    "per_tick": false,
+    "detail": "Derived from the last real dispatch, not from a per-tick heartbeat — a weekly autopilot produces this signal once a week, so its age alone does not prove beat is dead."
+  },
+  "beat_stale_after_seconds": 5400,
+  "overdue_grace_seconds": 900,
+  "autopilots": [
+    {
+      "autopilot_id": 3,
+      "strategy_id": 48,
+      "strategy_name": "[seed] Long/short core",
+      "is_enabled": true,
+      "state": "active",
+      "cron_expression": "0 14 * * 1",
+      "timezone": "America/New_York",
+      "next_run_at": "2026-06-08T18:00:00Z",
+      "overdue_by_seconds": null,
+      "overdue": false,
+      "last_run_at": "2026-06-01T18:00:00Z",
+      "last_dispatch_at": "2026-06-06T13:58:40Z",
+      "last_dispatch_status": "done",
+      "armed_without_next_run": false
+    },
+    {
+      "autopilot_id": 4,
+      "strategy_id": 56,
+      "strategy_name": "[seed] Sector momentum",
+      "is_enabled": true,
+      "state": "active",
+      "cron_expression": "0 13 * * 1-5",
+      "timezone": "America/New_York",
+      "next_run_at": null,
+      "overdue_by_seconds": null,
+      "overdue": false,
+      "last_run_at": null,
+      "last_dispatch_at": null,
+      "last_dispatch_status": null,
+      "armed_without_next_run": true
+    }
+  ],
+  "armed_count": 2,
+  "overdue_count": 0,
+  "queue_depth": null,
+  "queue_depth_reason": "Not collected: reading the Celery queue means a broker (Redis) round-trip on the request path, which this endpoint deliberately avoids.",
+  "warnings": [
+    "[seed] Sector momentum is armed but has no next run scheduled (cron '0 13 * * 1-5' may be invalid).",
+    "No per-tick beat heartbeat is available, so liveness is inferred only from whether an armed autopilot is overdue."
+  ]
+}

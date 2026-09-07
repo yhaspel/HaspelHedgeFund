@@ -78,6 +78,8 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   // ---- auth (interceptor skips bearer/refresh on these) -------------------
   { method: 'POST', spec: '/auth/login/', respond: () => json({ access: 'e2e.access.token', refresh: 'e2e.refresh.token' }) },
   { method: 'POST', spec: '/auth/refresh/', respond: () => json({ access: 'e2e.access.token.v2', refresh: 'e2e.refresh.token.v2' }) },
+  // Explicit sign-out blacklists the refresh token server-side (205, no body).
+  { method: 'POST', spec: '/auth/logout/', respond: () => json(null, 205) },
   { method: 'POST', spec: '/auth/signup/', respond: ({ body }) => json({ id: 2, email: (body as { email?: string })?.email ?? 'new@example.com', date_joined: '2026-06-06T00:00:00Z' }, 201) },
   { method: 'GET', spec: '/me/', respond: () => json(fixture('me')) },
   { method: 'GET', spec: '/me/model-preferences/', respond: () => json(fixture('model-preferences')) },
@@ -109,6 +111,11 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/fund/accounts/', respond: () => json(fixture('fund-accounts')) },
   { method: 'POST', spec: '/fund/reset/', respond: () => json({ ...(fixture('fund') as object), reset: { account_cash: '300000.00', sleeves: [], wiped_positions: 0 } }) },
   { method: 'POST', spec: '/fund/flatten/', respond: () => json({ ...(fixture('fund') as object), flatten: { orders: 6, skipped_inflight: [] } }) },
+  // WAVE 3 — the fund's operational record. `/activity/` pages on a `before`
+  // cursor: page 2 answers with the tail and closes the feed (has_more=false)
+  // so a "Load more" click has something real to append.
+  { method: 'GET', spec: '/fund/activity/', respond: ({ url }) => json(fundActivityPage(url)) },
+  { method: 'GET', spec: '/fund/scheduler-health/', respond: () => json(fixture('fund-scheduler-health')) },
   { method: 'GET', spec: '/strategies/:id/autopilot/', respond: () => json(fixture('autopilot')) },
   { method: 'PUT', spec: '/strategies/:id/autopilot/', respond: ({ body }) => json({ autopilot: { ...((fixture('autopilot') as { autopilot: object }).autopilot), ...(body as object) } }) },
   { method: 'POST', spec: '/strategies/:id/autopilot/enable/', respond: () => json(autopilotWith({ is_enabled: true, state: 'active' })) },
@@ -146,6 +153,10 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'PUT', spec: '/strategies/:id/', respond: ({ params, body }) => json({ ...(fixture('strategy-detail') as object), id: Number(params['id']) || 48, ...(body as object) }) },
   { method: 'PATCH', spec: '/strategies/:id/', respond: ({ params, body }) => json({ ...(fixture('strategy-detail') as object), id: Number(params['id']) || 48, ...(body as object) }) },
   { method: 'DELETE', spec: '/strategies/:id/', respond: () => ({ status: 204 }) },
+  // WAVE 3 — per-cycle realized vs the linked backtest's fold expectation. The
+  // fixture is PROVISIONAL on purpose: every ratio is null, which is the case
+  // the UI must render as "—" rather than inventing a number.
+  { method: 'GET', spec: '/strategies/:id/expected-vs-realized/', respond: ({ params }) => json({ ...(fixture('expected-vs-realized') as object), strategy_id: Number(params['id']) || 48 }) },
   { method: 'GET', spec: '/strategies/:id/cycles/', respond: () => json(fixture('strategy-cycles')) },
   { method: 'GET', spec: '/strategies/:id/cycles/:cycleId/', respond: ({ params }) => json({ ...(fixture('cycle-detail') as object), id: Number(params['cycleId']) || 109, status: 'done', enrolled_at: null }) },
   { method: 'POST', spec: '/strategies/:id/cycles/:cycleId/approve-council/', respond: () => json(fixture('cycle-detail')) },
@@ -202,6 +213,12 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/news/feed/', respond: () => json(fixture('news-feed')) },
   { method: 'GET', spec: '/news/preferences/', respond: () => json(fixture('news-preferences')) },
   { method: 'PUT', spec: '/news/preferences/', respond: ({ body }) => json({ ...(fixture('news-preferences') as object), preferences: { ...((fixture('news-preferences') as { preferences?: object }).preferences ?? {}), ...(body as object) } }) },
+
+  // ---- WAVE 3 data provenance ---------------------------------------------
+  // With no `?tickers=` the endpoint serves the global block alone; with them
+  // it serves only the requested symbols (the panel keys off that).
+  { method: 'GET', spec: '/data/provenance/', respond: ({ url }) => json(provenanceFor(url)) },
+  { method: 'POST', spec: '/data/provenance/refresh/', respond: ({ body }) => json({ queued: ((body as { tickers?: string[] })?.tickers ?? []).length, task_ids: ((body as { tickers?: string[] })?.tickers ?? []).map((t, i) => `task-${t}-${i}`) }) },
 
   // ---- macro / regime ------------------------------------------------------
   { method: 'GET', spec: '/macro/snapshot/', respond: () => json(fixture('macro-snapshot')) },
@@ -301,6 +318,55 @@ const REGISTRY: Array<{ method: string; spec: string; respond: Responder }> = [
   { method: 'GET', spec: '/notification-channels/', respond: () => json(fixture('notification-channels')) },
   { method: 'POST', spec: '/notification-channels/:id/test/', respond: () => json({ ok: true, sent: true }) },
 ];
+
+/** WAVE 3: honour `?tickers=` so the panel's per-ticker rows are exercised. */
+function provenanceFor(url: URL): unknown {
+  const all = fixture('data-provenance') as {
+    as_of: string;
+    tickers: Record<string, unknown>;
+    global: unknown;
+  };
+  const raw = url.searchParams.get('tickers');
+  if (!raw) return { ...all, tickers: {} };
+  const want = raw
+    .split(',')
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean);
+  const tickers: Record<string, unknown> = {};
+  for (const t of want) if (all.tickers[t]) tickers[t] = all.tickers[t];
+  return { ...all, tickers };
+}
+
+/**
+ * WAVE 3: the activity feed is cursor-paged. Page 1 (no `before`) returns the
+ * fixture as-is with `has_more: true`; passing its `next_before` back returns
+ * one older entry and closes the feed, so "Load more" is testable end to end.
+ */
+function fundActivityPage(url: URL): unknown {
+  const page1 = fixture('fund-activity') as {
+    entries: { at: string }[];
+    next_before: string | null;
+    [k: string]: unknown;
+  };
+  const before = url.searchParams.get('before');
+  if (!before) return page1;
+  return {
+    ...page1,
+    before,
+    entries: [
+      {
+        at: '2026-06-02T21:00:00Z',
+        kind: 'fund_reset',
+        severity: 'info',
+        title: 'Fund reset — $300,000 split across 2 sleeves',
+        detail: 'Positions wiped and sleeve cash re-seeded from the shared paper account.',
+        links: {},
+      },
+    ],
+    has_more: false,
+    next_before: null,
+  };
+}
 
 function autopilotWith(patch: Record<string, unknown>): unknown {
   const ap = fixture('autopilot') as { autopilot: object };

@@ -1282,3 +1282,70 @@ class FundSleeve(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"sleeve s={self.strategy_id} f={self.fund_id} {self.allocation_pct}%"
+
+
+class FundEvent(models.Model):
+    """Wave 3 — append-only record of the fund-lifecycle events nothing else stores.
+
+    ``GET /api/fund/activity/`` is assembled in Python from rows that already
+    exist: ``BrokerOrder`` / ``BrokerFill`` (submissions, fills, cancellations,
+    the ``flat-`` liquidation batches), ``AutopilotRun`` (dispatches, the
+    ``skipped_pending_open`` / halt-skip audits, the shadow cap evaluation and
+    the release outcomes) and ``LedgerEntry`` (fund reset and sleeve
+    reallocations, tagged ``fund sleeve: ...``).
+
+    Two events had **no** persisted record anywhere:
+
+      * the fund kill switch — ``halt_fund`` / ``resume_fund`` mutated
+        ``AutonomousFund.state`` and wrote a log line, nothing else;
+      * a guardrail state transition detected by the hourly ``guardrail_sweep``
+        (active → soft_cut → halted) — it mutated ``StrategyAutopilot.state``
+        only. A transition seen during a dispatch is on
+        ``AutopilotRun.guardrail_actions``; a swept one was invisible.
+
+    Those two are written here, and only forward: nothing backfills events that
+    were never recorded, so a fund that halted before this shipped has no row
+    for it. Rows are audit history — write once, never mutate.
+    """
+
+    KIND_FUND_HALT = "fund_halt"
+    KIND_FUND_RESUME = "fund_resume"
+    KIND_GUARDRAIL_TRANSITION = "guardrail_transition"
+    KIND_CHOICES = [
+        (KIND_FUND_HALT, "Fund halted"),
+        (KIND_FUND_RESUME, "Fund resumed"),
+        (KIND_GUARDRAIL_TRANSITION, "Guardrail state transition"),
+    ]
+
+    SEVERITY_INFO = "info"
+    SEVERITY_WARN = "warn"
+    SEVERITY_ERROR = "error"
+    SEVERITY_CHOICES = [
+        (SEVERITY_INFO, "Info"),
+        (SEVERITY_WARN, "Warning"),
+        (SEVERITY_ERROR, "Error"),
+    ]
+
+    fund = models.ForeignKey(
+        AutonomousFund, on_delete=models.CASCADE, related_name="events",
+    )
+    # The member this is about; null for fund-wide events (halt / resume).
+    strategy = models.ForeignKey(
+        PortfolioStrategy, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="fund_events",
+    )
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    severity = models.CharField(
+        max_length=8, choices=SEVERITY_CHOICES, default=SEVERITY_INFO,
+    )
+    title = models.CharField(max_length=200)
+    detail = models.TextField(blank=True, default="")
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["fund", "-created_at"])]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"fundevent f={self.fund_id} {self.kind} @ {self.created_at}"

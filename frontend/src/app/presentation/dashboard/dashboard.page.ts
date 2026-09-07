@@ -8,6 +8,7 @@ import { FundStore } from '../../abstraction/fund.store';
 import { MacroStore } from '../../abstraction/macro.store';
 import { PortfolioStore } from '../../abstraction/portfolio.store';
 import { RunsStore } from '../../abstraction/runs.store';
+import { strategyKindLabel } from '../../core/models/strategy.model';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { RunSummary } from '../../core/models/run.model';
@@ -231,7 +232,7 @@ type SigKind = 'buy' | 'sell' | 'hold' | 'info';
                 @for (s of topStrategies(); track s.id) {
                   <tr>
                     <td><a [routerLink]="['/strategies', s.id]" class="link">{{ s.name }}</a></td>
-                    <td><span class="pill mono">{{ s.kind }}</span></td>
+                    <td><span class="pill" data-test="dash-strategy-kind">{{ kindLabel(s.kind) }}</span></td>
                     <td class="mono text-text-2">{{ s.universe_name }}</td>
                     <td>
                       <span class="pill"
@@ -389,6 +390,8 @@ type SigKind = 'buy' | 'sell' | 'hold' | 'info';
   ],
 })
 export class DashboardPage implements OnInit {
+  /** WAVE 3 — no raw `sector_momentum` slugs in the strategy table. */
+  readonly kindLabel = strategyKindLabel;
   readonly auth = inject(AuthStore);
   readonly runs = inject(RunsStore);
   readonly macro = inject(MacroStore);

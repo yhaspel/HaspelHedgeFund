@@ -93,9 +93,11 @@ export class BrokerPage {
   selectBrokerButton(code: string): Locator {
     return this.page.locator(`[data-test="select-broker-${code}"], [data-testid="select-broker-${code}"]`);
   }
-  /** The disabled "Available in a later release" affordance (ibkr/tradestation). */
+  /** The disabled affordance on a gated broker (ibkr/tradestation). WAVE 3
+   *  replaced the fixed "Available in a later release" label with the gate's
+   *  own note, so it is located by its data-test hook rather than by name. */
   laterReleaseButton(): Locator {
-    return this.page.getByRole('button', { name: 'Available in a later release' });
+    return this.page.locator('[data-test^="select-broker-disabled-"]');
   }
   connectForm(): Locator {
     return this.page.locator(`[data-test="connect-form"], [data-testid="connect-form"]`);

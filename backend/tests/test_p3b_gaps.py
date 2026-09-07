@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core import mail
 from django.utils import timezone
 
+from apps.data.models import DailyBar
 from apps.leaderboard import compute
 from apps.leaderboard.models import StrategyScorecard
 from apps.models_catalog.presets import PERSONA_AGENTS
@@ -35,6 +36,15 @@ def user(db):
 
 
 def _strategy(user, name, returns):
+    """A long/short book whose DISJOINT per-period returns are exactly
+    ``returns`` (percent).
+
+    Wave 3 (WP P1): the scorecard now derives its return series from prices over
+    ``[as_of_i, as_of_{i+1})`` rather than from each cycle's cumulative
+    ``since_as_of_pct``, so the fixture lays down the bars that produce those
+    moves instead of stubbing the (overlapping) snapshot. Ratios also need ≥20
+    observations now, so these fixtures supply them.
+    """
     universe = Universe.objects.create(name=f"u-{name}", is_active=True)
     pf = Portfolio.objects.create(
         user=user, name=f"b-{name}", kind="strategy", cash_balance=Decimal("100000")
@@ -44,11 +54,20 @@ def _strategy(user, name, returns):
         universe=universe, portfolio=pf,
     )
     base = dt.date(2026, 1, 5)
-    for i, r in enumerate(returns):
+    ticker = name.replace("-", "").upper()[:16]
+    px = 100.0
+    for i, r in enumerate([*returns, "0.0"]):
+        close = Decimal(str(round(px, 4)))
+        DailyBar.objects.create(
+            ticker=ticker, date=base + dt.timedelta(days=i),
+            open=close, high=close, low=close, close=close, adjusted_close=close,
+            volume=1000, source="fmp",
+        )
+        px *= 1 + float(r) / 100.0
+    for i in range(len(returns)):
         PortfolioTarget.objects.create(
             strategy=s, as_of_date=base + dt.timedelta(days=i),
-            status=PortfolioTarget.DONE, target_weights={"AAPL": 0.1},
-            marked_snapshot={"since_as_of_pct": r},
+            status=PortfolioTarget.DONE, target_weights={ticker: 1.0},
         )
     return s
 
@@ -56,8 +75,8 @@ def _strategy(user, name, returns):
 def test_flavor_iqr_populated_with_multiple_strategies(user):
     # Two long/short strategies with different return profiles → the flavor row
     # gets a non-null Sharpe IQR (p25/p75), not just a median.
-    _strategy(user, "ls-a", ["1.0", "0.5", "1.5", "0.8"])
-    _strategy(user, "ls-b", ["-0.5", "2.0", "-1.0", "1.2"])
+    _strategy(user, "ls-a", ["1.0", "0.5", "1.5", "0.8", "-0.4"] * 5)
+    _strategy(user, "ls-b", ["-0.5", "2.0", "-1.0", "1.2", "0.3"] * 5)
     today = timezone.localdate()
     compute.recompute_strategies(today)
 
@@ -72,7 +91,7 @@ def test_flavor_iqr_populated_with_multiple_strategies(user):
 
 
 def test_flavor_iqr_null_with_single_strategy(user):
-    _strategy(user, "ls-solo", ["1.0", "0.5", "1.5"])
+    _strategy(user, "ls-solo", ["1.0", "0.5", "1.5", "-0.7", "0.2"] * 5)
     today = timezone.localdate()
     compute.recompute_strategies(today)
     flavor = StrategyScorecard.objects.get(
@@ -81,6 +100,32 @@ def test_flavor_iqr_null_with_single_strategy(user):
     )
     assert flavor.sharpe is not None  # median still computed
     assert flavor.sharpe_p25 is None and flavor.sharpe_p75 is None  # IQR needs ≥2
+
+
+def test_flavor_row_without_measurable_cycles_is_provisional_and_null(user):
+    """Wave 3: an unmeasurable flavor still gets an honest row rather than
+    vanishing — n strategies, no ratios."""
+    universe = Universe.objects.create(name="u-nobars", is_active=True)
+    pf = Portfolio.objects.create(
+        user=user, name="b-nobars", kind="strategy", cash_balance=Decimal("100000")
+    )
+    s = PortfolioStrategy.objects.create(
+        user=user, name="nobars", kind=PortfolioStrategy.KIND_LONG_ONLY,
+        universe=universe, portfolio=pf,
+    )
+    PortfolioTarget.objects.create(
+        strategy=s, as_of_date=dt.date(2026, 1, 5), status=PortfolioTarget.DONE,
+        target_weights={"NOBARS": 1.0},
+    )
+    today = timezone.localdate()
+    compute.recompute_strategies(today)
+    flavor = StrategyScorecard.objects.get(
+        strategy__isnull=True, flavor=PortfolioStrategy.KIND_LONG_ONLY,
+        window="lifetime", as_of=today,
+    )
+    assert flavor.n_cycles == 1 and flavor.n_observations == 0
+    assert flavor.sharpe is None and flavor.sortino is None
+    assert flavor.provisional is True
 
 
 # ---------- per-ticker throttle ----------

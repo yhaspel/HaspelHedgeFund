@@ -68,15 +68,31 @@ def _account(user, label="A", cash="100000"):
 
 def _real_validation_backtest(strategy):
     """A real-shaped DONE total-return-era backtest that clears the P10-hardened
-    §9 gate (positive mean-of-folds AND stitched Sharpe, DD within halt). This
-    is what seeds used to fabricate; post-§B3 only real runs open the gate."""
-    from apps.backtests.models import BacktestMetrics
+    §9 gate (positive mean-of-folds AND stitched Sharpe, DD within halt) *and*
+    the F18/G1 structural checks: the strategy's own universe, the engine its
+    kind trades live on, >=6 walk-forward folds and >=120 OOS sessions. This is
+    what seeds used to fabricate; post-§B3 only real runs open the gate."""
+    from apps.backtests.models import BacktestFold, BacktestMetrics
+    from apps.portfolios.validation import expected_engine_mode
 
+    tickers = list(
+        UniverseMembership.objects
+        .filter(universe=strategy.universe, effective_to__isnull=True)
+        .values_list("ticker", flat=True)
+    )
     bt = Backtest.objects.create(
         user=strategy.user, strategy=strategy, name="real validation WF",
-        start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 12, 31),
+        universe=tickers, engine_mode=expected_engine_mode(strategy),
+        start_date=dt.date(2022, 1, 3), end_date=dt.date(2025, 1, 3),
+        is_window_days=252, oos_window_days=63, step_days=63,
         status=Backtest.DONE,
     )
+    for i in range(6):
+        BacktestFold.objects.create(
+            backtest=bt, fold_index=i,
+            is_start=dt.date(2022, 1, 3), is_end=dt.date(2022, 12, 30),
+            oos_start=dt.date(2023, 1, 3), oos_end=dt.date(2023, 3, 31),
+        )
     BacktestMetrics.objects.create(
         backtest=bt, mean_oos_sharpe=Decimal("0.9"), sharpe=Decimal("0.7"),
         max_drawdown_pct=Decimal("4.0"),

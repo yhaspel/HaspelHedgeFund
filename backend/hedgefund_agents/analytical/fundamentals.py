@@ -77,10 +77,32 @@ def run_fundamentals(state: AgentState) -> AgentState:
     rows = state["data_provider"].get_fundamentals(
         ticker, METRICS, as_of=as_of, lookback_quarters=8
     )
+    if not rows:
+        # No statements at all (ETF, ADR, unknown ticker, thin FMP tier).
+        # Asking the LLM to "compute trailing ratios" off an empty table made it
+        # invent a full set of plausible numbers — a quality_score and an ROIC
+        # that then flowed to every persona as if measured. Technicals already
+        # guards this way (<30 bars → neutral, no LLM); do the same here.
+        out = FundamentalsOutput(
+            revenue_cagr_3y=0.0, gross_margin=0.0, operating_margin=0.0,
+            fcf_margin=0.0, roic=0.0, debt_to_equity=0.0, quality_score=0,
+            available=False,
+            notes=(
+                f"No financial statements available for {ticker} as of "
+                f"{as_of.isoformat()}; fundamentals not assessed. The numeric "
+                "fields are placeholders, not measurements."
+            ),
+        ).model_dump()
+        return {"fundamentals": out}  # type: ignore[return-value]
+
     table = _build_table(rows)
 
     # P4: best-effort, point-in-time institutional-ownership (13F) enrichment.
     ownership_block = ""
+    # WAVE-3 P2: the SEC bulk 13F fallback is gone, so an empty result means
+    # exactly one thing — the key is not FMP-Ultimate-entitled. Say so in the
+    # output instead of leaving the ownership fields silently at their defaults.
+    ownership_unavailable = False
     prov = state.get("ownership_provider")
     if prov is not None and getattr(settings, "FUNDAMENTALS_USE_13F", True):
         try:
@@ -89,6 +111,8 @@ def run_fundamentals(state: AgentState) -> AgentState:
             own = None
         if own is not None:
             ownership_block = _format_ownership_block(own)
+        else:
+            ownership_unavailable = True
 
     provider, model = pick_model(state, "fundamentals", DEFAULT_MODELS["fundamentals"])
     client = get_llm(provider, state=state)
@@ -130,6 +154,12 @@ def run_fundamentals(state: AgentState) -> AgentState:
         resp=resp,
     )
     result = parsed.model_dump()
+    if ownership_unavailable:
+        from apps.data.providers.ownership import NOT_ENTITLED_REASON
+
+        result["institutional_ownership_pct"] = None
+        result["institutional_ownership_trend"] = "unknown"
+        result["smart_money_note"] = NOT_ENTITLED_REASON
     # P5-SH WS1.4: replace the LLM's estimated revenue_cagr_3y with the exact
     # value computed from the revenue series. Falls back to the model's number
     # only when the series is too sparse/non-positive to compute deterministically.

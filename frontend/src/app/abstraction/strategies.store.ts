@@ -1,6 +1,8 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, catchError, finalize, of, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
+import { ExpectedVsRealized } from '../core/models/expected-vs-realized.model';
 import {
   CycleDetail,
   CycleEstimate,
@@ -11,6 +13,7 @@ import {
   EnrollmentResult,
   Portfolio,
   Position,
+  RunNowResponse,
   Strategy,
   Universe,
 } from '../core/models/strategy.model';
@@ -26,6 +29,10 @@ export class StrategiesStore {
   private readonly _currentStrategy = signal<Strategy | null>(null);
   private readonly _currentCycle = signal<CycleDetail | null>(null);
   private readonly _positions = signal<Position[]>([]);
+  // WAVE 3 — expected-vs-realized for the strategy currently on screen.
+  private readonly _evr = signal<ExpectedVsRealized | null>(null);
+  private readonly _evrLoading = signal(false);
+  private readonly _evrError = signal<string | null>(null);
 
   readonly strategies = this._strategies.asReadonly();
   readonly universes = this._universes.asReadonly();
@@ -34,6 +41,9 @@ export class StrategiesStore {
   readonly currentStrategy = this._currentStrategy.asReadonly();
   readonly currentCycle = this._currentCycle.asReadonly();
   readonly positions = this._positions.asReadonly();
+  readonly expectedVsRealized = this._evr.asReadonly();
+  readonly evrLoading = this._evrLoading.asReadonly();
+  readonly evrError = this._evrError.asReadonly();
 
   // P10 §D1: the server hides archived (is_active=false) strategies by
   // default; pass includeArchived to fetch everything (the list page does, so
@@ -82,10 +92,21 @@ export class StrategiesStore {
   estimateWith(id: number, body: CycleOverrideBody): Observable<CycleEstimate> {
     return this.api.post<CycleEstimate>(`/strategies/${id}/estimate/`, body);
   }
-  runNow(id: number, body: CycleOverrideBody = {}): Observable<{ task_id: string; status: string }> {
-    return this.api.post<{ task_id: string; status: string }>(
-      `/strategies/${id}/run-now/`, body,
-    );
+  /**
+   * POST /strategies/<id>/run-now/.
+   *
+   * Three success-ish shapes the UI has to tell apart:
+   *   • 202 `{task_id, status: "queued"}`     — a new cycle was dispatched
+   *   • 200 `{status: "reused", target_id}`   — a same-day DONE cycle already
+   *     exists and nothing was dispatched (the page must say so instead of
+   *     promising a refresh that will never produce a new row)
+   * Failures: 400 (bad / non-today as_of), 409 `{detail, autopilot_run_now}`.
+   */
+  runNow(
+    id: number,
+    body: CycleOverrideBody = {},
+  ): Observable<RunNowResponse> {
+    return this.api.post<RunNowResponse>(`/strategies/${id}/run-now/`, body);
   }
   /** P2l: approve a subset of the persisted screener candidates and dispatch
    *  the council chord. Returns the chord summary + cost estimate. */
@@ -176,6 +197,34 @@ export class StrategiesStore {
       }
     }));
   }
+  /**
+   * WAVE 3 — per-cycle realized vs the linked backtest's fold expectation.
+   * Failures land on `evrError` (the section renders <hf-error-state>) rather
+   * than blowing up the strategy detail page's other subscriptions.
+   */
+  loadExpectedVsRealized(strategyId: number): Observable<ExpectedVsRealized | null> {
+    this._evrLoading.set(true);
+    this._evrError.set(null);
+    return this.api
+      .get<ExpectedVsRealized>(`/strategies/${strategyId}/expected-vs-realized/`)
+      .pipe(
+        tap((r) => this._evr.set(r)),
+        catchError((err: unknown) => {
+          this._evr.set(null);
+          this._evrError.set(
+            apiErrorMessage(err, 'Could not load expected vs realized for this strategy.'),
+          );
+          return of(null);
+        }),
+        finalize(() => this._evrLoading.set(false)),
+      );
+  }
+
+  clearExpectedVsRealized(): void {
+    this._evr.set(null);
+    this._evrError.set(null);
+  }
+
   positionsFor(portfolioId: number): Observable<Position[]> {
     return this.api.get<Position[]>(`/portfolios/${portfolioId}/positions/`).pipe(
       tap((r) => this._positions.set(Array.isArray(r) ? r : [])),

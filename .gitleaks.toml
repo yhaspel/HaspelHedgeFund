@@ -16,6 +16,10 @@ regexes = [
   # Dev/test placeholder secrets — visibly insecure, never real.
   '''dev-insecure''',
   '''ci-e2e-lane-b-''',
+  # Signup-strength fixture: a made-up passphrase asserted to be ACCEPTED by the
+  # password validators (backend/tests/test_fix_b1_security_config.py). It has to
+  # look strong to do its job, which is what trips the entropy rule.
+  '''quiet-otter-marble-77''',
 ]
 paths = [
   # Template env file: placeholder values only; real secrets live in .env (gitignored).

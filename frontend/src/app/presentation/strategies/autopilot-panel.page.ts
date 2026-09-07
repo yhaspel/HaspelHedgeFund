@@ -1,12 +1,16 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FundStore } from '../../abstraction/fund.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { Autopilot, AutopilotRunRow } from '../../core/models/autopilot.model';
 import { AppShellComponent } from '../shared/app-shell.component';
+import { ConfirmService } from '../shared/confirm.service';
 import { PopoverComponent } from '../shared/popover.component';
+import { isOverdue, nextRunLabel, scheduleWithZone } from '../shared/schedule-format';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { Subscription } from 'rxjs';
 
 // P7 §14 — per-strategy autopilot panel: the validation-gate checklist that
 // unlocks the enable toggle, a prominent state chip, the guardrail config, and
@@ -139,7 +143,13 @@ import { PopoverComponent } from '../shared/popover.component';
             <button class="btn" (click)="runNow()" [disabled]="busy()">Run now</button>
           }
           @if (a.next_run_at) {
-            <span class="next">Next run: {{ a.next_run_at | date: 'EEE MMM d, HH:mm' }}</span>
+            <!-- Rendered in the AUTOPILOT's zone with a date and a zone label,
+                 so it agrees with the cron description above it. -->
+            <span class="next" data-test="next-run"
+                  [class.overdue]="isOverdue(a.next_run_at)"
+                  [title]="scheduleWithZone(a.cron_description, a.timezone)">
+              {{ nextRunLabel(a.next_run_at, a.timezone) }}
+            </span>
           }
           @if (notice()) {
             <span class="notice">{{ notice() }}</span>
@@ -541,6 +551,11 @@ import { PopoverComponent } from '../shared/popover.component';
         color: var(--text-3);
         font-size: 12px;
       }
+      /* A next_run_at in the past means the scheduler missed it. */
+      .controls .next.overdue {
+        color: var(--acc-short-fg);
+        font-weight: 600;
+      }
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -695,10 +710,15 @@ import { PopoverComponent } from '../shared/popover.component';
     `,
   ],
 })
-export class AutopilotPanelPage implements OnInit {
+export class AutopilotPanelPage implements OnInit, OnDestroy {
   private readonly store = inject(FundStore);
   private readonly models = inject(ModelsStore);
   private readonly route = inject(ActivatedRoute);
+  private readonly confirm = inject(ConfirmService);
+  private paramSub: Subscription | null = null;
+  readonly nextRunLabel = nextRunLabel;
+  readonly scheduleWithZone = scheduleWithZone;
+  readonly isOverdue = (iso: string | null | undefined) => isOverdue(iso);
   readonly ap = this.store.autopilot;
   readonly runs = this.store.history; // AutopilotRunRow[]
   readonly book = this.store.executed; // ExecutedBook | null
@@ -756,9 +776,28 @@ export class AutopilotPanelPage implements OnInit {
   schedDom = 1; // day of month (monthly)
   schedTime = '16:30'; // HH:MM in the account timezone
 
+  /**
+   * Follow the :id instead of snapshotting it — the component instance is
+   * reused across /strategies/1/autopilot → /strategies/2/autopilot, so a
+   * snapshot read left strategy 1's guardrails and run history under
+   * strategy 2's url (and Save would have written them to the wrong strategy).
+   */
   ngOnInit(): void {
-    this.strategyId = Number(this.route.snapshot.paramMap.get('id'));
-    this.reload();
+    this.paramSub = this.route.paramMap.subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!id || id === this.strategyId) return;
+      this.strategyId = id;
+      this.form = {};
+      this.notice.set(null);
+      this.bookError.set(false);
+      this.councilModels.set([]);
+      this.reload();
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.paramSub?.unsubscribe();
+    this.paramSub = null;
   }
 
   private reload(): void {
@@ -858,9 +897,13 @@ export class AutopilotPanelPage implements OnInit {
     });
   }
 
+  /**
+   * Surface what the backend actually said. Resume can 409 ("member of a
+   * halted fund"), run-now can 400/409 — a flat "Request failed." hid the one
+   * sentence that tells the user what to do next.
+   */
   private errMsg(e: unknown): string {
-    const err = e as { error?: { detail?: string } };
-    return err?.error?.detail ?? 'Request failed.';
+    return apiErrorMessage(e, 'Request failed.');
   }
 
   // Compact, total-defensive one-line summaries of the run-control audit. Both
@@ -893,16 +936,51 @@ export class AutopilotPanelPage implements OnInit {
   enable(): void {
     this.run(this.store.enable(this.strategyId), 'Autopilot enabled.');
   }
-  disable(): void {
+
+  /**
+   * Disable / Resume / Run now all change what a LIVE paper account does with
+   * real orders, so each states its concrete consequence before it fires.
+   * (Enable already has the validation gate + its own explicit toggle.)
+   */
+  async disable(): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: 'Disable autopilot?',
+      body:
+        'Scheduled cycles stop immediately — no new orders will be placed for this strategy. '
+        + 'Positions already open stay open and are NOT flattened. You can re-enable at any time.',
+      confirmLabel: 'Disable autopilot',
+      danger: true,
+    });
+    if (!ok) return;
     this.run(this.store.disable(this.strategyId), 'Autopilot disabled.');
   }
-  resume(): void {
+
+  async resume(): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: 'Resume this autopilot?',
+      body:
+        'The drawdown halt is cleared and the peak equity is REBASED to today\'s NAV, so the '
+        + 'drawdown breaker measures from here rather than the old high-water mark. '
+        + 'Scheduled cycles resume and can place live paper orders on the next tick.',
+      confirmLabel: 'Resume (rebases peak)',
+    });
+    if (!ok) return;
     this.run(
       this.store.resume(this.strategyId),
-      'Un-halted — re-checks drawdown on the next tick.',
+      'Un-halted — peak rebased to today\'s NAV; re-checks drawdown on the next tick.',
     );
   }
-  runNow(): void {
+
+  async runNow(): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: 'Run a cycle now?',
+      body:
+        'This runs the council immediately and submits the resulting orders to the linked '
+        + 'paper brokerage account — outside the schedule, and with no further confirmation. '
+        + 'It also bills the LLM cost to your account.',
+      confirmLabel: 'Run now and submit orders',
+    });
+    if (!ok) return;
     this.run(this.store.runNow(this.strategyId), 'Cycle queued.', () => this.loadAudit());
   }
   save(): void {

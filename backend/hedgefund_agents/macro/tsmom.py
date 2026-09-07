@@ -28,7 +28,17 @@ def tsmom_score(ticker: str, as_of: date, data_provider) -> dict:
         bars = data_provider.get_daily_bars(ticker, start=start, end=as_of, as_of=as_of) or []
     except Exception:  # noqa: BLE001 — trend is best-effort
         return neutral
-    closes = [float(b.close) for b in bars if getattr(b, "close", None)]
+    # Total-return series: ``adjusted_close`` matches the Markov classifier and
+    # the backtest engine (which credits dividend cash). Reading raw ``close``
+    # made a ~4%-yield bond ETF's flat price year read "flat" here while the
+    # same year is +4% everywhere else — the posture the council is told about
+    # flipped on the dividend alone. Falls back to ``close`` for providers or
+    # fixtures that do not populate the adjusted field.
+    closes = [
+        float(getattr(b, "adjusted_close", None) or b.close)
+        for b in bars
+        if (getattr(b, "adjusted_close", None) or getattr(b, "close", None))
+    ]
     if len(closes) < 22:  # need at least the 1-month leg
         return neutral
 

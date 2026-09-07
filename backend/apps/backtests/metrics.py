@@ -361,7 +361,13 @@ def compute_stitched_metrics(bt, fold_records, agent_outputs_cache=None) -> dict
     oos_s = [float(f.oos_sharpe) for f in fold_records if f.oos_sharpe is not None]
     mean_is = statistics.fmean(is_s) if is_s else 0.0
     mean_oos = statistics.fmean(oos_s) if oos_s else 0.0
-    deflation = (mean_oos / mean_is) if mean_is != 0 else 0.0
+    # IS→OOS haircut. Divide by |mean_is| so the ratio keeps the SIGN of the OOS
+    # Sharpe: the old `mean_oos / mean_is` was sign-blind, and a strategy that
+    # was worse out of sample than in sample with both negative (IS -0.5, OOS
+    # -2.0) reported "4x better OOS" and cleared the red-flag check. 1.0 still
+    # means "OOS held up", < 0.3 is still the red flag, and a negative OOS
+    # Sharpe now always lands below it.
+    deflation = (mean_oos / abs(mean_is)) if mean_is != 0 else 0.0
     oos_std = statistics.pstdev(oos_s) if len(oos_s) >= 2 else 0.0
 
     # Turnover: |fill notional|/equity per day, summed and annualized.

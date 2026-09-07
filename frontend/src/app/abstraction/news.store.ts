@@ -10,9 +10,11 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, of, shareReplay, tap } from 'rxjs';
 
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
 import {
   MarketNewsItem,
   NewsFeed,
+  NewsLlmStatus,
   NewsPreferences,
   NewsPreferencesResponse,
   SentimentModelChoice,
@@ -38,6 +40,10 @@ export class NewsStore {
   private readonly _refreshing = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _toast = signal<string | null>(null);
+  /** WAVE 3 — BYOK / daily-cap state, served by BOTH /feed/ and /preferences/. */
+  private readonly _llmStatus = signal<NewsLlmStatus | null>(null);
+  /** The 400 `detail` from the last rejected preferences save (non-selectable model). */
+  private readonly _saveError = signal<string | null>(null);
 
   private _feedFetchedAt = 0;
   private _feedInFlight: Observable<NewsFeed> | null = null;
@@ -56,6 +62,19 @@ export class NewsStore {
   readonly refreshing = this._refreshing.asReadonly();
   readonly error = this._error.asReadonly();
   readonly toast = this._toast.asReadonly();
+  readonly llmStatus = this._llmStatus.asReadonly();
+  readonly saveError = this._saveError.asReadonly();
+
+  /**
+   * The one-line explanation for why sentiment/translation is skipped, or null
+   * when the features are running. Rendered ONCE on the news page — a skipped
+   * LLM pass is not a broken feed.
+   */
+  readonly llmSkipReason = computed(() => {
+    const s = this._llmStatus();
+    if (!s || s.allowed) return null;
+    return s.reason ?? 'AI features are unavailable right now.';
+  });
 
   /** Top N items for the global chyron — first page's first slice. */
   readonly chyronItems = computed(() => {
@@ -181,6 +200,7 @@ export class NewsStore {
 
   private _applyPage(feed: NewsFeed, append: boolean): void {
     this._meta.set(feed);
+    if (feed.llm_status) this._llmStatus.set(feed.llm_status);
     this._page.set(feed.page);
     this._hasMore.set(feed.has_more);
     this._totalAvailable.set(feed.total_available);
@@ -204,6 +224,7 @@ export class NewsStore {
             this._preferences.set(r.preferences);
             this._sentimentChoices.set(r.sentiment_model_choices);
             this._translationChoices.set(r.translation_model_choices);
+            if (r.llm_status) this._llmStatus.set(r.llm_status);
             this._prefsInFlight = null;
           },
           error: () => {
@@ -220,6 +241,7 @@ export class NewsStore {
   ): Observable<NewsPreferencesResponse> {
     const prev = this._preferences();
     if (prev) this._preferences.set({ ...prev, ...patch });
+    this._saveError.set(null);
     return this.api
       .put<NewsPreferencesResponse>('/news/preferences/', patch)
       .pipe(
@@ -228,15 +250,18 @@ export class NewsStore {
             this._preferences.set(r.preferences);
             this._sentimentChoices.set(r.sentiment_model_choices);
             this._translationChoices.set(r.translation_model_choices);
+            if (r.llm_status) this._llmStatus.set(r.llm_status);
+            this._saveError.set(null);
             // Force the next feed-load to refetch (chyron/feed may change).
             this._feedFetchedAt = 0;
           },
           error: (err) => {
             if (prev) this._preferences.set(prev);
-            const msg =
-              err?.error?.detail ||
-              err?.message ||
-              'Failed to save settings.';
+            // WAVE 3: picking a non-selectable model is a 400 `{detail}` that
+            // names the model and the fix — never swallow it behind a generic
+            // "Failed to save".
+            const msg = apiErrorMessage(err, 'Failed to save settings.');
+            this._saveError.set(msg);
             this._error.set(msg);
           },
         }),

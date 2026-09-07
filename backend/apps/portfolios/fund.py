@@ -30,6 +30,7 @@ from django.utils import timezone
 from apps.schedules.triggers import describe_cron
 
 from . import sleeves
+from .autopilot_audit import last_caps_shadow
 from .models import AutonomousFund, AutopilotRun, StrategyAutopilot
 from .validation import validation_status
 
@@ -255,7 +256,15 @@ def fund_overview(fund: AutonomousFund) -> dict:
             "peak_equity": str(ap.peak_equity_usd) if (ap and ap.peak_equity_usd) else None,
             "rolling_sharpe": _sharpe(rets[-13:]) if len(rets) >= 2 else None,
             "next_run_at": ap.next_run_at.isoformat() if (ap and ap.next_run_at) else None,
+            # next_run_at stays UTC; this is the zone the cron is interpreted in,
+            # so the UI can render "Fri 16:30 America/New_York" honestly.
+            "timezone": ap.timezone if ap else None,
             "cron_description": describe_cron(ap.cron_expression) if ap else None,
+            # Shadow-mode daily caps from the member's last run (never blocking).
+            "caps_shadow": last_caps_shadow(ap) if ap is not None else None,
+            # §9 evidence-fit checks. Blocking for a NEW enable (enable_gate);
+            # advisory here — a running pod is never auto-disabled by them.
+            "validation_warnings": validation_status(s).get("warnings", []),
             # Run vs Re-run verb. Any linked backtest (any status) counts — distinct
             # from validation_passed, which gates the §9 enable toggle.
             "has_backtest": Backtest.objects.filter(strategy=s).exists(),
@@ -366,6 +375,20 @@ def halt_fund(fund: AutonomousFund, *, reason: str = "manual") -> int:
         state=StrategyAutopilot.STATE_HALTED, updated_at=timezone.now(),
     )
     log.warning("fund halted fund=%s reason=%s members=%s", fund.id, reason, n)
+    # Wave 3: the kill switch had NO persisted record — only this log line — so
+    # the activity feed could never show the single most important fund event.
+    from .fund_activity import record_fund_event
+    from .models import FundEvent
+
+    record_fund_event(
+        fund, FundEvent.KIND_FUND_HALT, f"Fund halted ({reason})",
+        severity=FundEvent.SEVERITY_ERROR,
+        detail=(
+            f"{n} member(s) moved to halted. Nothing trades until "
+            "POST /api/fund/resume/ acknowledges it."
+        ),
+        payload={"reason": reason, "members_halted": n},
+    )
     return n
 
 
@@ -409,8 +432,21 @@ def resume_fund(fund: AutonomousFund) -> dict:
         "fund resumed fund=%s peak_rebased_to=%s members_resumed=%s",
         fund.id, fund.peak_equity_usd, accounts_resumed,
     )
+    peak = str(fund.peak_equity_usd) if fund.peak_equity_usd is not None else None
+    from .fund_activity import record_fund_event
+    from .models import FundEvent
+
+    record_fund_event(
+        fund, FundEvent.KIND_FUND_RESUME, "Fund resumed",
+        severity=FundEvent.SEVERITY_WARN,
+        detail=(
+            f"{accounts_resumed} member(s) un-halted; drawdown peaks rebased to "
+            f"{peak or 'unvalued (re-seeds at the next evaluation)'}."
+        ),
+        payload={"accounts_resumed": accounts_resumed, "peak_rebased_to": peak},
+    )
     return {
         "state": fund.state,
         "accounts_resumed": accounts_resumed,
-        "peak_rebased_to": str(fund.peak_equity_usd) if fund.peak_equity_usd is not None else None,
+        "peak_rebased_to": peak,
     }

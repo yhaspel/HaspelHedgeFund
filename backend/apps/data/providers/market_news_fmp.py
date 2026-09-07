@@ -14,6 +14,7 @@ providers.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 import httpx
 from django.conf import settings
@@ -23,6 +24,8 @@ from ._http import make_client
 
 FMP_BASE = "https://financialmodelingprep.com/stable"
 RETENTION_DAYS = 7
+
+log = logging.getLogger(__name__)
 
 
 def _parse_pub(raw: str) -> dt.datetime | None:
@@ -105,6 +108,8 @@ class MarketNewsFmpProvider:
         """Pull both general-latest and stock-latest, map to ``MarketNewsItem``."""
         retention_cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=RETENTION_DAYS)
         out: list[MarketNewsItem] = []
+        self.warnings: list[str] = []
+        failures = 0
 
         for path, is_stock in (
             ("/news/general-latest", False),
@@ -112,10 +117,21 @@ class MarketNewsFmpProvider:
         ):
             try:
                 rows = self._fetch_endpoint(path, limit)
-            except Exception:
-                # One sub-feed failing must not block the other; surface via
-                # the aggregator's warnings on raise.
-                raise
+            except Exception as exc:  # noqa: BLE001 — one sub-feed must not kill the other
+                # This used to `raise`, discarding the second sub-feed entirely
+                # (contradicting the comment that said otherwise): a 402 on
+                # general-latest meant "no FMP market news at all".
+                failures += 1
+                self.warnings.append(f"{self.name}:{path}: {type(exc).__name__}")
+                log.warning(
+                    "market_news_fmp subfeed_failed path=%s err=%s: %s",
+                    path, type(exc).__name__, exc,
+                )
+                if failures == 2:
+                    # Both sub-feeds down: this is a real provider outage, so
+                    # let the aggregator record it as such.
+                    raise
+                continue
             for item in rows:
                 headline = (item.get("title") or "").strip()
                 url = (item.get("url") or "").strip()

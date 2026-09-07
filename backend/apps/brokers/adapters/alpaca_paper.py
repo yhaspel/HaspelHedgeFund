@@ -214,24 +214,57 @@ class _RateLimiter:
         self._lock = threading.Lock()
 
     def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            while self._stamps and now - self._stamps[0] > self.window_s:
-                self._stamps.popleft()
-            if len(self._stamps) >= self.max_calls:
-                sleep_for = self.window_s - (now - self._stamps[0]) + 0.01
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
+        """Block until a call slot is free.
+
+        The wait happens OUTSIDE the lock: sleeping while holding it serialized
+        every other thread behind the one waiter (a single throttled Celery
+        worker stalled the web process's manual sync for a whole window), and
+        the sleeping thread's slot was never actually reserved anyway."""
+        while True:
+            with self._lock:
                 now = time.monotonic()
                 while self._stamps and now - self._stamps[0] > self.window_s:
                     self._stamps.popleft()
-            self._stamps.append(now)
+                if len(self._stamps) < self.max_calls:
+                    self._stamps.append(now)
+                    return
+                sleep_for = self.window_s - (now - self._stamps[0]) + 0.01
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
 
 _LIMITER = _RateLimiter(max_calls=180, window_s=60.0)
 
 
 # --- SDK client construction -------------------------------------------------
+
+
+# alpaca-py never passes `timeout=` to requests, so a hung socket blocks the
+# calling worker forever — a gunicorn worker on a manual sync, a Celery worker
+# on the 30 s poll. (connect, read) seconds, applied to the SDK's own session.
+HTTP_TIMEOUT: tuple[float, float] = (10.0, 30.0)
+
+
+def _apply_http_timeout(client):
+    """Force a (connect, read) timeout onto the SDK client's requests session.
+
+    The SDK calls `self._session.request(method, url, **opts)` and never sets
+    `timeout`, so we wrap the session's `request` and inject a default. Done on
+    the session (not per call) so every present and future SDK endpoint is
+    covered. Idempotent — re-wrapping a session is a no-op."""
+    session = getattr(client, "_session", None)
+    if session is None or getattr(session, "_hhf_timeout_applied", False):
+        return client
+    inner = session.request
+
+    def _request_with_timeout(*args, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = HTTP_TIMEOUT
+        return inner(*args, **kwargs)
+
+    session.request = _request_with_timeout
+    session._hhf_timeout_applied = True
+    return client
 
 
 def _make_client(api_key: str, api_secret: str):
@@ -245,8 +278,8 @@ def _make_client(api_key: str, api_secret: str):
     # paper=True is the only path. url_override is never set — that
     # parameter could be used to point at the live host, so we don't
     # expose it through any code path. ADR 0013 §1.
-    return TradingClient(
-        api_key=api_key, secret_key=api_secret, paper=True,
+    return _apply_http_timeout(
+        TradingClient(api_key=api_key, secret_key=api_secret, paper=True),
     )
 
 
@@ -277,15 +310,17 @@ def _alpaca_error_code(exc: Exception) -> int | None:
     arriving as a string."""
     import json
 
-    # ``APIError.code`` is a PROPERTY doing ``self._error["code"]``, so it raises
-    # KeyError — not AttributeError — when the body carries no ``code``. Alpaca's
-    # auth failures are a bare ``{"message": "unauthorized."}``, and getattr's
-    # default only swallows AttributeError, so an unguarded read escaped this
-    # helper and killed _raise_translated before it could reach the 401/403 arm:
-    # the account stayed `active` instead of flipping to needs_reauth.
+    # ``APIError.code`` is a PROPERTY doing ``json.loads(self._error)["code"]``,
+    # so it raises KeyError when the body carries no ``code`` and
+    # json.JSONDecodeError (a ValueError) when the body is not JSON at all —
+    # neither of which getattr's default swallows (it only covers
+    # AttributeError). An unguarded read escaped this helper and killed
+    # _raise_translated before it could reach the 401/403 arm (the account
+    # stayed `active` instead of flipping to needs_reauth), and a proxy's HTML
+    # error page blew up the same way one function over.
     try:
         code = _coerce_int(getattr(exc, "code", None))
-    except (KeyError, AttributeError, TypeError):
+    except (KeyError, AttributeError, TypeError, ValueError):
         code = None
     if code is not None:
         return code
@@ -303,41 +338,128 @@ def _alpaca_error_code(exc: Exception) -> int | None:
     return None
 
 
+def _error_text(exc: Exception, limit: int = 200) -> str:
+    """The raw error body, truncated. Never raises: an APIError whose body is
+    an HTML proxy page has no ``.message``/``.code`` to read (both properties
+    json.loads the body), so we fall back to ``str(exc)``."""
+    try:
+        text = str(getattr(exc, "message", None) or exc)
+    except Exception:  # noqa: BLE001 — the property itself is what failed
+        text = str(exc)
+    text = " ".join(text.split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
 def _raise_translated(exc: Exception, op: str) -> None:
-    """Translate Alpaca SDK errors into framework exceptions."""
+    """Translate Alpaca SDK errors into framework exceptions.
+
+    Definitive (`BrokerError` / `BrokerAuthError`) vs transient
+    (`BrokerTransientError`) is the whole point: a definitive answer terminates
+    the order, a transient one must leave its state alone and be retried. This
+    function must NEVER raise anything else — a body it cannot parse is exactly
+    the case where a raised `KeyError`/`JSONDecodeError` stranded the order
+    between two arms of the state machine.
+    """
     # Lazy import so the SDK isn't loaded at module import time.
     from alpaca.common.exceptions import APIError
 
     if isinstance(exc, APIError):
         status_code = getattr(exc, "status_code", None) or 0
         code = _alpaca_error_code(exc)
+        body = _error_text(exc)
         # An order-domain 403 (e.g. insufficient qty) is the venue refusing the
         # ORDER, not an auth failure — classify as a hard rejection so it
         # terminates rather than walking back to a never-retried `confirmed`.
         if status_code == 403 and code in _ORDER_REJECT_403_CODES:
-            raise BrokerError(f"Alpaca {op} → {status_code}: {exc}") from exc
+            raise BrokerError(f"Alpaca {op} → {status_code}: {body}") from exc
         if status_code in (401, 403):
-            raise BrokerAuthError(f"Alpaca {op} → {status_code}: {exc}") from exc
-        if status_code >= 500:
-            raise BrokerTransientError(f"Alpaca {op} → {status_code}: {exc}") from exc
-        raise BrokerError(f"Alpaca {op} → {status_code}: {exc}") from exc
+            raise BrokerAuthError(f"Alpaca {op} → {status_code}: {body}") from exc
+        # 429 (throttled) and 5xx (upstream) are retryable by definition.
+        if status_code == 429 or status_code >= 500:
+            raise BrokerTransientError(f"Alpaca {op} → {status_code}: {body}") from exc
+        if code is None:
+            # A 4xx we cannot parse is NOT a documented venue rejection — it is
+            # an HTML error page from a proxy/CDN in front of Alpaca, or a
+            # truncated body. Treating it as definitive rejected live orders
+            # that the venue had actually accepted, so classify it as transient
+            # and let the reconcile loop ask the venue what really happened.
+            raise BrokerTransientError(
+                f"Alpaca {op} → {status_code} (unparseable body): {body}",
+            ) from exc
+        raise BrokerError(f"Alpaca {op} → {status_code}: {body}") from exc
     raise BrokerTransientError(f"Alpaca {op} failed: {exc}") from exc
 
 
 def _is_duplicate_client_order_id(exc: Exception) -> bool:
     """Alpaca rejects a second POST /v2/orders with the same
     client_order_id with HTTP 422 and a message like 'client_order_id
-    must be unique'. Match defensively on both signals."""
+    must be unique'. Match defensively on both signals.
+
+    Must never raise: `APIError.message` is a property that json.loads the
+    body, so a non-JSON 422 (HTML error page) used to blow up here — before
+    either the transient or the rejection arm of the submit state machine could
+    run — and left the order stuck in `submit_pending` forever."""
     from alpaca.common.exceptions import APIError
 
     if not isinstance(exc, APIError):
         return False
     if getattr(exc, "status_code", None) != 422:
         return False
-    msg = str(getattr(exc, "message", None) or exc).lower()
+    msg = _error_text(exc, limit=2000).lower()
     return "client_order_id" in msg and (
         "unique" in msg or "exists" in msg or "duplicate" in msg
     )
+
+
+def _is_transient(exc: Exception) -> bool:
+    """True when `exc` says nothing definitive about the request's outcome."""
+    from alpaca.common.exceptions import APIError
+
+    if not isinstance(exc, APIError):
+        return True  # socket timeout, connection reset, DNS…
+    status_code = getattr(exc, "status_code", None) or 0
+    if status_code == 429 or status_code >= 500:
+        return True
+    # A 4xx whose body carries no Alpaca error code is a proxy/CDN page, not a
+    # documented venue rejection.
+    return 400 <= status_code < 500 and _alpaca_error_code(exc) is None
+
+
+# Transient failures are retried in place with a short exponential backoff, so
+# a single throttle or upstream blip doesn't cost a whole 30 s poll cycle.
+# READ-ONLY calls only: a retried POST is Alpaca's own idempotency problem
+# (client_order_id → 422), handled in `_do_submit`.
+TRANSIENT_RETRIES = 2
+TRANSIENT_BACKOFF_S = 0.5
+
+
+def _read_call(op: str, fn, *, none_on_404: bool = False):
+    """Run a read-only Alpaca call under the rate limiter, retrying transient
+    failures with backoff and translating whatever survives."""
+    from alpaca.common.exceptions import APIError
+
+    retries = TRANSIENT_RETRIES
+    delay = TRANSIENT_BACKOFF_S
+    for attempt in range(retries + 1):
+        _LIMITER.acquire()
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — classified below
+            if (
+                none_on_404
+                and isinstance(exc, APIError)
+                and getattr(exc, "status_code", None) == 404
+            ):
+                return None
+            if attempt >= retries or not _is_transient(exc):
+                _raise_translated(exc, op)
+            log.warning(
+                "Alpaca %s transient failure (%s) — retry %d/%d in %.1fs",
+                op, _error_text(exc, limit=120), attempt + 1, retries, delay,
+            )
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 # --- The adapter ------------------------------------------------------------
@@ -354,11 +476,7 @@ class AlpacaPaperBroker:
     # -- get_account ------------------------------------------------------
 
     def get_account(self) -> AccountSnapshot:
-        _LIMITER.acquire()
-        try:
-            row = self._client.get_account()
-        except Exception as exc:  # noqa: BLE001
-            _raise_translated(exc, "get_account")
+        row = _read_call("get_account", self._client.get_account)
         cash = _dec(getattr(row, "cash", None))
         bp = _dec(getattr(row, "buying_power", None)) or cash
         equity = _dec(getattr(row, "equity", None)) or cash
@@ -377,11 +495,7 @@ class AlpacaPaperBroker:
     # -- get_positions ----------------------------------------------------
 
     def get_positions(self) -> list[PositionSnapshot]:
-        _LIMITER.acquire()
-        try:
-            rows = self._client.get_all_positions() or []
-        except Exception as exc:  # noqa: BLE001
-            _raise_translated(exc, "get_all_positions")
+        rows = _read_call("get_all_positions", self._client.get_all_positions) or []
         out: list[PositionSnapshot] = []
         for row in rows:
             ticker = (getattr(row, "symbol", "") or "").upper()
@@ -416,14 +530,12 @@ class AlpacaPaperBroker:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
-        _LIMITER.acquire()
         req = GetOrdersRequest(
             status=QueryOrderStatus.CLOSED, after=since, limit=500,
         )
-        try:
-            rows = self._client.get_orders(filter=req) or []
-        except Exception as exc:  # noqa: BLE001
-            _raise_translated(exc, "get_orders(closed)")
+        rows = _read_call(
+            "get_orders(closed)", lambda: self._client.get_orders(filter=req),
+        ) or []
         fills: list[FillSnapshot] = []
         for row in rows:
             filled_qty = _dec(getattr(row, "filled_qty", None))
@@ -465,12 +577,11 @@ class AlpacaPaperBroker:
         Zero/None equity points (pre-funding placeholders) are dropped."""
         from alpaca.trading.requests import GetPortfolioHistoryRequest
 
-        _LIMITER.acquire()
         req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
-        try:
-            hist = self._client.get_portfolio_history(history_filter=req)
-        except Exception as exc:  # noqa: BLE001
-            _raise_translated(exc, "get_portfolio_history")
+        hist = _read_call(
+            "get_portfolio_history",
+            lambda: self._client.get_portfolio_history(history_filter=req),
+        )
         stamps = list(getattr(hist, "timestamp", None) or [])
         equities = list(getattr(hist, "equity", None) or [])
         out: list[tuple[datetime, Decimal]] = []
@@ -480,7 +591,7 @@ class AlpacaPaperBroker:
             # The endpoint returns epoch SECONDS; tolerate datetimes/strings too.
             when = (
                 datetime.fromtimestamp(ts, tz=UTC)
-                if isinstance(ts, (int, float))
+                if isinstance(ts, int | float)
                 else _to_dt(ts)
             )
             out.append((when, _dec(eq)))
@@ -652,11 +763,10 @@ class AlpacaPaperBroker:
     # -- get_order --------------------------------------------------------
 
     def get_order(self, broker_order_id: str) -> OrderSnapshot:
-        _LIMITER.acquire()
-        try:
-            order = self._client.get_order_by_id(order_id=broker_order_id)
-        except Exception as exc:  # noqa: BLE001
-            _raise_translated(exc, f"get_order_by_id({broker_order_id})")
+        order = _read_call(
+            f"get_order_by_id({broker_order_id})",
+            lambda: self._client.get_order_by_id(order_id=broker_order_id),
+        )
         return self._snapshot_from_order(order)
 
     # -- cancel_order -----------------------------------------------------
@@ -679,19 +789,15 @@ class AlpacaPaperBroker:
         """Native lookup: Alpaca echoes our `client_order_id` and exposes
         `GET /v2/orders:by_client_order_id`. `order_meta` is ignored —
         Alpaca has a real broker-side client id (see ADR 0012)."""
-        _LIMITER.acquire()
-        try:
-            # SDK uses positional `client_id` arg (not `client_order_id`),
-            # despite the corresponding submit_order field being named
-            # `client_order_id`. Verified against alpaca-py 0.43.4 via the
-            # live-sandbox checklist.
-            order = self._client.get_order_by_client_id(client_order_id)
-        except Exception as exc:  # noqa: BLE001
-            from alpaca.common.exceptions import APIError
-
-            if isinstance(exc, APIError) and getattr(exc, "status_code", None) == 404:
-                return None
-            _raise_translated(exc, f"get_order_by_client_id({client_order_id})")
+        # SDK uses positional `client_id` arg (not `client_order_id`), despite
+        # the corresponding submit_order field being named `client_order_id`.
+        # Verified against alpaca-py 0.43.4 via the live-sandbox checklist.
+        # A 404 means "Alpaca has no such order" — an ANSWER, not a failure.
+        order = _read_call(
+            f"get_order_by_client_id({client_order_id})",
+            lambda: self._client.get_order_by_client_id(client_order_id),
+            none_on_404=True,
+        )
         if order is None:
             return None
         return self._snapshot_from_order(order)
@@ -779,7 +885,7 @@ def _to_raw(obj: Any) -> dict:
 
 
 def _json_safe(v: Any) -> Any:
-    if isinstance(v, (str, int, float, bool)) or v is None:
+    if isinstance(v, str | int | float | bool) or v is None:
         return v
     if isinstance(v, Decimal):
         return str(v)
@@ -787,7 +893,7 @@ def _json_safe(v: Any) -> Any:
         return v.isoformat()
     if hasattr(v, "value"):
         return v.value
-    if isinstance(v, (list, tuple)):
+    if isinstance(v, list | tuple):
         return [_json_safe(x) for x in v]
     if isinstance(v, dict):
         return {str(k): _json_safe(val) for k, val in v.items()}

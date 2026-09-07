@@ -308,8 +308,14 @@ export const INFO_GUIDES: InfoGuide[] = [
 /**
  * Maps a `StrategyKind` to its guide slug.
  * Convention: `strategy-${kind.replaceAll('_','-')}`.
+ *
+ * WAVE 3: PARTIAL on purpose. The deterministic kinds (`trend`,
+ * `sector_momentum`, `news_sentiment`) and the `xsec_long_short` scaffolding
+ * kind have no `/info` topic written yet, and linking to a slug with no topic
+ * behind it would 404. Call sites hide the "read the guide" link when the
+ * lookup is undefined; the in-form description still explains the kind.
  */
-export const STRATEGY_KIND_GUIDE: Record<StrategyKind, string> = {
+export const STRATEGY_KIND_GUIDE: Partial<Record<StrategyKind, string>> = {
   long_only: 'strategy-long-only',
   short_only: 'strategy-short-only',
   long_short: 'strategy-long-short',

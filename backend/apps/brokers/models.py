@@ -304,6 +304,11 @@ class BrokerOrder(models.Model):
         "portfolios.FundSleeve", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="broker_orders",
     )
+    # Stamped immediately BEFORE the broker call (idempotency.submit_*). Every
+    # grace window that asks "how long has this been in flight?" measures from
+    # here, never from ``created_at`` — a pending_open order created Friday and
+    # released Tuesday is seconds old as a submission, not days.
+    submit_attempted_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     filled_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)

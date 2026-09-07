@@ -120,8 +120,11 @@ def _cached_edgar() -> EdgarProvider:
 
 @lru_cache(maxsize=128)
 def _cached_ownership(user_id: int | None, api_key: str) -> OwnershipResolver:
+    # WAVE-3 P2: no EDGAR leg any more — the bulk 13F path it fell back to was
+    # dead end-to-end and has been deleted. Without an FMP key the resolver
+    # simply returns None and callers say "requires FMP Ultimate".
     fmp = FmpProvider(api_key=api_key or None) if api_key else None
-    return OwnershipResolver(fmp=fmp, edgar=_cached_edgar())
+    return OwnershipResolver(fmp=fmp)
 
 
 # ---------------------------------------------------------------------------
@@ -238,11 +241,12 @@ def get_edgar_provider() -> EdgarProvider:
 
 
 def get_ownership_provider(user: Any = None) -> OwnershipResolver:
-    """Build the 13F ownership resolver (FMP-if-entitled-else-EDGAR).
+    """Build the 13F ownership resolver (FMP Ultimate, or nothing).
 
     Resolves the FMP key like ``get_fmp_provider``; a missing key (the
-    ``RuntimeError`` from ``_resolve_data_key``) yields ``fmp=None`` so the
-    resolver runs EDGAR-only. EDGAR (User-Agent only) is always attached.
+    ``RuntimeError`` from ``_resolve_data_key``) yields ``fmp=None``, and the
+    resolver then returns ``None`` for every lookup — the SEC bulk 13F
+    fallback it used to have was deleted in WAVE-3 P2.
     ``lru_cache``d on ``(user_id, api_key)`` exactly like ``_cached_fmp``.
     """
     key = ""

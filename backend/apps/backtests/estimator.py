@@ -27,7 +27,20 @@ from .engine import rebalance_dates_for
 
 ANALYTICAL_AGENTS = ["fundamentals", "technicals", "valuation", "sentiment"]
 PIPELINE_AGENTS = ["macro", "news_digest", "risk_manager", "portfolio_manager"]
-# CIO is skipped in backtests (engine.py sets disable_cio=True).
+# What the council graph ACTUALLY issues per (ticker, rebalance-day) prime:
+#   * the 4 analytical nodes + every selected persona + news_digest +
+#     risk_manager                                   → one call each, per prime
+#   * macro                                          → ONE call per unique
+#     as_of_date (MacroSnapshot cache, macro_agent.py) — NOT per ticker
+#   * portfolio_manager                              → ZERO LLM calls; the PM
+#     node is a deterministic aggregate() (portfolio_manager.py)
+#   * cio                                            → one per prime, and only
+#     when the run opts in (Backtest.disable_cio=False; default is skipped)
+# Billing macro per ticker and portfolio_manager at all overstated every
+# estimate by (2 − 1/n_universe) calls per prime.
+PER_PRIME_PIPELINE_AGENTS = ["news_digest", "risk_manager"]
+PER_DAY_AGENTS = ["macro"]
+NON_LLM_AGENTS = ["portfolio_manager"]
 
 # Fallback per-call cost ($) if no historical LLMCall rows exist for an agent.
 # Tuned to Haiku 4.5 averages observed in P2c smoke runs.
@@ -116,37 +129,53 @@ def estimate_cost(
     personas: list[str] | None = None,
     model_overrides: dict[str, str] | None = None,
     max_budget_usd: Decimal | float | None = None,
+    disable_cio: bool = True,
 ) -> dict[str, Any]:
-    universe_list = list(universe)
-    overrides = model_overrides or {}
-    selected_personas = list(personas or ALL_PERSONAS)
+    universe_list = [str(t) for t in universe]
+    if not isinstance(model_overrides, dict) and model_overrides is not None:
+        raise TypeError("model_overrides must be an object mapping agent -> 'provider:model'")
+    overrides = {
+        str(k): v for k, v in (model_overrides or {}).items() if isinstance(v, str)
+    }
+    selected_personas = [str(p) for p in (personas or ALL_PERSONAS)]
     days = _trading_days(universe_list, start_date, end_date)
     rebal_days = sorted(rebalance_dates_for(days, rebalance_frequency))
-    n_invocations = len(rebal_days) * len(universe_list)
+    # One "prime" = one (ticker, rebalance-day) graph invocation. The prime phase
+    # walks the WHOLE master window once, so this is the unique ticker-day count
+    # across every fold — never a per-fold constant.
+    n_primes = len(rebal_days) * len(universe_list)
+    n_invocations = n_primes
 
     agent_lines: list[dict[str, Any]] = []
     total_cost = 0.0
     max_latency_per_inv = 0.0  # parallel fan-out → longest single call dominates
     sequential_latency_per_inv = 0.0  # personas + analytical + pipeline are gated
 
-    agents_with_role = [
-        (a, False) for a in ANALYTICAL_AGENTS
-    ] + [
-        (p, True) for p in selected_personas
-    ] + [
-        (a, False) for a in PIPELINE_AGENTS
-    ]
-    for agent, is_persona in agents_with_role:
+    # (agent, is_persona, n_calls)
+    agents_with_role: list[tuple[str, bool, int]] = (
+        [(a, False, n_primes) for a in ANALYTICAL_AGENTS]
+        + [(p, True, n_primes) for p in selected_personas]
+        + [(a, False, n_primes) for a in PER_PRIME_PIPELINE_AGENTS]
+        + [(a, False, len(rebal_days)) for a in PER_DAY_AGENTS]
+    )
+    if not disable_cio:
+        agents_with_role.append(("cio", False, n_primes))
+    n_llm_calls = sum(n for _a, _p, n in agents_with_role)
+
+    for agent, is_persona, n_calls in agents_with_role:
         provider, model = _resolve_model(agent, overrides)
         cpc = _per_call_cost(agent, provider, model, is_persona)
-        agent_cost = cpc * n_invocations
+        agent_cost = cpc * n_calls
         total_cost += agent_cost
         lat = _avg_latency_for(agent, model) or FALLBACK_LATENCY_MS
         max_latency_per_inv = max(max_latency_per_inv, lat)
-        sequential_latency_per_inv += lat
+        # Amortize an agent that does not run on every prime (macro is cached per
+        # as_of_date) over the primes it does not gate.
+        sequential_latency_per_inv += lat * (n_calls / max(1, n_primes))
         agent_lines.append({
             "agent": agent, "model": f"{provider}:{model}",
             "per_call_usd": round(cpc, 5),
+            "n_calls": n_calls,
             "total_usd": round(agent_cost, 4),
         })
 
@@ -162,8 +191,11 @@ def estimate_cost(
         "n_trading_days": len(days),
         "n_rebalance_days": len(rebal_days),
         "n_universe": len(universe_list),
+        # n_primes == n_invocations; both are exposed because the UI labels the
+        # prime phase separately from the per-agent call count.
+        "n_primes": n_primes,
         "n_invocations": n_invocations,
-        "n_llm_calls": n_invocations * len(agents_with_role),
+        "n_llm_calls": n_llm_calls,
         "est_total_usd": round(total_cost, 2),
         "est_minutes_optimistic": round(est_minutes_optimistic, 1),
         "est_minutes_upper": round(est_minutes_upper, 1),

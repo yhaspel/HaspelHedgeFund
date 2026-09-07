@@ -49,12 +49,21 @@ test.describe('WS-5 · Backtests', () => {
     await expect(backtests.page.getByText('18.50%')).toBeVisible();
   });
 
+  // WAVE 3: the comparison is a panel on the detail page (inside the app
+  // shell), not a bare route of its own.
   test('BT-07 compare — overlay two backtests + metrics table', async ({ backtests }) => {
     await backtests.gotoCompare(24);
-    await expect(backtests.page.getByRole('heading', { name: 'Compare backtests' })).toBeVisible();
+    await expect(backtests.comparePanel()).toBeVisible();
     await backtests.compareBSelect().selectOption({ index: 1 });
     await expect(backtests.metricsTable()).toBeVisible();
     await expect(backtests.page.getByText('Mean OOS Sharpe')).toBeVisible();
+  });
+
+  test('BT-07b compare — the legacy /compare route still resolves', async ({ backtests }) => {
+    await backtests.gotoLegacyCompare(24);
+    // Redirected onto the detail page with the panel already open — never a 404.
+    await expect(backtests.comparePanel()).toBeVisible();
+    await expect(backtests.page).toHaveURL(/\/backtests\/24\?compare=/);
   });
 
   test('BT-08 detail — 500 degrades gracefully', async ({ backtests, apiMock }) => {
