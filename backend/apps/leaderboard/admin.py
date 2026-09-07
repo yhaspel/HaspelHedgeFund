@@ -6,10 +6,10 @@ from .models import AgentScorecard, ModelScorecard, StrategyScorecard
 @admin.register(AgentScorecard)
 class AgentScorecardAdmin(admin.ModelAdmin):
     list_display = (
-        "agent_name", "model_id", "window", "as_of", "hit_rate",
-        "n_directional", "provisional",
+        "agent_name", "model_id", "user", "window", "as_of", "hit_rate",
+        "n_directional", "provisional", "metrics_version",
     )
-    list_filter = ("window", "provisional")
+    list_filter = ("window", "provisional", "metrics_version")
 
 
 @admin.register(ModelScorecard)
@@ -23,5 +23,8 @@ class ModelScorecardAdmin(admin.ModelAdmin):
 
 @admin.register(StrategyScorecard)
 class StrategyScorecardAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "flavor", "window", "as_of", "sharpe", "n_cycles", "provisional")
-    list_filter = ("window", "flavor", "provisional")
+    list_display = (
+        "__str__", "user", "flavor", "window", "as_of", "sharpe", "n_cycles",
+        "n_observations", "provisional", "metrics_version",
+    )
+    list_filter = ("window", "flavor", "provisional", "metrics_version")

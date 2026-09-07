@@ -2,18 +2,37 @@
 
 Agents: per-persona signal accuracy (hit-rate + Brier vs the forward N-day
 return) plus a PnL column folded in from backtest per-agent attribution.
-Strategies: rolling Sharpe/Sortino/drawdown/hit-rate/turnover/$-per-cycle from
-``PortfolioTarget.marked_snapshot``, plus per-flavor median aggregates.
+Strategies: rolling Sharpe/Sortino/drawdown/hit-rate/turnover/$-per-cycle over
+**disjoint** holding intervals (see ``period_returns``), plus per-flavor median
+aggregates.
 
-Statistical honesty: Wilson CIs on hit-rate, and a ``provisional`` flag for
-low-sample rows (agents < 30 decisions, strategies < 20 cycles).
+Statistical honesty (wave 3, WP P1)
+-----------------------------------
+* Strategy return series come from DISJOINT intervals (cycle N -> cycle N+1),
+  never from chained cumulative-since-inception windows.
+* Ratios annualise by the OBSERVED cadence (median gap between cycles), not a
+  hard-coded 252.
+* Below ``MIN_CYCLES`` observations a row is ``provisional`` and its
+  ``sharpe`` / ``sortino`` / ``annualised_return_pct`` are ``None`` — a Sharpe
+  from 13 points is not a Sharpe. ``n_cycles``, ``total_return_pct``,
+  ``hit_rate`` and ``max_drawdown_pct`` survive (they are meaningful at small n).
+* Sortino is bounded: fewer than ``MIN_NEGATIVE_OBS`` negative periods, or a
+  zero downside deviation, yields ``None`` + a ``sortino_note``; anything past
+  ``SORTINO_CAP`` is capped and says so.
+* Agent decisions are deduped (one per agent/version/model/ticker/as_of — 30
+  re-runs of one call are one observation) and thinned to NON-OVERLAPPING
+  forward windows before any rate or mean is taken.
+* Every decimal written is clamped to what its column can hold, so an extreme
+  input can never abort the nightly recompute mid-flight.
 """
 from __future__ import annotations
 
 import datetime as dt
+import math
 import statistics
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
+from django.db import models
 from django.db.models import Avg, Count, Sum
 from django.utils import timezone
 
@@ -27,8 +46,17 @@ from apps.runs.models import AgentMessage, Run
 from hedgefund_agents.models import LLMCall
 
 from .council_alpha import BASELINE_VERSION
-from .forward_returns import DEFAULT_FORWARD_DAYS, brier, forward_return, wilson_interval
-from .models import AgentScorecard, ModelScorecard, StrategyScorecard
+from .forward_returns import DEFAULT_FORWARD_DAYS, batch_forward_returns, brier, wilson_interval
+from .models import METRICS_VERSION, AgentScorecard, ModelScorecard, StrategyScorecard
+from .period_returns import (
+    DAYS_PER_YEAR,
+    Period,
+    PriceBook,
+    elapsed_days,
+    period_returns,
+    periods_per_year,
+    price_book_for,
+)
 
 WINDOWS_AGENT = {"30d": 30, "90d": 90, "lifetime": None}
 WINDOWS_STRATEGY = {"30d": 30, "90d": 90, "ytd": "ytd", "lifetime": None}
@@ -39,7 +67,14 @@ MIN_CYCLES = 20
 # baseline). Below this, council_alpha_bps stays null and the UI shows "needs
 # 30 days of baseline".
 MIN_COUNCIL_ALPHA_CYCLES = 30
-# Per-cycle ratios annualize assuming ~daily cycles. Surfaced as a UI caveat.
+# A Sortino needs a downside to divide by. With fewer than this many negative
+# periods the denominator is an artefact of the sample, not a risk estimate —
+# production showed Sortino 911.38 from 13 overlapping points.
+MIN_NEGATIVE_OBS = 3
+# Hard ceilings so no ratio is ever presentable as a plausible-looking number.
+SORTINO_CAP = 20.0
+SHARPE_CAP = 20.0
+# Fallback cadence when a strategy has cycles but no measurable gaps.
 ANNUALIZE_CYCLES = 252
 
 
@@ -55,6 +90,52 @@ def _dec2(v):
 
 def _dec6(v):
     return Decimal(str(round(v, 6))) if v is not None else None
+
+
+_FIELD_BOUNDS: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
+
+
+def _bounds_for(model, name: str) -> tuple[Decimal, Decimal] | None:
+    key = (model.__name__, name)
+    if key not in _FIELD_BOUNDS:
+        try:
+            field = model._meta.get_field(name)
+        except Exception:  # pragma: no cover — defensive
+            return None
+        if not isinstance(field, models.DecimalField):
+            _FIELD_BOUNDS[key] = None  # type: ignore[assignment]
+        else:
+            step = Decimal(1).scaleb(-field.decimal_places)
+            cap = Decimal(10) ** (field.max_digits - field.decimal_places) - step
+            _FIELD_BOUNDS[key] = (step, cap)
+    return _FIELD_BOUNDS[key]
+
+
+def _fit_decimals(model, values: dict) -> dict:
+    """Quantize + clamp every DecimalField value to what its column can hold.
+
+    The review's F-overflow finding: a perfectly ordinary 6% mean "cycle return"
+    annualised to 2.38e8 %, which does not fit ``NUMERIC(12,4)``. On Postgres the
+    INSERT raised ``numeric field overflow`` — *after* ``recompute_strategies``
+    had already deleted the day's rows, so the nightly task left the leaderboard
+    empty; on the read side Django's converter raised ``InvalidOperation`` and
+    every leaderboard GET 500'd. Clamping at the write boundary makes that class
+    of failure impossible for every column at once.
+    """
+    out = dict(values)
+    for name, raw in values.items():
+        if raw is None:
+            continue
+        bounds = _bounds_for(model, name)
+        if not bounds:
+            continue
+        step, cap = bounds
+        try:
+            dec = Decimal(str(raw)).quantize(step, rounding=ROUND_HALF_UP)
+        except Exception:  # pragma: no cover — non-numeric value
+            continue
+        out[name] = max(-cap, min(cap, dec))
+    return out
 
 
 def _cutoff(window_days, today: dt.date):
@@ -83,20 +164,74 @@ def _role_for(agent: str) -> str:
     return agent
 
 
+# ---- ratio primitives (cadence-aware, bounded) ----
+
+def _sharpe(rets: list[float], ppy: float) -> float | None:
+    """Annualised Sharpe from a DISJOINT return series. None when undefined."""
+    if len(rets) < 2:
+        return None
+    sd = statistics.pstdev(rets)
+    if sd <= 0:
+        return None
+    value = statistics.fmean(rets) / sd * math.sqrt(ppy)
+    if not math.isfinite(value):
+        return None
+    return max(-SHARPE_CAP, min(SHARPE_CAP, value))
+
+
+def _sortino(rets: list[float], ppy: float) -> tuple[float | None, str]:
+    """Annualised Sortino, or ``(None, why)``.
+
+    Zero (or near-zero) downside deviation is the failure mode that produced
+    911.38 in production: with 13 overlapping, almost-always-positive points the
+    denominator collapses and the ratio explodes. A Sortino is only quoted when
+    there is a real downside to divide by.
+    """
+    if len(rets) < 2:
+        return None, "not enough observations"
+    negatives = [r for r in rets if r < 0]
+    if len(negatives) < MIN_NEGATIVE_OBS:
+        return None, f"fewer than {MIN_NEGATIVE_OBS} negative periods"
+    downside = math.sqrt(statistics.fmean([min(0.0, r) ** 2 for r in rets]))
+    if downside <= 0:
+        return None, "no measurable downside deviation"
+    value = statistics.fmean(rets) / downside * math.sqrt(ppy)
+    if not math.isfinite(value):
+        return None, "not finite"
+    if abs(value) > SORTINO_CAP:
+        return math.copysign(SORTINO_CAP, value), f"capped at ±{SORTINO_CAP:g}"
+    return value, ""
+
+
 # ---- agents ----
 
-def _agent_pnl_bps(agent: str) -> float | None:
+def _agent_pnl_bps(agent: str, model_id: str) -> float | None:
     """Mean per-agent PnL contribution (bps of starting NAV) across backtests
-    whose attribution covers this agent. None when no backtest covers it."""
+    whose attribution covers this agent **on this model**.
+
+    Wave 3: the old version keyed on the agent alone, so one persona's number
+    was repeated verbatim on every model row it appeared under (production
+    showed lynch = −29.69 bps on four different models — a per-strategy constant
+    masquerading as per-model attribution). A backtest records the model it ran
+    each agent under in ``Backtest.model_overrides``; only matching runs may be
+    attributed to a model row. No matching backtest => ``None``, not a borrowed
+    number.
+    """
     vals = []
     qs = BacktestMetrics.objects.exclude(per_agent_attribution={}).select_related("backtest")
     for m in qs.iterator():
         attr = m.per_agent_attribution or {}
         if agent not in attr:
             continue
+        backtest = m.backtest
+        if backtest is None:
+            continue
+        bt_model = (getattr(backtest, "model_overrides", None) or {}).get(agent, "")
+        if (bt_model or "") != (model_id or ""):
+            continue
         try:
             dollars = float(attr[agent])
-            cash = float(m.backtest.starting_cash or 0)
+            cash = float(backtest.starting_cash or 0)
         except (TypeError, ValueError, AttributeError):
             continue
         if cash > 0:
@@ -104,13 +239,58 @@ def _agent_pnl_bps(agent: str) -> float | None:
     return statistics.fmean(vals) if vals else None
 
 
-def _collect_agent_decisions(cutoff, forward_days: int) -> list[dict]:
+def _thin_to_disjoint(rows: list[dict], forward_days: int) -> list[dict]:
+    """Keep only decisions whose forward windows do NOT overlap.
+
+    Two calls on the same ticker three days apart are scored over two
+    5-trading-day windows that share four of their days: they are one
+    observation of the market dressed up as two. Greedily keep the earliest
+    decision per (agent, version, model, ticker) and skip any later one whose
+    window would still be open. Different tickers never conflict.
+    """
+    if forward_days <= 0:
+        return rows
+    # ~7 calendar days per 5 trading days.
+    span = dt.timedelta(days=max(1, math.ceil(forward_days * 7 / 5)))
+    last_kept: dict[tuple, dt.date] = {}
+    out: list[dict] = []
+    for row in sorted(rows, key=lambda r: (r["as_of_date"], r["run_id"])):
+        key = (
+            row["user_id"], row["agent"], row["version"], row["model"], row["ticker"],
+        )
+        previous = last_kept.get(key)
+        if previous is not None and row["as_of_date"] < previous + span:
+            continue
+        last_kept[key] = row["as_of_date"]
+        out.append(row)
+    return out
+
+
+def _collect_agent_decisions(
+    cutoff, forward_days: int, *, user=None
+) -> list[dict]:
+    """Persona decisions to score, deduped and thinned to disjoint windows.
+
+    Windowing is on ``run.as_of_date`` (the date the call is ABOUT), not
+    ``run.created_at``: a run backdated years via the user-settable
+    ``as_of_date`` used to land in the 30d window and be graded against a
+    forward return its model may well have memorised (F-hindsight). It is now
+    scored in the window it actually belongs to.
+
+    Deduplication: one decision per (user, agent, version, model, ticker,
+    as_of_date), keeping the FIRST run. Re-running the same ticker/date thirty
+    times is one observation, not thirty (F-rerun-gaming: the Wilson CI used to
+    narrow and ``provisional`` flipped off from a single real call).
+    """
     qs = AgentMessage.objects.filter(
         agent_name__in=PERSONA_AGENTS, run__status=Run.DONE
     ).select_related("run")
     if cutoff:
-        qs = qs.filter(run__created_at__date__gte=cutoff)
-    out = []
+        qs = qs.filter(run__as_of_date__gte=cutoff)
+    if user is not None:
+        qs = qs.filter(run__user=user)
+
+    raw: list[dict] = []
     for m in qs.iterator():
         run = m.run
         if not run.tickers:
@@ -119,26 +299,49 @@ def _collect_agent_decisions(cutoff, forward_days: int) -> list[dict]:
         sig = po.get("signal")
         if sig not in ("bullish", "neutral", "bearish"):
             continue
-        ret = forward_return(run.tickers[0], run.as_of_date, forward_days)
-        if ret is None:
-            continue
-        directional = sig in ("bullish", "bearish")
-        hit = None
-        signed = 0.0
-        if directional:
-            hit = (sig == "bullish" and ret > 0) or (sig == "bearish" and ret < 0)
-            signed = ret if sig == "bullish" else -ret
-        out.append({
+        raw.append({
             "run_id": run.id,
+            "user_id": run.user_id,
+            "ticker": str(run.tickers[0]).upper(),
+            "as_of_date": run.as_of_date,
             "signal": sig,
             "agent": m.agent_name,
             "version": (run.agent_versions or {}).get(m.agent_name, ""),
             "model": (run.model_overrides or {}).get(m.agent_name, ""),
             "conf": int(po.get("confidence", 0) or 0),
-            "ret": signed,
-            "hit": hit,
-            "directional": directional,
+            "directional": sig in ("bullish", "bearish"),
         })
+    if not raw:
+        return []
+
+    # Consensus is read from the FULL set (before dedup) so a persona's
+    # "contrarian" status still reflects the council it actually sat on.
+    _annotate_contrarian(raw)
+
+    deduped: dict[tuple, dict] = {}
+    for row in sorted(raw, key=lambda r: (r["run_id"],)):
+        key = (row["user_id"], row["agent"], row["version"], row["model"],
+               row["ticker"], row["as_of_date"])
+        deduped.setdefault(key, row)
+    rows = _thin_to_disjoint(list(deduped.values()), forward_days)
+
+    # One query for every forward return (F-n+1).
+    returns = batch_forward_returns(
+        [(r["ticker"], r["as_of_date"]) for r in rows], forward_days
+    )
+    out: list[dict] = []
+    for row in rows:
+        ret = returns.get((row["ticker"], row["as_of_date"]))
+        if ret is None:
+            continue
+        hit = None
+        signed = 0.0
+        if row["directional"]:
+            sig = row["signal"]
+            hit = (sig == "bullish" and ret > 0) or (sig == "bearish" and ret < 0)
+            signed = ret if sig == "bullish" else -ret
+        out.append({**row, "ret": signed, "hit": hit})
+    out.sort(key=lambda r: (r["as_of_date"], r["run_id"]))
     return out
 
 
@@ -162,16 +365,18 @@ def _annotate_contrarian(decisions: list[dict]) -> None:
 
 def recompute_agents(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -> None:
     AgentScorecard.objects.filter(as_of=today).delete()
-    pnl_cache: dict[str, float | None] = {}
+    pnl_cache: dict[tuple[str, str], float | None] = {}
     for window, days in WINDOWS_AGENT.items():
         decisions = _collect_agent_decisions(_cutoff(days, today), forward_days)
-        _annotate_contrarian(decisions)
         groups: dict[tuple, list] = {}
         for d in decisions:
-            groups.setdefault((d["agent"], d["version"], d["model"]), []).append(d)
-        for (agent, version, model), rows in groups.items():
-            if agent not in pnl_cache:
-                pnl_cache[agent] = _agent_pnl_bps(agent)
+            groups.setdefault(
+                (d["user_id"], d["agent"], d["version"], d["model"]), []
+            ).append(d)
+        for (user_id, agent, version, model), rows in groups.items():
+            pnl_key = (agent, model)
+            if pnl_key not in pnl_cache:
+                pnl_cache[pnl_key] = _agent_pnl_bps(agent, model)
             directional = [r for r in rows if r["directional"]]
             nd = len(directional)
             hits = sum(1 for r in directional if r["hit"])
@@ -189,19 +394,22 @@ def recompute_agents(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -
             c_hits = sum(1 for r in contrarian if r["hit"])
             c_hit_rate = c_hits / nc if nc else None
             c_ci_low, c_ci_high = wilson_interval(c_hits, nc) if nc else (None, None)
-            AgentScorecard.objects.create(
-                agent_name=agent, agent_version=version, model_id=model,
-                window=window, as_of=today, n_decisions=len(rows), n_directional=nd,
-                hit_rate=_dec4(hit_rate), hit_rate_ci_low=_dec4(ci_low),
-                hit_rate_ci_high=_dec4(ci_high), brier_score=_dec4(brier_score),
-                avg_forward_return_bps=_dec2(avg_ret_bps),
-                pnl_contribution_bps=_dec2(pnl_cache[agent]),
-                n_contrarian_decisions=nc,
-                contrarian_hit_rate=_dec4(c_hit_rate),
-                contrarian_hit_rate_ci_low=_dec4(c_ci_low),
-                contrarian_hit_rate_ci_high=_dec4(c_ci_high),
-                provisional=nd < MIN_DECISIONS,
-            )
+            AgentScorecard.objects.create(**_fit_decimals(AgentScorecard, {
+                "user_id": user_id,
+                "agent_name": agent, "agent_version": version, "model_id": model,
+                "window": window, "as_of": today,
+                "n_decisions": len(rows), "n_directional": nd,
+                "hit_rate": hit_rate, "hit_rate_ci_low": ci_low,
+                "hit_rate_ci_high": ci_high, "brier_score": brier_score,
+                "avg_forward_return_bps": avg_ret_bps,
+                "pnl_contribution_bps": pnl_cache[pnl_key],
+                "n_contrarian_decisions": nc,
+                "contrarian_hit_rate": c_hit_rate,
+                "contrarian_hit_rate_ci_low": c_ci_low,
+                "contrarian_hit_rate_ci_high": c_ci_high,
+                "provisional": nd < MIN_DECISIONS,
+                "metrics_version": METRICS_VERSION,
+            }))
 
 
 # ---- models ----
@@ -236,33 +444,22 @@ def recompute_models(today: dt.date, forward_days: int = DEFAULT_FORWARD_DAYS) -
                 avg_ret_bps = statistics.fmean(ret_by_model[model]) * 10000
                 if avg_cost and avg_cost > 0:
                     cost_adj = avg_ret_bps / avg_cost
-            ModelScorecard.objects.create(
-                model_id=model, agent_role=role, window=window, as_of=today,
-                n_decisions=n, avg_cost_per_decision_usd=_dec6(avg_cost),
-                avg_forward_return_bps=_dec2(avg_ret_bps),
-                cost_adjusted_return_bps=_dec2(cost_adj),
-                provisional=n < MIN_DECISIONS,
-            )
+            ModelScorecard.objects.create(**_fit_decimals(ModelScorecard, {
+                "model_id": model, "agent_role": role, "window": window, "as_of": today,
+                "n_decisions": n, "avg_cost_per_decision_usd": avg_cost,
+                "avg_forward_return_bps": avg_ret_bps,
+                "cost_adjusted_return_bps": cost_adj,
+                "provisional": n < MIN_DECISIONS,
+            }))
 
 
 # ---- strategies ----
 
-def _cycle_returns(targets) -> list[float]:
-    rets = []
-    for t in targets:
-        v = (t.marked_snapshot or {}).get("since_as_of_pct")
-        if v in (None, "", "None"):
-            continue
-        try:
-            rets.append(float(v) / 100.0)
-        except (TypeError, ValueError):
-            continue
-    return rets
-
-
 def _avg_turnover(targets) -> float | None:
     """Mean per-cycle one-way turnover (fraction of NAV) from target_weight
-    deltas between consecutive cycles. Weights are signed percent."""
+    deltas between consecutive cycles. ``target_weights`` are SIGNED FRACTIONS
+    of NAV (``cycle_mark`` multiplies them by 100 to get percentage points), so
+    the one-way turnover is ``Σ|Δw| / 2`` — no extra /100."""
     weights = [t.target_weights or {} for t in targets]
     if len(weights) < 2:
         return None
@@ -270,11 +467,101 @@ def _avg_turnover(targets) -> float | None:
     for prev, cur in zip(weights, weights[1:], strict=False):
         keys = set(prev) | set(cur)
         delta = sum(abs(float(cur.get(k, 0)) - float(prev.get(k, 0))) for k in keys)
-        turns.append(delta / 2.0 / 100.0)
+        turns.append(delta / 2.0)
     return statistics.fmean(turns) if turns else None
 
 
+def _metrics_from_periods(periods: list[Period]) -> dict | None:
+    """Sharpe/Sortino/max-DD/hit-rate/CAGR from a DISJOINT return series.
+
+    Returns ``None`` only when there is nothing at all to report. Below
+    ``MIN_CYCLES`` observations the row is ``provisional`` and every ratio is
+    ``None`` — the sample cannot support one.
+    """
+    if not periods:
+        return None
+    rets = [p.ret for p in periods]
+    equity = [1.0]
+    for r in rets:
+        equity.append(equity[-1] * (1 + r))
+    n = len(rets)
+    ppy = periods_per_year(periods) or float(ANNUALIZE_CYCLES)
+    span_days = elapsed_days(periods)
+    provisional = n < MIN_CYCLES
+
+    total = equity[-1] - 1.0
+    out = {
+        "n": n,
+        "ppy": ppy,
+        "span_days": span_days,
+        "total": total,
+        "dd": drawdown_pct(equity),
+        "hit": hit_rate_fn(rets),
+        "sharpe": None,
+        "sortino": None,
+        "sortino_note": "",
+        "ann": None,
+        "provisional": provisional,
+    }
+    if provisional:
+        out["sortino_note"] = f"fewer than {MIN_CYCLES} observations"
+        return out
+
+    out["sharpe"] = _sharpe(rets, ppy)
+    out["sortino"], out["sortino_note"] = _sortino(rets, ppy)
+    # CAGR over the calendar time the series actually covers — not
+    # ``(1 + mean) ** 252``, which turned a 6% mean into 2.38e8 %.
+    if span_days > 0 and total > -1.0:
+        try:
+            out["ann"] = (1.0 + total) ** (DAYS_PER_YEAR / span_days) - 1.0
+        except (OverflowError, ValueError):  # pragma: no cover — defensive
+            out["ann"] = None
+    return out
+
+
+
+def _strategy_nav(portfolio, prices: PriceBook | None = None) -> float:
+    """Book EQUITY (cash + marked positions), not the cash balance.
+
+    ``council_net_value_usd`` used to multiply the window's excess return by
+    ``portfolio.cash_balance``. For an invested book that is the small residual
+    left over after buying, so a fully-invested $100k book with $10k of cash
+    reported a tenth of the dollars the council actually produced (or
+    destroyed). Positions are marked at their latest daily close and fall back
+    to ``avg_cost`` when no bar is cached.
+    """
+    if portfolio is None:
+        return 0.0
+    cash = float(getattr(portfolio, "cash_balance", 0) or 0)
+    positions = list(portfolio.positions.all())
+    if not positions:
+        return cash
+    if prices is None:
+        prices = PriceBook(
+            [p.ticker for p in positions],
+            timezone.localdate() - dt.timedelta(days=365),
+            timezone.localdate(),
+        )
+    today = timezone.localdate()
+    equity = cash
+    for pos in positions:
+        try:
+            qty = float(pos.quantity or 0)
+            cost = float(pos.avg_cost or 0)
+        except (TypeError, ValueError):  # pragma: no cover — defensive
+            continue
+        px = prices.close_on_or_before(pos.ticker, today)
+        equity += qty * (px if px is not None else cost)
+    return equity
+
+
 def _metrics_from_returns(rets: list[float]) -> dict | None:
+    """Legacy per-cycle metric bundle, kept ONLY for the council-alpha path.
+
+    ``rets`` here are the paired realised/baseline ``since_as_of_pct`` values,
+    whose overlap largely cancels in the realised−baseline difference. Strategy
+    scorecards no longer go through here — see ``_metrics_from_periods``.
+    """
     if len(rets) < 2:
         return None
     equity = [1.0]
@@ -350,6 +637,10 @@ def _council_alpha(targets, nav: float, council_cost: float) -> dict:
     Alpha/value stay null until ≥ MIN_COUNCIL_ALPHA_CYCLES paired cycles exist
     (short windows are too noisy — plan risk #6). ``cost_usd`` is always
     surfaced so the UI can show "cost $Y" even before alpha is meaningful.
+
+    ``nav`` is now book EQUITY (see ``_strategy_nav``); it used to be the cash
+    balance, which understated the council's dollar value by the invested
+    fraction of the book.
     """
     out = {"alpha_bps": None, "net_value_usd": None, "cost_usd": council_cost}
     realised, baseline = _paired_returns(targets)
@@ -376,49 +667,64 @@ def recompute_strategies(today: dt.date) -> None:
         .select_related("portfolio")
         .iterator()
     ):
+        all_targets = list(
+            PortfolioTarget.objects.filter(strategy=s, status=PortfolioTarget.DONE)
+            .order_by("as_of_date")
+        )
+        # One price query per strategy, shared by every window and by the
+        # council-alpha legs.
+        prices = price_book_for(all_targets, today, "target_weights", "baseline_weights")
+        nav = _strategy_nav(getattr(s, "portfolio", None))
         for window, days in WINDOWS_STRATEGY.items():
             cutoff = _cutoff(days, today)
-            tq = PortfolioTarget.objects.filter(
-                strategy=s, status=PortfolioTarget.DONE
-            ).order_by("as_of_date")
-            if cutoff:
-                tq = tq.filter(as_of_date__gte=cutoff)
-            targets = list(tq)
+            targets = (
+                [t for t in all_targets if t.as_of_date >= cutoff] if cutoff else all_targets
+            )
             n = len(targets)
-            m = _metrics_from_returns(_cycle_returns(targets))
+            periods = period_returns(targets, end_date=today, prices=prices)
+            m = _metrics_from_periods(periods)
             turnover = _avg_turnover(targets)
             cost_total = LLMCall.objects.filter(portfolio_target__strategy=s)
             if cutoff:
                 cost_total = cost_total.filter(created_at__date__gte=cutoff)
             cost_sum = float(cost_total.aggregate(s=Sum("cost_usd"))["s"] or 0)
             avg_cost = cost_sum / n if n else None
-            nav = float(getattr(s.portfolio, "cash_balance", 0) or 0)
             ca = _council_alpha(targets, nav, cost_sum)
-            StrategyScorecard.objects.create(
-                strategy=s, flavor=s.kind, window=window, as_of=today, n_cycles=n,
-                total_return_pct=_dec2(m["total"] * 100) if m else None,
-                annualised_return_pct=_dec2(m["ann"] * 100) if m else None,
-                sharpe=_dec4(m["sharpe"]) if m else None,
-                sortino=_dec4(m["sortino"]) if m else None,
-                max_drawdown_pct=_dec2(m["dd"] * 100) if m else None,
-                hit_rate=_dec4(m["hit"]) if m else None,
-                annualised_turnover_pct=(
-                    _dec2(turnover * ANNUALIZE_CYCLES * 100) if turnover is not None else None
+            ppy = m["ppy"] if m else None
+            StrategyScorecard.objects.create(**_fit_decimals(StrategyScorecard, {
+                "strategy": s, "user_id": s.user_id, "flavor": s.kind,
+                "window": window, "as_of": today,
+                "n_cycles": n,
+                "n_observations": m["n"] if m else 0,
+                "periods_per_year": ppy,
+                "total_return_pct": m["total"] * 100 if m else None,
+                "annualised_return_pct": m["ann"] * 100 if m and m["ann"] is not None else None,
+                "sharpe": m["sharpe"] if m else None,
+                "sortino": m["sortino"] if m else None,
+                "sortino_note": (m["sortino_note"] if m else "no priced observations"),
+                "max_drawdown_pct": m["dd"] * 100 if m else None,
+                "hit_rate": m["hit"] if m else None,
+                "annualised_turnover_pct": (
+                    turnover * (ppy or ANNUALIZE_CYCLES) * 100 if turnover is not None else None
                 ),
-                avg_cost_per_cycle_usd=_dec2(avg_cost),
-                council_alpha_bps=_dec2(ca["alpha_bps"]),
-                council_cost_usd=_dec2(ca["cost_usd"]),
-                council_net_value_usd=_dec2(ca["net_value_usd"]),
-                baseline_version=BASELINE_VERSION,
-                provisional=n < MIN_CYCLES,
-            )
-            by_flavor.setdefault((s.kind, window), []).append(m)
+                "avg_cost_per_cycle_usd": avg_cost,
+                "council_alpha_bps": ca["alpha_bps"],
+                "council_cost_usd": ca["cost_usd"],
+                "council_net_value_usd": ca["net_value_usd"],
+                "baseline_version": BASELINE_VERSION,
+                "provisional": (m or {}).get("provisional", True),
+                "metrics_version": METRICS_VERSION,
+            }))
+            by_flavor.setdefault((s.user_id, s.kind, window), []).append(m)
 
-    # Per-flavor aggregate: median across the user's strategies of that flavor.
-    for (flavor, window), metric_list in by_flavor.items():
+    # Per-flavor aggregate: median across THIS USER's strategies of that flavor.
+    # (Before wave 3 these rows had no owner and every authenticated caller was
+    # served the same global median — see the feresearch scope proof test.)
+    for (user_id, flavor, window), metric_list in by_flavor.items():
+        # A flavor the user actually runs always gets a row, even when nothing in
+        # it could be priced — an honest "no measurable observations" row beats a
+        # silently missing benchmark.
         valid = [m for m in metric_list if m is not None]
-        if not valid:
-            continue
 
         def _vals(key, _rows=valid):
             return [x[key] for x in _rows if x.get(key) is not None]
@@ -438,20 +744,29 @@ def recompute_strategies(today: dt.date) -> None:
         dd25, dd75 = _iqr("dd")
         sh25, sh75 = _iqr("sharpe")
         so25, so75 = _iqr("sortino")
-        StrategyScorecard.objects.create(
-            strategy=None, flavor=flavor, window=window, as_of=today,
-            n_cycles=len(valid),  # for flavor rows this is "n strategies"
-            total_return_pct=_dec2(_med("total") * 100) if _med("total") is not None else None,
-            sharpe=_dec4(_med("sharpe")),
-            sortino=_dec4(_med("sortino")),
-            max_drawdown_pct=_dec2(_med("dd") * 100) if _med("dd") is not None else None,
-            hit_rate=_dec4(_med("hit")),
-            sharpe_p25=_dec4(sh25), sharpe_p75=_dec4(sh75),
-            sortino_p25=_dec4(so25), sortino_p75=_dec4(so75),
-            max_drawdown_p25_pct=_dec2(dd25 * 100) if dd25 is not None else None,
-            max_drawdown_p75_pct=_dec2(dd75 * 100) if dd75 is not None else None,
-            provisional=False,
-        )
+        med_total = _med("total")
+        med_dd = _med("dd")
+        # A flavor row is only "real" when at least one contributing strategy
+        # cleared the provisional bar; otherwise it is a median of small samples.
+        non_provisional = [m for m in valid if not m.get("provisional")]
+        StrategyScorecard.objects.create(**_fit_decimals(StrategyScorecard, {
+            "strategy": None, "user_id": user_id, "flavor": flavor,
+            "window": window, "as_of": today,
+            "n_cycles": len(metric_list),  # for flavor rows this is "n strategies"
+            "n_observations": sum(m["n"] for m in valid),
+            "periods_per_year": _med("ppy"),
+            "total_return_pct": med_total * 100 if med_total is not None else None,
+            "sharpe": _med("sharpe"),
+            "sortino": _med("sortino"),
+            "max_drawdown_pct": med_dd * 100 if med_dd is not None else None,
+            "hit_rate": _med("hit"),
+            "sharpe_p25": sh25, "sharpe_p75": sh75,
+            "sortino_p25": so25, "sortino_p75": so75,
+            "max_drawdown_p25_pct": dd25 * 100 if dd25 is not None else None,
+            "max_drawdown_p75_pct": dd75 * 100 if dd75 is not None else None,
+            "provisional": not non_provisional,
+            "metrics_version": METRICS_VERSION,
+        }))
 
 
 def council_alpha_series(strategy, cutoff: dt.date | None = None) -> list[dict]:
@@ -493,40 +808,67 @@ def council_alpha_series(strategy, cutoff: dt.date | None = None) -> list[dict]:
 
 
 def recompute_all(today: dt.date | None = None, forward_days: int = DEFAULT_FORWARD_DAYS) -> dict:
+    """Rebuild every scorecard for ``today`` under the current maths.
+
+    Idempotent: each ``recompute_*`` deletes its own ``as_of=today`` rows before
+    writing, so re-running is safe (and is how a prod operator upgrades rows
+    written by an older ``metrics_version``).
+    """
     today = today or timezone.localdate()
     recompute_agents(today, forward_days)
     recompute_models(today, forward_days)
     recompute_strategies(today)
     return {
         "as_of": today.isoformat(),
+        "metrics_version": METRICS_VERSION,
         "agents": AgentScorecard.objects.filter(as_of=today).count(),
         "models": ModelScorecard.objects.filter(as_of=today).count(),
         "strategies": StrategyScorecard.objects.filter(as_of=today).count(),
     }
 
 
+# Drill-down pagination: the agent decision list is bounded so one persona with
+# a long history cannot pull an unbounded result set through the API.
+DECISION_DETAIL_LIMIT = 200
+
+
 def agent_decision_detail(
     agent_name: str, window: str = "90d", forward_days: int = DEFAULT_FORWARD_DAYS,
-    today: dt.date | None = None,
+    today: dt.date | None = None, *, user=None, limit: int = DECISION_DETAIL_LIMIT,
+    offset: int = 0,
 ) -> list[dict]:
-    """Drill-down: the underlying per-decision rows behind an agent scorecard."""
+    """Drill-down: the underlying per-decision rows behind an agent scorecard.
+
+    ``user`` scopes the rows to that owner's runs — the endpoint used to serve
+    every tenant's tickers, dates and model ids to any authenticated caller
+    (F-xtenant). Forward returns are fetched in ONE query (F-n+1) and the page
+    is bounded by ``limit``/``offset``.
+    """
     today = today or timezone.localdate()
     cutoff = _cutoff(WINDOWS_AGENT.get(window), today)
     qs = AgentMessage.objects.filter(
         agent_name=agent_name, run__status=Run.DONE
     ).select_related("run")
     if cutoff:
-        qs = qs.filter(run__created_at__date__gte=cutoff)
+        qs = qs.filter(run__as_of_date__gte=cutoff)
+    if user is not None:
+        qs = qs.filter(run__user=user)
+    qs = qs.exclude(run__tickers=[]).order_by("-run__as_of_date", "-run__created_at")
+    limit = max(1, min(int(limit or DECISION_DETAIL_LIMIT), DECISION_DETAIL_LIMIT))
+    offset = max(0, int(offset or 0))
+    messages = list(qs[offset:offset + limit])
+    rows = [(m, m.run) for m in messages if m.run.tickers]
+    returns = batch_forward_returns(
+        [(str(run.tickers[0]).upper(), run.as_of_date) for _, run in rows], forward_days
+    )
     out = []
-    for m in qs.order_by("-run__created_at").iterator():
-        run = m.run
-        if not run.tickers:
-            continue
+    for m, run in rows:
         po = m.parsed_output or {}
-        ret = forward_return(run.tickers[0], run.as_of_date, forward_days)
+        ticker = str(run.tickers[0]).upper()
+        ret = returns.get((ticker, run.as_of_date))
         out.append({
             "run_id": run.id,
-            "ticker": run.tickers[0],
+            "ticker": ticker,
             "as_of_date": run.as_of_date.isoformat(),
             "signal": po.get("signal"),
             "confidence": po.get("confidence"),

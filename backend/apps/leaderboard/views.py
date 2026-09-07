@@ -13,7 +13,13 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .compute import WINDOWS_STRATEGY, _cutoff, agent_decision_detail, council_alpha_series
+from .compute import (
+    DECISION_DETAIL_LIMIT,
+    WINDOWS_STRATEGY,
+    _cutoff,
+    agent_decision_detail,
+    council_alpha_series,
+)
 from .models import AgentScorecard, ModelScorecard, StrategyScorecard
 from .serializers import (
     AgentScorecardSerializer,
@@ -26,15 +32,26 @@ def _latest_as_of(model, window: str, **extra):
     return model.objects.filter(window=window, **extra).aggregate(m=Max("as_of"))["m"]
 
 
+def _provisional_last(qs, *order):
+    """Provisional (small-sample) rows always sort BELOW real ones, whatever the
+    caller asked to sort by — a Sharpe-less 3-cycle row must never head the
+    table just because the column it was ranked on is null-friendly."""
+    return qs.order_by("provisional", *order)
+
+
 class AgentLeaderboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request: Request) -> Response:
         window = request.query_params.get("window", "90d")
-        as_of = _latest_as_of(AgentScorecard, window)
+        as_of = _latest_as_of(AgentScorecard, window, user=request.user)
         rows = (
-            AgentScorecard.objects.filter(window=window, as_of=as_of)
-            .order_by(F("hit_rate").desc(nulls_last=True), "brier_score")
+            _provisional_last(
+                AgentScorecard.objects.filter(
+                    window=window, as_of=as_of, user=request.user,
+                ),
+                F("hit_rate").desc(nulls_last=True), "brier_score",
+            )
             if as_of else AgentScorecard.objects.none()
         )
         return Response({
@@ -82,7 +99,7 @@ class StrategyLeaderboardView(APIView):
         order = F(sort).desc(nulls_last=True) if sort in {
             "sharpe", "sortino", "council_alpha_bps", "total_return_pct", "hit_rate"
         } else F("sharpe").desc(nulls_last=True)
-        qs = qs.order_by(order)
+        qs = _provisional_last(qs, order)
         return Response({
             "window": window,
             "as_of": as_of,
@@ -97,10 +114,12 @@ class FlavorBenchmarkView(APIView):
 
     def get(self, request: Request) -> Response:
         window = request.query_params.get("window", "90d")
-        as_of = _latest_as_of(StrategyScorecard, window, strategy__isnull=True)
+        as_of = _latest_as_of(
+            StrategyScorecard, window, strategy__isnull=True, user=request.user,
+        )
         qs = (
             StrategyScorecard.objects.filter(
-                window=window, as_of=as_of, strategy__isnull=True
+                window=window, as_of=as_of, strategy__isnull=True, user=request.user,
             ).order_by("flavor")
             if as_of else StrategyScorecard.objects.none()
         )
@@ -144,10 +163,24 @@ class AgentDecisionsView(APIView):
 
     def get(self, request: Request, agent_name: str) -> Response:
         window = request.query_params.get("window", "90d")
+
+        def _int(name: str, default: int) -> int:
+            try:
+                return int(request.query_params.get(name, default))
+            except (TypeError, ValueError):
+                return default
+
+        limit = max(1, min(_int("limit", DECISION_DETAIL_LIMIT), DECISION_DETAIL_LIMIT))
+        offset = max(0, _int("offset", 0))
+        decisions = agent_decision_detail(
+            agent_name, window=window, user=request.user, limit=limit, offset=offset,
+        )
         return Response({
             "agent_name": agent_name,
             "window": window,
-            "decisions": agent_decision_detail(agent_name, window=window),
+            "limit": limit,
+            "offset": offset,
+            "decisions": decisions,
         })
 
 
@@ -159,4 +192,15 @@ class RecomputeView(APIView):
     def post(self, request: Request) -> Response:
         from .compute import recompute_all
 
-        return Response(recompute_all())
+        result = recompute_all()
+        as_of = result["as_of"]
+        # The rebuild itself is global (it must be — every tenant's rows are
+        # rewritten under the new maths), but the counts reported back are the
+        # CALLER's own rows. ``models`` has no owner dimension and stays global.
+        result["agents"] = AgentScorecard.objects.filter(
+            as_of=as_of, user=request.user,
+        ).count()
+        result["strategies"] = StrategyScorecard.objects.filter(
+            as_of=as_of, user=request.user,
+        ).count()
+        return Response(result)

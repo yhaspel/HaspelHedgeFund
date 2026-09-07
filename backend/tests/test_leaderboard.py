@@ -127,31 +127,47 @@ def test_agent_decision_detail(user):
 
 
 def test_recompute_strategies_metrics(user):
+    """Four cycles is not a Sharpe.
+
+    Updated for wave 3: the old expectation (``sharpe is not None`` from four
+    chained ``since_as_of_pct`` values) WAS the bug — those windows overlap and
+    four points cannot support a ratio. The row now keeps the small-sample
+    facts and nulls the ratios.
+    """
     s = _strategy(user)
     base = dt.date(2026, 4, 1)
-    rets = ["1.0", "-0.5", "2.0", "0.5"]  # percent
-    for i, r in enumerate(rets):
+    # 100 -> 101 -> 100.5 -> 102.5 -> 103 over the five boundary dates.
+    _bars("AAPL", base, [100, 101, 100.5, 102.5, 103])
+    today = timezone.localdate()
+    for i in range(4):
         PortfolioTarget.objects.create(
             strategy=s, as_of_date=base + dt.timedelta(days=i),
             status=PortfolioTarget.DONE,
-            target_weights={"AAPL": 10.0, "MSFT": -5.0},
-            marked_snapshot={"since_as_of_pct": r},
+            target_weights={"AAPL": 1.0},
+            marked_snapshot={"since_as_of_pct": "1.0"},
         )
-    today = timezone.localdate()
     compute.recompute_strategies(today)
 
     sc = StrategyScorecard.objects.get(strategy=s, window="lifetime", as_of=today)
     assert sc.n_cycles == 4
-    assert sc.sharpe is not None
-    assert sc.total_return_pct is not None
+    assert sc.n_observations == 4
+    # Disjoint chain telescopes to the real move: 103/100 - 1 = +3%.
+    assert float(sc.total_return_pct) == pytest.approx(3.0, abs=0.01)
+    assert sc.provisional is True  # < 20 observations
+    assert sc.sharpe is None       # …so no ratio is offered
+    assert sc.sortino is None
+    assert sc.annualised_return_pct is None
+    assert sc.hit_rate is not None and sc.max_drawdown_pct is not None
+    assert sc.metrics_version == 2
     assert sc.council_alpha_bps is None  # deferred
-    assert sc.provisional is True  # < 20 cycles
 
-    # flavor aggregate row exists
+    # flavor aggregate row exists, is owned by the user, and is provisional too
     flavor = StrategyScorecard.objects.get(
         strategy__isnull=True, flavor=s.kind, window="lifetime", as_of=today
     )
-    assert flavor.sharpe is not None
+    assert flavor.user_id == user.id
+    assert flavor.provisional is True
+    assert flavor.sharpe is None
 
 
 # ---------- API ----------
