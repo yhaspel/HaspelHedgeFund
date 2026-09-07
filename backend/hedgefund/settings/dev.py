@@ -2,6 +2,17 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = True
 
+# base.py decides the renderer set from the env-derived DEBUG, which is still
+# False at import time here — re-enable the browsable API explicitly for local
+# development. It stays off in every other settings module.
+REST_FRAMEWORK = {  # noqa: F405 - re-declares base.REST_FRAMEWORK
+    **REST_FRAMEWORK,  # noqa: F405
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ],
+}
+
 # Phase 8 — `manage.py seed_e2e` is permitted under dev settings only.
 E2E_SEED_ALLOWED = True
 

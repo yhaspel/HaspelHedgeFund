@@ -16,6 +16,11 @@ from django.utils import timezone
 from pydantic import BaseModel, Field
 
 from .models import MarketNewsItem
+from .news_llm_policy import (
+    FEATURE_TRANSLATION,
+    check_news_llm_allowed,
+    record_news_llm_spend,
+)
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +136,12 @@ def translate(
     if len(targets) > MAX_BATCH:
         targets = targets[:MAX_BATCH]
 
+    # WAVE-3 P2: BYOK + per-user daily cap. Over the bar the feature is SKIPPED
+    # with a reason for the payload — the feed still renders, untranslated.
+    allowed, reason = check_news_llm_allowed(user_id, feature=FEATURE_TRANSLATION)
+    if not allowed:
+        return False, reason
+
     from hedgefund_agents._persist import record_llm_call
 
     resp = parsed = used_model = None
@@ -157,7 +168,7 @@ def translate(
 
     # Cost recorded once, on the succeeding attempt only.
     try:
-        record_llm_call(
+        call = record_llm_call(
             run_id=None,
             backtest_id=None,
             portfolio_target_id=None,
@@ -166,6 +177,9 @@ def translate(
         )
     except Exception as exc:  # noqa: BLE001 - cost record must not break the page.
         log.warning("market_news translation cost-record error err=%s", exc)
+        call = None
+    # Attribute the spend to the user so the daily cap can see it.
+    record_news_llm_spend(user_id, feature=FEATURE_TRANSLATION, resp=resp, call=call)
 
     now = timezone.now()
     by_idx = {item.idx: item for item in parsed.items}

@@ -107,8 +107,18 @@ def auto_submit_orders(scheduled_run, hist, run_ids) -> dict:
         return {"enabled": True, "skipped_all": f"account {account.connection_status}"}
 
     draft_only = bool(scheduled_run.auto_submit_draft_only)
-    max_orders = int(scheduled_run.max_orders_per_day or 0)
-    max_notional = Decimal(str(scheduled_run.max_notional_per_day_usd or 0))
+    # `0` means ZERO — not "unlimited". `int(x or 0)` collapses None and 0 to the
+    # same value, and the old `if max_orders and ...` guard then skipped the cap
+    # check entirely, so a user who typed 0 to stop the schedule submitting got
+    # unlimited orders. None (never set) is the only "no cap" value.
+    max_orders = (
+        None if scheduled_run.max_orders_per_day is None
+        else int(scheduled_run.max_orders_per_day)
+    )
+    max_notional = (
+        None if scheduled_run.max_notional_per_day_usd is None
+        else Decimal(str(scheduled_run.max_notional_per_day_usd))
+    )
     n_today, notional_today = _prior_24h(scheduled_run)
 
     placed: list[BrokerOrder] = []
@@ -130,10 +140,10 @@ def auto_submit_orders(scheduled_run, hist, run_ids) -> dict:
             items.append({"ticker": decision.ticker, "skipped": "no size"})
             continue
         order_notional = qty * price
-        if max_orders and n_today >= max_orders:
+        if max_orders is not None and n_today >= max_orders:
             items.append({"ticker": decision.ticker, "skipped": "daily order cap"})
             continue
-        if max_notional and (notional_today + order_notional) > max_notional:
+        if max_notional is not None and (notional_today + order_notional) > max_notional:
             items.append({"ticker": decision.ticker, "skipped": "daily notional cap"})
             continue
 

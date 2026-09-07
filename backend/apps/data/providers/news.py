@@ -44,9 +44,13 @@ class NewsService:
         # merge safe.)
         freshness_cutoff = as_of - dt.timedelta(days=1)
         has_fresh = any(r.published_at.date() >= freshness_cutoff for r in existing)
-        sources_present = {r.source for r in existing}
-        expected_sources = {getattr(p, "name", "") for p in self._providers}
-        if has_fresh and expected_sources.issubset(sources_present | {""}):
+        # ``NewsItem.provider`` is the adapter ("fmp"/"tiingo"); ``source`` is
+        # the PUBLISHER ("Reuters", "seekingalpha.com"). Comparing provider
+        # names to publisher names never matched, so the short-circuit was dead
+        # and every council/news call re-hit both providers.
+        providers_present = {r.provider for r in existing}
+        expected_providers = {getattr(p, "name", "") for p in self._providers}
+        if has_fresh and expected_providers.issubset(providers_present | {""}):
             return self._dedup(existing)
 
         collected: list[NewsItem] = []

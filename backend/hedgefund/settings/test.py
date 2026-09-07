@@ -1,3 +1,5 @@
+import tempfile
+
 from .base import *  # noqa: F401,F403
 
 # Test-only sentinels. Override the env vars the docker-compose stack sets
@@ -14,6 +16,19 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
+    }
+}
+
+# The suite has no Redis, but it must not fall back to LocMemCache either: the
+# operator-alert throttle and the auth/test-send rate throttles are only correct
+# on a cache shared BETWEEN PROCESSES, and a per-process cache would let those
+# tests pass against a backend that cannot work in production. FileBasedCache is
+# the serverless backend with the same cross-process semantics; a fresh
+# directory per interpreter keeps throttle state from leaking between runs.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": tempfile.mkdtemp(prefix="hf-test-cache-"),
     }
 }
 

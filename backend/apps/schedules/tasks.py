@@ -17,7 +17,7 @@ worker slot is acceptable and far simpler than a chord+callback.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from celery import shared_task
 from django.utils import timezone
@@ -27,7 +27,7 @@ from apps.runs.tasks import execute_run
 
 from .costs import cheaper_preset, estimate_run_cost, resolve_overrides
 from .models import ScheduledRun, ScheduledRunHistory
-from .triggers import compute_next, market_gate_ok
+from .triggers import advance_after_downtime, market_gate_ok
 
 log = logging.getLogger(__name__)
 
@@ -58,13 +58,33 @@ def dispatch_due_scheduled_runs() -> dict:
             continue
         fire_time = sr.next_run_at
         # Advance the schedule FIRST so a slow/duplicate dispatcher pass can't
-        # re-select this same fire time.
+        # re-select this same fire time — and advance it to the next FUTURE
+        # slot, so downtime costs one fire, not one per missed slot.
+        try:
+            next_at, catchup_skipped = advance_after_downtime(
+                sr.cron_expression, sr.timezone, fire_time, now
+            )
+        except Exception:  # noqa: BLE001 — a bad stored cron must not stop the beat
+            log.exception(
+                "scheduled run %s has an unusable cron %r — deactivating its next fire",
+                sr_id, sr.cron_expression,
+            )
+            ScheduledRun.objects.filter(pk=sr_id).update(next_run_at=None)
+            continue
         sr.last_run_at = now
-        sr.next_run_at = compute_next(sr.cron_expression, sr.timezone, after=fire_time)
+        sr.next_run_at = next_at
         sr.save(update_fields=["last_run_at", "next_run_at"])
 
-        if not market_gate_ok(sr, fire_time):
+        gate_ok = market_gate_ok(sr, fire_time)
+        note = (
+            f"catch-up: {catchup_skipped} slots skipped" if catchup_skipped else ""
+        )
+        if not gate_ok:
+            # A market-holiday skip is a decision the user must be able to SEE:
+            # without a row, the History view is simply blank for a fire the
+            # "Next run" column had promised.
             skipped_market += 1
+            _record_market_skip(sr, fire_time, note)
             continue
 
         # Idempotency: one history per (schedule, fire_time). A duplicate
@@ -72,7 +92,7 @@ def dispatch_due_scheduled_runs() -> dict:
         hist, created = ScheduledRunHistory.objects.get_or_create(
             scheduled_run=sr,
             fire_time_utc=fire_time,
-            defaults={"status": ScheduledRunHistory.PENDING},
+            defaults={"status": ScheduledRunHistory.PENDING, "error": note},
         )
         if not created:
             continue
@@ -80,6 +100,57 @@ def dispatch_due_scheduled_runs() -> dict:
         dispatched += 1
 
     return {"due": len(due_ids), "dispatched": dispatched, "skipped_market": skipped_market}
+
+
+def _market_skip_reason(sr, fire_time) -> str:
+    """Why the market gate refused this fire — 'weekend' or 'holiday'."""
+    try:
+        from apps.brokers.market_calendar import NY, is_trading_day
+
+        day = fire_time.astimezone(NY).date()
+        if day.weekday() >= 5:
+            return "weekend"
+        if not is_trading_day(day):
+            return "holiday"
+    except Exception:  # noqa: BLE001 — the label is cosmetic
+        pass
+    return "non-trading day"
+
+
+def _record_market_skip(sr, fire_time, note: str = "") -> None:
+    """Write the audit row for a fire the market gate skipped. Best-effort."""
+    reason = _market_skip_reason(sr, fire_time)
+    error = f"market closed ({reason})"
+    if note:
+        error = f"{error}; {note}"
+    try:
+        ScheduledRunHistory.objects.get_or_create(
+            scheduled_run=sr,
+            fire_time_utc=fire_time,
+            defaults={
+                "status": ScheduledRunHistory.SKIPPED,
+                "error": error,
+                "finished_at": timezone.now(),
+            },
+        )
+    except Exception:  # noqa: BLE001 — an audit row must not break the beat
+        log.exception("failed to record market-closed skip for schedule %s", sr.pk)
+
+
+# Floor for a per-run hard budget: below this a run cannot complete even one
+# agent, so a tight ceiling on a wide watchlist degrades to "abort immediately"
+# rather than "spend a sane minimum and stop".
+MIN_CHILD_RUN_BUDGET = Decimal("0.05")
+
+
+def _per_run_budget(ceiling, n_tickers: int):
+    """Each child run's share of the schedule's ceiling, or None when unset."""
+    if ceiling is None or n_tickers <= 0:
+        return None
+    share = (Decimal(str(ceiling)) / Decimal(n_tickers)).quantize(
+        Decimal("0.01"), rounding=ROUND_DOWN
+    )
+    return max(MIN_CHILD_RUN_BUDGET, share)
 
 
 def _find_prior_run(user, ticker: str, before_run: Run):
@@ -195,6 +266,12 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         gpersonas = personas_for_version(graph_version)
         if gpersonas:
             personas = gpersonas
+    # The cost ceiling used to gate the pre-flight ESTIMATE only: once the fan-out
+    # started, actual spend was unbounded (an estimate that lands under the
+    # ceiling says nothing about what 16 agents × N tickers really cost). Give
+    # every child run a hard mid-run budget — its share of the ceiling — so
+    # record_llm_call aborts a runaway instead of the ceiling being advisory.
+    per_run_budget = _per_run_budget(sr.cost_ceiling_usd, len(tickers))
     run_ids: list[int] = []
     for tk in tickers:
         run = Run.objects.create(
@@ -205,6 +282,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
             personas=personas,
             source=Run.ADHOC,
             graph_version=graph_version,
+            max_budget_usd=per_run_budget,
         )
         run_ids.append(run.id)
         try:

@@ -61,6 +61,10 @@ class MarketNewsService:
             for provider in self._providers:
                 try:
                     collected.extend(provider.fetch_latest(limit=per_provider))
+                    # A provider that degraded (e.g. one FMP sub-feed 402'd but
+                    # the other returned rows) reports it here rather than by
+                    # raising and discarding everything it did fetch.
+                    self.warnings.extend(getattr(provider, "warnings", None) or [])
                 except Exception as exc:  # noqa: BLE001 - quota / 401 / 402 / network
                     name = getattr(provider, "name", "?")
                     self.warnings.append(f"{name}: {exc.__class__.__name__}")

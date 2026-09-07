@@ -8,11 +8,38 @@ plus a new ``channels/*.py`` sender.
 * email    → ``{"address": "you@example.com"}`` (falls back to ``user.email``)
 * telegram → ``{"bot_token": "...", "chat_id": "..."}`` (user-supplied; see
   ``guides/telegram-setup.md``)
+
+Secrets inside ``config`` are encrypted AT REST with the same Fernet helper
+``ProviderKey`` uses (ADR 0022): a Telegram bot token is a full send-as-this-bot
+credential, and it used to sit in plaintext JSON in a column that every DB
+backup, read replica and ``dumpdata`` copies. Writes are normalised in
+``save()`` — ``{"bot_token": x}`` is stored as ``{"bot_token_enc": <fernet>}`` —
+so every creation path (API, admin, management command, fixture) is covered;
+read it back with ``get_secret("bot_token")``.
 """
 from __future__ import annotations
 
 from django.conf import settings
 from django.db import models
+
+from apps.models_catalog.crypto import decrypt, encrypt
+
+# config keys that hold a credential rather than an identifier.
+SECRET_CONFIG_KEYS = ("bot_token",)
+
+
+def encrypt_config(cfg: dict | None) -> dict:
+    """Return ``cfg`` with every secret key replaced by its ``<key>_enc`` form.
+
+    Idempotent: a config that is already encrypted round-trips unchanged, which
+    is what makes both ``save()`` and the data migration safe to re-run.
+    """
+    out = dict(cfg or {})
+    for key in SECRET_CONFIG_KEYS:
+        raw = out.pop(key, None)
+        if raw:
+            out[f"{key}_enc"] = encrypt(str(raw))
+    return out
 
 
 class NotificationChannel(models.Model):
@@ -41,9 +68,28 @@ class NotificationChannel(models.Model):
     def __str__(self) -> str:
         return f"{self.get_kind_display()} channel (user={self.user_id})"
 
+    def save(self, *args, **kwargs):
+        # Normalise on the way in so no caller can persist a plaintext secret,
+        # wherever it came from (serializer, admin, shell, fixture).
+        self.config = encrypt_config(self.config)
+        return super().save(*args, **kwargs)
+
     @property
     def label(self) -> str:
         return self.name or self.get_kind_display()
+
+    def get_secret(self, key: str) -> str:
+        """Decrypted value of a secret config key ('' when unset).
+
+        Falls back to a plaintext value for rows written before the encryption
+        cutover that the data migration has not reached (a restored backup, a
+        fixture loaded with ``loaddata --raw``).
+        """
+        cfg = self.config or {}
+        enc = cfg.get(f"{key}_enc")
+        if enc:
+            return decrypt(str(enc))
+        return str(cfg.get(key) or "")
 
 
 class NotificationEvent(models.Model):

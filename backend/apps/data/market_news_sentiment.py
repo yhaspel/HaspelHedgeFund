@@ -21,6 +21,11 @@ from django.utils import timezone
 from pydantic import BaseModel, Field, ValidationError
 
 from .models import MarketNewsItem
+from .news_llm_policy import (
+    FEATURE_SENTIMENT,
+    check_news_llm_allowed,
+    record_news_llm_spend,
+)
 
 log = logging.getLogger(__name__)
 
@@ -122,15 +127,20 @@ def _build_user_prompt(rows: list[MarketNewsItem]) -> str:
 
 
 def _needs_classification(row: MarketNewsItem, model_id: str) -> bool:
-    return (
-        (row.sentiment_at is None)
-        or (row.sentiment_model != model_id)
+    """Only NEW work. ``model_id`` is accepted for signature stability but is
+    deliberately NOT compared against ``row.sentiment_model``.
+
+    WAVE-3 P2: switching the picker used to re-score every row already scored by
+    the previous model — one full batched LLM call per model switch, per page,
+    on the operator's key. A score from another catalogue model is still a
+    score; only unscored rows (and rows whose English translation landed after
+    the score) are sent.
+    """
+    return (row.sentiment_at is None) or (
         # Re-score when a translation landed after the last scoring, so a row
         # scored on its original text gets re-scored on the English text.
-        or (
-            row.translation_at is not None
-            and (row.sentiment_at is None or row.translation_at > row.sentiment_at)
-        )
+        row.translation_at is not None
+        and row.translation_at > row.sentiment_at
     )
 
 
@@ -155,6 +165,12 @@ def classify(
         return True, None
     if len(targets) > MAX_BATCH:
         targets = targets[:MAX_BATCH]
+
+    # WAVE-3 P2: BYOK + per-user daily cap. Over the bar the feature is SKIPPED
+    # with a reason for the payload — the feed still renders.
+    allowed, reason = check_news_llm_allowed(user_id, feature=FEATURE_SENTIMENT)
+    if not allowed:
+        return False, reason
 
     try:
         provider, _, model = model_id.partition(":")
@@ -200,7 +216,7 @@ def classify(
 
     # Cost record. Null run/backtest/portfolio FKs are allowed by LLMCall.
     try:
-        record_llm_call(
+        call = record_llm_call(
             run_id=None,
             backtest_id=None,
             portfolio_target_id=None,
@@ -209,6 +225,9 @@ def classify(
         )
     except Exception as exc:  # noqa: BLE001 - cost record failures must not break the page.
         log.warning("market_news sentiment cost-record error err=%s", exc)
+        call = None
+    # Attribute the spend to the user so tomorrow's cap check can see it.
+    record_news_llm_spend(user_id, feature=FEATURE_SENTIMENT, resp=resp, call=call)
 
     now = timezone.now()
     by_idx = {item.idx: item for item in parsed.items}

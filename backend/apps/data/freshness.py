@@ -26,13 +26,20 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from django.db.models import F
+from django.db.models import F, Max
 
 from apps.data.models import CorporateAction, DailyBar
 
 log = logging.getLogger(__name__)
 
 SOURCE = "fmp"
+# The dividend table is only trusted to name the LAST ex-date while it is this
+# fresh relative to the newest bar. Quarterly payers file every ~91 days, so a
+# bigger gap means "we have probably missed one" — and normalising on a stale
+# table ERASES the real back-adjustment for every dividend paid since.
+DIVIDEND_TABLE_MAX_GAP_DAYS = 100
+# How far back to top up dividends when a provider is available.
+DIVIDEND_REFRESH_LOOKBACK_DAYS = 400
 MAX_STALENESS_DAYS = 5  # calendar days; tolerates a long holiday weekend
 FACTOR_TOL = 0.005  # |adj/close - 1| beyond this, with no same-day action, = corrupt
 # Corporate actions that make adjusted_close != close for bars BEFORE their
@@ -61,7 +68,39 @@ def last_adjustment_ex_date(ticker: str) -> dt.date | None:
     )
 
 
-def normalize_adjusted_tail(ticker: str) -> int:
+def refresh_dividends(
+    ticker: str,
+    provider,
+    *,
+    as_of: dt.date | None = None,
+    lookback_days: int = DIVIDEND_REFRESH_LOOKBACK_DAYS,
+) -> int:
+    """Idempotently top up ``CorporateAction`` cash dividends for ``ticker``.
+
+    One FMP ``/dividends`` call plus a ``bulk_create(ignore_conflicts=True)``
+    against the (ticker, as_of_date, kind, source) unique constraint — cheap
+    enough to run before every normalisation, and the only way
+    ``last_adjustment_ex_date`` can be current between manual
+    ``backfill_dividends`` runs. Returns the number of rows offered.
+    """
+    as_of = as_of or dt.date.today()
+    start = as_of - dt.timedelta(days=lookback_days)
+    divs = provider.get_dividends(ticker, start, as_of)
+    objs = [
+        CorporateAction(
+            ticker=ticker, as_of_date=d, kind=CorporateAction.CASH_DIVIDEND,
+            amount=amt, source=SOURCE,
+        )
+        for d, amt in divs
+    ]
+    if objs:
+        CorporateAction.objects.bulk_create(objs, ignore_conflicts=True)
+    return len(objs)
+
+
+def normalize_adjusted_tail(
+    ticker: str, *, provider=None, as_of: dt.date | None = None
+) -> int:
     """Reset ``adjusted_close = close`` for every bar dated on/after the ticker's
     last price-adjusting corporate action (or all bars if it never had one).
 
@@ -70,8 +109,41 @@ def normalize_adjusted_tail(ticker: str) -> int:
     before D keep their back-adjustment (a split with no later dividend would
     otherwise have its whole split-adjusted history wrongly flattened). Returns
     the number of rows corrected.
+
+    The whole argument rests on D being the ticker's *actual* last ex-date.
+    ``CorporateAction`` used to be filled only by a one-off management command,
+    so every dividend paid after that run pushed the real D forward while this
+    function still used the stale one — flattening FMP's CORRECT adjustments
+    for months of bars. Two guards now:
+
+      * ``provider`` (passed by ``refresh_universe_bars``) tops the dividend
+        table up first — one cheap, idempotent call;
+      * with no provider, a dividend table more than
+        ``DIVIDEND_TABLE_MAX_GAP_DAYS`` behind the newest bar is refused
+        outright (returns 0) rather than trusted.
     """
+    if provider is not None:
+        try:
+            refresh_dividends(ticker, provider, as_of=as_of)
+        except Exception:  # noqa: BLE001 — fall through to the staleness guard
+            log.exception("normalize_adjusted_tail: dividend refresh failed ticker=%s", ticker)
     led = last_adjustment_ex_date(ticker)
+    newest_bar = (
+        DailyBar.objects.filter(ticker=ticker, source=SOURCE)
+        .aggregate(d=Max("date"))["d"]
+    )
+    if (
+        led is not None
+        and newest_bar is not None
+        and (newest_bar - led).days > DIVIDEND_TABLE_MAX_GAP_DAYS
+    ):
+        log.warning(
+            "normalize_adjusted_tail: skipping ticker=%s — last known ex-date %s is "
+            "%dd behind the newest bar %s (limit %dd); normalising would erase real "
+            "dividend adjustments",
+            ticker, led, (newest_bar - led).days, newest_bar, DIVIDEND_TABLE_MAX_GAP_DAYS,
+        )
+        return 0
     # Only rows where adjusted_close already disagrees with close need touching —
     # bounds the scan to actual corrections (a no-dividend ticker re-scanned each
     # cycle does no work).
@@ -101,7 +173,10 @@ def refresh_universe_bars(tickers, as_of: dt.date, provider, *, lookback_days: i
         except Exception:  # noqa: BLE001 — degrade to whatever is cached; assert gates
             log.exception("refresh_universe_bars: upsert failed ticker=%s", t)
         try:
-            normalize_adjusted_tail(t)
+            # Pass the provider so the dividend table is topped up first —
+            # otherwise every dividend paid since the last manual
+            # `backfill_dividends` run gets flattened out of adjusted_close.
+            normalize_adjusted_tail(t, provider=provider, as_of=as_of)
         except Exception:  # noqa: BLE001
             log.exception("refresh_universe_bars: normalize failed ticker=%s", t)
 

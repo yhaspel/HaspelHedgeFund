@@ -272,13 +272,14 @@ FIELD_REGISTRY: dict[str, ScreenerField] = {
         label="1-Month Return",
         group=GROUP_PERFORMANCE,
         kind=KIND_RANGE,
-        unit="pct",
+        unit="ratio",
         capabilities=frozenset({C.DAILY_BARS}),
         fmp_param=None,
         enrich_metric="momentum_1m",
         asset_classes=("equity", "etf"),
         description=(
-            "Price return over the last ~21 trading sessions, in percent. "
+            "Price return over the last ~21 trading sessions, as a RATIO "
+            "(0.05 = +5%, -0.10 = -10%) — not percentage points. "
             "Captures short-term trend."
         ),
     ),
@@ -287,15 +288,15 @@ FIELD_REGISTRY: dict[str, ScreenerField] = {
         label="3-Month Return",
         group=GROUP_PERFORMANCE,
         kind=KIND_RANGE,
-        unit="pct",
+        unit="ratio",
         capabilities=frozenset({C.DAILY_BARS}),
         fmp_param=None,
         enrich_metric="momentum_3m",
         asset_classes=("equity", "etf"),
         description=(
-            "Price return over the last ~63 trading sessions, in percent. "
-            "Classic momentum window — set min ≥ 20 for sustained "
-            "uptrends."
+            "Price return over the last ~63 trading sessions, as a RATIO "
+            "(0.20 = +20%) — not percentage points. Classic momentum "
+            "window — set min ≥ 0.20 for sustained uptrends."
         ),
     ),
     "momentum_6m": ScreenerField(
@@ -303,14 +304,14 @@ FIELD_REGISTRY: dict[str, ScreenerField] = {
         label="6-Month Return",
         group=GROUP_PERFORMANCE,
         kind=KIND_RANGE,
-        unit="pct",
+        unit="ratio",
         capabilities=frozenset({C.DAILY_BARS}),
         fmp_param=None,
         enrich_metric="momentum_6m",
         asset_classes=("equity", "etf"),
         description=(
-            "Price return over the last ~126 trading sessions, in percent. "
-            "Medium-term trend signal."
+            "Price return over the last ~126 trading sessions, as a RATIO "
+            "(0.20 = +20%) — not percentage points. Medium-term trend signal."
         ),
     ),
     "above_50d_ma": ScreenerField(

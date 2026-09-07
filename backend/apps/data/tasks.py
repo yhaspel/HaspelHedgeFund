@@ -34,29 +34,87 @@ def prewarm_macro_snapshot(as_of_iso: str | None = None) -> str:
     return f"{as_of.isoformat()}:{snap.growth_quadrant}"
 
 
-def _most_recent_completed_quarter(today: dt.date | None = None) -> str:
-    """Return the most-recently-filed 13F quarter (e.g. ``2024Q4``).
+@shared_task
+def ingest_13f_current_quarter() -> str:
+    """Tombstone for the deleted SEC bulk 13F ingest (WAVE-3 P2 item 2).
 
-    13F is due ~45 days after quarter-end, so when the beat runs (Feb/May/
-    Aug/Nov) the quarter that just became fully available is the *prior*
-    calendar quarter.
+    The EDGAR Form 13F *data-set* path is gone. It was dead end-to-end: SEC
+    renamed the archives in 2024 so every run since 404'd; nothing in the
+    codebase ever wrote a ``CusipTicker`` row, so holdings landed with
+    ``ticker=""`` and the aggregation built zero snapshots; the by-filer view
+    had no callers and no UI. Institutional ownership now comes from FMP
+    (Ultimate) only — see ``apps.data.providers.ownership.OwnershipResolver``.
+
+    The ``ingest-13f-datasets`` entry is gone from ``hedgefund/celery.py``, but
+    beat runs on ``DatabaseScheduler``: removing a schedule from the config does
+    NOT delete its ``PeriodicTask`` row, so a deployed instance keeps firing the
+    stored entry. Migration ``data.0012`` deletes that row, and this no-op stays
+    one release longer so an instance that has not migrated yet logs a skip
+    instead of "Received unregistered task". Safe to delete after 0012 has run
+    everywhere.
     """
-    today = today or dt.date.today()
-    q = (today.month - 1) // 3 - 1  # prior quarter index (0..3)
-    year = today.year
-    if q < 0:
-        q = 3
-        year -= 1
-    return f"{year}Q{q + 1}"
+    if skip_when_offline("ingest_13f_current_quarter"):
+        return "skipped_offline"
+    log.info(
+        "ingest_13f_current_quarter: no-op — the SEC bulk 13F ingest was removed "
+        "(WAVE-3 P2). If this still fires, migration data.0012 has not run here."
+    )
+    return "removed"
+
+
+#: Form types the provenance refresh tops up (matches the news/filings agents).
+REFRESH_FORM_TYPES = ["10-K", "10-Q", "8-K"]
 
 
 @shared_task
-def ingest_13f_current_quarter() -> str:
-    """Ingest the most-recently-completed 13F quarter's SEC data set."""
-    if skip_when_offline("ingest_13f_current_quarter"):
-        return "skipped_offline"
-    from django.core.management import call_command
+def refresh_ticker_data(ticker: str, user_id: int | None = None) -> dict:
+    """Top up bars + dividends + cached EDGAR filings for one ticker.
 
-    quarter = _most_recent_completed_quarter()
-    call_command("ingest_13f_datasets", "--quarter", quarter)
-    return quarter
+    WAVE-3 P2 item 4: pure delegation to the refresh helpers that already
+    exist — this task adds no refresh logic of its own.
+
+      * bars + dividends: ``apps.data.freshness.refresh_universe_bars`` (which
+        force-fetches the recent tail, tops the ``CorporateAction`` dividend
+        table up from the provider, and re-normalises the adjusted tail);
+      * filings: ``EdgarProvider.get_recent_filings``, whose own cache-first
+        path refreshes ``FilingRecord`` when the newest cached row is stale.
+
+    Best-effort per leg: a provider outage is reported in the return value, it
+    never fails the task.
+    """
+    if skip_when_offline("refresh_ticker_data"):
+        return {"status": "skipped_offline", "ticker": ticker}
+
+    from django.contrib.auth import get_user_model
+
+    from apps.data.freshness import refresh_universe_bars
+    from apps.data.providers.factory import get_edgar_provider, get_fmp_provider
+
+    ticker = (ticker or "").upper()
+    as_of = dt.date.today()
+    out: dict = {"ticker": ticker, "bars": "skipped", "filings": "skipped"}
+
+    user = None
+    if user_id is not None:
+        user = get_user_model().objects.filter(pk=user_id).first()
+    try:
+        provider = get_fmp_provider(user=user)
+    except RuntimeError as exc:
+        out["bars"] = f"no_key: {exc}"
+    else:
+        try:
+            refresh_universe_bars([ticker], as_of, provider)
+            out["bars"] = "ok"
+        except Exception as exc:  # noqa: BLE001 — one bad ticker must not fail the job
+            log.warning("refresh_ticker_data bars failed ticker=%s err=%s", ticker, exc)
+            out["bars"] = f"error: {type(exc).__name__}"
+
+    try:
+        get_edgar_provider().get_recent_filings(
+            ticker, as_of=as_of, form_types=REFRESH_FORM_TYPES, limit=4
+        )
+        out["filings"] = "ok"
+    except Exception as exc:  # noqa: BLE001 — EDGAR outage must not fail the job
+        log.warning("refresh_ticker_data filings failed ticker=%s err=%s", ticker, exc)
+        out["filings"] = f"error: {type(exc).__name__}"
+    return out

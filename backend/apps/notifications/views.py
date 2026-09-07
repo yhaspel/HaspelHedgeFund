@@ -3,6 +3,7 @@ from __future__ import annotations
 from rest_framework import generics, permissions, status
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .models import NotificationChannel
@@ -33,16 +34,36 @@ class NotificationChannelTestView(APIView):
     """POST /api/notification-channels/<id>/test/ — send a hello message.
 
     Bypasses the daily cap (a test must always go through) so the user can
-    verify a freshly-added channel works.
+    verify a freshly-added channel works — which is exactly why it needs two
+    other bounds: a 5/min throttle, and (for email) a hard restriction to the
+    caller's OWN address. Without them any authenticated account could point a
+    channel at a third party and use the instance's SMTP reputation as an
+    unauthenticated-looking relay.
     """
 
     permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "notif_test"
 
     def post(self, request: Request, pk: int) -> Response:
         try:
             channel = NotificationChannel.objects.get(pk=pk, user=request.user)
         except NotificationChannel.DoesNotExist:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # An email test-send goes to the caller's OWN account address unless
+        # they are staff. The channel may legitimately point somewhere else (a
+        # shared team inbox) for real alerts, but the uncapped, on-demand test
+        # button must not be usable as an open relay to a third party. The
+        # channel row is NOT modified — only the copy this one send reads.
+        sent_to = ""
+        if channel.kind == NotificationChannel.EMAIL:
+            configured = ((channel.config or {}).get("address") or "").strip()
+            own = (request.user.email or "").strip()
+            sent_to = configured or own
+            if not request.user.is_staff and sent_to.lower() != own.lower():
+                sent_to = own
+                channel.config = {**(channel.config or {}), "address": own}
 
         ev = send_notification(
             channel,
@@ -58,6 +79,7 @@ class NotificationChannelTestView(APIView):
         )
         ok = ev.delivery_status == ev.SENT
         return Response(
-            {"delivery_status": ev.delivery_status, "error": ev.error},
+            {"delivery_status": ev.delivery_status, "error": ev.error,
+             "sent_to": sent_to},
             status=status.HTTP_200_OK if ok else status.HTTP_502_BAD_GATEWAY,
         )
