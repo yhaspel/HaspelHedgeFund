@@ -18,16 +18,19 @@
       "pe_ratio": null,
       "eps": null,
       "beta": "2.202",
-      "momentum_1m": 0.13492063492063489,
-      "momentum_3m": 0.25090252707581207,
-      "momentum_6m": 0.2724576271186441,
-      "dist_52w_high": 13.291620867506548,
-      "dist_52w_low": 47.73463948714254,
-      "above_50d_ma": true,
-      "above_200d_ma": true,
+      "momentum_1m": null,
+      "momentum_3m": null,
+      "momentum_6m": null,
+      "dist_52w_high": null,
+      "dist_52w_low": null,
+      "above_50d_ma": null,
+      "above_200d_ma": null,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [
+        "Price history unavailable \u2014 momentum, 52-week and moving-average fields are not computed for this row."
+      ],
+      "enrichment": "partial"
     },
     {
       "ticker": "AAPL",
@@ -56,7 +59,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "fetched"
     },
     {
       "ticker": "GOOGL",
@@ -85,7 +89,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "GOOG",
@@ -114,7 +119,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": false,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "MSFT",
@@ -143,7 +149,8 @@
       "above_200d_ma": false,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "fetched"
     },
     {
       "ticker": "AMZN",
@@ -172,7 +179,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "TSM",
@@ -201,7 +209,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "AVGO",
@@ -230,7 +239,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": true,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "fetched"
     },
     {
       "ticker": "META",
@@ -259,7 +269,8 @@
       "above_200d_ma": false,
       "has_positive_catalyst": false,
       "in_watchlist": false,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "TSLA",
@@ -288,7 +299,8 @@
       "above_200d_ma": false,
       "has_positive_catalyst": false,
       "in_watchlist": false,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     },
     {
       "ticker": "LLY",
@@ -317,7 +329,8 @@
       "above_200d_ma": true,
       "has_positive_catalyst": false,
       "in_watchlist": false,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "fetched"
     },
     {
       "ticker": "BRK-B",
@@ -346,7 +359,8 @@
       "above_200d_ma": false,
       "has_positive_catalyst": false,
       "in_watchlist": false,
-      "warnings": []
+      "warnings": [],
+      "enrichment": "cache"
     }
   ],
   "universe_size": 3000,
@@ -364,5 +378,10 @@
   "warnings": [
     "Showing the 300 most liquid matches \u2014 tighten your filters for full coverage."
   ],
-  "preset_id": ""
+  "preset_id": "",
+  "enrichment_counts": {
+    "cache": 7,
+    "fetched": 4,
+    "partial": 1
+  }
 }

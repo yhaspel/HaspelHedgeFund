@@ -18,7 +18,7 @@ const ROUTES: { path: string; known?: string[] }[] = [
   { path: '/backtests' },
   { path: '/backtests/new' },
   { path: '/backtests/24' },
-  { path: '/backtests/24/compare' },
+  { path: '/backtests/24?compare=1' },
   { path: '/strategies' },
   { path: '/strategies/new' },
   { path: '/strategies/48' },

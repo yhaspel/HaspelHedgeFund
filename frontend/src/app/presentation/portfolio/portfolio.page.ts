@@ -11,6 +11,7 @@ import { CashAdjustModalComponent } from './cash-adjust.modal';
 import { EmptyStateComponent } from '../shared/empty-state.component';
 import { EnterPositionModalComponent } from './enter-position.modal';
 import { PositionsTableComponent } from './positions-table.component';
+import { ProvenancePanelComponent } from '../shared/provenance-panel.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
 import { ModalComponent } from '../shared/modal.component';
@@ -31,6 +32,7 @@ import { PopoverComponent } from '../shared/popover.component';
     ModalComponent,
     KpiTileComponent,
     PopoverComponent,
+    ProvenancePanelComponent,
   ],
   template: `
     <hf-app-shell [crumbs]="[{label:'Portfolios', link:'/portfolios'}, {label:'Manual book'}]">
@@ -126,6 +128,17 @@ import { PopoverComponent } from '../shared/popover.component';
             (closeClick)="onClose($event)"
             (editClick)="onEdit($event)" />
         </section>
+
+        <!-- WAVE 3: the marks above are only as good as the bars behind them.
+             One panel per book says how old each holding's price series is,
+             whether it is total-return adjusted, and when it last moved. -->
+        @if (positionTickers().length) {
+          <hf-provenance
+            class="block mb-[18px]"
+            heading="Price data behind these marks"
+            [tickers]="positionTickers()"
+          ></hf-provenance>
+        }
       } @else {
         <section class="kpi-row mb-4" aria-busy="true" aria-label="Loading manual book">
           @for (_ of [1,2,3,4]; track $index) {
@@ -304,6 +317,12 @@ import { PopoverComponent } from '../shared/popover.component';
 })
 export class PortfolioPage implements OnInit, OnDestroy {
   readonly store = inject(PortfolioStore);
+
+  /** WAVE 3: symbols behind the marks on this page, for <hf-provenance>. */
+  readonly positionTickers = computed<string[]>(() => {
+    const rows = this.store.overview()?.positions ?? [];
+    return [...new Set(rows.map((p) => String(p.ticker || '').toUpperCase()).filter(Boolean))];
+  });
   private readonly profiles = inject(TickerProfileStore);
 
   loadError = signal<string | null>(null);

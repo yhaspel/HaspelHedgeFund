@@ -50,6 +50,8 @@ interface AgentRow {
   contrarian_hit_rate_ci_low: string | null;
   contrarian_hit_rate_ci_high: string | null;
   provisional: boolean;
+  /** WAVE 3 — generation of the scoring maths behind this row. */
+  metrics_version?: number;
 }
 interface ModelRow {
   model_id: string;
@@ -65,6 +67,21 @@ interface StrategyRow {
   flavor: string;
   flavor_display: string;
   n_cycles: number;
+  /**
+   * WAVE 3 — the DISJOINT holding intervals actually priced. This, not
+   * `n_cycles`, is the sample size behind every ratio in the row: a cycle that
+   * could not be marked contributes nothing. Provisional is `n_observations <
+   * 20`, so showing cycles alone made the "prov." pill look arbitrary.
+   */
+  n_observations: number;
+  /** Annualisation factor from the OBSERVED cadence, not a hard-coded 252. */
+  periods_per_year: string | null;
+  /** Why `sortino` is null or capped ("" when it is a plain number). */
+  sortino_note: string;
+  /** Generation of the scoring maths. Below METRICS_VERSION ⇒ ratios NULLed. */
+  metrics_version: number;
+  annualised_return_pct: string | null;
+  total_return_pct: string | null;
   sharpe: string | null;
   sortino: string | null;
   max_drawdown_pct: string | null;
@@ -182,7 +199,7 @@ interface DecisionRow {
                       <td>
                         {{ a.agent_name }}
                         @if (a.provisional) {
-                          <span class="pill ml-1.5 align-middle" title="Low sample — treat as provisional">prov.</span>
+                          <span class="pill ml-1.5 align-middle" title="Fewer than 20 measurable observations — every ratio is withheld">prov.</span>
                         }
                       </td>
                       <td class="muted">{{ a.model_id || '—' }}</td>
@@ -319,6 +336,23 @@ interface DecisionRow {
                 </tbody>
               </table>
             </div>
+            <div class="drill-foot">
+              <span class="micro" data-test="decisions-count">
+                Showing {{ decisions().length }} decision(s){{
+                  decisionsHasMore() ? ' — more available' : ''
+                }}.
+              </span>
+              @if (decisionsHasMore()) {
+                <button
+                  class="btn sm"
+                  data-test="decisions-load-more"
+                  [disabled]="decisionsLoading()"
+                  (click)="moreDecisions()"
+                >
+                  {{ decisionsLoading() ? 'Loading…' : 'Load more' }}
+                </button>
+              }
+            </div>
           </section>
         }
       } @else {
@@ -349,6 +383,8 @@ interface DecisionRow {
                     <th>Strategy</th>
                     <th>Flavor</th>
                     <th class="r">Cycles</th>
+                    <th class="r" title="Disjoint priced holding intervals — the sample behind every ratio">Obs</th>
+                    <th class="r">Ann. return</th>
                     <th class="r">Sharpe</th>
                     <th class="r">Sortino</th>
                     <th class="r">Max DD</th>
@@ -363,13 +399,27 @@ interface DecisionRow {
                       <td>
                         {{ s.strategy_name }}
                         @if (s.provisional) {
-                          <span class="pill ml-1.5 align-middle" title="Fewer than 20 cycles — provisional">prov.</span>
+                          <span class="pill ml-1.5 align-middle"
+                                [title]="provTip(s)"
+                                data-test="leaderboard-prov">prov.</span>
                         }
                       </td>
                       <td class="muted">{{ s.flavor_display }}</td>
                       <td class="r">{{ s.n_cycles }}</td>
-                      <td class="r">{{ num(s.sharpe) }}</td>
-                      <td class="r">{{ num(s.sortino) }}</td>
+                      <td class="r" [attr.data-test]="'leaderboard-obs-' + s.flavor">
+                        {{ s.n_observations ?? '—' }}
+                        @if (s.periods_per_year) {
+                          <div class="micro">{{ num(s.periods_per_year) }}/yr</div>
+                        }
+                      </td>
+                      <td class="r"><span [title]="ratioTip(s)">{{ pctRaw(s.annualised_return_pct) }}</span></td>
+                      <td class="r"><span [title]="ratioTip(s)" data-test="leaderboard-sharpe">{{ num(s.sharpe) }}</span></td>
+                      <td class="r">
+                        <span [title]="sortinoTip(s)" data-test="leaderboard-sortino">{{ num(s.sortino) }}</span>
+                        @if (s.sortino === null && s.sortino_note) {
+                          <div class="micro" data-test="leaderboard-sortino-note">{{ s.sortino_note }}</div>
+                        }
+                      </td>
                       <td class="r">{{ pctRaw(s.max_drawdown_pct) }}</td>
                       <td class="r">{{ pctRaw(s.annualised_turnover_pct) }}</td>
                       <td class="r">{{ usd(s.avg_cost_per_cycle_usd) }}</td>
@@ -436,6 +486,7 @@ interface DecisionRow {
                   <tr>
                     <th>Flavor</th>
                     <th class="r">Strategies</th>
+                    <th class="r" title="Disjoint priced holding intervals across the flavor">Obs</th>
                     <th class="r">Median Sharpe</th>
                     <th class="r">Median Sortino</th>
                     <th class="r">Median Max DD</th>
@@ -444,15 +495,25 @@ interface DecisionRow {
                 <tbody>
                   @for (f of flavors(); track f.flavor) {
                     <tr>
-                      <td>{{ f.flavor_display }}</td>
+                      <td>
+                        {{ f.flavor_display }}
+                        @if (f.provisional) {
+                          <span class="pill ml-1.5 align-middle"
+                                [title]="provTip(f)"
+                                data-test="leaderboard-flavor-prov">prov.</span>
+                        }
+                      </td>
                       <td class="r">{{ f.n_cycles }}</td>
+                      <td class="r">{{ f.n_observations ?? '—' }}</td>
                       <td class="r">
-                        {{ num(f.sharpe) }}
+                        <span [title]="ratioTip(f)">{{ num(f.sharpe) }}</span>
                         <div class="micro">{{ iqr(f.sharpe_p25, f.sharpe_p75) }}</div>
                       </td>
                       <td class="r">
-                        {{ num(f.sortino) }}
-                        <div class="micro">{{ iqr(f.sortino_p25, f.sortino_p75) }}</div>
+                        <span [title]="sortinoTip(f)">{{ num(f.sortino) }}</span>
+                        <div class="micro">
+                          {{ f.sortino === null && f.sortino_note ? f.sortino_note : iqr(f.sortino_p25, f.sortino_p75) }}
+                        </div>
                       </td>
                       <td class="r">
                         {{ pctRaw(f.max_drawdown_pct) }}
@@ -475,6 +536,8 @@ interface DecisionRow {
       .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
       .sub { color: var(--text-3); font-size: 12.5px; margin-top: 4px; max-width: 640px; }
       .sub.tight { margin: -4px 0 10px; }
+      .drill-foot { display:flex; align-items:center; gap:10px; padding:8px 12px; }
+      .drill-foot .micro { font-size:10.5px; color: var(--text-3); }
       .head-right { display:flex; gap:8px; align-items:center; }
       .sel { padding:6px 10px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text); border:1px solid var(--border); }
       .sel.sm { padding:4px 8px; font-size:12px; }
@@ -533,6 +596,13 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
   readonly flavors = signal<StrategyRow[]>([]);
   readonly drillAgent = signal<string | null>(null);
   readonly decisions = signal<DecisionRow[]>([]);
+  // WAVE 3 — the drill-down is paged server-side (`limit`/`offset`, limit ≤ 200)
+  // and single-tenant. The endpoint returns no total, so "there is a next page"
+  // is inferred from a full page coming back — the same rule the server uses.
+  readonly decisionsOffset = signal(0);
+  readonly decisionsLoading = signal(false);
+  readonly decisionsHasMore = signal(false);
+  readonly DECISIONS_PAGE = 50;
   readonly drillStrategy = signal<StrategyRow | null>(null);
   readonly councilSeries = signal<CouncilAlphaRow[]>([]);
 
@@ -574,6 +644,12 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
       .subscribe((r) => this.flavors.set(r.rows ?? []));
   }
 
+  /**
+   * WAVE 3: the server orders provisional rows LAST whatever column was asked
+   * for (a Sharpe-less 3-cycle row must never head the table just because the
+   * sort column is null-friendly). Rows are stored and rendered in the exact
+   * order they arrive — do NOT re-sort client-side, that would undo it.
+   */
   loadStrategies(): void {
     this.api
       .get<{ rows: StrategyRow[] }>(
@@ -584,15 +660,41 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
 
   drill(agent: string): void {
     this.drillAgent.set(agent);
+    this.decisions.set([]);
+    this.decisionsOffset.set(0);
+    this.decisionsHasMore.set(false);
+    this.fetchDecisions(agent, 0, false);
+  }
+
+  /** Next page of the agent drill-down (cursor is a plain offset). */
+  moreDecisions(): void {
+    const agent = this.drillAgent();
+    if (!agent || this.decisionsLoading() || !this.decisionsHasMore()) return;
+    this.fetchDecisions(agent, this.decisionsOffset() + this.DECISIONS_PAGE, true);
+  }
+
+  private fetchDecisions(agent: string, offset: number, append: boolean): void {
+    this.decisionsLoading.set(true);
     this.api
-      .get<{ decisions: DecisionRow[] }>(
-        `/leaderboard/agents/${agent}/decisions/?window=${this.window()}`,
+      .get<{ decisions: DecisionRow[]; limit?: number; offset?: number }>(
+        `/leaderboard/agents/${agent}/decisions/?window=${this.window()}` +
+          `&limit=${this.DECISIONS_PAGE}&offset=${offset}`,
       )
-      .subscribe((r) => {
-        const rows = r.decisions ?? [];
-        this.decisions.set(rows);
-        const tickers = [...new Set(rows.map((d) => d.ticker))];
-        if (tickers.length) this.tickerProfiles.fetchNames(tickers).subscribe();
+      .subscribe({
+        next: (r) => {
+          const rows = r.decisions ?? [];
+          this.decisions.set(append ? [...this.decisions(), ...rows] : rows);
+          this.decisionsOffset.set(offset);
+          // A short page is the last page; a full one MAY have more.
+          this.decisionsHasMore.set(rows.length === this.DECISIONS_PAGE);
+          this.decisionsLoading.set(false);
+          const tickers = [...new Set(rows.map((d) => d.ticker))];
+          if (tickers.length) this.tickerProfiles.fetchNames(tickers).subscribe();
+        },
+        error: () => {
+          this.decisionsLoading.set(false);
+          this.decisionsHasMore.set(false);
+        },
       });
   }
 
@@ -722,6 +824,35 @@ export class LeaderboardPage implements OnInit, AfterViewInit, OnDestroy {
     const n = Number(v);
     return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
   }
+  /**
+   * WAVE 3 — why this row's ratios are blank. `provisional === true` means the
+   * backend deliberately returned `null` for sharpe / sortino /
+   * annualised_return_pct; the fix is more measurable observations, never a
+   * client-side estimate.
+   */
+  provTip(s: StrategyRow): string {
+    const n = s.n_observations ?? 0;
+    return (
+      `Fewer than 20 measurable observations (${n} priced holding interval` +
+      `${n === 1 ? '' : 's'} across ${s.n_cycles} cycle${s.n_cycles === 1 ? '' : 's'}). ` +
+      'Sharpe, Sortino and annualised return are withheld — the sample cannot support them.'
+    );
+  }
+
+  /** Tooltip for any ratio cell: the provisional reason, or the sample it rests on. */
+  ratioTip(s: StrategyRow): string {
+    if (s.provisional) return this.provTip(s);
+    const ppy = s.periods_per_year ? `, annualised at ${Number(s.periods_per_year).toFixed(2)}/yr` : '';
+    return `From ${s.n_observations} disjoint priced holding interval(s)${ppy}.`;
+  }
+
+  /** Sortino can be null on a NON-provisional row too — `sortino_note` says why. */
+  sortinoTip(s: StrategyRow): string {
+    if (s.sortino === null && s.sortino_note) return s.sortino_note;
+    if (s.provisional) return this.provTip(s);
+    return s.sortino_note || this.ratioTip(s);
+  }
+
   councilTip(s: StrategyRow): string {
     return (
       `Annualised return vs the council-free baseline. ` +

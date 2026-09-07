@@ -27,7 +27,7 @@ function makeOrder(overrides: Partial<BrokerOrderRow> = {}): BrokerOrderRow {
     broker_order_id: '',
     confirmed_at: null,
     confirmation_method: '',
-    queued_until_open: false,
+    queued_until_open: false, is_held: false, release_eta: null, release_after: null,
     submitted_at: null,
     filled_at: null,
     cancelled_at: null,

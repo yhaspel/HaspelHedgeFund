@@ -13,7 +13,7 @@ import { offlineCacheInterceptor } from './offline-cache.interceptor';
 import { OfflineState } from './offline-state.service';
 
 const API = environment.apiBaseUrl;
-const tick = () => new Promise((r) => setTimeout(r, 25));
+const tick = () => new Promise((r) => setTimeout(r, 400));
 
 function jwt(userId: number): string {
   const b64 = (o: unknown) =>

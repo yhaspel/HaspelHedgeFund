@@ -22,7 +22,8 @@
       "contrarian_hit_rate_ci_low": null,
       "contrarian_hit_rate_ci_high": null,
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.819562Z"
+      "last_updated": "2026-06-06T07:00:01.819562Z",
+      "metrics_version": 2
     },
     {
       "id": 1203,
@@ -44,7 +45,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.807958Z"
+      "last_updated": "2026-06-06T07:00:01.807958Z",
+      "metrics_version": 2
     },
     {
       "id": 1212,
@@ -66,7 +68,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.810556Z"
+      "last_updated": "2026-06-06T07:00:01.810556Z",
+      "metrics_version": 2
     },
     {
       "id": 1244,
@@ -88,7 +91,8 @@
       "contrarian_hit_rate_ci_low": null,
       "contrarian_hit_rate_ci_high": null,
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.819792Z"
+      "last_updated": "2026-06-06T07:00:01.819792Z",
+      "metrics_version": 2
     },
     {
       "id": 1213,
@@ -110,7 +114,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.810846Z"
+      "last_updated": "2026-06-06T07:00:01.810846Z",
+      "metrics_version": 2
     },
     {
       "id": 1230,
@@ -132,7 +137,8 @@
       "contrarian_hit_rate_ci_low": "0.3424",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.815207Z"
+      "last_updated": "2026-06-06T07:00:01.815207Z",
+      "metrics_version": 2
     },
     {
       "id": 1206,
@@ -154,7 +160,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.808792Z"
+      "last_updated": "2026-06-06T07:00:01.808792Z",
+      "metrics_version": 2
     },
     {
       "id": 1207,
@@ -176,7 +183,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.809103Z"
+      "last_updated": "2026-06-06T07:00:01.809103Z",
+      "metrics_version": 2
     },
     {
       "id": 1232,
@@ -198,7 +206,8 @@
       "contrarian_hit_rate_ci_low": "0.2065",
       "contrarian_hit_rate_ci_high": "1.0000",
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.815921Z"
+      "last_updated": "2026-06-06T07:00:01.815921Z",
+      "metrics_version": 2
     },
     {
       "id": 1234,
@@ -220,7 +229,8 @@
       "contrarian_hit_rate_ci_low": null,
       "contrarian_hit_rate_ci_high": null,
       "provisional": true,
-      "last_updated": "2026-06-06T07:00:01.816984Z"
+      "last_updated": "2026-06-06T07:00:01.816984Z",
+      "metrics_version": 2
     }
   ]
 }

@@ -16,7 +16,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:arcee-ai/trinity-large-thinking:free",
@@ -24,7 +25,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -32,7 +34,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-4.5-air:free",
@@ -40,7 +43,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
@@ -48,7 +52,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3-coder:free",
@@ -56,7 +61,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:minimax/minimax-m2.5:free",
@@ -64,7 +70,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:poolside/laguna-m.1:free",
@@ -72,7 +79,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:google/gemma-4-31b-it:free",
@@ -80,7 +88,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:openai/gpt-oss-120b:free",
@@ -88,7 +97,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:openai/gpt-oss-120b",
@@ -96,7 +106,8 @@
       "price_in_per_mtok": 0.039,
       "price_out_per_mtok": 0.18,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
@@ -104,7 +115,8 @@
       "price_in_per_mtok": 0.05,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:amazon/nova-lite-v1",
@@ -112,7 +124,8 @@
       "price_in_per_mtok": 0.06,
       "price_out_per_mtok": 0.24,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3.5-flash-02-23",
@@ -120,7 +133,8 @@
       "price_in_per_mtok": 0.065,
       "price_out_per_mtok": 0.26,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:qwen/qwen3-coder-30b-a3b-instruct",
@@ -128,7 +142,8 @@
       "price_in_per_mtok": 0.07,
       "price_out_per_mtok": 0.27,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:qwen/qwen3-235b-a22b-2507",
@@ -136,7 +151,8 @@
       "price_in_per_mtok": 0.071,
       "price_out_per_mtok": 0.1,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
@@ -144,7 +160,8 @@
       "price_in_per_mtok": 0.075,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:google/gemma-3-27b-it",
@@ -152,7 +169,8 @@
       "price_in_per_mtok": 0.08,
       "price_out_per_mtok": 0.16,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-4-32b",
@@ -160,7 +178,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.1,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:meta-llama/llama-3.3-70b-instruct",
@@ -168,7 +187,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.32,
       "supports_reasoning": false,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:deepseek/deepseek-v4-flash",
@@ -176,7 +196,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3.6-27b",
@@ -184,7 +205,8 @@
       "price_in_per_mtok": 0.3,
       "price_out_per_mtok": 3.2,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:deepseek/deepseek-v4-pro",
@@ -192,7 +214,8 @@
       "price_in_per_mtok": 0.435,
       "price_out_per_mtok": 0.87,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-5.1",
@@ -200,7 +223,8 @@
       "price_in_per_mtok": 0.98,
       "price_out_per_mtok": 3.08,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-haiku-4-5-20251001",
@@ -208,7 +232,8 @@
       "price_in_per_mtok": 1.0,
       "price_out_per_mtok": 5.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-sonnet-4-6",
@@ -216,7 +241,8 @@
       "price_in_per_mtok": 3.0,
       "price_out_per_mtok": 15.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-opus-4-7",
@@ -224,7 +250,8 @@
       "price_in_per_mtok": 15.0,
       "price_out_per_mtok": 75.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     }
   ],
   "translation_model_choices": [
@@ -234,7 +261,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:arcee-ai/trinity-large-thinking:free",
@@ -242,7 +270,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -250,7 +279,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-4.5-air:free",
@@ -258,7 +288,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
@@ -266,7 +297,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3-coder:free",
@@ -274,7 +306,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:minimax/minimax-m2.5:free",
@@ -282,7 +315,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:poolside/laguna-m.1:free",
@@ -290,7 +324,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:google/gemma-4-31b-it:free",
@@ -298,7 +333,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:openai/gpt-oss-120b:free",
@@ -306,7 +342,8 @@
       "price_in_per_mtok": 0.0,
       "price_out_per_mtok": 0.0,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:openai/gpt-oss-120b",
@@ -314,7 +351,8 @@
       "price_in_per_mtok": 0.039,
       "price_out_per_mtok": 0.18,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:nvidia/nemotron-3-nano-30b-a3b",
@@ -322,7 +360,8 @@
       "price_in_per_mtok": 0.05,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:amazon/nova-lite-v1",
@@ -330,7 +369,8 @@
       "price_in_per_mtok": 0.06,
       "price_out_per_mtok": 0.24,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3.5-flash-02-23",
@@ -338,7 +378,8 @@
       "price_in_per_mtok": 0.065,
       "price_out_per_mtok": 0.26,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:qwen/qwen3-coder-30b-a3b-instruct",
@@ -346,7 +387,8 @@
       "price_in_per_mtok": 0.07,
       "price_out_per_mtok": 0.27,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:qwen/qwen3-235b-a22b-2507",
@@ -354,7 +396,8 @@
       "price_in_per_mtok": 0.071,
       "price_out_per_mtok": 0.1,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:mistralai/mistral-small-3.2-24b-instruct",
@@ -362,7 +405,8 @@
       "price_in_per_mtok": 0.075,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:google/gemma-3-27b-it",
@@ -370,7 +414,8 @@
       "price_in_per_mtok": 0.08,
       "price_out_per_mtok": 0.16,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-4-32b",
@@ -378,7 +423,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.1,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:meta-llama/llama-3.3-70b-instruct",
@@ -386,7 +432,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.32,
       "supports_reasoning": false,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:deepseek/deepseek-v4-flash",
@@ -394,7 +441,8 @@
       "price_in_per_mtok": 0.1,
       "price_out_per_mtok": 0.2,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:qwen/qwen3.6-27b",
@@ -402,7 +450,8 @@
       "price_in_per_mtok": 0.3,
       "price_out_per_mtok": 3.2,
       "supports_reasoning": true,
-      "frugal": true
+      "frugal": true,
+      "selectable": true
     },
     {
       "id": "openrouter:deepseek/deepseek-v4-pro",
@@ -410,7 +459,8 @@
       "price_in_per_mtok": 0.435,
       "price_out_per_mtok": 0.87,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "openrouter:z-ai/glm-5.1",
@@ -418,7 +468,8 @@
       "price_in_per_mtok": 0.98,
       "price_out_per_mtok": 3.08,
       "supports_reasoning": true,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-haiku-4-5-20251001",
@@ -426,7 +477,8 @@
       "price_in_per_mtok": 1.0,
       "price_out_per_mtok": 5.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-sonnet-4-6",
@@ -434,7 +486,8 @@
       "price_in_per_mtok": 3.0,
       "price_out_per_mtok": 15.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     },
     {
       "id": "anthropic:claude-opus-4-7",
@@ -442,7 +495,18 @@
       "price_in_per_mtok": 15.0,
       "price_out_per_mtok": 75.0,
       "supports_reasoning": false,
-      "frugal": false
+      "frugal": false,
+      "selectable": false
     }
-  ]
+  ],
+  "llm_status": {
+    "byok_required": true,
+    "has_user_key": false,
+    "platform_key_allowed": false,
+    "allowed": false,
+    "reason": "Sentiment analysis needs your own OpenRouter key \u2014 add one at /settings/providers. The news feed still works without it.",
+    "daily_cap_usd": 1.0,
+    "spent_today_usd": 0.0,
+    "model_choices_restricted": true
+  }
 }

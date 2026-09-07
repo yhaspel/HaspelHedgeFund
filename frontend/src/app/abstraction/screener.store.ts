@@ -3,6 +3,7 @@ import { Observable, of, shareReplay, tap } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
 import {
   AssetClass,
   Preset,
@@ -164,9 +165,12 @@ export class ScreenerStore {
           this._result.set(r);
           this._running.set(false);
         },
-        error: (e) => {
-          const detail = e?.error?.detail || e?.message || 'Run failed';
-          this._error.set(detail);
+        error: (e: unknown) => {
+          // WAVE 3: a provider outage is a real 503 with a readable `detail`
+          // ("Market-data provider is unavailable (…). Try again shortly.").
+          // Keep the previous result on screen so the failure reads as "this
+          // run failed", not "your filters matched nothing".
+          this._error.set(apiErrorMessage(e, 'Run failed'));
           this._running.set(false);
         },
       }),

@@ -1,6 +1,7 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, map, tap } from 'rxjs';
+import { Injectable, inject, signal } from '@angular/core';
+import { Observable, Subscription, map, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
 import {
   BacktestDetail,
   BacktestSummary,
@@ -34,6 +35,13 @@ export class BacktestsStore {
   private readonly _deflation = signal<DeflationPayload | null>(null);
   private readonly _defaultUniverse = signal<string[]>([]);
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
+  private pollSub: Subscription | null = null;
+  /** Bumped by stopPolling() and by every new poll(): responses tagged with an
+   *  older generation are stale and must be ignored. */
+  private pollGen = 0;
+  private polledId: number | null = null;
+  private readonly _polling = signal(false);
+  private readonly _pollError = signal<string | null>(null);
 
   readonly list = this._list.asReadonly();
   /** P10 §D4: total rows server-side (the list is paginated at 50). */
@@ -44,7 +52,11 @@ export class BacktestsStore {
   readonly rollingSharpe = this._rollingSharpe.asReadonly();
   readonly deflation = this._deflation.asReadonly();
   readonly defaultUniverse = this._defaultUniverse.asReadonly();
-  readonly isPolling = computed(() => this.pollHandle !== null);
+  /** A real signal — the old `computed(() => this.pollHandle !== null)` read a
+   *  plain field, so it cached its first value and never updated. */
+  readonly isPolling = this._polling.asReadonly();
+  /** Set when a poll tick fails; cleared when polling (re)starts. */
+  readonly pollError = this._pollError.asReadonly();
 
   loadDefaultUniverse(): Observable<{ universe: string[] }> {
     return this.api
@@ -106,22 +118,46 @@ export class BacktestsStore {
     return this.api.delete<void>(`/backtests/${id}/`);
   }
 
+  /**
+   * Poll one backtest until it reaches a terminal state. Same generation-based
+   * teardown as RunsStore.pollRun: stopPolling() (and every new poll()) makes an
+   * in-flight response inert — it can neither write `_current` nor re-arm the
+   * timer — and cancels the HTTP request.
+   */
   poll(id: number, intervalMs = 3000): void {
     this.stopPolling();
+    // Never show backtest A under backtest B's URL while B loads.
+    if (this.polledId !== id) {
+      this._current.set(null);
+      this._equity.set([]);
+      this._equityBenchmarks.set([]);
+      this._rollingSharpe.set([]);
+      this._deflation.set(null);
+      this.polledId = id;
+    }
+    this._pollError.set(null);
+    const gen = ++this.pollGen;
+    this._polling.set(true);
     const tick = () => {
-      this.api.get<BacktestDetail>(`/backtests/${id}/`).subscribe({
+      if (gen !== this.pollGen) return;
+      this.pollSub = this.api.get<BacktestDetail>(`/backtests/${id}/`).subscribe({
         next: (bt) => {
+          if (gen !== this.pollGen) return; // superseded: a stale response
           this._current.set(bt);
           if (bt.status === 'queued' || bt.status === 'running') {
             this.pollHandle = setTimeout(tick, intervalMs);
           } else {
             this.pollHandle = null;
-            this.loadEquity(id).subscribe();
-            this.loadDeflation(id).subscribe();
+            this._polling.set(false);
+            this.loadEquity(id).subscribe({ error: () => undefined });
+            this.loadDeflation(id).subscribe({ error: () => undefined });
           }
         },
-        error: () => {
+        error: (err: unknown) => {
+          if (gen !== this.pollGen) return;
           this.pollHandle = null;
+          this._polling.set(false);
+          this._pollError.set(apiErrorMessage(err, 'Could not load this backtest.'));
         },
       });
     };
@@ -129,8 +165,12 @@ export class BacktestsStore {
   }
 
   stopPolling(): void {
+    this.pollGen++;
     if (this.pollHandle) clearTimeout(this.pollHandle);
     this.pollHandle = null;
+    this.pollSub?.unsubscribe();
+    this.pollSub = null;
+    this._polling.set(false);
   }
 
   loadEquity(id: number): Observable<EquityCurveResponse> {

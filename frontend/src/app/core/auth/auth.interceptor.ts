@@ -10,6 +10,7 @@ function isAuthEndpoint(url: string): boolean {
   return (
     url.includes('/auth/login') ||
     url.includes('/auth/refresh') ||
+    url.includes('/auth/logout') ||
     url.includes('/auth/signup')
   );
 }
@@ -48,18 +49,31 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
       }
 
       // Try to silently mint a new access token and replay the original request.
-      // Only if the refresh itself fails (refresh token expired/revoked) do we
-      // actually log the user out — otherwise the session is invisible to them.
+      // Only if the refresh itself fails (refresh token expired/revoked/blacklisted)
+      // — or the REPLAY itself 401s — do we actually log the user out.
       return refresher.refresh().pipe(
-        switchMap((newAccess) =>
-          next(
-            req.clone({ setHeaders: { Authorization: `Bearer ${newAccess}` } }),
-          ),
-        ),
+        // This catchError sits UPSTREAM of the switchMap, so it only ever sees a
+        // failure of /auth/refresh/ itself. Rotated refresh tokens are blacklisted
+        // server-side, so a 401 here is terminal: never retry, just end the session.
         catchError((refreshErr) => {
           bounceToLogin();
           return throwError(() => refreshErr);
         }),
+        switchMap((newAccess) =>
+          next(
+            req.clone({ setHeaders: { Authorization: `Bearer ${newAccess}` } }),
+          ).pipe(
+            // The replay ran with a demonstrably fresh access token. An ordinary
+            // 400/404/409/5xx therefore says nothing about the session and MUST
+            // NOT clear it; only another 401 means the new token is unusable.
+            catchError((replayErr: unknown) => {
+              if (replayErr instanceof HttpErrorResponse && replayErr.status === 401) {
+                bounceToLogin();
+              }
+              return throwError(() => replayErr);
+            }),
+          ),
+        ),
       );
     }),
   );

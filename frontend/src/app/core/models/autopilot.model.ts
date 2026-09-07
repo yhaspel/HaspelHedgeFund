@@ -77,6 +77,15 @@ export interface FundMemberCard {
   rolling_sharpe: number | null;
   next_run_at: string | null;
   cron_description: string | null;
+  /** IANA zone the cron is expressed in. `next_run_at` stays UTC — the card
+   *  must render BOTH in this zone or the two rows disagree by hours/days. */
+  timezone: string | null;
+  /** Shadow-mode daily order/notional caps: computed and recorded, never
+   *  blocking. Present so the UI can show what WOULD have been capped. */
+  caps_shadow?: Record<string, unknown> | null;
+  /** §9 gate warnings for an already-enabled autopilot (strict only for new
+   *  enables), so the card can surface them without blocking. */
+  validation_warnings?: string[];
   // P7 — why a member isn't live + the one next step (drives the card CTA).
   validation_passed: boolean;
   can_enable: boolean;

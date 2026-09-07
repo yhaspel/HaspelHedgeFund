@@ -1,6 +1,12 @@
-import { Injectable, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { Observable, catchError, finalize, of, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
+import {
+  FundActivityEntry,
+  FundActivityResponse,
+  SchedulerHealthResponse,
+} from '../core/models/fund-activity.model';
 import {
   Autopilot,
   AutopilotResponse,
@@ -30,6 +36,15 @@ export class FundStore {
   private readonly _executed = signal<ExecutedBook | null>(null);
   private readonly _candidates = signal<FundCandidate[]>([]);
   private readonly _accounts = signal<FundAccountOption[]>([]);
+  // WAVE 3 — the fund's operational record: activity feed + scheduler health.
+  private readonly _activity = signal<FundActivityEntry[]>([]);
+  private readonly _activityMeta = signal<FundActivityResponse | null>(null);
+  private readonly _activityLoading = signal(false);
+  private readonly _activityLoadingMore = signal(false);
+  private readonly _activityError = signal<string | null>(null);
+  private readonly _scheduler = signal<SchedulerHealthResponse | null>(null);
+  private readonly _schedulerLoading = signal(false);
+  private readonly _schedulerError = signal<string | null>(null);
 
   readonly fund = this._fund.asReadonly();
   readonly composite = this._composite.asReadonly();
@@ -39,6 +54,20 @@ export class FundStore {
   readonly executed = this._executed.asReadonly();
   readonly candidates = this._candidates.asReadonly();
   readonly accounts = this._accounts.asReadonly();
+  readonly activity = this._activity.asReadonly();
+  readonly activityMeta = this._activityMeta.asReadonly();
+  readonly activityLoading = this._activityLoading.asReadonly();
+  readonly activityLoadingMore = this._activityLoadingMore.asReadonly();
+  readonly activityError = this._activityError.asReadonly();
+  readonly scheduler = this._scheduler.asReadonly();
+  readonly schedulerLoading = this._schedulerLoading.asReadonly();
+  readonly schedulerError = this._schedulerError.asReadonly();
+
+  /** Cursor for "Load more" — null when the server says the page is the last. */
+  readonly activityNextBefore = computed(() => {
+    const m = this._activityMeta();
+    return m?.has_more ? (m.next_before ?? null) : null;
+  });
 
   // The GET returns `{fund: null}` before a fund exists — normalize to null so
   // the page renders the set-up flow instead of a half-empty overview.
@@ -143,6 +172,70 @@ export class FundStore {
       .put<AutopilotResponse>(`/strategies/${strategyId}/autopilot/`, body)
       .pipe(tap((r) => this._autopilot.set(r?.autopilot ?? null)));
   }
+  // --- WAVE 3: activity feed + scheduler health ---------------------------
+  /**
+   * Page 1 of the fund activity feed. `limit` is clamped server-side; the
+   * cursor comes back as `next_before` and is passed to `loadMoreActivity`.
+   */
+  loadActivity(limit = 40): Observable<FundActivityResponse | null> {
+    this._activityLoading.set(true);
+    this._activityError.set(null);
+    return this.api.get<FundActivityResponse>(`/fund/activity/?limit=${limit}`).pipe(
+      tap((r) => {
+        this._activityMeta.set(r);
+        this._activity.set(r?.entries ?? []);
+      }),
+      catchError((err: unknown) => {
+        this._activityError.set(apiErrorMessage(err, 'Could not load the fund activity feed.'));
+        return of(null);
+      }),
+      finalize(() => this._activityLoading.set(false)),
+    );
+  }
+
+  /** Append the next cursor page. No-op when the last page is already loaded. */
+  loadMoreActivity(limit = 40): Observable<FundActivityResponse | null> {
+    const before = this.activityNextBefore();
+    if (!before || this._activityLoadingMore()) return of(null);
+    this._activityLoadingMore.set(true);
+    this._activityError.set(null);
+    return this.api
+      .get<FundActivityResponse>(
+        `/fund/activity/?limit=${limit}&before=${encodeURIComponent(before)}`,
+      )
+      .pipe(
+        tap((r) => {
+          this._activityMeta.set(r);
+          // The cursor is exclusive server-side, but de-duplicate anyway: two
+          // rows can share an instant and a naive concat would double them.
+          const seen = new Set(this._activity().map((e) => `${e.at}|${e.kind}|${e.title}`));
+          const fresh = (r?.entries ?? []).filter(
+            (e) => !seen.has(`${e.at}|${e.kind}|${e.title}`),
+          );
+          this._activity.set([...this._activity(), ...fresh]);
+        }),
+        catchError((err: unknown) => {
+          this._activityError.set(apiErrorMessage(err, 'Could not load more activity.'));
+          return of(null);
+        }),
+        finalize(() => this._activityLoadingMore.set(false)),
+      );
+  }
+
+  loadSchedulerHealth(): Observable<SchedulerHealthResponse | null> {
+    this._schedulerLoading.set(true);
+    this._schedulerError.set(null);
+    return this.api.get<SchedulerHealthResponse>('/fund/scheduler-health/').pipe(
+      tap((r) => this._scheduler.set(r)),
+      catchError((err: unknown) => {
+        this._scheduler.set(null);
+        this._schedulerError.set(apiErrorMessage(err, 'Could not read scheduler health.'));
+        return of(null);
+      }),
+      finalize(() => this._schedulerLoading.set(false)),
+    );
+  }
+
   enable(strategyId: number): Observable<AutopilotResponse> {
     return this.api
       .post<AutopilotResponse>(`/strategies/${strategyId}/autopilot/enable/`, {})

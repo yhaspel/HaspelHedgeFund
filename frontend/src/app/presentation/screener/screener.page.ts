@@ -11,6 +11,7 @@ import { Router } from '@angular/router';
 
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
 import { ScreenerStore } from '../../abstraction/screener.store';
 import {
   AssetClass,
@@ -37,6 +38,7 @@ type ViewMode = 'results' | 'watchlist';
     AppShellComponent,
     EmptyStateComponent,
     EnterPositionModalComponent,
+    ErrorStateComponent,
     FilterEditorComponent,
     PresetBarComponent,
     ResultsTableComponent,
@@ -116,6 +118,23 @@ type ViewMode = 'results' | 'watchlist';
                 @if (r.truncated) {
                   · <span class="pill warn"><span class="dot"></span>truncated</span>
                 }
+                <!-- WAVE 3: where the bar-derived columns came from this run.
+                     "partial" rows have NULL momentum / 52-week / MA fields. -->
+                @if (r.enrichment_counts; as ec) {
+                  ·
+                  <span class="pill" data-test="enrichment-cache">
+                    <span class="dot"></span>{{ ec.cache }} cached
+                  </span>
+                  <span class="pill" data-test="enrichment-fetched">
+                    <span class="dot"></span>{{ ec.fetched }} fetched
+                  </span>
+                  @if (ec.partial > 0) {
+                    <span class="pill warn" data-test="enrichment-partial"
+                          title="These rows have no momentum, 52-week or moving-average data — the enrichment could not complete. They are not zeroes.">
+                      <span class="dot"></span>{{ ec.partial }} partial
+                    </span>
+                  }
+                }
               </span>
             }
             <div class="actions">
@@ -130,12 +149,19 @@ type ViewMode = 'results' | 'watchlist';
             </div>
           </div>
           <div class="card-bd p-0">
-            @if (store.error()) {
-              <p
-                class="alert"
-                role="alert"
-                aria-live="polite"
-              >{{ store.error() }}</p>
+            <!-- WAVE 3: a provider outage is a 503 with a real message, not an
+                 empty result. Render it as a failure with a retry. -->
+            @if (store.error(); as err) {
+              <div class="p-4">
+                <hf-error-state
+                  [compact]="true"
+                  title="The screen didn’t run"
+                  [detail]="err"
+                  retryLabel="Run again"
+                  (retry)="runScreen()"
+                  data-test="screener-error"
+                ></hf-error-state>
+              </div>
             }
             @if (store.result(); as r) {
               @if (r.warnings.length) {

@@ -4,6 +4,8 @@ import { Router, RouterLink } from '@angular/router';
 
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { apiErrorMessage } from '../../core/api/api-error';
 import { RunsStore } from '../../abstraction/runs.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
@@ -15,7 +17,7 @@ type StatusFilter = 'all' | RunStatus;
 @Component({
   selector: 'hf-runs-list',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, EmptyStateComponent, ErrorStateComponent, TickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <hf-app-shell [crumbs]="[{label:'Runs'}]">
@@ -85,6 +87,14 @@ type StatusFilter = 'all' | RunStatus;
               }
             </div>
           </div>
+        } @else if (loadError()) {
+          <div class="card-bd">
+            <hf-error-state
+              title="Couldn't load your runs"
+              [detail]="loadError()"
+              (retry)="reload()"
+            ></hf-error-state>
+          </div>
         } @else if (filtered().length === 0) {
           @if (allRuns().length === 0) {
             <hf-empty-state message="You haven't started any runs yet.">
@@ -113,7 +123,14 @@ type StatusFilter = 'all' | RunStatus;
             </thead>
             <tbody>
               @for (r of filtered(); track r.id) {
-                <tr class="row-clickable" (click)="open(r)">
+                <!-- The whole row navigates, so it has to be reachable and
+                     operable from the keyboard: a focusable row with a link
+                     role, Enter/Space activation and a real accessible name. -->
+                <tr class="row-clickable" (click)="open(r)"
+                    (keydown)="onRowKeydown($event, r)"
+                    tabindex="0" role="link"
+                    [attr.aria-label]="rowLabel(r)"
+                    [attr.data-test]="'run-row-' + r.id">
                   <td class="mono">#{{ r.id }}</td>
                   <td>
                     <span class="inline-flex gap-2 flex-wrap">
@@ -198,6 +215,11 @@ type StatusFilter = 'all' | RunStatus;
     `
       .runs-tbl tr.row-clickable { cursor: pointer; }
       .runs-tbl tr.row-clickable:hover { background: var(--hover); }
+      .runs-tbl tr.row-clickable:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+        background: var(--hover);
+      }
       .pill-source {
         background: var(--surface-2);
         color: var(--text-3);
@@ -268,6 +290,8 @@ export class RunsListPage implements OnInit {
   private readonly profileStore = inject(TickerProfileStore);
 
   readonly loading = signal(true);
+  /** GET /runs/ failed — distinct from "this account has no runs". */
+  readonly loadError = signal<string | null>(null);
   readonly rerunningId = signal<number | null>(null);
   readonly sourceFilter = signal<SourceFilter>('all');
   readonly statusFilter = signal<StatusFilter>('all');
@@ -316,8 +340,14 @@ export class RunsListPage implements OnInit {
     this.reload();
   }
 
-  private reload(): void {
+  /**
+   * A failed GET /runs/ used to render "You haven't started any runs yet." —
+   * a 500 was indistinguishable from an empty account, with no way to retry.
+   * Track the failure and render <hf-error-state> instead.
+   */
+  reload(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.runs.listRuns({
       search: this.searchTerm() || undefined,
       days: this.windowFilter() === 'all' ? 'all' : undefined,
@@ -327,9 +357,12 @@ export class RunsListPage implements OnInit {
         this.loading.set(false);
         // Lazy-prefetch names for visible tickers (cheap; deduped batch).
         const tickers = [...new Set(rows.flatMap((r) => r.tickers || []))];
-        if (tickers.length) this.profileStore.fetchNames(tickers).subscribe();
+        if (tickers.length) this.profileStore.fetchNames(tickers).subscribe({ error: () => undefined });
       },
-      error: () => this.loading.set(false),
+      error: (e: unknown) => {
+        this.loading.set(false);
+        this.loadError.set(apiErrorMessage(e, 'Could not load your runs.'));
+      },
     });
   }
 
@@ -382,6 +415,22 @@ export class RunsListPage implements OnInit {
   }
 
   open(r: RunSummary): void { this.router.navigate(['/runs', r.id]); }
+
+  /** Enter / Space open the row, like a link. Keys handled by a control inside
+   *  the row (the Rerun button) are left alone. */
+  onRowKeydown(ev: KeyboardEvent, r: RunSummary): void {
+    if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
+    const target = ev.target as HTMLElement | null;
+    if (target && target !== ev.currentTarget && target.closest('button, a, input, select')) return;
+    ev.preventDefault();
+    this.open(r);
+  }
+
+  /** What a screen reader announces for the row. */
+  rowLabel(r: RunSummary): string {
+    const tickers = (r.tickers ?? []).join(', ') || 'no tickers';
+    return `Run #${r.id}, ${tickers}, ${r.status}, ${r.as_of_date}`;
+  }
 
   // P4 WS-A: rerun a failed/cancelled run. Stops row-click navigation, creates
   // a new run from the original's payload, and navigates to the new run.

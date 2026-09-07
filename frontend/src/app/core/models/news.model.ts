@@ -24,6 +24,27 @@ export interface MarketNewsItem {
   sentiment_model: string | null;
 }
 
+/**
+ * WAVE 3 — why the news LLM features did (or did not) run.
+ *
+ * Sentiment + translation became BYOK-required with a daily USD cap: with no
+ * user OpenRouter key (and `platform_key_allowed === false`) the feature is
+ * skipped, and the model pickers are limited to the frugal preset menu.
+ * `reason` is the backend's own user-facing sentence — render it verbatim.
+ * Verified against `apps/data/news_llm_policy.py::llm_status`.
+ */
+export interface NewsLlmStatus {
+  byok_required: boolean;
+  has_user_key: boolean;
+  platform_key_allowed: boolean;
+  allowed: boolean;
+  reason: string | null;
+  daily_cap_usd: number;
+  spent_today_usd: number;
+  /** True ⇒ non-frugal models are `selectable: false` and PUT rejects them. */
+  model_choices_restricted: boolean;
+}
+
 export interface NewsFeed {
   items: MarketNewsItem[];
   page: number;
@@ -41,6 +62,10 @@ export interface NewsFeed {
   ranking_basis: string;
   sentiment_warning?: string;
   translation_warning?: string;
+  /** WAVE 3 — BYOK / daily-cap state. */
+  llm_status?: NewsLlmStatus;
+  /** P4-OFF — rows are last-persisted DB values, not a live fetch. */
+  stale?: boolean;
 }
 
 export interface NewsPreferences {
@@ -63,10 +88,22 @@ export interface SentimentModelChoice {
   supports_reasoning: boolean;
   /** In the cheap Llama/Qwen default subset; shown before "Show all models". */
   frugal: boolean;
+  /**
+   * WAVE 3 — false when this model may NOT be picked (a non-frugal model and
+   * the user has no OpenRouter key of their own). `PUT /news/preferences/`
+   * answers 400 `{detail}` for one of these, so the picker disables it.
+   *
+   * Optional so a pre-wave-3 server (which omits the key) does not read as
+   * "everything is locked" — call sites test `selectable === false`, never
+   * falsiness.
+   */
+  selectable?: boolean;
 }
 
 export interface NewsPreferencesResponse {
   preferences: NewsPreferences;
   sentiment_model_choices: SentimentModelChoice[];
   translation_model_choices: SentimentModelChoice[];
+  /** WAVE 3 — BYOK / daily-cap state (same block as the feed). */
+  llm_status?: NewsLlmStatus;
 }

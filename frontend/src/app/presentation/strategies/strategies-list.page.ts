@@ -4,12 +4,15 @@ import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { ConfirmService } from '../shared/confirm.service';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { formatExposurePct } from '../shared/format';
 import { StrategiesStore } from '../../abstraction/strategies.store';
 
 @Component({
   selector: 'hf-strategies-list',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe, AppShellComponent, EmptyStateComponent],
+  imports: [CommonModule, RouterLink, DatePipe, AppShellComponent, EmptyStateComponent, ErrorStateComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies'}]">
       <div class="page-head">
@@ -38,7 +41,15 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
             </button>
           </div>
         }
-        @if (visible().length === 0 && !showArchived()) {
+        @if (loadError()) {
+          <div class="card-bd">
+            <hf-error-state
+              title="Couldn't load your strategies"
+              [detail]="loadError()"
+              (retry)="reload()"
+            ></hf-error-state>
+          </div>
+        } @else if (visible().length === 0 && !showArchived()) {
           <hf-empty-state
             message="No active strategies."
             detail="Create one to start the autonomous long-short engine, or check the Archived chip.">
@@ -66,7 +77,9 @@ import { StrategiesStore } from '../../abstraction/strategies.store';
                     }
                   </td>
                   <td class="text-text-2">{{ s.universe_name }}</td>
-                  <td class="mono">{{ s.target_gross_pct }} / {{ s.target_net_pct }}</td>
+                  <!-- These are fractions of NAV (1.50 = 150%), so render them
+                       as percentages under a "Gross / Net" heading. -->
+                  <td class="mono">{{ pct(s.target_gross_pct) }} / {{ pct(s.target_net_pct) }}</td>
                   <td class="mono">{{ s.top_k_longs }} / {{ s.top_k_shorts }}</td>
                   <td>{{ s.model_preset }}</td>
                   <td class="mono text-[11.5px] text-text-3">
@@ -117,6 +130,9 @@ export class StrategiesListPage implements OnInit {
   readonly deletingId = signal<number | null>(null);
   readonly archivingId = signal<number | null>(null);
   readonly showArchived = signal(false);
+  /** GET /strategies/ failed — distinct from "no active strategies". */
+  readonly loadError = signal<string | null>(null);
+  readonly pct = formatExposurePct;
 
   readonly archivedCount = computed(
     () => this.store.strategies().filter((s) => !s.is_active).length,
@@ -128,21 +144,47 @@ export class StrategiesListPage implements OnInit {
 
   // Load EVERYTHING (the server's default list is active-only) so the chip
   // count and the toggle work without a second round trip.
-  ngOnInit(): void { this.store.list({ includeArchived: true }).subscribe(); }
+  ngOnInit(): void { this.reload(); }
+
+  /** A failed GET /strategies/ used to render "No active strategies." */
+  reload(): void {
+    this.loadError.set(null);
+    this.store.list({ includeArchived: true }).subscribe({
+      error: (e: unknown) =>
+        this.loadError.set(apiErrorMessage(e, 'Could not load your strategies.')),
+    });
+  }
 
   // P10 §D1: archive/unarchive — the viable cleanup verb (delete is 409-gated
   // once a strategy has any non-cancelled cycle).
-  toggleArchive(id: number, name: string, isActive: boolean): void {
+  async toggleArchive(id: number, name: string, isActive: boolean): Promise<void> {
     if (this.archivingId() !== null) return;
+    // Archiving is not cosmetic: it takes the strategy out of the default list
+    // and out of every picker. Say what it does (and does NOT do) first.
+    if (isActive) {
+      const ok = await this.confirm.ask({
+        title: `Archive "${name}"?`,
+        body:
+          'It disappears from the default Strategies list and from the pickers that offer '
+          + 'strategies (new backtest, fund roster). Its cycles and history are kept, its '
+          + 'positions are NOT closed, and any running autopilot is NOT disabled — do that '
+          + 'on its autopilot panel. You can unarchive it at any time from the Archived chip.',
+        confirmLabel: 'Archive',
+      });
+      if (!ok) return;
+    }
     this.archivingId.set(id);
     this.store.setActive(id, !isActive).subscribe({
       next: () => {
         this.archivingId.set(null);
-        this.store.list({ includeArchived: true }).subscribe();
+        this.reload();
       },
-      error: () => {
+      error: (e: unknown) => {
         this.archivingId.set(null);
-        void this.confirm.notify({ title: `Could not ${isActive ? 'archive' : 'unarchive'} "${name}".` });
+        void this.confirm.notify({
+          title: `Could not ${isActive ? 'archive' : 'unarchive'} "${name}".`,
+          body: apiErrorMessage(e, 'The server refused the request.'),
+        });
       },
     });
   }

@@ -1,6 +1,7 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, map, tap } from 'rxjs';
+import { Injectable, inject, signal } from '@angular/core';
+import { Observable, Subscription, map, tap } from 'rxjs';
 import { ApiClient } from '../core/api/api-client';
+import { apiErrorMessage } from '../core/api/api-error';
 import {
   CreateRunRequest,
   ModelOption,
@@ -17,13 +18,24 @@ export class RunsStore {
   private readonly _current = signal<RunDetail | null>(null);
   private readonly _models = signal<ModelOption[]>([]);
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
+  private pollSub: Subscription | null = null;
+  /** Bumped by stopPolling() and by every new pollRun(): a response tagged with
+   *  an older generation is stale and must be ignored. */
+  private pollGen = 0;
+  private polledId: number | null = null;
+  private readonly _polling = signal(false);
+  private readonly _pollError = signal<string | null>(null);
 
   readonly runs = this._runs.asReadonly();
   /** P10 §D4: total rows server-side (the list is paginated at 50). */
   readonly runsCount = this._runsCount.asReadonly();
   readonly currentRun = this._current.asReadonly();
   readonly models = this._models.asReadonly();
-  readonly isPolling = computed(() => this.pollHandle !== null);
+  /** A real signal — the old `computed(() => this.pollHandle !== null)` read a
+   *  plain field, so it cached its first value and never updated. */
+  readonly isPolling = this._polling.asReadonly();
+  /** Set when a poll tick fails; cleared when polling (re)starts. */
+  readonly pollError = this._pollError.asReadonly();
 
   loadModels(): Observable<{ models: ModelOption[] }> {
     return this.api.get<{ models: ModelOption[] }>('/models/').pipe(
@@ -86,20 +98,43 @@ export class RunsStore {
     return this.api.post<{ id: number; status: string }>(`/runs/${runId}/cancel/`, {});
   }
 
+  /**
+   * Poll one run until it reaches a terminal state.
+   *
+   * Teardown is generation-based: `stopPolling()` (and every new `pollRun`)
+   * bumps `pollGen`, so a response that was already in flight can neither write
+   * to `_current` nor re-arm the timer. The in-flight request is also
+   * unsubscribed, so navigating away really does cancel the HTTP call rather
+   * than leaving a zombie poller running for the rest of the session.
+   */
   pollRun(runId: number, intervalMs = 2000): void {
     this.stopPolling();
+    // Never let run A stay on screen under run B's URL while B loads.
+    if (this.polledId !== runId) {
+      this._current.set(null);
+      this.polledId = runId;
+    }
+    this._pollError.set(null);
+    const gen = ++this.pollGen;
+    this._polling.set(true);
     const tick = () => {
-      this.api.get<RunDetail>(`/runs/${runId}/`).subscribe({
+      if (gen !== this.pollGen) return;
+      this.pollSub = this.api.get<RunDetail>(`/runs/${runId}/`).subscribe({
         next: (run) => {
+          if (gen !== this.pollGen) return; // superseded: a stale response
           this._current.set(run);
           if (run.status === 'queued' || run.status === 'running') {
             this.pollHandle = setTimeout(tick, intervalMs);
           } else {
             this.pollHandle = null;
+            this._polling.set(false);
           }
         },
-        error: () => {
+        error: (err: unknown) => {
+          if (gen !== this.pollGen) return;
           this.pollHandle = null;
+          this._polling.set(false);
+          this._pollError.set(apiErrorMessage(err, 'Could not load this run.'));
         },
       });
     };
@@ -107,9 +142,15 @@ export class RunsStore {
   }
 
   stopPolling(): void {
+    // Invalidate any in-flight tick BEFORE cancelling, so a response that is
+    // already queued as a microtask cannot re-arm the timer.
+    this.pollGen++;
     if (this.pollHandle) {
       clearTimeout(this.pollHandle);
       this.pollHandle = null;
     }
+    this.pollSub?.unsubscribe();
+    this.pollSub = null;
+    this._polling.set(false);
   }
 }

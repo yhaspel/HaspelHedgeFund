@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { of } from 'rxjs';
-import { ActivatedRoute } from '@angular/router';
+import { of, throwError } from 'rxjs';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 
 import { AutopilotPanelPage } from './autopilot-panel.page';
+import { ConfirmService } from '../shared/confirm.service';
 import { FundStore } from '../../abstraction/fund.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { Autopilot, AutopilotRunRow, ExecutedBook } from '../../core/models/autopilot.model';
@@ -15,6 +16,8 @@ type Cmp = any;
 // Spies from the most recent setup() — read by the audit-wiring tests (AP-02/06).
 let lastLoadHistory: ReturnType<typeof vi.fn>;
 let lastLoadExecuted: ReturnType<typeof vi.fn>;
+// Run now / Disable / Resume submit real paper orders, so they are confirm-gated.
+let lastAsk: ReturnType<typeof vi.fn>;
 
 function ap(overrides: Partial<Autopilot> = {}): Autopilot {
   return {
@@ -55,17 +58,23 @@ function setup(
     loadHistory: lastLoadHistory,
     loadExecuted: lastLoadExecuted,
   } as unknown as FundStore;
-  const route = { snapshot: { paramMap: { get: () => '7' } } } as unknown as ActivatedRoute;
+  // The panel follows paramMap now, so an in-place :id change reloads.
+  const route = {
+    paramMap: of(convertToParamMap({ id: '7' })),
+    snapshot: { paramMap: convertToParamMap({ id: '7' }) },
+  } as unknown as ActivatedRoute;
   const modelsStore = {
     models: signal([]).asReadonly(),
     loadModels: () => of({ models: [] }),
     fetchPreset: () => of({ preset: 'frugal', overrides: {}, menu: [] }),
   } as unknown as ModelsStore;
+  lastAsk = vi.fn(() => Promise.resolve(true));
   TestBed.configureTestingModule({
     providers: [
       { provide: FundStore, useValue: store },
       { provide: ModelsStore, useValue: modelsStore },
       { provide: ActivatedRoute, useValue: route },
+      { provide: ConfirmService, useValue: { ask: lastAsk } },
     ],
   });
   const cmp = TestBed.runInInjectionContext(() => new AutopilotPanelPage());
@@ -86,10 +95,20 @@ describe('AutopilotPanelPage', () => {
     expect(cmp.ap().validation.passed).toBe(false);
   });
 
-  it('shows a notice after run-now', () => {
+  it('shows a notice after run-now', async () => {
     const cmp = setup(ap({ is_enabled: true }));
-    cmp.runNow();
+    await cmp.runNow();
+    // The action states its consequence (live paper orders) before firing.
+    expect(lastAsk).toHaveBeenCalledTimes(1);
+    expect(lastAsk.mock.calls[0][0].body).toContain('paper brokerage account');
     expect(cmp.notice()).toContain('queued');
+  });
+
+  it('does not run a cycle when the confirmation is declined', async () => {
+    const cmp = setup(ap({ is_enabled: true }));
+    lastAsk.mockImplementation(() => Promise.resolve(false));
+    await cmp.runNow();
+    expect(cmp.notice()).toBeNull();
   });
 
   it('parses an existing weekly cron into the friendly builder', () => {
@@ -168,11 +187,63 @@ describe('AutopilotPanelPage', () => {
   });
 
   // AP-06 — Run now refreshes the audit (loadHistory fires again) + keeps the notice.
-  it('refreshes the audit after run-now', () => {
+  it('refreshes the audit after run-now', async () => {
     const cmp = setup(ap({ is_enabled: true }));
     expect(lastLoadHistory).toHaveBeenCalledTimes(1);   // ngOnInit
-    cmp.runNow();
+    await cmp.runNow();
     expect(lastLoadHistory).toHaveBeenCalledTimes(2);   // + the post-run-now refresh
     expect(cmp.notice()).toContain('queued');
+  });
+
+  it('confirms Disable and Resume, and Resume states the peak rebase', async () => {
+    const cmp = setup(ap({ is_enabled: true, state: 'halted' }));
+    await cmp.disable();
+    expect(lastAsk.mock.calls[0][0].body).toContain('NOT flattened');
+    await cmp.resume();
+    expect(lastAsk.mock.calls[1][0].body).toContain('REBASED');
+    expect(cmp.notice()).toContain('peak rebased');
+  });
+
+  it('surfaces the backend detail when resume is refused (halted fund → 409)', async () => {
+    const autopilot = ap({ is_enabled: true, state: 'halted' });
+    const store = {
+      autopilot: signal<Autopilot | null>(autopilot).asReadonly(),
+      history: signal<AutopilotRunRow[]>([]).asReadonly(),
+      executed: signal<ExecutedBook | null>(null).asReadonly(),
+      loadAutopilot: () => of({ autopilot }),
+      resume: () =>
+        throwError(() => ({
+          status: 409,
+          error: { detail: 'This strategy is a member of a halted fund — resume the fund first.' },
+        })),
+      loadHistory: () => of({ runs: [] }),
+      loadExecuted: () => of({ linked: false, positions: [], nav: null }),
+    } as unknown as FundStore;
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: FundStore, useValue: store },
+        {
+          provide: ModelsStore,
+          useValue: {
+            models: signal([]).asReadonly(),
+            loadModels: () => of({ models: [] }),
+            fetchPreset: () => of({ preset: 'frugal', overrides: {}, menu: [] }),
+          },
+        },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            paramMap: of(convertToParamMap({ id: '7' })),
+            snapshot: { paramMap: convertToParamMap({ id: '7' }) },
+          },
+        },
+        { provide: ConfirmService, useValue: { ask: () => Promise.resolve(true) } },
+      ],
+    });
+    const cmp: Cmp = TestBed.runInInjectionContext(() => new AutopilotPanelPage());
+    cmp.ngOnInit();
+    await cmp.resume();
+    expect(cmp.notice()).toContain('member of a halted fund');
   });
 });

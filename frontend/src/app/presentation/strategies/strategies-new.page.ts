@@ -50,11 +50,13 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                 }
               </select>
               <p class="text-[11.5px] text-text-3 m-0 mt-1">{{ kindDescription() }}</p>
-              <p class="text-[11.5px] m-0 mt-1.5">
-                <a [routerLink]="['/info', kindGuideSlug()]" class="text-[var(--acc-info-fg)]">
-                  Read the full guide →
-                </a>
-              </p>
+              @if (kindGuideSlug(); as slug) {
+                <p class="text-[11.5px] m-0 mt-1.5">
+                  <a [routerLink]="['/info', slug]" class="text-[var(--acc-info-fg)]">
+                    Read the full guide →
+                  </a>
+                </p>
+              }
             </div>
 
             <div class="grid grid-cols-2 gap-3.5">
@@ -226,6 +228,54 @@ import { STRATEGY_KIND_GUIDE } from '../../core/models/info.model';
                   <hf-info text="Off (default): pure deterministic inverse-vol — zero LLM cost, identical to a baseline 'just inverse-vol weight a sector basket' strategy. On: the trimmed council may vote to exclude a sleeve with a reason (sleeve's weight is redistributed across the rest)." />
                 </label>
                 <input class="check" name="ecv" type="checkbox" [(ngModel)]="enableCouncilVeto"  id="strat-ecv"/>
+              </div>
+            }
+            <!-- WAVE 3 — the deterministic (council-free) kinds. Their sizing is
+                 entirely constructor-bound, so only these knobs matter; every
+                 one is already accepted by StrategySerializer. -->
+            @if (isDeterministicMomentum()) {
+              <div class="field" data-test="det-vol-window">
+                <label class="lbl" for="strat-det-vw">
+                  Vol lookback (days)
+                  <hf-info text="Trailing window used to estimate each name's daily-return volatility. Sizing targets a constant portfolio volatility, so a jumpy name gets a smaller slice. Default 60." />
+                </label>
+                <input class="input" name="detvw" type="number" min="20" max="252"
+                       [(ngModel)]="volWindowDays" id="strat-det-vw" />
+              </div>
+              @if (kind === 'sector_momentum') {
+                <div class="field" data-test="det-top-n">
+                  <label class="lbl" for="strat-det-topn">
+                    ETFs held (top N)
+                    <hf-info text="How many of the highest-ranked sector / theme ETFs the book holds each cycle. Read by the constructor as top_n." />
+                  </label>
+                  <input class="input" name="dettopn" type="number" min="2" max="20"
+                         [(ngModel)]="maxEtfsHeld" id="strat-det-topn" />
+                </div>
+              }
+              <div class="field det-note" data-test="det-note">
+                <p class="text-[11.5px] text-text-3 m-0">
+                  No AI council runs for this kind — there is no per-cycle LLM cost, and the
+                  persona roster below is ignored. Long/short trend (a negative signal opening a
+                  short instead of going flat) is not exposed by the API and is set from the CLI.
+                </p>
+              </div>
+            }
+            @if (kind === 'news_sentiment') {
+              <div class="field" data-test="news-top-n">
+                <label class="lbl" for="strat-news-topn">
+                  Names held (top N)
+                  <hf-info text="How many of the most positively-covered names the book holds, equal-weighted. Read by the constructor as top_n (max_positions)." />
+                </label>
+                <input class="input" name="newstopn" type="number" min="1" max="25"
+                       [(ngModel)]="maxPositions" id="strat-news-topn" />
+              </div>
+              <div class="field det-note" data-test="news-note">
+                <p class="text-[11.5px] text-text-3 m-0">
+                  Long-only: only positive-sentiment names are eligible, and the book never
+                  shorts. The persona roster below drives the bounded conviction overlay, which
+                  can veto a name; the platform measures the same book without the overlay so
+                  you can see whether it earns its cost.
+                </p>
               </div>
             }
             @if (kind === 'pairs') {
@@ -599,6 +649,14 @@ export class StrategiesNewPage implements OnInit {
     global_macro: ['druckenmiller', 'damodaran', 'burry'],
     risk_parity: ['buffett', 'druckenmiller', 'burry'],
     pairs: this.ALL_PERSONAS,
+    // WAVE 3 — the deterministic kinds run NO council, so the roster is empty
+    // (a persona list on one of these would cost money and change nothing).
+    // `news_sentiment` is the exception: its bounded conviction overlay reads
+    // the roster, so it keeps the general-purpose personas.
+    trend: [],
+    sector_momentum: [],
+    news_sentiment: this.ALL_PERSONAS,
+    xsec_long_short: this.ALL_PERSONAS,
   };
   selectedPersonas: string[] = [...this.ALL_PERSONAS];
 
@@ -613,7 +671,8 @@ export class StrategiesNewPage implements OnInit {
   error = signal<string | null>(null);
 
   kindDescription(): string { return STRATEGY_KIND_DESCRIPTIONS[this.kind]; }
-  kindGuideSlug(): string { return STRATEGY_KIND_GUIDE[this.kind]; }
+  /** Undefined for the kinds with no `/info` topic — the link is then hidden. */
+  kindGuideSlug(): string | undefined { return STRATEGY_KIND_GUIDE[this.kind]; }
 
   /** Compact, stable timestamp suffix, e.g. "2026-05-21 14:32". */
   private buildStamp(): string {
@@ -724,9 +783,42 @@ export class StrategiesNewPage implements OnInit {
       this.maxEtfsHeld = 12;
       const rpUni = this.store.universes().find((u) => u.name === 'risk_parity_sleeves');
       if (rpUni) this.universe = rpUni.id;
+    } else if (k === 'trend' || k === 'sector_momentum') {
+      // WAVE 3 — deterministic momentum: gross is the vol-target ceiling, the
+      // council knobs are meaningless, and sector ETFs are the natural universe.
+      this.topLongs = 0;
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.maxPosition = 0.30;
+      this.maxSector = 1.0;
+      this.volWindowDays = 60;
+      if (k === 'sector_momentum') this.maxEtfsHeld = 5;
+      const momUni = this.store.universes().find((u) => u.name === 'sector_etfs');
+      if (momUni) this.universe = momUni.id;
+    } else if (k === 'news_sentiment') {
+      // Long-only equal-weight top-N by sentiment — an equity universe, no shorts.
+      this.topShorts = 0;
+      this.targetGross = 1.0;
+      this.targetNet = 1.0;
+      this.maxPositions = 15;
+      const ETF_ONLY = new Set(['risk_parity_sleeves', 'sector_etfs', 'macro_etfs']);
+      const cur = this.universe === null
+        ? null
+        : this.store.universes().find((u) => u.id === this.universe);
+      if (!cur || ETF_ONLY.has(cur.name)) {
+        const eq = this.store.universes().find((u) => u.name === 'sp500_top_200')
+          || this.store.universes().find((u) => !ETF_ONLY.has(u.name));
+        if (eq) this.universe = eq.id;
+      }
     }
     this.selectedPersonas = [...this.RECOMMENDED_PERSONAS[k]];
     this.refreshAutoName();
+  }
+
+  /** The two council-free momentum kinds share one config block. */
+  isDeterministicMomentum(): boolean {
+    return this.kind === 'trend' || this.kind === 'sector_momentum';
   }
 
   label(k: string): string { return SCREENER_WEIGHT_LABELS[k] ?? k; }
@@ -820,6 +912,14 @@ export class StrategiesNewPage implements OnInit {
       payload['vol_window_days'] = this.volWindowDays;
       payload['rebalance_band_pct'] = String(this.rebalanceBand);
       payload['enable_council_veto'] = this.enableCouncilVeto;
+    }
+    // WAVE 3 — the deterministic kinds. Only the knobs their constructors read.
+    if (this.kind === 'trend' || this.kind === 'sector_momentum') {
+      payload['vol_window_days'] = this.volWindowDays;
+      if (this.kind === 'sector_momentum') payload['max_etfs_held'] = this.maxEtfsHeld;
+    }
+    if (this.kind === 'news_sentiment') {
+      payload['max_positions'] = this.maxPositions;
     }
     if (this.kind === 'pairs') {
       payload['pair_entry_z'] = String(this.pairEntryZ);

@@ -7,6 +7,8 @@ import { EmptyStateComponent } from '../shared/empty-state.component';
 import { TickerComponent } from '../shared/ticker.component';
 import { BrokerStore } from '../../abstraction/broker.store';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { formatInZone, isOverdue } from '../shared/schedule-format';
 import {
   BrokerOrderRow,
   BrokerOrderType,
@@ -156,6 +158,51 @@ type OrderType = BrokerOrderType;
             </table>
           }
         </section>
+
+        @if (heldOrders().length) {
+          <section class="card p-0 overflow-hidden mb-4" data-test="held-orders">
+            <div class="card-hd"><h2 class="title">Held until the next open ({{ heldOrders().length }})</h2>
+              <span class="hint">accepted, not yet sent to the broker — cancel any time</span>
+            </div>
+            <table class="tbl w-full" data-test="held-orders-table">
+              <thead>
+                <tr>
+                  <th class="text-left">Ticker</th>
+                  <th class="text-left">Side</th>
+                  <th class="text-left">Type</th>
+                  <th class="text-right">Qty</th>
+                  <th class="text-left">Releases</th>
+                  <th class="text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (ord of heldOrders(); track ord.id) {
+                  <tr [attr.data-test]="'held-order-row-' + ord.id">
+                    <td class="font-medium"><hf-ticker [ticker]="ord.ticker"></hf-ticker></td>
+                    <td>
+                      <span class="pill" [class.ok]="ord.side === 'buy'"
+                            [class.err]="ord.side === 'sell'">
+                        <span class="dot"></span>{{ ord.side }}
+                      </span>
+                    </td>
+                    <td class="uppercase text-[11px] tracking-wide text-text-2">{{ ord.order_type }}</td>
+                    <td class="text-right mono">{{ +ord.quantity | number: '1.0-4' }}</td>
+                    <td class="text-[11.5px]" [attr.data-test]="'held-release-' + ord.id">
+                      {{ releaseLabel(ord) }}
+                    </td>
+                    <td class="text-right">
+                      <button class="btn ghost btn-sm danger" (click)="onCancel(ord)"
+                              [disabled]="cancellingId() === ord.id"
+                              [attr.data-test]="'cancel-held-order-' + ord.id">
+                        {{ cancellingId() === ord.id ? 'Cancelling…' : 'Cancel' }}
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
 
         <section class="card p-0 overflow-hidden mb-4">
           <div class="card-hd"><h2 class="title">Working orders</h2>
@@ -478,11 +525,33 @@ export class BrokerAccountOverviewPage implements OnInit {
 
   protected readonly lastError = signal<string | null>(null);
 
+  protected readonly cancellingId = signal<number | null>(null);
+
   protected readonly working = computed(() =>
     this.store.orders().filter(
-      (o) => o.status === 'submitted' || o.status === 'partial',
+      // `is_held` also covers a SUBMITTED order the broker is queuing until the
+      // open (`queued_until_open`). Those belong in the held section, not here,
+      // so each order is listed exactly once.
+      (o) => (o.status === 'submitted' || o.status === 'partial') && !o.is_held,
     ),
   );
+
+  /**
+   * Orders accepted by the backend but deliberately held until the next open.
+   * `working` filters submitted|partial, so these were invisible here — the
+   * card said "No working orders" while 18 live commitments existed.
+   */
+  protected readonly heldOrders = computed(() =>
+    this.store.orders().filter((o) => o.is_held || o.status === 'pending_open'),
+  );
+
+  /** "Tue 9 Sep, 09:30 EDT" / "Releasing now (was …)" / the open. */
+  releaseLabel(ord: BrokerOrderRow): string {
+    const iso = ord.release_eta ?? ord.release_after;
+    if (!iso) return 'At the next market open';
+    const when = formatInZone(iso, null);
+    return isOverdue(iso) ? `Releasing now (was ${when})` : when;
+  }
 
   /** Persist the per-account default order quantity mode (whole|fractional). */
   setDefaultQuantityMode(mode: string): void {
@@ -815,7 +884,21 @@ export class BrokerAccountOverviewPage implements OnInit {
 
   onCancel(ord: BrokerOrderRow): void {
     // Cancelling a working order is low-stakes and reversible (just place
-    // again), so it's a single click — no blocking confirm dialog.
-    this.store.cancelOrder(ord.id).subscribe({ next: () => this.refresh() });
+    // again), so it's a single click — no blocking confirm dialog. But the
+    // broker CAN refuse (409 "order is not cancellable" once it is filling),
+    // and that refusal used to go to RxJS's unhandled-error sink: the page
+    // showed nothing and the row stayed put with no explanation.
+    this.cancellingId.set(ord.id);
+    this.lastError.set(null);
+    this.store.cancelOrder(ord.id).subscribe({
+      next: () => {
+        this.cancellingId.set(null);
+        this.refresh();
+      },
+      error: (e: unknown) => {
+        this.cancellingId.set(null);
+        this.lastError.set(apiErrorMessage(e, `Could not cancel the ${ord.ticker} order.`));
+      },
+    });
   }
 }

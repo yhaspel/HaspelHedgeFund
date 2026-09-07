@@ -1,6 +1,8 @@
+import { HttpClient } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable, tap } from 'rxjs';
+import { environment } from '../../environments/environment';
 import { ApiClient } from '../core/api/api-client';
 import { TokenStorage } from '../core/auth/token-storage';
 import { AuthTokens, User } from '../core/models/user.model';
@@ -9,6 +11,7 @@ import { ANON_SCOPE, clearScope, currentScope } from '../core/offline/api-cache'
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
   private readonly api = inject(ApiClient);
+  private readonly http = inject(HttpClient);
   private readonly tokens = inject(TokenStorage);
   private readonly router = inject(Router);
 
@@ -42,6 +45,20 @@ export class AuthStore {
   }
 
   logout(): void {
+    // Revoke the refresh token server-side so signing out actually ends the
+    // session everywhere (POST /auth/logout/ {refresh} → 205, idempotent and
+    // AllowAny). Fire-and-forget: a failed/offline revoke must never keep the
+    // user signed in locally, so the local teardown below runs regardless.
+    // Deliberately HttpClient, not ApiClient: the offline write-block would pop
+    // an "Unavailable offline" modal on a sign-out that must always succeed
+    // locally. /auth/logout/ is AllowAny and is listed as an auth endpoint in the
+    // interceptor, so it carries no bearer and never triggers a refresh-retry.
+    const refresh = this.tokens.getRefresh();
+    if (refresh) {
+      this.http
+        .post<void>(`${environment.apiBaseUrl}/auth/logout/`, { refresh })
+        .subscribe({ next: () => undefined, error: () => undefined });
+    }
     // P4-OFF WS-3.5: purge the offline cache for this user AND the anon scope
     // BEFORE clearing the token (currentScope reads the JWT) — last-known
     // portfolio values are exactly the residue logout must remove, and the anon

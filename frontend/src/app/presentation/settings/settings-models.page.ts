@@ -6,6 +6,8 @@ import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { SettingsTabsComponent } from './settings-tabs.component';
 import { ModelsStore } from '../../abstraction/models.store';
+import { AuthStore } from '../../abstraction/auth.store';
+import { apiErrorMessage } from '../../core/api/api-error';
 import {
   AGENT_DISPLAY,
   GROUP_LABEL,
@@ -244,18 +246,24 @@ type TierFilter = 'all' | ModelTier;
                     [attr.data-test]="'models-filter-' + f.value">{{ f.label }}</button>
                 }
               </div>
-              <button type="button" class="btn"
-                (click)="fetchOpenRouter()"
-                [disabled]="fetchingOpenRouter()"
-                data-test="fetch-openrouter">
-                {{ fetchingOpenRouter() ? 'Fetching…' : 'Fetch latest OpenRouter models' }}
-              </button>
-              <button type="button" class="btn"
-                (click)="verifyAllOpenRouter()"
-                [disabled]="verifyingAll() || openRouterCount() === 0"
-                data-test="verify-all-openrouter">
-                {{ verifyingAll() ? 'Verifying…' : 'Verify all OpenRouter pricing' }}
-              </button>
+              <!-- Catalog-wide OpenRouter actions are staff-only server-side
+                   (403 for everyone else). Hidden when /me/ says the viewer is
+                   not staff; left enabled — and the 403 explained — when /me/
+                   does not carry the flag. -->
+              @if (canManageCatalog()) {
+                <button type="button" class="btn"
+                  (click)="fetchOpenRouter()"
+                  [disabled]="fetchingOpenRouter()"
+                  data-test="fetch-openrouter">
+                  {{ fetchingOpenRouter() ? 'Fetching…' : 'Fetch latest OpenRouter models' }}
+                </button>
+                <button type="button" class="btn"
+                  (click)="verifyAllOpenRouter()"
+                  [disabled]="verifyingAll() || openRouterCount() === 0"
+                  data-test="verify-all-openrouter">
+                  {{ verifyingAll() ? 'Verifying…' : 'Verify all OpenRouter pricing' }}
+                </button>
+              }
             </div>
           </div>
           @if (fetchMsg()) {
@@ -832,6 +840,28 @@ export class SettingsModelsPage implements OnInit {
     return this._scopeToMenu(this.presetMenu(), this.agentDefault(a));
   }
 
+  private readonly auth = inject(AuthStore);
+
+  /**
+   * Whether to offer the catalog-wide OpenRouter actions.
+   *
+   * `POST /api/models/fetch/` and `/api/models/verify-pricing/` are staff-only
+   * (403 otherwise), so a non-staff user was offered two buttons that could
+   * only fail. `/me/` does not expose `is_staff` yet, so an absent flag keeps
+   * the buttons (nothing is hidden from an admin by mistake) and the 403 is
+   * explained; once the field ships, non-staff simply do not see them.
+   */
+  readonly canManageCatalog = computed(() => this.auth.user()?.is_staff !== false);
+
+  /** A 403 here means "staff only", not "something went wrong". */
+  private staffAwareError(e: unknown, fallback: string): string {
+    const status = (e as { status?: number })?.status;
+    if (status === 403) {
+      return 'Only staff accounts can sync or verify the shared model catalog.';
+    }
+    return apiErrorMessage(e, fallback);
+  }
+
   fetchOpenRouter(): void {
     this.fetchingOpenRouter.set(true);
     this.fetchMsg.set(null);
@@ -863,10 +893,10 @@ export class SettingsModelsPage implements OnInit {
         // /models/ from the user's keys + LLM_FREE_ONLY/BLOCK_ANTHROPIC).
         this.store.loadModels().subscribe();
       },
-      error: (err) => {
+      error: (e: unknown) => {
         this.fetchingOpenRouter.set(false);
         this.fetchHasIssues.set(true);
-        this.fetchMsg.set(err?.error?.detail || 'Fetch failed.');
+        this.fetchMsg.set(this.staffAwareError(e, 'Fetch failed.'));
       },
     });
   }
@@ -1047,12 +1077,12 @@ export class SettingsModelsPage implements OnInit {
             : `${id}: pricing matches OpenRouter ($${result?.upstream_price_in_per_mtok ?? '0'} / $${result?.upstream_price_out_per_mtok ?? '0'} per Mtok).`,
         );
       },
-      error: (err) => {
+      error: (e: unknown) => {
         const after = new Set(this.verifyingIds());
         after.delete(id);
         this.verifyingIds.set(after);
         this.verifyHasFailures.set(true);
-        this.verifyMsg.set(err?.error?.detail || `Verification failed for ${id}.`);
+        this.verifyMsg.set(this.staffAwareError(e, `Verification failed for ${id}.`));
       },
     });
   }
@@ -1072,10 +1102,10 @@ export class SettingsModelsPage implements OnInit {
             : `Verified ${total} OpenRouter model(s) — ${failed.length} failed: ${failed.map((f) => f.model_id).join(', ')}.`,
         );
       },
-      error: (err) => {
+      error: (e: unknown) => {
         this.verifyingAll.set(false);
         this.verifyHasFailures.set(true);
-        this.verifyMsg.set(err?.error?.detail || 'Verification failed.');
+        this.verifyMsg.set(this.staffAwareError(e, 'Verification failed.'));
       },
     });
   }

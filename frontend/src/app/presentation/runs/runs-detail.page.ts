@@ -20,6 +20,9 @@ import { PositionSide } from '../../core/models/portfolio.model';
 import { RangeRailComponent } from '../shared/range-rail.component';
 import { TickerComponent } from '../shared/ticker.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
+import { Subscription } from 'rxjs';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { ProvenancePanelComponent } from '../shared/provenance-panel.component';
 
 type RunTab = 'decision' | 'council' | 'risk' | 'cio' | 'raw';
 const RUN_TABS: readonly RunTab[] = ['decision', 'council', 'risk', 'cio', 'raw'] as const;
@@ -39,7 +42,7 @@ interface PersonaCard {
 @Component({
   selector: 'hf-runs-detail',
   standalone: true,
-  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, BrokerOrderTicketModalComponent, OrderConfirmModalComponent, GlossaryTermComponent, InfoTooltipComponent, PopoverComponent, RangeRailComponent, TickerComponent],
+  imports: [CommonModule, RouterLink, AppShellComponent, ConfidenceMeterComponent, EnterPositionModalComponent, BrokerOrderTicketModalComponent, OrderConfirmModalComponent, ErrorStateComponent, GlossaryTermComponent, InfoTooltipComponent, PopoverComponent, ProvenancePanelComponent, RangeRailComponent, TickerComponent],
   template: `
     <hf-app-shell [crumbs]="crumbs()">
       <div class="page-head">
@@ -69,7 +72,13 @@ interface PersonaCard {
         </div>
       </div>
 
-      @if (!run()) {
+      @if (!run() && store.pollError()) {
+        <hf-error-state
+          title="Couldn't load this run"
+          [detail]="store.pollError()"
+          (retry)="retryLoad()"
+        ></hf-error-state>
+      } @else if (!run()) {
         <p class="text-text-3">Loading…</p>
       } @else {
         @if (run()!.source === 'strategy' && run()!.strategy_backlink; as link) {
@@ -352,7 +361,7 @@ interface PersonaCard {
                       <div class="text-xs">
                         <p class="m-0">
                           Target qty: <span class="mono text-text">{{ d.target_quantity }}</span>
-                          <hf-info text="Illustrative — computed against a $100K stub portfolio. Replaced by your real broker account balance in P3a (paper trading)."></hf-info>
+                          <hf-info text="Illustrative — sized against a $100,000 reference portfolio, not your account. Use “Add to portfolio” or the order ticket to size it against a real balance."></hf-info>
                         </p>
                         <p class="m-0 mt-0.5">
                           Target weight: <span class="mono text-text">{{ d.target_weight_pct }}%</span>
@@ -594,6 +603,18 @@ interface PersonaCard {
         @if (activeTab() === 'raw') {
           <div role="tabpanel" id="tab-raw" aria-labelledby="tabbtn-raw" tabindex="0">
             <h2 class="eyebrow m-0 mb-2.5">Raw artifacts</h2>
+
+            <!-- WAVE 3: where this run's inputs came from and how old they are.
+                 A run whose bars stopped three weeks ago produced a stale
+                 answer; without this the staleness is invisible. -->
+            @if (provenanceTickers().length) {
+              <hf-provenance
+                class="block mb-3.5"
+                heading="Input data provenance"
+                [tickers]="provenanceTickers()"
+              ></hf-provenance>
+            }
+
             <!-- Evidence trail (P01 review) -->
             @if (evidenceItems().length || providerStateEntries().length) {
               <section class="card mb-3.5" data-test="evidence-trail">
@@ -724,6 +745,9 @@ export class RunsDetailPage implements OnInit, OnDestroy {
   readonly expanded = signal<Set<string>>(new Set());
   readonly cancelling = signal(false);
   private prefetchedTickers = new Set<string>();
+  /** The :id currently loaded, so a paramMap re-emit for the same run is a no-op. */
+  private loadedId: number | null = null;
+  private paramSub: Subscription | null = null;
 
   // Tabs (ADR 0002): five-tab decomposition of the long single-scroll page.
   readonly tabs: { id: RunTab; label: string }[] = [
@@ -771,6 +795,18 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     { label: 'Runs', link: '/runs' },
     { label: `#${this.run()?.id ?? ''}` },
   ]);
+
+  /** WAVE 3: the symbols this run actually consumed data for — the run's own
+   *  tickers plus any decision ticker (a council run can decide on a name that
+   *  is not in the request list). Drives <hf-provenance> on the Raw tab. */
+  readonly provenanceTickers = computed<string[]>(() => {
+    const r = this.run();
+    if (!r) return [];
+    const out = new Set<string>();
+    (r.tickers || []).forEach((t) => t && out.add(String(t).toUpperCase()));
+    (r.decisions || []).forEach((d) => d.ticker && out.add(String(d.ticker).toUpperCase()));
+    return [...out];
+  });
 
   readonly canCancel = computed(() => {
     const s = this.run()?.status;
@@ -1018,14 +1054,38 @@ export class RunsDetailPage implements OnInit, OnDestroy {
     return out;
   });
 
+  /**
+   * Angular's default RouteReuseStrategy keeps this component instance alive
+   * across /runs/1 → /runs/2, so reading `route.snapshot` once in ngOnInit left
+   * the OLD run on screen (and being polled) under the NEW url — exactly what
+   * "↻ Rerun", ⌘K navigation and browser back/forward do. Subscribe to
+   * paramMap instead: it emits the current value immediately and again on every
+   * in-place :id change.
+   */
   ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (id) this.store.pollRun(id);
-    const t = this.route.snapshot.queryParamMap.get('tab');
-    if (t && this.isRunTab(t)) this.activeTab.set(t);
+    this.paramSub = this.route.paramMap.subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!id) return;
+      if (id === this.loadedId) return;
+      this.loadedId = id;
+      // Per-run view state must not leak across entities.
+      this.rerunning.set(false);
+      const t = this.route.snapshot.queryParamMap.get('tab');
+      this.activeTab.set(t && this.isRunTab(t) ? t : 'decision');
+      this.store.pollRun(id);
+    });
   }
 
-  ngOnDestroy(): void { this.store.stopPolling(); }
+  ngOnDestroy(): void {
+    this.paramSub?.unsubscribe();
+    this.paramSub = null;
+    this.store.stopPolling();
+  }
+
+  retryLoad(): void {
+    const id = this.loadedId;
+    if (id) this.store.pollRun(id);
+  }
 
   private isRunTab(t: string): t is RunTab {
     return (RUN_TABS as readonly string[]).includes(t);

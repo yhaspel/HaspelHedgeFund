@@ -3,6 +3,9 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { EmptyStateComponent } from '../shared/empty-state.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { engineVersionBadge, engineVersionLabel } from '../../core/models/backtest.model';
 import { BacktestsStore } from '../../abstraction/backtests.store';
 import { ConfirmService } from '../shared/confirm.service';
 
@@ -13,7 +16,7 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
 @Component({
   selector: 'hf-backtests-list',
   standalone: true,
-  imports: [CommonModule, RouterLink, DecimalPipe, AppShellComponent, EmptyStateComponent],
+  imports: [CommonModule, RouterLink, DecimalPipe, AppShellComponent, EmptyStateComponent, ErrorStateComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Backtests'}]">
       <div class="page-head">
@@ -43,7 +46,15 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
             </button>
           }
         </div>
-        @if (visible().length === 0) {
+        @if (loadError()) {
+          <div class="card-bd">
+            <hf-error-state
+              title="Couldn't load your backtests"
+              [detail]="loadError()"
+              (retry)="reload()"
+            ></hf-error-state>
+          </div>
+        } @else if (visible().length === 0) {
           <hf-empty-state message="No backtests yet.">
             <a class="btn primary" routerLink="/backtests/new">Start your first walk-forward</a>
           </hf-empty-state>
@@ -52,7 +63,9 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
           <table class="tbl">
             <thead><tr>
               <th>Name</th><th>Status</th><th>Period</th>
-              <th class="right">OOS return</th><th class="right">OOS Sharpe</th><th class="right">Deflation</th>
+              <th class="right">OOS return</th>
+              <th class="right" title="The stitched long-run Sharpe of the whole OOS curve. Averaging 63-day fold Sharpes biases ~0.3–0.4 upward, so that number is only in the tooltip.">OOS Sharpe (stitched)</th>
+              <th class="right">Deflation</th>
               <th><span class="visually-hidden">Actions</span></th>
             </tr></thead>
             <tbody>
@@ -63,6 +76,10 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                     @if (bt.data_era === 'price_only') {
                       <span class="pill warn" title="Pre-PR#50 price-only bars — understates returns; excluded as §9-gate evidence">P</span>
                     }
+                    <!-- Rows in this table are read against each other, and v1
+                         economics are not comparable with v2's. -->
+                    <span class="pill" [title]="engineLabel(bt.engine_version)"
+                          [attr.data-test]="'engine-version-' + bt.id">{{ engineBadge(bt.engine_version) }}</span>
                   </td>
                   <td>
                     <span class="pill"
@@ -73,7 +90,13 @@ const DELETABLE_BACKTEST_STATUSES = new Set([
                   </td>
                   <td class="mono text-text-2">{{ bt.start_date }} → {{ bt.end_date }}</td>
                   <td class="num">{{ bt.total_return_pct !== null ? ((bt.total_return_pct | number:'1.2-2') + '%') : '—' }}</td>
-                  <td class="num">{{ bt.oos_sharpe !== null ? (bt.oos_sharpe | number:'1.2-2') : '—' }}</td>
+                  <!-- P10 §B2: the stitched number is the honest headline;
+                       mean-of-folds stays available on hover. -->
+                  <td class="num" [attr.data-test]="'sharpe-' + bt.id"
+                      [title]="bt.oos_sharpe !== null ? 'mean of folds ' + (bt.oos_sharpe | number:'1.2-2') : 'no per-fold Sharpe recorded'">
+                    {{ bt.stitched_sharpe !== null && bt.stitched_sharpe !== undefined
+                        ? (bt.stitched_sharpe | number:'1.2-2') : '—' }}
+                  </td>
                   <!-- P10 §B4: the OOS/IS ratio only means something when an IS
                        candidate search ran — deterministic runs show n/a. -->
                   @if (bt.deflation_meaningful) {
@@ -141,6 +164,11 @@ export class BacktestsListPage implements OnInit {
   readonly store = inject(BacktestsStore);
   private readonly confirm = inject(ConfirmService);
   readonly deletingId = signal<number | null>(null);
+  readonly loading = signal(true);
+  /** GET /backtests/ failed — distinct from "this account has no backtests". */
+  readonly loadError = signal<string | null>(null);
+  readonly engineLabel = engineVersionLabel;
+  readonly engineBadge = engineVersionBadge;
   readonly archivingId = signal<number | null>(null);
   readonly showArchived = signal(false);
   readonly page = signal(1);
@@ -161,11 +189,23 @@ export class BacktestsListPage implements OnInit {
 
   ngOnInit(): void { this.reload(); }
 
-  private reload(): void {
+  /**
+   * A failed GET /backtests/ used to render "No backtests yet." — a 5xx looked
+   * exactly like an empty account. Track the failure and offer a retry.
+   */
+  reload(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.store.listBacktests({
       includeArchived: this.showArchived(),
       page: this.page(),
-    }).subscribe();
+    }).subscribe({
+      next: () => this.loading.set(false),
+      error: (e: unknown) => {
+        this.loading.set(false);
+        this.loadError.set(apiErrorMessage(e, 'Could not load your backtests.'));
+      },
+    });
   }
 
   toggleShowArchived(): void {

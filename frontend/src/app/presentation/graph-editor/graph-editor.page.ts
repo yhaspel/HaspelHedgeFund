@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   HostListener,
+  OnDestroy,
   OnInit,
   computed,
   effect,
@@ -25,6 +26,9 @@ import { GraphPaletteComponent } from './palette.component';
 import { GraphInspectorComponent, InspectorSelection } from './inspector.component';
 import { GraphValidationService } from './validation.service';
 import { GraphVersionsDrawerComponent } from './versions-drawer.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'hf-graph-editor',
@@ -37,6 +41,7 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
     GraphPaletteComponent,
     GraphInspectorComponent,
     GraphVersionsDrawerComponent,
+    ErrorStateComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -109,6 +114,15 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
           <div class="save-error" role="alert">{{ saveError() }}</div>
         }
 
+        @if (loadError()) {
+          <hf-error-state
+            title="Couldn't load this graph"
+            [detail]="loadError()"
+            [compact]="true"
+            (retry)="reload()"
+          ></hf-error-state>
+        }
+
         <div class="panes">
           <aside class="rail left">
             <hf-graph-palette [registry]="store.registry()" [present]="presentTypes()" (add)="addNode($event)" />
@@ -163,36 +177,37 @@ import { GraphVersionsDrawerComponent } from './versions-drawer.component';
       .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px;
                  padding: 6px 2px 10px; flex-wrap: wrap; }
       .tb-left { display: flex; align-items: center; gap: 10px; }
-      .gname { font-size: 15px; color: var(--text, #e6ebf5); }
+      .gname { font-size: 15px; color: var(--text); }
       .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
-      .pill.ok { background: #163a2c; color: #5fd6a6; } .pill.bad { background: #3a1b1b; color: #f08a8a; }
+      .pill.ok { background: var(--acc-long-soft); color: var(--acc-long-fg); }
+      .pill.bad { background: var(--acc-short-soft); color: var(--acc-short-fg); }
       .saved, .draft { font-size: 11px; color: var(--text-3); }
-      .draft button { margin-left: 4px; background: none; border: none; color: #5b8cff; cursor: pointer; font-size: 11px; }
+      .draft button { margin-left: 4px; background: none; border: none; color: var(--acc-info-fg); cursor: pointer; font-size: 11px; }
       .tb-right { display: flex; gap: 8px; align-items: center; }
-      .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border, #2a3142); }
-      .btn.ghost { background: var(--surface, #151b26); color: var(--text, #e6ebf5); }
-      .btn.primary { background: var(--acc-long); color: #06231a; border-color: var(--acc-long); font-weight: 600; }
+      .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); }
+      .btn.ghost { background: var(--surface); color: var(--text); }
+      .btn.primary { background: var(--acc-long); color: var(--bg); border-color: var(--acc-long); font-weight: 600; }
       .btn.primary:disabled { opacity: .45; cursor: not-allowed; }
-      .save-error { background: #3a1b1b; color: #f6b3b3; padding: 8px 12px; border-radius: 8px;
+      .save-error { background: var(--acc-short-soft); color: var(--acc-short-fg); padding: 8px 12px; border-radius: var(--r-8);
                     font-size: 12.5px; margin-bottom: 8px; }
       .tier-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 10px;
-                  margin-bottom: 8px; border: 1px solid var(--border, #2a3142); border-radius: 9px;
-                  background: var(--surface, #151b26); }
-      .tier-lbl { font-size: 12px; font-weight: 600; color: var(--text, #e6ebf5); }
+                  margin-bottom: 8px; border: 1px solid var(--border); border-radius: 9px;
+                  background: var(--surface); }
+      .tier-lbl { font-size: 12px; font-weight: 600; color: var(--text); }
       .tier-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
-      .tier-field select { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border, #2a3142);
-                           background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); font-size: 12px; }
+      .tier-field select { padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border);
+                           background: var(--surface-2); color: var(--text); font-size: 12px; }
       .tier-field select:disabled { opacity: .5; }
       .tier-hint { font-size: 10.5px; color: var(--text-3); margin-left: auto; }
       .panes { flex: 1; display: grid; grid-template-columns: 210px 1fr 270px; gap: 10px; min-height: 0; position: relative; }
-      .rail { border: 1px solid var(--border, #2a3142); border-radius: 10px; background: var(--surface, #151b26); overflow: hidden; }
+      .rail { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
       .canvas-wrap { position: relative; min-width: 0; }
       .warnings { position: absolute; left: 10px; bottom: 10px; max-width: 60%; display: flex; flex-direction: column; gap: 4px; }
-      .warn { background: #2e2410; color: #e8c06a; font-size: 11px; padding: 5px 9px; border-radius: 7px; }
+      .warn { background: var(--acc-hold-soft); color: var(--acc-hold-fg); font-size: 11px; padding: 5px 9px; border-radius: var(--r-6); }
     `,
   ],
 })
-export class GraphEditorPage implements OnInit {
+export class GraphEditorPage implements OnInit, OnDestroy {
   readonly store = inject(GraphsStore);
   private readonly modelsStore = inject(ModelsStore);
   private readonly validator = inject(GraphValidationService);
@@ -209,6 +224,8 @@ export class GraphEditorPage implements OnInit {
   readonly savedLabel = signal<string | null>(null);
   readonly versionsOpen = signal(false);
   readonly draftRestored = signal(false);
+  readonly loadError = signal<string | null>(null);
+  private paramSub: Subscription | null = null;
   // Gates autosave until the initial version load completes (see constructor).
   private readonly ready = signal(false);
 
@@ -275,22 +292,73 @@ export class GraphEditorPage implements OnInit {
     });
   }
 
+  /**
+   * Follow the :id. The editor holds an autosaved localStorage draft keyed by
+   * graph id, so a snapshot-only read was worse than a stale view here: after
+   * an in-place /graphs/1/edit → /graphs/2/edit the canvas still showed graph 1
+   * while `graphId` said 2, and the next autosave tick wrote graph 1's nodes
+   * into graph 2's draft.
+   */
   ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    this.graphId.set(id);
     if (this.modelsStore.models().length === 0) {
-      this.modelsStore.loadModels().subscribe();
+      this.modelsStore.loadModels().subscribe({ error: () => undefined });
     }
-    this.store.loadRegistry().subscribe();
-    this.store.getGraph(id).subscribe((g) => this.graphName.set(g.name));
-    this.store.listVersions(id).subscribe((rows) => {
-      const latest = rows[0];
-      if (latest) {
-        this.store.getVersion(id, latest.version).subscribe((v) => this.applyVersion(v, true));
-      } else {
-        this.applyVersion(null, true);
-      }
+    this.store.loadRegistry().subscribe({ error: () => undefined });
+    this.paramSub = this.route.paramMap.subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!id || id === this.graphId()) return;
+      // Stop autosaving the OUTGOING graph before the id changes.
+      this.ready.set(false);
+      this.graphId.set(id);
+      this.graphName.set('');
+      this.workingNodes.set([]);
+      this.tailModels.set({});
+      this.selectedId.set(null);
+      this.loadedVersion.set(null);
+      this.saveError.set(null);
+      this.savedLabel.set(null);
+      this.draftRestored.set(false);
+      this.loadError.set(null);
+      this.loadGraph(id);
     });
+  }
+
+  ngOnDestroy(): void {
+    this.paramSub?.unsubscribe();
+    this.paramSub = null;
+  }
+
+  private loadGraph(id: number): void {
+    this.store.getGraph(id).subscribe({
+      next: (g) => this.graphName.set(g.name),
+      error: (e: unknown) => this.loadError.set(apiErrorMessage(e, 'Could not load this graph.')),
+    });
+    this.store.listVersions(id).subscribe({
+      next: (rows) => {
+        if (id !== this.graphId()) return; // superseded by a newer navigation
+        const latest = rows[0];
+        if (latest) {
+          this.store.getVersion(id, latest.version).subscribe({
+            next: (v) => {
+              if (id !== this.graphId()) return;
+              this.applyVersion(v, true);
+            },
+            error: (e: unknown) =>
+              this.loadError.set(apiErrorMessage(e, 'Could not load this graph version.')),
+          });
+        } else {
+          this.applyVersion(null, true);
+        }
+      },
+      error: (e: unknown) =>
+        this.loadError.set(apiErrorMessage(e, 'Could not load this graph’s versions.')),
+    });
+  }
+
+  reload(): void {
+    this.loadError.set(null);
+    const id = this.graphId();
+    if (id) this.loadGraph(id);
   }
 
   private draftKey(id: number): string {

@@ -10,7 +10,9 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AppShellComponent } from '../shared/app-shell.component';
 import { GraphsStore } from '../../abstraction/graphs.store';
+import { ConfirmService } from '../shared/confirm.service';
 import { AgentGraphSummary } from '../../core/models/graph.model';
+import { apiErrorMessage } from '../../core/api/api-error';
 
 @Component({
   selector: 'hf-graphs-list',
@@ -58,7 +60,8 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
             <p class="meta">{{ g.version_count }} version{{ g.version_count === 1 ? '' : 's' }}</p>
             <div class="g-act">
               <button type="button" class="btn primary sm" (click)="edit(g)" [attr.data-testid]="'edit-' + g.id">Edit</button>
-              <button type="button" class="btn ghost sm" (click)="archive(g)">Archive</button>
+              <button type="button" class="btn ghost sm" (click)="archive(g)"
+                      [attr.data-testid]="'delete-graph-' + g.id">Delete</button>
             </div>
           </article>
         }
@@ -94,31 +97,33 @@ import { AgentGraphSummary } from '../../core/models/graph.model';
       .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 8px; }
       h1 { margin: 0; font-size: 20px; } .sub { color: var(--text-3); font-size: 13px; margin: 4px 0 0; max-width: 560px; }
       .sec { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); margin: 22px 0 10px; }
-      .card { border: 1px solid var(--border, #2a3142); border-radius: 10px; background: var(--surface, #151b26); padding: 14px; }
+      .card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 14px; }
       .create-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
-      .create-row input, .clone-row input { padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border, #2a3142);
-              background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); font-size: 13px; }
+      .create-row input, .clone-row input { padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border);
+              background: var(--surface-2); color: var(--text); font-size: 13px; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
       .g-hd { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-      .g h3 { margin: 0; font-size: 14.5px; color: var(--text, #e6ebf5); }
+      .g h3 { margin: 0; font-size: 14.5px; color: var(--text); }
       .desc { font-size: 12px; color: var(--text-3); margin: 6px 0; line-height: 1.4; }
       .meta { font-size: 11px; color: var(--text-3); margin: 4px 0 10px; }
-      .pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #3a1b1b; color: #f08a8a; }
-      .pill.ok { background: #163a2c; color: #5fd6a6; } .pill.tmpl-pill { background: #1d2740; color: #8fb0ff; }
+      .pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: var(--acc-short-soft); color: var(--acc-short-fg); }
+      .pill.ok { background: var(--acc-long-soft); color: var(--acc-long-fg); }
+      .pill.tmpl-pill { background: var(--acc-info-soft); color: var(--acc-info-fg); }
       .g-act, .clone-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
-      .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border, #2a3142); }
+      .btn { padding: 7px 13px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); }
       .btn.sm { padding: 5px 10px; font-size: 12px; }
-      .btn.ghost { background: var(--surface-2, #0e1117); color: var(--text, #e6ebf5); }
-      .btn.primary { background: var(--acc-long); color: #06231a; border-color: var(--acc-long); font-weight: 600; }
+      .btn.ghost { background: var(--surface-2); color: var(--text); }
+      .btn.primary { background: var(--acc-long); color: var(--bg); border-color: var(--acc-long); font-weight: 600; }
       .btn:disabled { opacity: .45; cursor: not-allowed; }
       .muted { color: var(--text-3); font-size: 13px; }
-      .err { color: #f08a8a; font-size: 12px; }
+      .err { color: var(--acc-short-fg); font-size: 12px; }
     `,
   ],
 })
 export class GraphsListPage implements OnInit {
   readonly store = inject(GraphsStore);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
 
   readonly creating = signal(false);
   readonly cloningId = signal<number | null>(null);
@@ -128,7 +133,14 @@ export class GraphsListPage implements OnInit {
   cloneName = '';
 
   ngOnInit(): void {
-    this.store.loadGraphs().subscribe();
+    this.reload();
+  }
+
+  reload(): void {
+    this.error.set(null);
+    this.store.loadGraphs().subscribe({
+      error: (e: unknown) => this.error.set(apiErrorMessage(e, 'Could not load your graphs.')),
+    });
   }
 
   create(): void {
@@ -154,8 +166,27 @@ export class GraphsListPage implements OnInit {
     this.router.navigate(['/graphs', g.id, 'edit']);
   }
 
-  archive(g: AgentGraphSummary): void {
-    this.store.archiveGraph(g.id).subscribe();
+  /**
+   * Labelled "Archive", but GraphsStore.archiveGraph is a
+   * `DELETE /graphs/<id>/` — the graph and its saved versions go away. That
+   * needs a confirmation that says so, and a failure that reaches the user.
+   */
+  async archive(g: AgentGraphSummary): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Delete the graph "${g.name}"?`,
+      body:
+        'This removes the graph and all of its saved versions. Runs and backtests already '
+        + 'produced with it keep their results, but you will not be able to open or re-run '
+        + 'this graph. This cannot be undone.',
+      confirmLabel: 'Delete graph',
+      danger: true,
+    });
+    if (!ok) return;
+    this.error.set(null);
+    this.store.archiveGraph(g.id).subscribe({
+      error: (e: unknown) =>
+        this.error.set(apiErrorMessage(e, `Could not delete "${g.name}".`)),
+    });
   }
 
   startClone(t: AgentGraphSummary): void {

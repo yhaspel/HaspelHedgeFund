@@ -69,16 +69,23 @@ import { NewsDetailModalComponent } from './news-detail.modal';
           <p class="toast" role="status" aria-live="polite">{{ t }}</p>
         }
 
+        <!-- WAVE 3: the news LLM features are BYOK-gated with a daily cap. Say
+             why they are skipped ONCE, calmly — the feed itself still works. -->
+        @if (llmSkipReason(); as why) {
+          <p class="warn calm" role="status" data-test="news-llm-skip">
+            {{ why }}
+            <a routerLink="/settings/data-news" class="calm-link">News settings</a>
+          </p>
+        }
+
         @if (store.meta(); as meta) {
-          @if (meta.sentiment_warning) {
-            <p class="warn" role="status">
+          @if (meta.sentiment_warning && meta.sentiment_warning !== llmSkipReason()) {
+            <p class="warn" role="status" data-test="news-sentiment-warning">
               {{ meta.sentiment_warning }}
             </p>
           }
-          @if (meta.warnings.length) {
-            <p class="warn subtle">
-              {{ providerWarningText(meta.warnings) }}
-            </p>
+          @if (providerWarningText(providerWarnings()); as pw) {
+            <p class="warn subtle" data-test="news-provider-warning">{{ pw }}</p>
           }
         }
 
@@ -216,6 +223,21 @@ import { NewsDetailModalComponent } from './news-detail.modal';
         background: var(--surface-2);
         border-left-color: var(--border-2);
         color: var(--text-2);
+      }
+      /* WAVE 3: a skipped AI pass is not a broken feed — say it calmly. */
+      .warn.calm {
+        background: var(--acc-info-soft);
+        border-left-color: var(--acc-info);
+        color: var(--text-2);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .calm-link {
+        color: var(--acc-info-fg);
+        text-decoration: underline;
+        font-size: 11.5px;
       }
       .grid {
         display: grid;
@@ -378,13 +400,47 @@ export class NewsPage implements OnInit {
     return 'Try the Refresh button or check back in a few minutes.';
   }
 
+  /**
+   * WAVE 3 — BYOK / daily-cap skip reason, rendered once at the top.
+   *
+   * Read through `llmStatus` here rather than aliasing the store's own computed
+   * so a test double that predates the field (or a server that does not send
+   * `llm_status`) simply yields null instead of throwing in the template.
+   */
+  readonly llmSkipReason = computed<string | null>(() => {
+    const st = this.store.llmStatus?.() ?? null;
+    if (!st || st.allowed) return null;
+    return st.reason ?? 'AI features are unavailable right now.';
+  });
+
+  /**
+   * Provider warnings only. The feed appends the sentiment / translation
+   * warnings to `warnings` too, and `CAP_MESSAGE` contains a colon
+   * ("Sentiment analysis paused: today's budget …"), so feeding the raw list
+   * to `providerWarningText` rendered "Sentiment analysis paused unavailable
+   * — showing other providers only." Strip the LLM lines first.
+   */
+  readonly providerWarnings = computed<string[]>(() => {
+    const meta = this.store.meta();
+    if (!meta) return [];
+    const llm = new Set(
+      [meta.sentiment_warning, meta.translation_warning, this.llmSkipReason()].filter(
+        (w): w is string => !!w,
+      ),
+    );
+    return (meta.warnings ?? []).filter((w) => !llm.has(w));
+  });
+
   providerWarningText(warnings: string[]): string {
     const names: string[] = [];
     for (const w of warnings) {
       const colon = w.indexOf(':');
-      if (colon > 0) {
-        names.push(w.slice(0, colon).trim());
-      }
+      if (colon <= 0) continue;
+      const prefix = w.slice(0, colon).trim();
+      // A provider warning is `"<provider>: …"` — one bare token. Anything with
+      // a space is a sentence, not a provider name.
+      if (!prefix || /\s/.test(prefix)) continue;
+      names.push(prefix);
     }
     if (!names.length) return '';
     if (names.length === 1)

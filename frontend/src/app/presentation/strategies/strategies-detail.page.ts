@@ -11,14 +11,19 @@ import { GraphsStore } from '../../abstraction/graphs.store';
 import { ModelsStore } from '../../abstraction/models.store';
 import { CYCLE_ACTIVE_STATUSES, CycleDetail, CycleEstimate, CycleMarkedSnapshot, CycleStatus, EnrollmentResult, EnrollmentRow, ScreenerCandidate } from '../../core/models/strategy.model';
 import { RegimeContextWidgetComponent } from './regime-context-widget.component';
+import { ExpectedVsRealizedComponent } from './expected-vs-realized.component';
 import { TickerProfileStore } from '../../abstraction/ticker-profile.store';
 import { TickerComponent } from '../shared/ticker.component';
 import { ModalComponent } from '../shared/modal.component';
+import { ErrorStateComponent } from '../shared/error-state.component';
+import { apiErrorMessage } from '../../core/api/api-error';
+import { formatExposurePct, formatExposurePct1 } from '../shared/format';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'hf-strategies-detail',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, EmptyStateComponent, GlossaryTermComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DatePipe, DecimalPipe, AppShellComponent, EmptyStateComponent, ErrorStateComponent, GlossaryTermComponent, ExpectedVsRealizedComponent, RegimeContextWidgetComponent, TickerComponent, ModalComponent],
   template: `
     <hf-app-shell [crumbs]="[{label:'Strategies', link:'/strategies'}, {label: store.currentStrategy()?.name || ''}]">
       <div class="page-head">
@@ -27,8 +32,8 @@ import { ModalComponent } from '../shared/modal.component';
           <h1 class="mt-1.5">{{ store.currentStrategy()?.name ?? 'Strategy' }}</h1>
           <p class="text-xs text-text-2 mt-1">
             <hf-term key="universe">Universe</hf-term> {{ store.currentStrategy()?.universe_name }} ·
-            <hf-term key="gross-exposure">Gross</hf-term> {{ store.currentStrategy()?.target_gross_pct }} ·
-            <hf-term key="net-exposure">Net</hf-term> {{ store.currentStrategy()?.target_net_pct }} ·
+            <hf-term key="gross-exposure">Gross</hf-term> {{ pct(store.currentStrategy()?.target_gross_pct) }} ·
+            <hf-term key="net-exposure">Net</hf-term> {{ pct(store.currentStrategy()?.target_net_pct) }} ·
             K {{ store.currentStrategy()?.top_k_longs }}L / {{ store.currentStrategy()?.top_k_shorts }}S
           </p>
           @if (store.currentStrategy()?.risk_disclaimer; as disc) {
@@ -252,6 +257,25 @@ import { ModalComponent } from '../shared/modal.component';
         </div>
       }
 
+      @if (loadError()) {
+        <hf-error-state
+          class="mb-3.5"
+          title="Couldn't load this strategy"
+          [detail]="loadError()"
+          (retry)="reload()"
+        ></hf-error-state>
+      }
+
+      <!-- WAVE 3 item 2: what the validation backtest promised, next to what
+           the live cycles actually delivered. Every ratio here is withheld
+           (null → "—") while the answer is provisional. -->
+      @if (strategyId) {
+        <hf-expected-vs-realized
+          class="block mb-[18px]"
+          [strategyId]="strategyId"
+        ></hf-expected-vs-realized>
+      }
+
       <div class="grid grid-cols-[280px_1fr] gap-[18px]">
         <section class="card">
           <div class="card-hd"><h2 class="title">Cycles</h2></div>
@@ -274,7 +298,7 @@ import { ModalComponent } from '../shared/modal.component';
                   <li>
                     <button (click)="openCycle(c.id)"
                       class="bg-transparent border-0 p-0 text-[var(--acc-info-fg)] cursor-pointer text-left">
-                      <span class="mono">{{ c.as_of_date }}</span> · {{ c.status }} · g {{ c.gross_pct }}
+                      <span class="mono">{{ c.as_of_date }}</span> · {{ c.status }} · gross {{ pct1(c.gross_pct) }}
                     </button>
                     @if (c.superseded_by) {
                       <span class="pill" title="Rerun as cycle #{{ c.superseded_by }}"
@@ -310,7 +334,7 @@ import { ModalComponent } from '../shared/modal.component';
                   {{ c.finished_at ? (c.finished_at | date: 'short') : '—' }}
                 </span>
                 <span class="mono text-[11.5px] text-text-3">
-                  · gross {{ c.gross_pct | number: '1.4-4' }} · net {{ c.net_pct | number: '1.4-4' }}
+                  · gross {{ pct1(c.gross_pct) }} · net {{ pct1(c.net_pct) }}
                 </span>
                 @if ((c.status === 'failed' || c.status === 'cancelled') && !c.superseded_by) {
                   <button type="button" class="btn ghost sm" (click)="rerunCycle(c.id)"
@@ -1178,6 +1202,13 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
   private readonly models = inject(ModelsStore);
   private readonly confirm = inject(ConfirmService);
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private paramSub: Subscription | null = null;
+  /** Set when GET /strategies/<id>/ itself fails, so the page can say so
+   *  instead of rendering an empty strategy. */
+  readonly loadError = signal<string | null>(null);
+  /** gross/net are FRACTIONS of NAV (1.50 = 150%) — convert exactly once. */
+  readonly pct = formatExposurePct;
+  readonly pct1 = formatExposurePct1;
 
   /** Flips true after the first `listCycles` call settles so the left-rail
    *  can show a skeleton during the initial fetch (rather than the
@@ -1616,15 +1647,52 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
   }
 
+  /**
+   * The component instance is reused across /strategies/1 → /strategies/2
+   * (default RouteReuseStrategy), so a snapshot read left the previous
+   * strategy's cycles on screen under the new url. Follow paramMap.
+   */
   ngOnInit(): void {
-    this.strategyId = Number(this.route.snapshot.paramMap.get('id'));
-    this.store.detail(this.strategyId).subscribe();
-    this.refreshCycles();
+    this.paramSub = this.route.paramMap.subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!id || id === this.strategyId) return;
+      this.strategyId = id;
+      // Drop the previous strategy's per-entity view state.
+      if (this.pollHandle) { clearInterval(this.pollHandle); this.pollHandle = null; }
+      if (this.dispatchWatchdog) { clearTimeout(this.dispatchWatchdog); this.dispatchWatchdog = null; }
+      this.awaitingDispatch = false;
+      this.cycle.set(null);
+      this.cyclesLoaded.set(false);
+      this.notice.set(null);
+      this.loadError.set(null);
+      this.store.detail(this.strategyId).subscribe({
+        error: (e: unknown) =>
+          this.loadError.set(apiErrorMessage(e, 'Could not load this strategy.')),
+      });
+      this.refreshCycles();
+    });
     // Warm the price-tier registry (cached) so the dispatch modal's tier
     // selector is populated before the user can open it.
-    this.graphs.loadRegistry().subscribe();
+    this.graphs.loadRegistry().subscribe({ error: () => undefined });
   }
-  ngOnDestroy(): void { if (this.pollHandle) clearInterval(this.pollHandle); }
+  ngOnDestroy(): void {
+    this.paramSub?.unsubscribe();
+    this.paramSub = null;
+    if (this.pollHandle) clearInterval(this.pollHandle);
+    this.pollHandle = null;
+    if (this.dispatchWatchdog) clearTimeout(this.dispatchWatchdog);
+    this.dispatchWatchdog = null;
+    this.awaitingDispatch = false;
+  }
+
+  reload(): void {
+    this.loadError.set(null);
+    this.store.detail(this.strategyId).subscribe({
+      error: (e: unknown) =>
+        this.loadError.set(apiErrorMessage(e, 'Could not load this strategy.')),
+    });
+    this.refreshCycles();
+  }
 
   // ---- P4 WS-E: enter strategy (enrollment) ------------------------------
   enrollPreview = signal<EnrollmentResult | null>(null);
@@ -1754,27 +1822,69 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       }
       // Auto-poll non-terminal cycles every 5s.
       if (CYCLE_ACTIVE_STATUSES.includes(d.status as CycleStatus)) {
+        this.awaitingDispatch = false;
         if (!this.pollHandle) {
           this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
         }
-      } else if (this.pollHandle) {
+      } else if (this.pollHandle && !this.awaitingDispatch) {
+        // While `awaitingDispatch` is set the newest cycle is still the OLD,
+        // terminal one — the worker has not created the new PortfolioTarget
+        // yet. Clearing the interval here is what used to kill run-now polling
+        // after a single tick while the notice still promised a refresh.
         clearInterval(this.pollHandle);
         this.pollHandle = null;
       }
     });
   }
 
+  /** Set between "run now" dispatch and the new cycle appearing, so openCycle()
+   *  does not stop polling on the previous (terminal) cycle. */
+  private awaitingDispatch = false;
+  private dispatchWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+  private startCyclePolling(): void {
+    if (this.pollHandle) clearInterval(this.pollHandle);
+    this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
+    this.awaitingDispatch = true;
+    if (this.dispatchWatchdog) clearTimeout(this.dispatchWatchdog);
+    // Give the worker two minutes to create the row; after that stop claiming
+    // the page is refreshing rather than polling forever.
+    this.dispatchWatchdog = setTimeout(() => {
+      this.dispatchWatchdog = null;
+      if (!this.awaitingDispatch) return;
+      this.awaitingDispatch = false;
+      if (this.pollHandle) { clearInterval(this.pollHandle); this.pollHandle = null; }
+      this.notice.set('The cycle has not appeared yet. Reload the page to check again.');
+    }, 120_000);
+  }
+
+  // The estimate modal (openEstimate → dispatchWithOverrides) is this action's
+  // confirmation gate: it shows the projected cost and requires an explicit
+  // "Confirm cycle dispatch". No second dialog here.
   runNow(body: { preset?: string; model_overrides?: Record<string, string> } = {}): void {
     this.running.set(true);
     this.notice.set(null);
     this.store.runNow(this.strategyId, body).subscribe({
       next: (r) => {
         this.running.set(false);
-        this.notice.set(`Cycle dispatched (task ${r.task_id}). Refreshing every 5s.`);
-        if (this.pollHandle) clearInterval(this.pollHandle);
-        this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
+        if (r.status === 'reused') {
+          // Nothing was dispatched — a same-day DONE cycle already exists.
+          this.notice.set(
+            'A completed cycle already exists for today, so nothing new was run. Showing that cycle.',
+          );
+          if (r.target_id) this.openCycle(r.target_id);
+          else this.refreshCycles();
+          return;
+        }
+        this.notice.set(
+          `Cycle dispatched${r.task_id ? ` (task ${r.task_id})` : ''}. Refreshing every 5s.`,
+        );
+        this.startCyclePolling();
       },
-      error: () => { this.running.set(false); this.notice.set('Failed to dispatch cycle.'); },
+      error: (e: unknown) => {
+        this.running.set(false);
+        this.notice.set(apiErrorMessage(e, 'Failed to dispatch cycle.'));
+      },
     });
   }
 
@@ -1826,12 +1936,11 @@ export class StrategiesDetailPage implements OnInit, OnDestroy {
       next: (r) => {
         this.rerunningCycleId.set(null);
         this.notice.set(`Cycle rerun dispatched (task ${r.task_id}). Refreshing every 5s.`);
-        if (this.pollHandle) clearInterval(this.pollHandle);
-        this.pollHandle = setInterval(() => this.refreshCycles(), 5000);
+        this.startCyclePolling();
       },
-      error: () => {
+      error: (e: unknown) => {
         this.rerunningCycleId.set(null);
-        this.notice.set('Failed to rerun cycle.');
+        this.notice.set(apiErrorMessage(e, 'Failed to rerun cycle.'));
       },
     });
   }
