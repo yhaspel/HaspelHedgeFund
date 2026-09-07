@@ -45,8 +45,10 @@ export class RunsPage {
   search(): Locator {
     return this.page.getByRole('searchbox', { name: 'Search run transcripts' });
   }
+  /** Run rows carry role="link" (tab stop + accessible name) rather than the
+   *  implicit "row" role, so they are located by their stable data-test hook. */
   rows(): Locator {
-    return this.page.getByRole('row').filter({ hasText: '#' });
+    return this.page.locator('[data-test^="run-row-"]');
   }
   newRunCta(): Locator {
     return this.page.getByRole('link', { name: 'New run' });
