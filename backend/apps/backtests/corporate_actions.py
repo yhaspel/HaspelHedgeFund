@@ -59,7 +59,7 @@ def actions_on(ticker: str, as_of: dt.date, source: str = "fmp") -> list[dict]:
             # symbol_change / delisting / stock_dividend — wire when needed.
         return out
 
-    # Legacy fallback: infer split from close-ratio jump.
+    # Legacy fallback: infer the split from the ADJUSTMENT FACTOR jump.
     bars = list(
         DailyBar.objects.filter(
             ticker=ticker, source=source, date__lte=as_of
@@ -70,21 +70,31 @@ def actions_on(ticker: str, as_of: dt.date, source: str = "fmp") -> list[dict]:
     today, prev = bars[0], bars[1]
     if today.date != as_of:
         return []
-    # Adjusted-close ratio captures both split and dividend; close ratio
-    # captures price only. The split is the close ratio (after normalizing).
     try:
-        float(today.adjusted_close)
+        adj_today = float(today.adjusted_close)
         adj_prev = float(prev.adjusted_close)
         close_today = float(today.close)
         close_prev = float(prev.close)
     except (TypeError, ValueError):
         return []
-    if min(adj_prev, close_prev, close_today) <= 0:
+    if min(adj_today, adj_prev, close_prev, close_today) <= 0:
         return []
     actions: list[dict] = []
-    # Split detection: previous adjusted should jump by inverse of split ratio.
-    # If close drops to ~half overnight, it's a 2:1 split (ratio 2 for holders).
-    raw_ratio = close_prev / close_today
+    # Engine v2. The old rule read the RAW close ratio (`close_prev /
+    # close_today`) and snapped it to a clean split ratio — which cannot tell a
+    # 2:1 split from a −50% crash. Every ticker without a CorporateAction row
+    # that halved (or tripled, or dropped 90%) on a single session had its qty
+    # rescaled and the loss erased from the equity curve.
+    #
+    # The adjustment factor (adjusted_close / close) is what actually
+    # distinguishes them: back-adjusted history leaves adjusted_close CONTINUOUS
+    # across a split while close jumps, so the factor jumps by the split ratio.
+    # A genuine price move drags close and adjusted_close together, leaving the
+    # factor flat. Dividends nudge the factor by well under a percent, far below
+    # the smallest split candidate (1.5).
+    factor_today = adj_today / close_today
+    factor_prev = adj_prev / close_prev
+    raw_ratio = factor_today / factor_prev
     split = _round_split(raw_ratio)
     if split and split != 1.0:
         actions.append({"kind": "split", "ratio": split})

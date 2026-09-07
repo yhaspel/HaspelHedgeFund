@@ -20,6 +20,7 @@ from .metrics import (
 from .models import Backtest, BacktestDay
 from .serializers import (
     DEFAULT_UNIVERSE_20,
+    REBALANCE_FREQUENCIES,
     BacktestCreateSerializer,
     BacktestDetailSerializer,
     BacktestListSerializer,
@@ -144,11 +145,22 @@ class BacktestCancelView(APIView):
         if bt.status not in Backtest.ACTIVE_STATUSES:
             return Response({"detail": f"already {bt.status}"}, status=status.HTTP_409_CONFLICT)
         if bt.celery_task_id:
+            # terminate=True SIGTERMs the child that is already executing;
+            # revoking by id also covers the still-queued case.
             celery_app.control.revoke(bt.celery_task_id, terminate=True, signal="SIGTERM")
-        bt.status = Backtest.CANCELLED
-        bt.error_message = "Cancelled by user."
-        bt.finished_at = timezone.now()
-        bt.save(update_fields=["status", "error_message", "finished_at"])
+        # Conditional update: only flip a row that is STILL active. Without the
+        # filter a cancel racing the worker's own terminal write (DONE / FAILED /
+        # ABORTED_*) would clobber it, and the run's real outcome would be lost.
+        updated = Backtest.objects.filter(
+            pk=bt.pk, user=request.user, status__in=Backtest.ACTIVE_STATUSES
+        ).update(
+            status=Backtest.CANCELLED,
+            error_message="Cancelled by user.",
+            finished_at=timezone.now(),
+        )
+        bt.refresh_from_db(fields=["status"])
+        if not updated:
+            return Response({"detail": f"already {bt.status}"}, status=status.HTTP_409_CONFLICT)
         return Response({"id": bt.pk, "status": bt.status})
 
 
@@ -256,24 +268,66 @@ class BacktestEstimateView(APIView):
     def post(self, request: Request) -> Response:
         import datetime as _dt
 
-        d = request.data or {}
+        d = request.data if isinstance(request.data, dict) else {}
+        # Everything below used to reach estimate_cost unchecked, so a plausible
+        # typo ("max_budget_usd": "four dollars", or model_overrides sent as a
+        # string) surfaced as a 500 with a stack trace instead of a 400 naming
+        # the field.
         try:
             start = _dt.date.fromisoformat(d["start_date"])
             end = _dt.date.fromisoformat(d["end_date"])
-            universe = list(d.get("universe") or [])
+            raw_universe = d.get("universe") or []
+            if not isinstance(raw_universe, list):
+                return Response({"detail": "universe must be a list of tickers"}, status=400)
+            universe = [str(t).upper() for t in raw_universe if str(t).strip()]
             if not universe:
                 return Response({"detail": "universe is required"}, status=400)
-        except (KeyError, ValueError, TypeError) as e:
+            freq = d.get("rebalance_frequency", "weekly")
+            if freq not in REBALANCE_FREQUENCIES:
+                return Response(
+                    {"detail": f"rebalance_frequency must be one of "
+                               f"{sorted(REBALANCE_FREQUENCIES)}"},
+                    status=400,
+                )
+            personas = d.get("personas") or None
+            if personas is not None and (
+                not isinstance(personas, list)
+                or not all(isinstance(p, str) for p in personas)
+            ):
+                return Response({"detail": "personas must be a list of names"}, status=400)
+            overrides = d.get("model_overrides") or None
+            if overrides is not None:
+                if not isinstance(overrides, dict):
+                    return Response(
+                        {"detail": "model_overrides must be an object mapping "
+                                   "agent -> 'provider:model'"},
+                        status=400,
+                    )
+                bad = sorted(k for k, v in overrides.items() if not isinstance(v, str))
+                if bad:
+                    return Response(
+                        {"detail": f"model_overrides values must be "
+                                   f"'provider:model' strings; bad keys: {bad}"},
+                        status=400,
+                    )
+            budget = d.get("max_budget_usd", 4.00)
+            budget = float(budget) if budget is not None else None
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
             return Response({"detail": f"bad input: {e}"}, status=400)
-        est = estimate_cost(
-            universe=universe,
-            start_date=start,
-            end_date=end,
-            rebalance_frequency=d.get("rebalance_frequency", "weekly"),
-            personas=d.get("personas") or None,
-            model_overrides=d.get("model_overrides") or None,
-            max_budget_usd=d.get("max_budget_usd", 4.00),
-        )
+        try:
+            est = estimate_cost(
+                universe=universe,
+                start_date=start,
+                end_date=end,
+                rebalance_frequency=freq,
+                personas=personas,
+                model_overrides=overrides,
+                max_budget_usd=budget,
+                disable_cio=bool(d.get("disable_cio", True)),
+            )
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning("backtest_estimate_bad_input user_id=%s err=%s", request.user.id, e)
+            return Response({"detail": f"bad input: {e}"}, status=400)
         return Response(est)
 
 
@@ -291,10 +345,21 @@ class BacktestCompareView(APIView):
         a_id = request.data.get("backtest_a_id")
         b_id = request.data.get("backtest_b_id")
         try:
+            # Both ids must be the CALLER's own rows — a foreign id is a 404, the
+            # same as fetching it directly, so compare can't be used to read
+            # another user's curve or metrics.
             a = Backtest.objects.get(pk=a_id, user=request.user)
             b = Backtest.objects.get(pk=b_id, user=request.user)
-        except Backtest.DoesNotExist:
+        except (Backtest.DoesNotExist, TypeError, ValueError):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        not_done = [bt.pk for bt in (a, b) if bt.status != Backtest.DONE]
+        if not_done:
+            # A queued/running/failed row has no stitched curve and no metrics;
+            # comparing against it silently renders an empty side.
+            return Response(
+                {"detail": f"both backtests must be done; {not_done} are not"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         def _payload(bt: Backtest) -> dict:
             dates, equity, _ = stitched_oos_returns(bt)

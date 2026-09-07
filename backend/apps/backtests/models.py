@@ -1,7 +1,18 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
+
+# Walk-forward / cost floors. Mirrored by BacktestCreateSerializer, which is the
+# enforcing boundary (validators here only run under full_clean()); they are
+# declared on the fields so the admin and any future ORM-side validation agree.
+MIN_IS_WINDOW_DAYS = 126
+MIN_OOS_WINDOW_DAYS = 21
+MIN_STEP_DAYS = 1
+MIN_BUDGET_USD = Decimal("0.05")
+MIN_STARTING_CASH = Decimal("0.01")
+REBALANCE_FREQUENCIES = ("daily", "weekly", "monthly")
 
 
 class Backtest(models.Model):
@@ -57,6 +68,20 @@ class Backtest(models.Model):
         (ERA_TOTAL_RETURN, "Total-return data"),
     ]
 
+    # Which simulation engine produced this row's numbers.
+    #   1 — the original engine: the council walk-forward built a FRESH book per
+    #       OOS fold (liquidate + re-buy at every boundary, phantom turnover),
+    #       financing was charged only on the cash debit (a short book paid $0
+    #       borrow), and splits were inferred from the raw-close jump (a −40%
+    #       crash day was booked as a split and its loss erased).
+    #   2 — carries one book across OOS folds on BOTH paths and stitches the
+    #       curve continuously, charges borrow + financing daily on |short
+    #       notional|, and infers splits from the adjust-factor jump.
+    # Existing rows are stamped 1 by migration 0016 so their stored metrics stay
+    # interpretable; new rows default to 2 and ``run_walkforward`` re-stamps at
+    # execution time (an old QUEUED row that runs under v2 is recorded as v2).
+    ENGINE_VERSION = 2
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="backtests", on_delete=models.CASCADE
     )
@@ -76,17 +101,32 @@ class Backtest(models.Model):
     universe = models.JSONField(default=list)
     start_date = models.DateField()
     end_date = models.DateField()
-    starting_cash = models.DecimalField(max_digits=18, decimal_places=2, default=Decimal("100000"))
-    commission_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
-    spread_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("5"))
+    starting_cash = models.DecimalField(
+        max_digits=18, decimal_places=2, default=Decimal("100000"),
+        validators=[MinValueValidator(MIN_STARTING_CASH)],
+    )
+    commission_bps = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal("5"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    spread_bps = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal("5"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
     # P11 E2: annual financing/carry (bps) charged daily on the margin borrow of a
     # levered (gross>1) book. Default 200 = ~2%/yr — the paper's (L-1)·rf drag. It
     # is a no-op for unlevered books (no borrow ⇒ no charge), so only gross>1
     # backtests change when re-run; pre-existing DONE rows are untouched until then.
-    financing_bps = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("200"))
+    financing_bps = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal("200"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
     engine_mode = models.CharField(
         max_length=20, choices=ENGINE_MODE_CHOICES, default=COUNCIL
     )
+    # See ENGINE_VERSION above. Read-only contract field on the list + detail
+    # serializers so the UI can label which engine a row's numbers came from.
+    engine_version = models.IntegerField(default=ENGINE_VERSION)
     agent_graph_version = models.CharField(max_length=64, default="council-v1")
     # P4c: the immutable agent-graph version this backtest executed on. NULL ⇒
     # the hardcoded council.py. The CharField above is kept as a denormalized
@@ -102,14 +142,26 @@ class Backtest(models.Model):
     agent_versions = models.JSONField(default=dict, blank=True)
     model_overrides = models.JSONField(default=dict, blank=True)
     personas = models.JSONField(default=list, blank=True)
-    rebalance_frequency = models.CharField(max_length=16, default="weekly")  # daily|weekly|monthly
+    rebalance_frequency = models.CharField(
+        max_length=16, default="weekly",
+        choices=[(f, f.title()) for f in REBALANCE_FREQUENCIES],
+    )
 
     # Walk-forward config
-    is_window_days = models.IntegerField(default=252)
-    oos_window_days = models.IntegerField(default=63)
-    step_days = models.IntegerField(default=63)
+    is_window_days = models.IntegerField(
+        default=252, validators=[MinValueValidator(MIN_IS_WINDOW_DAYS)],
+    )
+    oos_window_days = models.IntegerField(
+        default=63, validators=[MinValueValidator(MIN_OOS_WINDOW_DAYS)],
+    )
+    # step_days <= 0 made generate_folds() loop forever; the walk-forward now
+    # raises on it too, but the field carries the floor so the contract is
+    # visible at the model.
+    step_days = models.IntegerField(
+        default=63, validators=[MinValueValidator(MIN_STEP_DAYS)],
+    )
     search_space = models.JSONField(default=dict, blank=True)
-    n_candidates = models.IntegerField(default=50)
+    n_candidates = models.IntegerField(default=50, validators=[MinValueValidator(1)])
     is_objective = models.CharField(max_length=16, default="sharpe")  # sharpe|sortino|calmar
     rng_seed = models.IntegerField(default=42)
     baseline = models.CharField(max_length=16, default="universe_ew")  # universe_ew|spy
@@ -153,14 +205,23 @@ class Backtest(models.Model):
     # Hard kill-switch on cumulative LLM spend (USD). prime_agent_cache aborts
     # the run if total_cost_usd >= max_budget_usd. Default is intentionally
     # conservative; raise per-run from the UI if a larger sweep is justified.
+    # NOTE: 0 means "no cap" to prime_agent_cache (legacy semantics kept for
+    # already-stored rows); the create serializer refuses anything below
+    # MIN_BUDGET_USD so no NEW run can be dispatched with the guard disabled.
     max_budget_usd = models.DecimalField(
-        max_digits=8, decimal_places=2, default=Decimal("4.00")
+        max_digits=8, decimal_places=2, default=Decimal("4.00"),
+        validators=[MinValueValidator(MIN_BUDGET_USD)],
     )
     celery_task_id = models.CharField(max_length=64, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    # Last progress write from the worker. The orphan sweeper skips rows whose
+    # heartbeat is fresh (within ORPHAN_THRESHOLD_MIN) even when the broker is
+    # unreachable or the task is merely prefetched (reserved, not yet active).
+    # NULL = never wrote progress (pre-fix rows, or a task that has not started).
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
     # P10 §D4: soft archive (the graphs pattern — graphs/models.py). done /
     # failed rows are protected history and can never be deleted, so without
     # this the list is append-only forever. Archived rows are hidden from the

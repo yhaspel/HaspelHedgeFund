@@ -60,6 +60,22 @@ def close_prices_for(date_: dt.date, universe: list[str]) -> dict[str, float]:
     return {r["ticker"]: float(r["close"]) for r in rows}
 
 
+def prior_close_prices_for(date_: dt.date, universe: list[str]) -> dict[str, float]:
+    """Closes from the most recent session strictly before `date_`.
+
+    Engine v2 boundary mark. A segment marks day *i* to day *i-1*'s close, so a
+    book carried into a new segment used to keep the mark it had two sessions
+    ago — the entire market move over the previous fold's last session simply
+    vanished from the stitched curve. Marking a carried book here restores it.
+    Empty (a no-op) when there is no earlier bar.
+    """
+    prev = (
+        DailyBar.objects.filter(ticker__in=universe, date__lt=date_)
+        .order_by("-date").values_list("date", flat=True).first()
+    )
+    return close_prices_for(prev, universe) if prev else {}
+
+
 def trailing_returns_for(
     ticker: str, as_of: dt.date, lookback_days: int = 60, price_field: str = "close"
 ) -> list[float]:
@@ -127,22 +143,30 @@ def run_segment(
     pm_config: dict,
     agent_outputs_cache: dict[tuple[str, dt.date], dict],
     rebalance_dates: set[dt.date] | None = None,
+    pf: SimulatedPortfolio | None = None,
 ) -> SegmentResult:
     """Replay [start, end] with a fixed `pm_config`, using cached agent outputs.
 
     `agent_outputs_cache[(ticker, day)]` must contain at least:
         {persona_name: {...PersonaOutput}, "risk": {...}, "valuation": {...}}
 
+    Pass `pf` to continue an existing book across contiguous segments — engine
+    v2 carries ONE portfolio across the OOS folds so it is held continuously
+    instead of liquidated and re-bought at every boundary (which charged a full
+    round trip on ~100% of notional and inflated the turnover metric by the fold
+    count). The IS candidate sweep still runs each candidate from cash.
+
     Returns a SegmentResult with the day-by-day equity curve.
     """
     from hedgefund_agents.portfolio.portfolio_manager import aggregate as pm_aggregate
 
-    pf = SimulatedPortfolio(
-        starting_cash=float(bt.starting_cash),
-        commission_bps=float(bt.commission_bps),
-        spread_bps=float(bt.spread_bps),
-        financing_bps=float(getattr(bt, "financing_bps", 0) or 0),
-    )
+    if pf is None:
+        pf = SimulatedPortfolio(
+            starting_cash=float(bt.starting_cash),
+            commission_bps=float(bt.commission_bps),
+            spread_bps=float(bt.spread_bps),
+            financing_bps=float(getattr(bt, "financing_bps", 0) or 0),
+        )
 
     universe = list(bt.universe)
     days = trading_days(start, end, universe)
@@ -158,6 +182,12 @@ def run_segment(
         if i > 0:
             prev = days[i - 1]
             pf.mark_to_market(close_prices_for(prev, universe))
+        elif pf.positions:
+            # Engine v2 fold-boundary mark: a book carried in from the previous
+            # fold is still marked to that fold's second-to-last close, so the
+            # move over its LAST session would be lost. A fresh book has no
+            # positions ⇒ no-op, so single-segment results are unchanged.
+            pf.mark_to_market(prior_close_prices_for(day, universe))
         # Accrue OUTSIDE the i>0 guard: a book carried into this segment (a
         # walk-forward fold after the first) starts at i==0 already levered, and
         # its boundary-overnight borrow must be charged. A fresh book has borrow 0
@@ -582,6 +612,10 @@ def run_deterministic_segment(
     for i, day in enumerate(days):
         if i > 0:
             pf.mark_to_market(close_prices_for(days[i - 1], universe))
+        elif pf.positions:
+            # Engine v2 fold-boundary mark — see run_segment. No-op for a fresh
+            # book (fold 0 / single-segment runs).
+            pf.mark_to_market(prior_close_prices_for(day, universe))
         # P11 E2: daily carry on margin borrow. OUTSIDE the i>0 guard so a levered
         # book carried across contiguous OOS folds is charged the boundary
         # overnight on each fold's day 0 (fresh books have borrow 0 ⇒ no-op).
@@ -777,6 +811,12 @@ def prime_agent_cache(
         initial_state: dict[str, Any] = {
             "ticker": ticker,
             "as_of_date": day,
+            # BYOK: hedgefund_agents.registry.get_llm resolves the per-user
+            # ProviderKey ONLY from state["user_id"], and get_news_service takes
+            # the same. Without it every backtest LLM call silently fell back to
+            # the platform settings.*_API_KEY — the owner's own keys were never
+            # used and the platform paid for their runs.
+            "user_id": bt.user_id,
             "model_overrides": bt_overrides,
             "data_provider": data_provider,
             "filings_provider": filings_provider,

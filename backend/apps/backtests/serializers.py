@@ -1,3 +1,6 @@
+import re
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.graphs.models import AgentGraphVersion
@@ -37,8 +40,8 @@ class BacktestListSerializer(serializers.ModelSerializer):
             "id", "name", "status", "progress_pct", "progress_message",
             "universe", "start_date", "end_date", "created_at",
             "finished_at", "oos_sharpe", "stitched_sharpe", "total_return_pct",
-            "deflation", "deflation_meaningful", "engine_mode", "data_era",
-            "archived_at",
+            "deflation", "deflation_meaningful", "engine_mode", "engine_version",
+            "data_era", "archived_at",
         )
 
     def _m(self, obj):
@@ -77,7 +80,8 @@ class BacktestDetailSerializer(serializers.ModelSerializer):
             "status", "progress_pct", "progress_message", "error_message",
             "total_cost_usd", "max_budget_usd", "disable_cio",
             "created_at", "started_at", "finished_at",
-            "metrics", "folds", "engine_mode", "data_era", "deflation_meaningful",
+            "metrics", "folds", "engine_mode", "engine_version", "data_era",
+            "deflation_meaningful",
         )
 
     def to_representation(self, instance):
@@ -92,8 +96,55 @@ DEFAULT_UNIVERSE_20 = [
     "PEP", "ABBV",
 ]
 
+# --- Input contract (fix B3a §1) -------------------------------------------
+# Every one of these used to be unchecked at the API boundary. The engine has no
+# second line of defence for most of them, so a bad POST reached a Celery worker:
+#   * step_days <= 0 made generate_folds() loop forever, pinning a prefork slot
+#     with an ever-growing folds list until the worker OOM'd;
+#   * starting_cash == 0 crashed both engines with ZeroDivisionError mid-run;
+#   * n_candidates == 0 crashed the council path with IndexError (candidates[0]);
+#   * an unknown rebalance_frequency silently meant DAILY — the most expensive
+#     cadence, one LLM prime per ticker-day;
+#   * max_budget_usd == 0 DISABLED the spend kill-switch entirely;
+#   * step_days < oos_window_days produced overlapping OOS folds, which the
+#     stitched-curve code cannot represent (it flat-lines the overlap).
+MIN_IS_WINDOW_DAYS = 126      # 6 months — enough IS history to fit anything
+MIN_OOS_WINDOW_DAYS = 21      # 1 month — below this a "fold" is noise
+MIN_BUDGET_USD = Decimal("0.05")
+MIN_STARTING_CASH = Decimal("0.01")
+MAX_UNIVERSE_SIZE = 200
+REBALANCE_FREQUENCIES = ("daily", "weekly", "monthly")
+# Tickers as the bar providers spell them: AAPL, BRK.B, RDS-A, plus digits.
+TICKER_RE = re.compile(r"^[A-Z0-9]{1,10}(?:[.\-][A-Z0-9]{1,4})?$")
+
 
 class BacktestCreateSerializer(serializers.ModelSerializer):
+    # Explicit bounds — DRF renders each as a 400 naming the field. `required`
+    # stays False everywhere so an omitted key still falls through to the model
+    # default (the pre-existing contract).
+    step_days = serializers.IntegerField(required=False, min_value=1)
+    oos_window_days = serializers.IntegerField(
+        required=False, min_value=MIN_OOS_WINDOW_DAYS
+    )
+    is_window_days = serializers.IntegerField(
+        required=False, min_value=MIN_IS_WINDOW_DAYS
+    )
+    n_candidates = serializers.IntegerField(required=False, min_value=1)
+    starting_cash = serializers.DecimalField(
+        required=False, max_digits=18, decimal_places=2, min_value=MIN_STARTING_CASH,
+    )
+    commission_bps = serializers.DecimalField(
+        required=False, max_digits=6, decimal_places=2, min_value=Decimal("0"),
+    )
+    spread_bps = serializers.DecimalField(
+        required=False, max_digits=6, decimal_places=2, min_value=Decimal("0"),
+    )
+    max_budget_usd = serializers.DecimalField(
+        required=False, max_digits=8, decimal_places=2, min_value=MIN_BUDGET_USD,
+    )
+    rebalance_frequency = serializers.ChoiceField(
+        required=False, choices=REBALANCE_FREQUENCIES,
+    )
     # P4c: optional agent-graph version (same semantics as Run).
     graph_version_id = serializers.PrimaryKeyRelatedField(
         source="graph_version", required=False, allow_null=True,
@@ -120,13 +171,44 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "status")
 
     def validate_universe(self, v):
-        if not v:
-            return DEFAULT_UNIVERSE_20
-        return [str(t).upper() for t in v]
+        """Uppercase, de-duplicate (order-preserving) and shape-check tickers.
+
+        An omitted/empty universe still falls back to the documented default 20
+        (the UI relies on it); anything the caller DID supply must be a list of
+        well-formed ticker symbols, because a junk symbol silently contributes
+        no bars and is dropped from the run without a warning."""
+        if v in (None, "", [], {}):
+            return list(DEFAULT_UNIVERSE_20)
+        if not isinstance(v, list):
+            raise serializers.ValidationError("universe must be a list of tickers")
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in v:
+            if not isinstance(raw, str):
+                raise serializers.ValidationError(f"not a ticker symbol: {raw!r}")
+            t = raw.strip().upper()
+            if not t:
+                continue
+            if not TICKER_RE.match(t):
+                raise serializers.ValidationError(f"not a ticker symbol: {raw!r}")
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+        if not out:
+            raise serializers.ValidationError("universe must contain at least one ticker")
+        if len(out) > MAX_UNIVERSE_SIZE:
+            raise serializers.ValidationError(
+                f"universe has {len(out)} tickers (max {MAX_UNIVERSE_SIZE})"
+            )
+        return out
 
     def validate(self, attrs):
         if attrs["end_date"] <= attrs["start_date"]:
             raise serializers.ValidationError("end_date must be after start_date")
+        # `universe` is required=False on the model (default=list): an absent key
+        # never reaches validate_universe, so guarantee non-empty here too.
+        if not attrs.get("universe"):
+            attrs["universe"] = list(DEFAULT_UNIVERSE_20)
         # A strategy link may only point at the caller's own strategy (never leak
         # or attach across users).
         strategy = attrs.get("strategy")
@@ -208,10 +290,19 @@ class BacktestCreateSerializer(serializers.ModelSerializer):
         # incorrectly arm the deflation KPI. Force the field to match reality.
         if attrs.get("engine_mode") in Backtest.DETERMINISTIC_ENGINE_MODES:
             attrs["n_candidates"] = 1
-        if attrs.get("is_window_days", 252) < 126:
-            raise serializers.ValidationError("is_window_days must be >= 126 (6 months)")
+        is_window = attrs.get("is_window_days", 252)
+        oos_window = attrs.get("oos_window_days", 63)
+        step = attrs.get("step_days", 63)
+        # Overlapping OOS folds double-count sessions and the stitched-curve
+        # builder cannot represent them (it restarts the chain at every fold
+        # flip, flat-lining the overlap and losing real up-days).
+        if step < oos_window:
+            raise serializers.ValidationError(
+                f"step_days ({step}) must be >= oos_window_days ({oos_window}) — "
+                "a smaller step produces overlapping OOS folds"
+            )
         master_days = (attrs["end_date"] - attrs["start_date"]).days
-        if master_days < attrs.get("is_window_days", 252) + attrs.get("oos_window_days", 63):
+        if master_days < is_window + oos_window:
             raise serializers.ValidationError(
                 "master window too short for one fold (need >= is_window + oos_window days)"
             )
