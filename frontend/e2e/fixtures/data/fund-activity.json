@@ -1,0 +1,54 @@
+{
+  "available": true,
+  "fund_id": 1,
+  "limit": 40,
+  "before": null,
+  "entries": [
+    {
+      "at": "2026-06-06T14:02:11Z",
+      "kind": "order_pending_open",
+      "severity": "warn",
+      "title": "18 orders held for the next open",
+      "detail": "Market is closed; the sleeve's rebalance orders are queued and will be released at 09:30 ET.",
+      "links": { "strategy_id": 48 }
+    },
+    {
+      "at": "2026-06-06T13:58:40Z",
+      "kind": "autopilot_run",
+      "severity": "info",
+      "title": "Autopilot cycle finished for [seed] Long/short core",
+      "detail": "status=done · 24 candidates · $0.61 of LLM cost.",
+      "links": { "strategy_id": 48, "run_id": 371 }
+    },
+    {
+      "at": "2026-06-05T20:01:03Z",
+      "kind": "order_filled",
+      "severity": "info",
+      "title": "AAPL buy 40 @ 231.14 filled",
+      "detail": "Alpaca paper · notional $9,245.60.",
+      "links": { "order_id": 9810, "strategy_id": 48 }
+    },
+    {
+      "at": "2026-06-05T19:44:55Z",
+      "kind": "order_rejected",
+      "severity": "error",
+      "title": "NVDA short 12 rejected",
+      "detail": "Broker rejected the order: no shares available to borrow.",
+      "links": { "order_id": 9811, "strategy_id": 48 }
+    },
+    {
+      "at": "2026-06-04T09:30:00Z",
+      "kind": "guardrail_transition",
+      "severity": "warn",
+      "title": "Sleeve moved to reduced exposure",
+      "detail": "Drawdown-from-peak crossed 6.0% — the guardrail scaled gross to 60%.",
+      "links": { "strategy_id": 48 }
+    }
+  ],
+  "has_more": true,
+  "next_before": "2026-06-04T09:30:00Z",
+  "notes": [
+    "Merged read-only from broker orders/fills, autopilot run audits and the sleeve ledger; only the fund kill switch and swept guardrail transitions are stored as their own rows.",
+    "Those two (fund_halt, fund_resume, guardrail_transition) are recorded forward only — halts and swept transitions from before this release were never persisted anywhere and are not reconstructed here."
+  ]
+}
