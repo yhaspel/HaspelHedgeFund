@@ -48,9 +48,15 @@ def describe_cron(expr: str, tz_name: str = "") -> str:
     disagree ("At 04:30 PM" next to "Fri 23:30") with nothing to explain why.
     """
     try:
-        from cron_descriptor import get_description
+        from cron_descriptor import Options, get_description
 
-        desc = get_description(expr)
+        # Pin the clock format. Left to cron_descriptor it follows the HOST
+        # locale, so the same schedule reads "At 04:30 PM" on one machine and
+        # "At 16:30" on another — the string is user-facing, so it must not
+        # depend on the container's LANG.
+        options = Options()
+        options.use_24hour_time_format = False
+        desc = get_description(expr, options)
     except Exception:  # noqa: BLE001 — never let description fail an API read
         desc = expr
     return f"{desc} ({tz_name})" if tz_name else desc
