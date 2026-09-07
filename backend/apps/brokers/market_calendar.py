@@ -13,13 +13,21 @@ this sub-phase.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date as date_cls
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+log = logging.getLogger(__name__)
+
 NY = ZoneInfo("America/New_York")
 REGULAR_OPEN = time(9, 30)
 REGULAR_CLOSE = time(16, 0)
+# NYSE half-days close at 13:00 ET (no extended session for us).
+EARLY_CLOSE = time(13, 0)
+# Warn once the static tables are about to run out. Six months is roughly two
+# release cycles of head-room to refresh them.
+TABLE_HORIZON_WARN = timedelta(days=183)
 
 
 # US equity holidays through 2027. We deliberately include a few years out
@@ -62,6 +70,80 @@ _HOLIDAYS: set[date_cls] = {
 }
 
 
+# --- 13:00 ET early closes ---------------------------------------------------
+#
+# NYSE closes at 13:00 ET on three recurring half-days: the day after
+# Thanksgiving, Christmas Eve and the day before Independence Day — the latter
+# two only when they land on a weekday that is not itself a holiday (e.g.
+# 2026-07-03 is the *observed* Independence Day, a full close, not a half-day).
+# Derived from the rules rather than copied so the table can't drift.
+_EARLY_CLOSE_YEARS = range(2025, 2029)
+
+
+def _thanksgiving(year: int) -> date_cls:
+    """Fourth Thursday of November."""
+    d = date_cls(year, 11, 1)
+    while d.weekday() != 3:  # 3 = Thursday
+        d += timedelta(days=1)
+    return d + timedelta(weeks=3)
+
+
+def _build_early_closes() -> set[date_cls]:
+    out: set[date_cls] = set()
+    for year in _EARLY_CLOSE_YEARS:
+        candidates = (
+            _thanksgiving(year) + timedelta(days=1),  # "Black Friday"
+            date_cls(year, 12, 24),                   # Christmas Eve
+            date_cls(year, 7, 3),                     # day before Independence Day
+        )
+        for day in candidates:
+            # A weekend or a full holiday is never a half-day.
+            if day.weekday() >= 5 or day in _HOLIDAYS:
+                continue
+            out.add(day)
+    return out
+
+
+_EARLY_CLOSES: set[date_cls] = _build_early_closes()
+
+
+def is_early_close(day: date_cls) -> bool:
+    """True when `day` is a 13:00 ET half-session."""
+    return day in _EARLY_CLOSES
+
+
+def session_close(day: date_cls) -> time:
+    """The closing wall-clock time (America/New_York) for `day`."""
+    return EARLY_CLOSE if day in _EARLY_CLOSES else REGULAR_CLOSE
+
+
+def table_horizon_warning(today: date_cls | None = None) -> str | None:
+    """Message to log when the hardcoded tables are within
+    ``TABLE_HORIZON_WARN`` of running out, else ``None``.
+
+    Past the last tabulated year every holiday silently becomes a trading day
+    and every half-day a full session, so orders would be released into a
+    closed venue. Callers update the tables; this is the tripwire."""
+    today = today or datetime.now(tz=NY).date()
+    # The FIRST table to run out is the one that matters — the holiday table
+    # ends in 2027 and the half-day table in 2028, so 2027-12-31 is the date
+    # after which this calendar starts lying.
+    last_covered = date_cls(min(max(_HOLIDAYS).year, max(_EARLY_CLOSES).year), 12, 31)
+    if last_covered - today > TABLE_HORIZON_WARN:
+        return None
+    return (
+        f"market_calendar: the static NYSE holiday / early-close tables end on "
+        f"{last_covered.isoformat()} — refresh them before then or the calendar "
+        f"will report holidays as ordinary trading days"
+    )
+
+
+def _warn_if_tables_expiring() -> None:
+    message = table_horizon_warning()
+    if message:
+        log.warning("%s", message)
+
+
 def is_trading_day(day: date_cls) -> bool:
     if day.weekday() >= 5:  # 5=Sat, 6=Sun
         return False
@@ -72,7 +154,7 @@ def is_market_open(now: datetime | None = None) -> bool:
     now = (now or datetime.now(tz=NY)).astimezone(NY)
     if not is_trading_day(now.date()):
         return False
-    return REGULAR_OPEN <= now.time() < REGULAR_CLOSE
+    return REGULAR_OPEN <= now.time() < session_close(now.date())
 
 
 def next_open(after: datetime | None = None) -> datetime:
@@ -91,9 +173,9 @@ def next_open(after: datetime | None = None) -> datetime:
 def next_close(after: datetime | None = None) -> datetime:
     cur = (after or datetime.now(tz=NY)).astimezone(NY)
     if is_market_open(cur):
-        return datetime.combine(cur.date(), REGULAR_CLOSE, tzinfo=NY)
+        return datetime.combine(cur.date(), session_close(cur.date()), tzinfo=NY)
     nxt = next_open(cur)
-    return datetime.combine(nxt.date(), REGULAR_CLOSE, tzinfo=NY)
+    return datetime.combine(nxt.date(), session_close(nxt.date()), tzinfo=NY)
 
 
 def session_summary(now: datetime | None = None) -> dict:
@@ -104,4 +186,8 @@ def session_summary(now: datetime | None = None) -> dict:
         "now_eastern": cur.isoformat(),
         "next_open": next_open(cur).isoformat(),
         "next_close": next_close(cur).isoformat(),
+        "is_early_close": is_early_close(cur.date()),
     }
+
+
+_warn_if_tables_expiring()

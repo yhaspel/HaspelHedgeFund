@@ -21,7 +21,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from apps.portfolios.models import LedgerEntry, Portfolio, Position
@@ -33,6 +33,7 @@ from .interfaces import (
     Broker,
     BrokerAuthError,
     BrokerError,
+    BrokerTransientError,
     FillSnapshot,
     OrderSnapshot,
     PositionSnapshot,
@@ -151,20 +152,56 @@ def ingest_order_fills(order: BrokerOrder, broker: Broker | None = None) -> int:
         if credentials_confirmed_dead(order.broker_account):
             order.broker_account.flag_needs_reauth()
         return 0
+    except BrokerTransientError as exc:
+        # Timeout / 5xx / 429 — no answer about the order. Leave the row exactly
+        # as it is: an error_message here would masquerade as a venue rejection
+        # and get the row swept. The beat retries.
+        log.warning(
+            "ingest_order_fills: transient broker error order=%s (%s) — "
+            "state unchanged, will retry", order.pk, exc,
+        )
+        return 0
     except BrokerError as exc:
         order.error_message = str(exc)[:500]
         order.save(update_fields=["error_message"])
         return 0
 
 
+def pollable_orders_q() -> models.Q:
+    """Rows the venue poll must still look at.
+
+    Three families, and the last two are the ones the original
+    ``status__in=OPEN_STATUSES`` filter dropped on the floor:
+
+    * ``submitted`` / ``partial`` — ordinary working orders;
+    * ANY row parked ``idempotency_state=unknown`` — a submit whose response
+      was lost. Its local status is ``error`` (not an open status), so it fell
+      out of every poll and was stranded forever even though Alpaca may well
+      have accepted it. It is re-polled until ``resolve_unknown`` adopts the
+      broker's answer or the grace window expires;
+    * a group anchor whose protective legs are still working — once a bracket
+      ENTRY fills the anchor leaves OPEN_STATUSES, and the take-profit /
+      stop-loss legs stopped being polled while they were live at the venue.
+    """
+    return (
+        models.Q(status__in=BrokerOrder.OPEN_STATUSES)
+        | models.Q(idempotency_state=BrokerOrder.IDEM_UNKNOWN)
+        | models.Q(child_legs__status__in=BrokerOrder.OPEN_STATUSES)
+    )
+
+
 def poll_open_orders_for_account(account: BrokerAccount) -> int:
-    """Pull every open order and ingest any new fills. Returns # of fills
-    written. Child legs are skipped as independent orders — they are polled
-    through their anchor in one `get_order` to avoid double work."""
+    """Pull every order that still needs a venue round-trip and ingest any new
+    fills. Returns # of fills written. Child legs are skipped as independent
+    orders — they are polled through their anchor in one `get_order` to avoid
+    double work, which is why an anchor whose legs are still live keeps being
+    polled after its own entry has filled."""
     broker = get_broker(account)
-    open_orders = BrokerOrder.objects.filter(
-        broker_account=account, status__in=BrokerOrder.OPEN_STATUSES,
-        parent_order__isnull=True,
+    open_orders = (
+        BrokerOrder.objects
+        .filter(models.Q(broker_account=account, parent_order__isnull=True))
+        .filter(pollable_orders_q())
+        .distinct()
     )
     fills_written = 0
     for order in open_orders:
@@ -173,8 +210,11 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
         if order.idempotency_state == BrokerOrder.IDEM_UNKNOWN:
             resolve_unknown(order, broker)
             order.refresh_from_db()
-            if not order.broker_order_id:
-                continue
+
+        # Nothing to ask the venue about without an id — an `unknown` row the
+        # broker has no record of yet stays put until its grace window expires.
+        if not order.broker_order_id:
+            continue
 
         # A group anchor is polled as a unit; both paths hit the adapter and
         # may raise. An auth failure is account-wide — propagate so the caller
@@ -190,6 +230,14 @@ def poll_open_orders_for_account(account: BrokerAccount) -> int:
             fills_written += _ingest_fills_for(order, snapshot, fills)
         except BrokerAuthError:
             raise
+        except BrokerTransientError as exc:
+            # Timeout / 5xx / 429: the venue said nothing about this order, so
+            # its state must not move. Keep polling the rest of the account.
+            log.warning(
+                "poll: transient broker error order=%s (%s) — state unchanged, "
+                "will retry", order.pk, exc,
+            )
+            continue
         except BrokerError as exc:
             order.error_message = str(exc)[:500]
             order.save(update_fields=["error_message"])
@@ -350,6 +398,13 @@ def _apply_fill_to_book(
                 position.realized_pnl = (
                     position.realized_pnl + realized_pnl
                 ).quantize(Decimal("0.01"))
+                # Flip THROUGH zero (long 5 → sell 8 → short 3): the closed leg
+                # is realized above, and the remainder OPENS a brand-new leg on
+                # the other side — at this fill's price, not the closed leg's
+                # basis. Keeping the old avg_cost books a phantom P&L when the
+                # new leg is later covered.
+                if new_qty != 0 and (new_qty > 0) != existing_is_long:
+                    position.avg_cost = price.quantize(Decimal("0.0001"))
             else:
                 # Increasing — weighted-average new cost.
                 old_abs = position.quantity.copy_abs()
@@ -635,6 +690,17 @@ def reconcile_account(
             event.error_message = f"transient auth error (creds re-verified) — {str(exc)[:430]}"
         event.finished_at = timezone.now()
         event.save(update_fields=["finished_at", "error_message"])
+        return event
+    except BrokerTransientError as exc:
+        # Timeout / 5xx / 429. NOT a definitive answer about the book, so
+        # nothing is written: no drift, no ledger rows, no last_synced_at.
+        # BrokerTransientError does not subclass BrokerError, so without this
+        # arm it escaped the view as a 500 and left the sync event dangling
+        # "in progress" forever. The next beat retries.
+        event.finished_at = timezone.now()
+        event.error_message = f"transient — {str(exc)[:480]}"
+        event.notes = "broker unreachable; state unchanged, will retry"
+        event.save(update_fields=["finished_at", "error_message", "notes"])
         return event
     except BrokerError as exc:
         event.finished_at = timezone.now()

@@ -6,6 +6,8 @@ connection state without ever seeing plaintext.
 """
 from __future__ import annotations
 
+from datetime import UTC
+
 from rest_framework import serializers
 
 from .credentials import has_credential
@@ -68,6 +70,8 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
     notional_estimate = serializers.SerializerMethodField()
     legs = serializers.SerializerMethodField()
     group_status = serializers.SerializerMethodField()
+    is_held = serializers.SerializerMethodField()
+    release_eta = serializers.SerializerMethodField()
 
     class Meta:
         model = BrokerOrder
@@ -77,6 +81,7 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
             "trail_price", "trail_percent", "time_in_force", "status",
             "idempotency_state", "broker_order_id",
             "confirmed_at", "confirmation_method", "queued_until_open",
+            "is_held", "release_after", "release_eta",
             "submitted_at", "filled_at", "cancelled_at", "avg_fill_price",
             "filled_quantity", "error_message", "group_id", "parent_order",
             "leg_role", "legs", "group_status", "notional_estimate",
@@ -85,7 +90,8 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id", "client_order_id", "status", "idempotency_state",
             "broker_order_id", "confirmed_at", "confirmation_method",
-            "queued_until_open", "submitted_at", "filled_at", "cancelled_at",
+            "queued_until_open", "is_held", "release_after", "release_eta",
+            "submitted_at", "filled_at", "cancelled_at",
             "avg_fill_price", "filled_quantity", "error_message", "group_id",
             "parent_order", "leg_role", "legs", "group_status",
             "created_at", "decision_id", "notional_estimate",
@@ -118,6 +124,33 @@ class BrokerOrderSerializer(serializers.ModelSerializer):
         if obj.group_id is None or not is_group_anchor(obj):
             return None
         return derive_group_status(obj)
+
+    def get_is_held(self, obj: BrokerOrder) -> bool:
+        """True while the order is waiting on a market open rather than
+        working. Two distinct mechanisms, one flag for the UI:
+        `queued_until_open` (the BROKER is holding it) and status
+        `pending_open` (WE are holding it until the release task fires)."""
+        return bool(obj.queued_until_open) or (
+            obj.status == BrokerOrder.STATUS_PENDING_OPEN
+        )
+
+    def get_release_eta(self, obj: BrokerOrder) -> str | None:
+        """When a held order is expected to reach the venue — the next regular
+        session open, in UTC (ISO-8601). ``None`` for anything not held."""
+        if not self.get_is_held(obj):
+            return None
+        from django.utils import timezone as dj_timezone
+
+        from .market_calendar import next_open
+
+        now = dj_timezone.now()
+        # `release_after` is already the computed next open; honour it while it
+        # is still in the future, otherwise recompute (the session it named has
+        # passed, or the broker is holding the order with no local schedule).
+        eta = obj.release_after
+        if eta is None or eta <= now:
+            eta = next_open(now)
+        return eta.astimezone(UTC).isoformat()
 
 
 class BrokerFillSerializer(serializers.ModelSerializer):

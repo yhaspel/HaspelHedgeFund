@@ -16,6 +16,7 @@ import logging
 from datetime import timedelta
 
 from celery import shared_task
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from hedgefund.offline import skip_when_offline
@@ -28,6 +29,7 @@ from .models import BrokerAccount, BrokerOrder, BrokerSyncEvent
 from .reconcile import (
     credentials_confirmed_dead,
     poll_open_orders_for_account,
+    pollable_orders_q,
     reconcile_account,
 )
 
@@ -36,14 +38,19 @@ log = logging.getLogger(__name__)
 
 @shared_task(name="apps.brokers.tasks.poll_open_orders")
 def poll_open_orders() -> dict:
-    """Walk every active account with at least one open order and poll the
-    adapter for new fills."""
+    """Walk every active account with at least one order still awaiting a venue
+    answer and poll the adapter for new fills.
+
+    "Awaiting an answer" is wider than `status in OPEN_STATUSES`: it also covers
+    rows parked `idempotency_state=unknown` (a submit whose response was lost —
+    Alpaca may hold the order) and bracket anchors whose protective legs are
+    still live after the entry filled. See `reconcile.pollable_orders_q`."""
     if skip_when_offline("poll_open_orders"):
         return {"status": "skipped_offline"}
     summary = {"accounts_scanned": 0, "fills_written": 0, "needs_reauth": 0}
     account_ids = (
         BrokerOrder.objects
-        .filter(status__in=BrokerOrder.OPEN_STATUSES)
+        .filter(pollable_orders_q())
         .values_list("broker_account_id", flat=True)
         # .order_by() clears BrokerOrder's Meta.ordering: without it the
         # ORDER BY created_at leaks into the SELECT DISTINCT list, so the
@@ -101,13 +108,20 @@ def sweep_stuck_confirmed_orders(grace_hours: int = 24) -> int:
     or an auth failure whose credentials never recovered) would linger forever,
     obscuring the book. Reap such rows to `rejected` once they are older than
     `grace_hours` (the window in which a transient auth blip could still
-    recover). Returns the number reaped."""
+    recover). Returns the number reaped.
+
+    The grace window is measured from the SUBMIT ATTEMPT (`submit_attempted_at`,
+    falling back to `created_at` for rows that never reached the broker call).
+    Measuring from `created_at` reaped held orders on their very first release:
+    a `pending_open` order drafted at Friday's close is two days old by
+    Tuesday's open but zero seconds into its submission."""
     cutoff = timezone.now() - timedelta(hours=grace_hours)
     stuck = BrokerOrder.objects.filter(
         status=BrokerOrder.STATUS_CONFIRMED,
         broker_order_id="",
-        created_at__lt=cutoff,
-    ).exclude(error_message="")
+    ).annotate(
+        attempted_at=Coalesce("submit_attempted_at", "created_at"),
+    ).filter(attempted_at__lt=cutoff).exclude(error_message="")
     reaped = 0
     for order in stuck:
         order.status = BrokerOrder.STATUS_REJECTED

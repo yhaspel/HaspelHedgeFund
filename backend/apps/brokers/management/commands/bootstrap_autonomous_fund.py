@@ -331,9 +331,16 @@ class Command(BaseCommand):
         return strategy
 
     def _upsert_fund(self, owner, account, strategies, templates) -> AutonomousFund:
-        fund, _created = AutonomousFund.objects.get_or_create(
-            owner=owner, name="Autonomous Fund",
-        )
+        # Resolve the owner's fund exactly the way the API does
+        # (``apps.portfolios.api_fund._user_fund``): FIRST fund by id, whatever
+        # it is called. Keying on name="Autonomous Fund" meant that once the
+        # owner renamed their fund on the Fund tab, a re-run of this
+        # "idempotent" command created a SECOND fund bound to the same shared
+        # broker account — and the two halves of the product then disagreed
+        # about which fund was live.
+        fund = AutonomousFund.objects.filter(owner=owner).order_by("id").first()
+        if fund is None:
+            fund = AutonomousFund.objects.create(owner=owner, name="Autonomous Fund")
         if fund.broker_account_id != account.id:
             try:
                 sleeves.configure_account(fund, account)
