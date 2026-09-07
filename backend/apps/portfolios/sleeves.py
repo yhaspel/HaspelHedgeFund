@@ -91,6 +91,21 @@ def sleeve_for(strategy, *, include_inactive: bool = False) -> FundSleeve | None
     return qs.first()
 
 
+def fund_halted(strategy) -> bool:
+    """True when this strategy is a member of a fund whose kill switch is ON.
+
+    The fund halt is firm-wide and LATCHED: nothing a member does (a member-level
+    Resume, an hourly guardrail sweep that finds no drawdown, a Run-now) may
+    trade through it — ``POST /api/fund/resume/`` is the only exit. Flatten /
+    reset still work, because they go through ``_emit_close`` rather than the
+    cycle bridge.
+    """
+    sleeve = sleeve_for(strategy, include_inactive=True)
+    if sleeve is None:
+        return False
+    return sleeve.fund.state == AutonomousFund.STATE_HALTED
+
+
 def _active_link(strategy):
     from apps.brokers.models import StrategyBrokerLink
 
@@ -644,16 +659,68 @@ def _close_side(quantity: Decimal) -> str:
     return "sell" if quantity > 0 else "buy"
 
 
+def cancel_pending_open(fund: AutonomousFund, *, reason: str = "manual_flatten") -> list[dict]:
+    """Cancel the account's locally-held ``pending_open`` orders.
+
+    "Flatten" used to ignore them: with the market closed the previous cycle's
+    batch is still held, so flatten reported "0 orders", the account looked flat
+    — and at the open the held batch deployed the book anyway (then Reset was
+    refused for "positions"). A held order has never reached the venue, so
+    cancelling is a local status write; the audit note says who cancelled it.
+    """
+    from apps.brokers.models import BrokerOrder
+
+    if fund.broker_account_id is None:
+        return []
+    held = list(
+        BrokerOrder.objects.filter(
+            broker_account_id=fund.broker_account_id,
+            status=BrokerOrder.STATUS_PENDING_OPEN,
+        ).order_by("id")
+    )
+    if not held:
+        return []
+    note = f"cancelled by fund flatten ({reason}) before it could release at the open"
+    BrokerOrder.objects.filter(pk__in=[o.pk for o in held]).update(
+        status=BrokerOrder.STATUS_CANCELLED, release_after=None, error_message=note[:500],
+    )
+    records = [
+        {"order_id": o.pk, "ticker": o.ticker, "side": o.side, "quantity": str(o.quantity)}
+        for o in held
+    ]
+    for order in held:
+        try:
+            run = order.autopilot_runs.order_by("-fire_time_utc").first()
+            if run is None:
+                continue
+            actions = dict(run.guardrail_actions or {})
+            actions["flatten_cancelled"] = [
+                *actions.get("flatten_cancelled", []),
+                {"order_id": order.pk, "ticker": order.ticker, "reason": reason},
+            ]
+            run.guardrail_actions = actions
+            run.save(update_fields=["guardrail_actions"])
+        except Exception:  # noqa: BLE001 — the audit must never block a flatten
+            log.exception("flatten cancel audit failed order=%s", order.pk)
+    log.warning("fund flatten cancelled %s held order(s) fund=%s", len(held), fund.pk)
+    return records
+
+
 def flatten_fund(fund: AutonomousFund, *, reason: str = "manual") -> dict:
     """Queue closing orders for EVERY position in the account book, attributed
     per sleeve where the sleeves account for it (so their ledgers flatten too)
     and untagged for the unattributed residual. Same gated, idempotent order
-    path as the cycle bridge; market closed ⇒ held for the open."""
+    path as the cycle bridge; market closed ⇒ held for the open.
+
+    Any of the cycle's own orders still held ``pending_open`` are CANCELLED
+    first — otherwise they release at the open and re-deploy the book that was
+    just flattened."""
     book = account_book(fund)
     if book is None:
         raise FundError("choose the fund's paper account first.", status=409)
 
     account = fund.broker_account
+    cancelled = cancel_pending_open(fund, reason=reason)
     inflight = {
         o.ticker.upper() for o in inflight_orders(fund)
         if o.client_order_id.startswith("flat-")
@@ -682,9 +749,13 @@ def flatten_fund(fund: AutonomousFund, *, reason: str = "manual") -> dict:
             if _emit_close(account, fund, None, ticker, _close_side(remaining), abs(remaining)):
                 placed += 1
     log.warning(
-        "fund flatten fund=%s reason=%s orders=%s skipped=%s", fund.pk, reason, placed, skipped,
+        "fund flatten fund=%s reason=%s orders=%s skipped=%s cancelled=%s",
+        fund.pk, reason, placed, skipped, len(cancelled),
     )
-    return {"orders": placed, "skipped_inflight": skipped}
+    return {
+        "orders": placed, "skipped_inflight": skipped,
+        "cancelled_pending_open": cancelled,
+    }
 
 
 def flatten_sleeve(sleeve: FundSleeve, *, reason: str = "manual") -> dict:

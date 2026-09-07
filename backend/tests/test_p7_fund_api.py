@@ -9,7 +9,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
-from apps.backtests.models import Backtest, BacktestMetrics
+from apps.backtests.models import Backtest, BacktestFold, BacktestMetrics
 from apps.brokers.models import BrokerAccount, StrategyBrokerLink
 from apps.notifications.models import NotificationChannel, NotificationEvent
 from apps.portfolios import fund as fund_layer
@@ -22,7 +22,7 @@ from apps.portfolios.models import (
     Universe,
     UniverseMembership,
 )
-from apps.portfolios.validation import validation_status
+from apps.portfolios.validation import expected_engine_mode, validation_status
 
 User = get_user_model()
 
@@ -63,11 +63,27 @@ def _account(user, label="A", cash="100000"):
 def _passing_backtest(strategy, *, oos="0.8", dd="4.0", stitched="0.7"):
     # P10 §B3: the gate also requires a positive STITCHED OOS Sharpe (the
     # ``sharpe`` field) and total-return-era data (the model default).
+    # F18/G1: ...plus gate-grade *structural* evidence — the strategy's own
+    # universe, the engine its kind trades live on, >=6 walk-forward folds and
+    # >=120 OOS sessions — so the backtest demonstrably models THIS strategy.
+    tickers = list(
+        UniverseMembership.objects
+        .filter(universe=strategy.universe, effective_to__isnull=True)
+        .values_list("ticker", flat=True)
+    )
     bt = Backtest.objects.create(
         user=strategy.user, strategy=strategy, name="bt",
-        start_date=dt.date(2024, 1, 1), end_date=dt.date(2025, 1, 1),
+        universe=tickers, engine_mode=expected_engine_mode(strategy),
+        start_date=dt.date(2022, 1, 3), end_date=dt.date(2025, 1, 3),
+        is_window_days=252, oos_window_days=63, step_days=63,
         status=Backtest.DONE,
     )
+    for i in range(6):
+        BacktestFold.objects.create(
+            backtest=bt, fold_index=i,
+            is_start=dt.date(2022, 1, 3), is_end=dt.date(2022, 12, 30),
+            oos_start=dt.date(2023, 1, 3), oos_end=dt.date(2023, 3, 31),
+        )
     BacktestMetrics.objects.create(
         backtest=bt, mean_oos_sharpe=Decimal(oos), max_drawdown_pct=Decimal(dd),
         sharpe=Decimal(stitched),

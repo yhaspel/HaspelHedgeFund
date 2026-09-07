@@ -112,10 +112,11 @@ def _linked_rp(user, account, *, enabled=True, state=StrategyAutopilot.STATE_ACT
     StrategyBrokerLink.objects.create(strategy=strategy, broker_account=account)
     ap = StrategyAutopilot.objects.create(
         strategy=strategy, broker_account=account, is_enabled=enabled, state=state,
-        # Disable the daily order/notional caps so these unit tests isolate the
-        # bypass + risk gate; the default $50k/day cap would otherwise throttle a
-        # full $100k deploy (a real Part B/F config note, not under test here).
-        max_orders_per_day=0, max_notional_per_day_usd=Decimal("0"),
+        # Effectively unlimited daily order/notional caps, so these unit tests
+        # isolate the bypass + risk gate; the default $50k/day cap would
+        # otherwise throttle a full $100k deploy (a real Part B/F config note,
+        # not under test here). NB: 0 means *zero* — a hard stop, not "off".
+        max_orders_per_day=1000, max_notional_per_day_usd=Decimal("100000000"),
     )
     return strategy, ap
 

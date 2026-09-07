@@ -107,12 +107,19 @@ def _parse_weights(raw: str | None, strategy_ids: list[int]) -> dict[int, float]
     or ids that aren't fund members (caller falls back to equal weight)."""
     if not raw:
         return None
+    import math
+
     out: dict[int, float] = {}
     try:
         for part in raw.split(","):
             sid, w = part.split(":")
             out[int(sid.strip())] = float(w)
     except (ValueError, AttributeError):
+        return None
+    # ``float("nan")`` parses fine and every comparison against it is False, so
+    # the `w < 0` guard let NaN/Infinity through — and DRF's strict JSON
+    # renderer then 500s on the response it poisons.
+    if any(not math.isfinite(w) for w in out.values()):
         return None
     if set(out) != set(strategy_ids) or any(w < 0 for w in out.values()):
         return None

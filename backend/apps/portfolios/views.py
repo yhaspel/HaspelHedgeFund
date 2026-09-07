@@ -283,6 +283,16 @@ class StrategyDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         return _strategies_with_active_count(self.request.user)
 
+    def perform_update(self, serializer):
+        """§9 was enable-time only: editing the risk config after arming re-locked
+        the toggle but left the autopilot enabled, trading a never-backtested
+        config. A risk-field edit now disarms it with reason ``config_changed``."""
+        from .autopilot_audit import disable_on_config_change, snapshot_risk_config
+
+        before = snapshot_risk_config(self.get_object())
+        strategy = serializer.save()
+        disable_on_config_change(strategy, before)
+
     def destroy(self, request: Request, *args, **kwargs):
         """P4 WS-C: delete a strategy only if it has no non-cancelled cycles
         and its strategy-portfolio book is empty (a freshly-seeded book with
@@ -419,8 +429,64 @@ class StrategyRunNowView(APIView):
             strategy = PortfolioStrategy.objects.get(pk=pk, user=request.user)
         except PortfolioStrategy.DoesNotExist:
             return Response({"detail": "not found"}, status=404)
-        as_of = request.data.get("as_of_date") or date_cls.today().isoformat()
+        today = date_cls.today()
+        raw_as_of = request.data.get("as_of_date")
+        if raw_as_of:
+            try:
+                as_of_date = datetime.strptime(str(raw_as_of), "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "as_of_date must be an ISO date (YYYY-MM-DD)"}, status=400,
+                )
+        else:
+            as_of_date = today
+        as_of = as_of_date.isoformat()
         force = bool(request.data.get("force", False))
+
+        ap = getattr(strategy, "autopilot", None)
+        autopilot_on = ap is not None and ap.is_enabled
+        if autopilot_on:
+            # This endpoint drives the SAME terminal hook as the autopilot, so on
+            # an armed strategy it emits real broker orders — with no AutopilotRun
+            # (no audit, no daily-cap basis, no pre-flight reconcile / drawdown
+            # check). A caller-supplied historical as_of_date is worse: the sleeve
+            # is sized at that day's closes while the fills happen at today's
+            # price. Route armed strategies through the autopilot's own Run-now.
+            from . import sleeves
+
+            if as_of_date != today:
+                return Response(
+                    {"detail": "as_of_date must be today for an autopilot-enabled "
+                               "strategy — a historical date sizes the book at stale "
+                               "closes while the fills happen at today's price."},
+                    status=400,
+                )
+            if sleeves.sleeve_for(strategy) is not None:
+                return Response(
+                    {"detail": "this strategy is a fund member with autopilot enabled — "
+                               "use the autopilot Run-now "
+                               f"(POST /api/strategies/{strategy.pk}/autopilot/run-now/) "
+                               "so the cycle is audited, capped and pre-flight checked.",
+                     "autopilot_run_now": f"/api/strategies/{strategy.pk}/autopilot/run-now/"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        # A same-day cycle already exists: say so synchronously instead of
+        # queueing a task whose only outcome is `{"status": "reused"}`.
+        if not force:
+            existing = PortfolioTarget.objects.filter(
+                strategy=strategy, as_of_date=as_of_date,
+                status__in=(
+                    PortfolioTarget.DONE,
+                    PortfolioTarget.AWAITING_REVIEW,
+                    PortfolioTarget.RUNNING_COUNCIL,
+                    PortfolioTarget.CONSTRUCTING,
+                    PortfolioTarget.RUNNING,
+                ),
+            ).first()
+            if existing is not None:
+                return Response({"status": "reused", "target_id": existing.pk})
+
         preset, overrides = _parse_cycle_overrides(request)
         result = daily_long_short_cycle.delay(
             strategy.pk,
@@ -678,6 +744,28 @@ class StrategyNewsDecisionsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(news_decision_scoreboard(strategy))
+
+
+class StrategyExpectedVsRealizedView(APIView):
+    """Wave 3 — GET /api/strategies/<pk>/expected-vs-realized/
+
+    Every DONE cycle's realized (disjoint-interval) return placed inside the
+    out-of-sample return distribution of the validation backtest fold that
+    covers its ``as_of_date``. See ``apps.portfolios.expected_vs_realized`` for
+    the honesty rules (no covering fold / no gate-passing backtest / fewer than
+    five scored cycles ⇒ ``provisional`` with null ratios).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request: Request, pk: int) -> Response:
+        from .expected_vs_realized import expected_vs_realized
+
+        try:
+            strategy = PortfolioStrategy.objects.get(pk=pk, user=request.user)
+        except PortfolioStrategy.DoesNotExist:
+            return Response({"detail": "not found"}, status=404)
+        return Response(expected_vs_realized(strategy))
 
 
 class BorrowLookupView(APIView):

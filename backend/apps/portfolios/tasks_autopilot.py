@@ -44,8 +44,9 @@ def dispatch_due_autopilots() -> dict:
     )
     dispatched = 0
     skipped_market = 0
+    skipped_fund_halt = 0
     for ap_id in due_ids:
-        ap = StrategyAutopilot.objects.filter(pk=ap_id).first()
+        ap = StrategyAutopilot.objects.select_related("strategy").filter(pk=ap_id).first()
         if ap is None:
             continue
         fire_time = ap.next_run_at
@@ -67,10 +68,30 @@ def dispatch_due_autopilots() -> dict:
         )
         if not created:
             continue
+
+        # The fund kill switch is firm-wide and latched: while fund.state is
+        # HALTED no member fires, whatever its own state says (an hourly sweep
+        # or a per-member Resume must not be an exit). The fire is still
+        # recorded, so the history shows WHY nothing ran.
+        from . import sleeves
+
+        if sleeves.fund_halted(ap.strategy):
+            _finish(run, AutopilotRun.SKIPPED, {
+                "skipped": "fund halted",
+                "message": "the fund kill switch is on — POST /api/fund/resume/ clears it.",
+            })
+            skipped_fund_halt += 1
+            continue
+
         run_autopilot_cycle.delay(run.id)
         dispatched += 1
 
-    return {"due": len(due_ids), "dispatched": dispatched, "skipped_market": skipped_market}
+    return {
+        "due": len(due_ids),
+        "dispatched": dispatched,
+        "skipped_market": skipped_market,
+        "skipped_fund_halt": skipped_fund_halt,
+    }
 
 
 @shared_task(name="apps.portfolios.tasks_autopilot.run_autopilot_cycle")
@@ -96,6 +117,14 @@ def run_autopilot_cycle(autopilot_run_id: int) -> dict:
     if ap.state == StrategyAutopilot.STATE_HALTED:
         _finish(run, AutopilotRun.SKIPPED, {"skipped": "halted"})
         return {"skipped": "halted"}
+    from . import sleeves
+
+    if sleeves.fund_halted(strategy):
+        _finish(run, AutopilotRun.SKIPPED, {
+            "skipped": "fund halted",
+            "message": "the fund kill switch is on — POST /api/fund/resume/ clears it.",
+        })
+        return {"skipped": "fund halted"}
     if not bool(getattr(strategy, "auto_run_council", True)):
         # §6.0: a cycle under autopilot must never park awaiting_review. Treat a
         # mis-set flag as halt-and-notify, not a silent stop.
@@ -154,6 +183,14 @@ def run_autopilot_cycle(autopilot_run_id: int) -> dict:
             f"Cycle skipped — stale/corrupt market data; book held. {exc}",
         )
         return {"skipped": "stale_data", "detail": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — audit it, alert, then re-raise
+        # Anything else (FMP 429, an empty universe, a constructor bug) used to
+        # propagate straight out of the task, leaving this AutopilotRun stuck in
+        # RUNNING with an empty error forever and the cycle's PortfolioTarget
+        # mid-flight. Record the failure on both rows and page the operator; the
+        # exception still propagates so Celery records the traceback.
+        _fail_cycle(run, ap, strategy, exc)
+        raise
     # If the cycle parked awaiting_review (should not happen — guarded above),
     # halt-and-notify rather than leave it dangling.
     if isinstance(result, dict) and result.get("status") == "awaiting_review":
@@ -168,6 +205,43 @@ def _finish(run: AutopilotRun, status: str, decision: dict) -> None:
     run.submit_decision = {**(run.submit_decision or {}), **decision}
     run.finished_at = timezone.now()
     run.save(update_fields=["status", "submit_decision", "finished_at"])
+
+
+def _fail_cycle(run: AutopilotRun, ap: StrategyAutopilot, strategy, exc: BaseException) -> None:
+    """Audit an unhandled cycle exception: the AutopilotRun and any in-flight
+    PortfolioTarget go to ``failed`` with the error text, and the operator is
+    paged. Best-effort — it must never mask the original exception."""
+    from .models import PortfolioTarget
+
+    message = f"{type(exc).__name__}: {exc}"[:2000]
+    log.exception("autopilot cycle failed autopilot=%s strategy=%s", ap.pk, strategy.pk)
+    try:
+        PortfolioTarget.objects.filter(
+            strategy=strategy, status__in=tuple(PortfolioTarget.ACTIVE_STATUSES),
+        ).update(
+            status=PortfolioTarget.FAILED,
+            error_message=message[:500],
+            finished_at=timezone.now(),
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("failed to mark cycle target failed autopilot=%s", ap.pk)
+    try:
+        run.status = AutopilotRun.FAILED
+        run.error = message
+        run.submit_decision = {**(run.submit_decision or {}), "failed": message[:500]}
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "error", "submit_decision", "finished_at"])
+    except Exception:  # noqa: BLE001
+        log.exception("failed to mark autopilot run failed run=%s", run.pk)
+    try:
+        from apps.notifications.autopilot import ACCOUNT_UNHEALTHY, notify_autopilot
+
+        notify_autopilot(
+            ap, ACCOUNT_UNHEALTHY,
+            f"Cycle FAILED — no orders emitted; the book is held. {message[:400]}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _on_hard_halt(ap: StrategyAutopilot, *, reason: str = "drawdown") -> None:
@@ -220,6 +294,17 @@ def guardrail_sweep() -> dict:
             if record_snapshot(pf, equity=equity, cash=pf.cash_balance) is not None:
                 snapshots += 1
         ap.refresh_from_db()
+        # Wave 3: a transition FOUND BY THE SWEEP had no record anywhere (only a
+        # mutated StrategyAutopilot.state). A dispatch-time transition already
+        # lands on AutopilotRun.guardrail_actions; this covers the swept ones so
+        # the fund activity feed can show them. Best-effort, never blocking.
+        if dd.get("transition"):
+            try:
+                from apps.portfolios.fund_activity import record_guardrail_transition
+
+                record_guardrail_transition(ap, dd)
+            except Exception:  # noqa: BLE001 — audit never breaks the sweep
+                log.exception("guardrail transition audit failed autopilot=%s", ap.pk)
         if dd.get("transition") and ap.state == StrategyAutopilot.STATE_HALTED:
             _on_hard_halt(ap)
             halted += 1
@@ -299,20 +384,66 @@ def release_pending_open_orders() -> dict:
             status__in=BrokerOrder.OPEN_STATUSES,
         ).only("broker_account_id", "ticker")
     }
+    # Shadow-mode daily caps: compute what the caps WOULD have skipped for this
+    # batch, per account, and record it on the run audit. Never blocks (owner
+    # decision) — the emission-time caps stay the only enforcement point.
+    from apps.portfolios.release_caps import evaluate_release_caps
+
+    shadow: dict[int, dict] = {}
+    by_account: dict[int, list] = {}
+    for order in held:
+        by_account.setdefault(order.broker_account_id, []).append(order)
+    for orders in by_account.values():
+        account = orders[0].broker_account
+        try:
+            shadow[account.id] = evaluate_release_caps(account, orders)
+        except Exception:  # noqa: BLE001 — shadow accounting never blocks a release
+            log.exception("release cap shadow failed account=%s", account.pk)
+
     released = 0
     deferred = 0
+    outcomes: dict[int, dict[str, list[int]]] = {}
     for order in held:
+        run_ids = list(order.autopilot_runs.values_list("id", flat=True))
         key = (order.broker_account_id, order.ticker.upper())
         if key in live:
             deferred += 1
+            _tally(outcomes, run_ids, "skipped", order)
             continue
         try:
             if submit_held_order(order):
                 released += 1
                 live.add(key)
+                _tally(outcomes, run_ids, "released", order)
+            else:
+                _tally(outcomes, run_ids, "failed", order)
         except Exception:  # noqa: BLE001 — one bad release can't block the rest
             log.exception("release failed order=%s", order.pk)
+            _tally(outcomes, run_ids, "failed", order)
+
+    from apps.portfolios.autopilot_audit import record_release_outcome
+
+    for run_id, buckets in outcomes.items():
+        record_release_outcome(
+            run_id,
+            released=buckets["released"], skipped=buckets["skipped"],
+            failed=buckets["failed"],
+            caps_shadow=shadow.get(buckets["account_id"]),
+        )
+    # NB: the shadow cap evaluation is deliberately NOT in this return value —
+    # it lives on the run audit (and the fund member card), so the beat task's
+    # published shape stays exactly as it was.
     return {"released": released, "candidates": len(held), "deferred": deferred}
+
+
+def _tally(outcomes: dict, run_ids: list[int], bucket: str, order) -> None:
+    """Bucket one released/deferred/rejected order under every run that owns it."""
+    for run_id in run_ids:
+        buckets = outcomes.setdefault(
+            run_id, {"released": [], "skipped": [], "failed": [], "account_id": None},
+        )
+        buckets["account_id"] = order.broker_account_id
+        buckets[bucket].append(order.pk)
 
 
 def trigger_autopilot_now(autopilot: StrategyAutopilot) -> AutopilotRun:
