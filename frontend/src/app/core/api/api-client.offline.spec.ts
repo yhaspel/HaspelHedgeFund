@@ -17,7 +17,6 @@ import { OfflineWriteBlockedError } from '../offline/offline-write-blocked.error
 import { ApiClient } from './api-client';
 
 const API = environment.apiBaseUrl;
-const tick = () => new Promise((r) => setTimeout(r, 25));
 
 function jwt(userId: number): string {
   const b64 = (o: unknown) =>
@@ -114,9 +113,8 @@ describe('auth invariant under offline (WS-6.2)', () => {
     let errored = false;
     http.get(`${API}/me/`).subscribe({ error: () => (errored = true) });
     ctrl.expectOne(`${API}/me/`).error(new ProgressEvent('err'), { status: 0 });
-    await tick();
+    await vi.waitFor(() => expect(errored).toBe(true), { timeout: 2000, interval: 10 });
 
-    expect(errored).toBe(true);
     expect(tokens.getAccess()).toBe(jwt(7)); // NOT cleared
     expect(navigate).not.toHaveBeenCalled();
   });

@@ -11,7 +11,7 @@ import {
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { environment } from '../../../environments/environment';
 import * as cache from './api-cache';
@@ -19,7 +19,6 @@ import { offlineCacheInterceptor } from './offline-cache.interceptor';
 import { OfflineState } from './offline-state.service';
 
 const API = environment.apiBaseUrl;
-const tick = () => new Promise((r) => setTimeout(r, 25));
 
 function jwt(userId: number): string {
   const b64 = (o: unknown) =>
@@ -80,7 +79,7 @@ describe('review-fecore: offlineCacheInterceptor staleness', () => {
     http.get(`${API}/portfolio/`).subscribe((b) => (body = b));
     // One transient connection reset (status 0) — e.g. the backend restarting.
     ctrl.expectOne(`${API}/portfolio/`).error(new ProgressEvent('err'), { status: 0 });
-    await tick();
+    await vi.waitFor(() => expect(body).toBeDefined(), { timeout: 2000, interval: 10 });
 
     expect(body).toEqual({ nav: '1000000.00', positions: [{ ticker: 'NVDA', quantity: '100' }] });
     // The store consumers read the body only (HttpClient.get<T>), so the
