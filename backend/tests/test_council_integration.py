@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import threading
 import time
 from decimal import Decimal
 from unittest.mock import patch
@@ -316,24 +317,54 @@ def test_dissent_recorded_when_one_persona_disagrees() -> None:
 
 @pytest.mark.django_db
 def test_parallel_fanout_is_concurrent() -> None:
-    """If fan-out is parallel, total wall-time ≈ slowest agent, not sum."""
+    """Fan-out really runs agents at the same time, not one after another.
+
+    Asserts on OVERLAP, not on wall-clock. The previous version timed the graph
+    and required < 0.35s against a ~0.40s serial estimate — 50ms of headroom, so
+    a busy machine failed it while the fan-out was working perfectly (observed
+    0.393-0.452s on a loaded box). Counting how many calls are inside the client
+    at once is the property we actually care about, and load can only make the
+    overlap easier to observe, never harder.
+    """
     graph = build_council_graph(personas=["buffett", "munger", "graham"])
 
     inner = _make_fake_llm("bullish")
 
-    class _SlowFake:
+    class _ConcurrencyProbe:
+        """Records the high-water mark of simultaneously in-flight calls."""
+
         provider = "fake"
 
-        def complete(self, **kwargs):
-            time.sleep(0.05)
-            return inner.complete(**kwargs)
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._in_flight = 0
+            self.peak_in_flight = 0
+            self.calls = 0
 
-    slow = _SlowFake()
-    with patch_all_llms(slow):
-        t0 = time.perf_counter()
+        def complete(self, **kwargs):
+            with self._lock:
+                self._in_flight += 1
+                self.calls += 1
+                self.peak_in_flight = max(self.peak_in_flight, self._in_flight)
+            try:
+                # Holds the slot open long enough for siblings to pile in; a
+                # serial graph can never exceed 1 no matter how slow the box is.
+                time.sleep(0.05)
+                return inner.complete(**kwargs)
+            finally:
+                with self._lock:
+                    self._in_flight -= 1
+
+    probe = _ConcurrencyProbe()
+    with patch_all_llms(probe):
         graph.invoke(_initial_state())
-        elapsed = time.perf_counter() - t0
-    # Pure serial would be ~ (4 analytical + 3 persona + 1 risk) * 0.05 = 0.40s.
-    # Parallel should be roughly (1 analytical + 1 persona + 1 risk) * 0.05 = 0.15s.
-    # Allow generous slack for CI jitter; mainly assert we're well below serial.
-    assert elapsed < 0.35, f"fan-out doesn't look parallel: {elapsed:.3f}s"
+
+    # Observed peak is 3 (the persona fan-out) across 8 calls. Asserting only
+    # ">1" keeps the check immune to thread start-up skew under load while
+    # losing no detection power: the old 0.35s bound would not have caught a
+    # narrowing to 2-wide either (8 calls at width 2 = 0.20s, comfortably under).
+    assert probe.calls > 1, "no LLM calls were made — the graph did not run"
+    assert probe.peak_in_flight > 1, (
+        "fan-out ran serially: never more than one agent in flight "
+        f"(peak={probe.peak_in_flight}, calls={probe.calls})"
+    )
