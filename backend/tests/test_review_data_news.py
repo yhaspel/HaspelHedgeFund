@@ -21,7 +21,6 @@ Proof tests for:
 """
 from __future__ import annotations
 
-import datetime as dt
 from unittest.mock import MagicMock
 
 import httpx
@@ -59,7 +58,11 @@ def test_news_freshness_short_circuit_fires_on_provider_not_publisher():
     """FIXED: the short-circuit compares ``NewsItem.provider`` (the adapter)
     instead of ``source`` (the publisher), so a fresh cache really does skip
     the network."""
-    as_of = dt.date(2026, 9, 7)
+    # Must track the rows below, which are stamped `timezone.now()`: the cache
+    # lookup filters `published_at__date__lte=as_of`, so a pinned as_of silently
+    # excludes them the day after it — the short-circuit then cannot fire and
+    # this test fails on a date rollover rather than on a real regression.
+    as_of = timezone.now().date()
     for prov, publisher, i in (("tiingo", "Reuters", 1), ("fmp", "seekingalpha.com", 2)):
         NewsItem.objects.create(
             ticker="AAPL",
