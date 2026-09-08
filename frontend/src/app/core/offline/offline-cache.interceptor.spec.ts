@@ -5,7 +5,7 @@ import {
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { environment } from '../../../environments/environment';
 import * as cache from './api-cache';
@@ -14,6 +14,17 @@ import { OfflineState } from './offline-state.service';
 
 const API = environment.apiBaseUrl;
 const tick = () => new Promise((r) => setTimeout(r, 25));
+/**
+ * Poll until `assert` stops throwing.
+ *
+ * The replay path is an async IndexedDB round-trip (open -> transaction -> get)
+ * whose latency is unbounded on a loaded machine, so a fixed sleep is inherently
+ * racy — that raciness was ~50% of this suite's flake. Only used where the
+ * expectation is POSITIVE; a `toBeNull` assertion would pass vacuously on the
+ * first poll, so those keep the fixed settle.
+ */
+const settle = (assert: () => void | Promise<void>) =>
+  vi.waitFor(assert, { timeout: 2000, interval: 10 });
 
 function jwt(userId: number): string {
   const b64 = (o: unknown) =>
@@ -61,9 +72,10 @@ describe('offlineCacheInterceptor', () => {
   it('caches a 2xx API GET body', async () => {
     http.get(`${API}/fund/`).subscribe();
     ctrl.expectOne(`${API}/fund/`).flush({ nav: 100 });
-    await tick();
-    const got = await cache.get(cache.cacheKey(`${API}/fund/`));
-    expect(got?.body).toEqual({ nav: 100 });
+    await settle(async () => {
+      const got = await cache.get(cache.cacheKey(`${API}/fund/`));
+      expect(got?.body).toEqual({ nav: 100 });
+    });
   });
 
   it('replays cache on status 0 with X-HF-Cache: stale', async () => {
@@ -78,7 +90,7 @@ describe('offlineCacheInterceptor', () => {
     let resp: unknown;
     http.get(`${API}/fund/`, { observe: 'response' }).subscribe((r) => (resp = r));
     ctrl.expectOne(`${API}/fund/`).error(new ProgressEvent('err'), { status: 0 });
-    await tick();
+    await settle(() => expect(resp).toBeDefined());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const r = resp as any;
     expect(r.body).toEqual({ nav: 42 });
@@ -99,8 +111,7 @@ describe('offlineCacheInterceptor', () => {
     let ok = false;
     http.get(`${API}/x/`).subscribe(() => (ok = true));
     ctrl.expectOne(`${API}/x/`).flush(null, { status, statusText: 'x' });
-    await tick();
-    expect(ok).toBe(true);
+    await settle(() => expect(ok).toBe(true));
   });
 
   it('does NOT serve stale-as-live on a per-route 504 while online', async () => {
@@ -118,8 +129,7 @@ describe('offlineCacheInterceptor', () => {
     let errored = false;
     http.get(`${API}/x/`).subscribe({ error: () => (errored = true) });
     ctrl.expectOne(`${API}/x/`).flush(null, { status: 504, statusText: 'Gateway Timeout' });
-    await tick();
-    expect(errored).toBe(true);
+    await settle(() => expect(errored).toBe(true));
   });
 
   it('does NOT replay cache on 401', async () => {
@@ -134,8 +144,7 @@ describe('offlineCacheInterceptor', () => {
     let errored = false;
     http.get(`${API}/me/`).subscribe({ error: () => (errored = true) });
     ctrl.expectOne(`${API}/me/`).flush(null, { status: 401, statusText: 'Unauthorized' });
-    await tick();
-    expect(errored).toBe(true);
+    await settle(() => expect(errored).toBe(true));
   });
 
   it('does NOT replay cache on 404/500', async () => {
@@ -143,8 +152,7 @@ describe('offlineCacheInterceptor', () => {
       let errored = false;
       http.get(`${API}/z/`).subscribe({ error: () => (errored = true) });
       ctrl.expectOne(`${API}/z/`).flush(null, { status, statusText: 'x' });
-      await tick();
-      expect(errored).toBe(true);
+      await settle(() => expect(errored).toBe(true));
     }
   });
 
@@ -177,7 +185,7 @@ describe('offlineCacheInterceptor', () => {
     });
     let body: unknown;
     http.get(`${API}/fund/`).subscribe((b) => (body = b));
-    await tick();
+    await settle(() => expect(body).toBeDefined());
     ctrl.expectNone(`${API}/fund/`); // no network touched
     expect(body).toEqual({ forced: true });
     offline.setForced(false);

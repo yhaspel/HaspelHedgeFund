@@ -96,7 +96,8 @@
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
-            "runnerConfig": true
+            "runnerConfig": true,
+            "setupFiles": ["src/testing/test-isolation.setup.ts"]
           }
         }
       }
