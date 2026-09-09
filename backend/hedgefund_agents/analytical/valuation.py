@@ -4,6 +4,7 @@ Computes three valuations in pure Python from the cached fundamentals
 and last bar (no LLM in the arithmetic). The LLM only writes a 1-2
 sentence summary and names the most sensitive assumption.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -17,12 +18,17 @@ from ..registry import DEFAULT_MODELS, get_llm
 from ..versioning import AgentSpec, register
 
 METRICS = [
-    "revenue", "operating_income", "net_income",
-    "free_cash_flow", "total_equity", "total_assets",
+    "revenue",
+    "operating_income",
+    "net_income",
+    "free_cash_flow",
+    "total_equity",
+    "total_assets",
     # Needed to turn the enterprise-level estimates into PER-SHARE fair values.
     # Providers that don't map a name simply omit it (FmpProvider filters
     # unknown metrics), in which case the node reports upside_pct=None.
-    "shares_outstanding", "weighted_average_shares_outstanding",
+    "shares_outstanding",
+    "weighted_average_shares_outstanding",
 ]
 
 # Metric names, most authoritative first, that may carry a share count.
@@ -31,6 +37,15 @@ SHARE_COUNT_METRICS = ("shares_outstanding", "weighted_average_shares_outstandin
 DCF_WACC_DEFAULT = 0.09
 DCF_TERMINAL_GROWTH = 0.025
 DCF_HORIZON_YEARS = 10
+# Two-stage DCF guard (2026-09-09 post-deploy finding). The explicit stage-1
+# growth is the trailing 3-year revenue CAGR, which for a hyper-growth name is
+# +90%/yr (NVDA) — compounded for ten years that is a 6,000x multiplier, so the
+# DCF leg reported $17,438/share and upside_pct +2,451%. Cap the starting rate
+# and fade it linearly to the terminal rate over the horizon, the standard
+# 2-stage treatment; the cap is generous enough that it never binds for an
+# ordinary large cap.
+DCF_GROWTH_CAP = 0.25
+DCF_GROWTH_FLOOR = -0.15
 
 SPEC = AgentSpec(
     agent_name="valuation",
@@ -96,8 +111,13 @@ def compute_dcf(
         return None
     pv = 0.0
     fcf = fcf_ttm
+    g0 = min(max(growth, DCF_GROWTH_FLOOR), DCF_GROWTH_CAP)
     for t in range(1, horizon + 1):
-        fcf *= 1 + growth
+        # Linear fade from the (capped) starting rate to the terminal rate, so
+        # year 10 grows at terminal_g rather than the trailing CAGR forever.
+        frac = (t - 1) / max(horizon - 1, 1)
+        g_t = g0 + (terminal_g - g0) * frac
+        fcf *= 1 + g_t
         pv += fcf / (1 + wacc) ** t
     terminal = fcf * (1 + terminal_g) / (wacc - terminal_g)
     pv += terminal / (1 + wacc) ** horizon
@@ -105,7 +125,9 @@ def compute_dcf(
 
 
 def compute_multiples(
-    net_income_ttm: float | None, pe_peer: float = 18.0, shares_out: float = 1.0,
+    net_income_ttm: float | None,
+    pe_peer: float = 18.0,
+    shares_out: float = 1.0,
 ) -> float | None:
     if net_income_ttm is None or net_income_ttm <= 0:
         return None
@@ -178,8 +200,20 @@ def run_valuation(state: AgentState) -> AgentState:
             note = "Upside not computable: no price bar on or before the as-of date."
         else:
             fv_low, fv_high = min(candidates), max(candidates)
-            midpoint = sum(candidates) / len(candidates)
+            # Median, not mean: with three legs one runaway estimate would
+            # otherwise drag the midpoint (and upside_pct) with it.
+            ordered = sorted(candidates)
+            mid_i = len(ordered) // 2
+            midpoint = (
+                ordered[mid_i] if len(ordered) % 2 else (ordered[mid_i - 1] + ordered[mid_i]) / 2
+            )
             upside = (midpoint - current_price) / current_price * 100
+            if fv_low > 0 and fv_high / fv_low > 10:
+                note = (
+                    "Wide band: the valuation methods disagree by more than 10x "
+                    f"(low {fv_low:.2f}, high {fv_high:.2f}); upside_pct uses the "
+                    "median method. Treat the band as low-confidence."
+                )
 
     summary_input = {
         "dcf_fair_value": dcf_ps,
@@ -190,7 +224,9 @@ def run_valuation(state: AgentState) -> AgentState:
         "current_price": current_price,
         "upside_pct": upside,
         "shares_outstanding": shares_out,
-        "growth_used": growth,
+        "growth_used": min(max(growth, DCF_GROWTH_FLOOR), DCF_GROWTH_CAP),
+        "growth_trailing_cagr": growth,
+        "growth_capped": growth > DCF_GROWTH_CAP or growth < DCF_GROWTH_FLOOR,
         "wacc": DCF_WACC_DEFAULT,
         "terminal_growth": DCF_TERMINAL_GROWTH,
         "note": note,
@@ -207,6 +243,7 @@ def run_valuation(state: AgentState) -> AgentState:
     )
     user = "INPUTS:\n" + str(summary_input)
     from apps.backtests.cache import make_cache_ctx
+
     parsed, resp = call_structured(
         client,
         model=model,
@@ -216,21 +253,25 @@ def run_valuation(state: AgentState) -> AgentState:
         cache_ctx=make_cache_ctx(state, "valuation"),
     )
     record_llm_call(
-        run_id=state.get("run_id"), backtest_id=state.get("backtest_id"),
-            portfolio_target_id=state.get("portfolio_target_id"),
-        agent_name="valuation", resp=resp,
+        run_id=state.get("run_id"),
+        backtest_id=state.get("backtest_id"),
+        portfolio_target_id=state.get("portfolio_target_id"),
+        agent_name="valuation",
+        resp=resp,
     )
     out = parsed.model_dump()
     # Trust our arithmetic, not the LLM's echo.
-    out.update({
-        "dcf_fair_value": dcf_ps,
-        "multiples_fair_value": mult_ps,
-        "residual_income_fair_value": ri_ps,
-        "fair_value_low": fv_low,
-        "fair_value_high": fv_high,
-        "current_price": current_price,
-        "upside_pct": upside,
-        "shares_outstanding": shares_out,
-        "notes": note or out.get("notes", ""),
-    })
+    out.update(
+        {
+            "dcf_fair_value": dcf_ps,
+            "multiples_fair_value": mult_ps,
+            "residual_income_fair_value": ri_ps,
+            "fair_value_low": fv_low,
+            "fair_value_high": fv_high,
+            "current_price": current_price,
+            "upside_pct": upside,
+            "shares_outstanding": shares_out,
+            "notes": note or out.get("notes", ""),
+        }
+    )
     return {"valuation": out}  # type: ignore[return-value]
