@@ -2,6 +2,7 @@
 module decides which class to instantiate. Centralising the wiring here
 makes it easy to swap (e.g., Ollama in P2+) without touching agents.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,6 +46,7 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
     """
     if getattr(settings, "E2E_STUB_LLM", False):
         from .llm.adapters.stub import StubLLMClient
+
         return StubLLMClient()
     # P4-OFF R3: the hard "local LLM only" guarantee. Under OFFLINE_MODE, any
     # non-Ollama adapter is a leak (a per-agent override, the Settings default
@@ -53,6 +55,7 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
     # network. A healthy L1 run never hits this: every agent is forced local.
     if getattr(settings, "OFFLINE_MODE", False) and provider != "ollama":
         from .errors import OfflineLLMViolation
+
         raise OfflineLLMViolation(
             f"OFFLINE_MODE blocks the '{provider}' LLM provider — offline runs "
             "use the local Ollama model only."
@@ -65,6 +68,7 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
     if user_id is not None:
         try:
             from apps.models_catalog.models import ProviderKey
+
             pk = ProviderKey.objects.filter(user_id=user_id).first()
         except Exception:
             pk = None
@@ -93,20 +97,33 @@ _PROD_PERSONA = ("anthropic", "claude-haiku-4-5-20251001")
 _PROD_ANALYTICAL = ("openrouter", "meta-llama/llama-3.3-70b-instruct")
 # Dev/blocked fallback: every agent on a free OpenRouter slug. Used when an
 # environment sets BLOCK_ANTHROPIC=True so a missing per-agent override can
-# never resolve to Haiku and silently spend credits. Nemotron-3-Super-120B
-# chosen as the universal fallback — flagship-grade, $0/Mtok, and crucially
-# NON-reasoning: the previous pick (GPT-OSS 120B) burns its budget on hidden
-# thinking and emits empty content (the reasoning-exhaustion class behind the
-# qwen3.6-27b hang). Same non-reasoning rule the dev/frugal presets follow;
-# guarded by test_preset_invariants.
-_BLOCKED_FALLBACK = ("openrouter", "nvidia/nemotron-3-super-120b-a12b:free")
+# never resolve to Haiku and silently spend credits. Nemotron-3.5-Super-VL
+# (120B/12B-active) chosen as the universal fallback — flagship-grade, $0/Mtok,
+# and run with thinking DISABLED (openrouter._THINKING_OFF_SLUGS) so it behaves
+# as a NON-reasoning route: the earlier pick (GPT-OSS 120B) burned its budget on
+# hidden thinking and emitted empty content (the reasoning-exhaustion class
+# behind the qwen3.6-27b hang), and its predecessor nemotron-3-super:free died
+# upstream 2026-10 (404 while still listed; run 1178). Same non-reasoning rule
+# the dev/frugal presets follow; guarded by test_preset_invariants.
+_BLOCKED_FALLBACK = ("openrouter", "nvidia/nemotron-3.5-super-vl:free")
 
 _ALL_AGENT_NAMES = (
-    "fundamentals", "technicals", "valuation", "sentiment",
-    "macro", "news_digest",
-    "buffett", "munger", "graham", "wood",
-    "druckenmiller", "burry", "damodaran", "lynch",
-    "risk_manager", "cio",
+    "fundamentals",
+    "technicals",
+    "valuation",
+    "sentiment",
+    "macro",
+    "news_digest",
+    "buffett",
+    "munger",
+    "graham",
+    "wood",
+    "druckenmiller",
+    "burry",
+    "damodaran",
+    "lynch",
+    "risk_manager",
+    "cio",
 )
 
 
@@ -124,13 +141,22 @@ def _compute_default_models() -> dict[str, tuple[str, str]]:
     persona = _PROD_PERSONA
     analytical = _PROD_ANALYTICAL
     return {
-        "fundamentals": analytical, "technicals": analytical,
-        "valuation": analytical, "sentiment": analytical,
-        "macro": analytical, "news_digest": analytical,
-        "buffett": persona, "munger": persona, "graham": persona,
-        "wood": persona, "druckenmiller": persona, "burry": persona,
-        "damodaran": persona, "lynch": persona,
-        "risk_manager": persona, "cio": persona,
+        "fundamentals": analytical,
+        "technicals": analytical,
+        "valuation": analytical,
+        "sentiment": analytical,
+        "macro": analytical,
+        "news_digest": analytical,
+        "buffett": persona,
+        "munger": persona,
+        "graham": persona,
+        "wood": persona,
+        "druckenmiller": persona,
+        "burry": persona,
+        "damodaran": persona,
+        "lynch": persona,
+        "risk_manager": persona,
+        "cio": persona,
     }
 
 
@@ -139,14 +165,39 @@ DEFAULT_MODELS: dict[str, tuple[str, str]] = _compute_default_models()
 
 # Catalog for GET /api/models/ (stub for P2d).
 MODEL_CATALOG = [
-    {"id": "anthropic:claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "tier": "frontier",
-     "input_per_mtok": 3.0, "output_per_mtok": 15.0},
-    {"id": "anthropic:claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "tier": "fast",
-     "input_per_mtok": 1.0, "output_per_mtok": 5.0},
-    {"id": "openrouter:anthropic/claude-sonnet-4.6", "name": "Sonnet 4.6 (via OpenRouter)",
-     "tier": "frontier", "input_per_mtok": 3.15, "output_per_mtok": 15.75},
-    {"id": "openrouter:qwen/qwen3.6-27b", "name": "Qwen3 32B (OpenRouter)", "tier": "cheap",
-     "input_per_mtok": 0.15, "output_per_mtok": 0.30},
-    {"id": "openrouter:meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B (OpenRouter)",
-     "tier": "balanced", "input_per_mtok": 0.40, "output_per_mtok": 0.40},
+    {
+        "id": "anthropic:claude-sonnet-4-6",
+        "name": "Claude Sonnet 4.6",
+        "tier": "frontier",
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+    },
+    {
+        "id": "anthropic:claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "tier": "fast",
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 5.0,
+    },
+    {
+        "id": "openrouter:anthropic/claude-sonnet-4.6",
+        "name": "Sonnet 4.6 (via OpenRouter)",
+        "tier": "frontier",
+        "input_per_mtok": 3.15,
+        "output_per_mtok": 15.75,
+    },
+    {
+        "id": "openrouter:qwen/qwen3.6-27b",
+        "name": "Qwen3 32B (OpenRouter)",
+        "tier": "cheap",
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.30,
+    },
+    {
+        "id": "openrouter:meta-llama/llama-3.3-70b-instruct",
+        "name": "Llama 3.3 70B (OpenRouter)",
+        "tier": "balanced",
+        "input_per_mtok": 0.40,
+        "output_per_mtok": 0.40,
+    },
 ]

@@ -4,6 +4,7 @@ This table is intentionally small in P1 — only the models we exercise.
 P2d (Model Selector UI) will load this from a database table editable by
 operators.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,6 +55,15 @@ PRICING: dict[str, ModelPrice] = {
     "openai/gpt-oss-120b:free": ModelPrice(0.0, 0.0),
     "meta-llama/llama-3.3-70b-instruct:free": ModelPrice(0.0, 0.0),
     "nousresearch/hermes-3-llama-3.1-405b:free": ModelPrice(0.0, 0.0),
+    # 2026-10-20 dev-tier allowlist (tier_menus.DEV_TIER_SLUGS) — the adapter's
+    # static :free fallback ladder may hop onto these before the catalog has a
+    # row, so they need a cold-start price floor here too.
+    "nvidia/nemotron-3.5-super-vl:free": ModelPrice(0.0, 0.0),
+    "minimax/minimax-m3.1-flash:free": ModelPrice(0.0, 0.0),
+    "nvidia/nemotron-3.5-lightning:free": ModelPrice(0.0, 0.0),
+    "dots-studio/dots-3-note-preview:free": ModelPrice(0.0, 0.0),
+    "google/gemma-4-31b-it:free": ModelPrice(0.0, 0.0),
+    "xingchen-agi/xing4.0-29b-a4b:free": ModelPrice(0.0, 0.0),
 }
 
 
@@ -80,7 +90,7 @@ def lookup_catalog_price(model: str) -> ModelPrice | None:
         None,
     )
     if matched_prefix is not None:
-        candidates.add(model[len(matched_prefix):])
+        candidates.add(model[len(matched_prefix) :])
     else:
         candidates.update(f"{p}{model}" for p in _KNOWN_PROVIDER_PREFIXES)
     try:
@@ -124,6 +134,15 @@ def estimate_cost(
         price = lookup_catalog_price(base) or PRICING.get(base)
         if price is not None:
             log.debug("pricing :online → base passthrough for model=%r", model)
+    # An OpenRouter `:free` variant is $0/Mtok by OpenRouter's own naming
+    # contract (verification.py: free ⇔ pricing == 0; the suffix is how they
+    # publish it). This is NOT the "unknown price recorded as $0" failure mode —
+    # it is a known price — and it keeps a :free fallback rung that completes
+    # after its catalog row was quarantined (inactive rows are not priced above)
+    # from blowing up a healed call with UnknownModelPriceError.
+    if price is None and model.endswith(":free"):
+        price = ModelPrice(0.0, 0.0)
+        log.debug("pricing :free contract → $0 for model=%r", model)
     if price is None:
         if strict:
             raise UnknownModelPriceError(
