@@ -504,29 +504,47 @@ def ensure_allowlist_membership(tier, member_ids) -> list[str]:
     membership used to be written only on cold start — so a slug added to
     DEV_TIER_SLUGS after a deployment's first migrate never reached that
     deployment's menu, and the runtime fallback chain (which reads the DB menu)
-    had nothing to hop to once the original members died (run 1178). Appends
-    only (ordering after the current max) and never removes: a dead member
-    drops out via `is_active`, an operator's own additions are untouched. A
-    tier with ZERO membership rows was deliberately emptied by an operator
-    (PUT members: []) and is left alone, same as the cold-start guard. Ids
-    without a ModelEntry row are skipped. Returns the appended ids.
+    had nothing to hop to once the original members died (run 1178). Never
+    removes and never reorders existing rows: a dead member drops out via
+    `is_active`, an operator's own additions and order are kept. Each appended
+    id is placed by its allowlist rank — just before the first existing row
+    that ranks later, else after the last allowlist row — because that order is
+    the runtime fallback ladder: appending at the end landed the new rungs
+    behind the old ones (in production, behind google/gemma-4, 429'd all day
+    and deliberately last). A tier with ZERO membership rows was deliberately
+    emptied by an operator (PUT members: []) and is left alone, same as the
+    cold-start guard. Ids without a ModelEntry row are skipped. Returns the
+    appended ids.
     """
     from .models import ModelEntry, TierMembership
 
-    present = set(TierMembership.objects.filter(tier=tier).values_list("model_id", flat=True))
-    if not present:
+    rows = list(TierMembership.objects.filter(tier=tier).order_by("ordering", "model_id"))
+    if not rows:
         return []
-    missing = [mid for mid in member_ids if mid not in present]
-    if not missing:
-        return []
-    last = TierMembership.objects.filter(tier=tier).order_by("-ordering").first()
-    ordering = (last.ordering + 1) if last is not None else 0
+    rank = {mid: i for i, mid in enumerate(member_ids)}
+    present = {r.model_id for r in rows}
+    placed = False
     added: list[str] = []
-    for mid in missing:
+    for mid in member_ids:
+        if mid in present:
+            continue
         model_obj = ModelEntry.objects.filter(id=mid).first()
         if model_obj is None:
             continue
-        TierMembership.objects.create(tier=tier, model=model_obj, ordering=ordering)
-        ordering += 1
-        added.append(mid)
+        # get_or_create: a concurrent seed/sync appending the same id must not
+        # raise IntegrityError out of `migrate` (that fails the api deploy).
+        row, created = TierMembership.objects.get_or_create(
+            tier=tier, model=model_obj, defaults={"ordering": len(rows)}
+        )
+        present.add(mid)
+        later = [i for i, r in enumerate(rows) if rank.get(r.model_id, -1) > rank[mid]]
+        curated = [i for i, r in enumerate(rows) if r.model_id in rank]
+        rows.insert(later[0] if later else (curated[-1] + 1 if curated else len(rows)), row)
+        placed = True
+        if created:
+            added.append(mid)
+    if placed:
+        for ordering, row in enumerate(rows):
+            row.ordering = ordering
+        TierMembership.objects.bulk_update(rows, ["ordering"])
     return added

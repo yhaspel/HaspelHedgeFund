@@ -9,9 +9,13 @@ stored map kept picking it, and every call 404'd. The adapter's runtime fallback
 is the last net for the call in flight; THIS module makes the failure stick so
 the next dispatch never picks the dead route again:
 
-* ``quarantine_model`` — called by the OpenRouter adapter on HTTP 402/404 (the
-  non-transient, model-specific statuses; 401/403 are key problems, not model
-  problems). Deactivates the ``ModelEntry`` with an audited note + stamp.
+* ``quarantine_model`` — called by the OpenRouter adapter on HTTP 404, and only
+  once a LATER rung of the same fallback chain has succeeded: that contrast is
+  what proves the route — not the account — failed. 402 (the account's/key's
+  credits) and 401/403 (key problems) are never quarantined, nor is a 404 whose
+  body names the account's data policy / provider allow-list; an account-level
+  condition fails EVERY rung and must not deactivate a whole tier for days.
+  Deactivates the ``ModelEntry`` with an audited note + stamp.
   Selection-time healing (``tier_menus.heal_overrides``) then moves every live
   pick off it, and the DB tier menu drops it, within the same process.
 * ``is_quarantined`` — honoured by ``sync_tier_models`` so the presence-only
@@ -35,7 +39,10 @@ from django.utils import timezone
 log = logging.getLogger(__name__)
 
 QUARANTINE_PREFIX = "runtime quarantine:"
-QUARANTINE_STATUSES = frozenset({402, 404})
+QUARANTINE_STATUSES = frozenset({404})
+# 404 bodies that describe the ACCOUNT's settings, not the model ("No endpoints
+# found matching your data policy", "No allowed providers are available…").
+_ACCOUNT_SCOPED_404_MARKERS = ("data policy", "allowed providers")
 _PROVIDER_PREFIXES = ("openrouter:", "anthropic:", "ollama:")
 
 
@@ -75,9 +82,12 @@ def is_quarantined(row, *, now: datetime | None = None) -> bool:
 def quarantine_model(model: str, *, status_code: int, body: str = "") -> bool:
     """Deactivate the catalog row for ``model`` after a live HTTP ``status_code``
     in ``QUARANTINE_STATUSES``. Returns True when a row was flipped inactive;
-    False when there was nothing to do (not a quarantine status, no row, already
-    inactive, or any DB failure — logged, never raised)."""
+    False when there was nothing to do (not a quarantine status, an
+    account-scoped 404 body, no row, already inactive, or any DB failure —
+    logged, never raised)."""
     if status_code not in QUARANTINE_STATUSES:
+        return False
+    if any(marker in (body or "").lower() for marker in _ACCOUNT_SCOPED_404_MARKERS):
         return False
     try:
         from .models import ModelEntry

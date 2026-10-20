@@ -279,11 +279,13 @@ LLM_LAST_RESORT_FREE_MODEL = os.environ.get(
     "LLM_LAST_RESORT_FREE_MODEL", "minimax/minimax-m3.1-flash:free"
 )
 # Runtime quarantine (apps/models_catalog/quarantine.py): a model that answers a
-# LIVE call with HTTP 402/404 is deactivated in the catalog on the spot — the
-# daily sync only retires slugs that VANISH from OpenRouter's list, and a route
-# can be dead while still listed. The sync will not resurrect a quarantined row
+# LIVE call with HTTP 404 while a later rung of the same chain succeeds is
+# deactivated in the catalog — the daily sync only retires slugs that VANISH
+# from OpenRouter's list, and a route can be dead while still listed (402 and
+# account-scoped 404s never quarantine). The sync will not resurrect a quarantined row
 # for this many days; after that, if it is still dead, the next call re-hops and
-# re-quarantines (one extra fallback hop per window, never a failed run).
+# re-quarantines (one extra fallback hop per window, never a failed run). Needs
+# LLM_SELF_HEAL on and LLM_MAX_MODEL_FALLBACKS > 0: the contrast is a later rung.
 LLM_RUNTIME_QUARANTINE_DAYS = int(os.environ.get("LLM_RUNTIME_QUARANTINE_DAYS", "3"))
 # When True (default), a live run tolerates a single agent's unrecoverable
 # failure by emitting that agent's null signal (the council proceeds and the run

@@ -525,6 +525,17 @@ def test_quarantine_deactivates_only_on_dead_route_statuses() -> None:
     # 401/403 are KEY problems, not model problems — never quarantine on them.
     assert quarantine_model("nvidia/nemotron-3.5-super-vl:free", status_code=401) is False
     assert quarantine_model("nvidia/nemotron-3.5-super-vl:free", status_code=403) is False
+    # 402 is the account's/key's credits; a data-policy or provider-allow-list
+    # 404 is the account's settings — none of them says the MODEL is dead.
+    for status, body in (
+        (402, "Insufficient credits"),
+        (404, "No endpoints found matching your data policy (Free model publication)."),
+        (404, "No allowed providers are available for the selected model."),
+    ):
+        assert (
+            quarantine_model("nvidia/nemotron-3.5-super-vl:free", status_code=status, body=body)
+            is False
+        )
     assert ModelEntry.objects.get(id=mid).is_active
     # 404 on a live call: deactivated with an audited note (bare slug resolves to
     # its openrouter: row); a second report is a no-op.
@@ -587,7 +598,8 @@ def test_live_synced_tier_gains_new_allowlist_members_without_cold_start() -> No
     """A slug added to DEV_TIER_SLUGS after a deployment's cold-start seed used to
     never reach that deployment's DB menu. Both post_migrate (seed_tiers) and the
     daily sync now append missing allowlist ids — without touching an
-    operator-emptied tier or any existing ordering."""
+    operator-emptied tier — in curated allowlist order (see the prod-shaped
+    re-sequencing test below)."""
     from apps.models_catalog.fetching import sync_tier_models
     from apps.models_catalog.models import TierConfig, TierMembership
     from apps.models_catalog.seed import seed_tiers
@@ -609,8 +621,8 @@ def test_live_synced_tier_gains_new_allowlist_members_without_cold_start() -> No
         .order_by("ordering")
         .values_list("model_id", flat=True)
     )
-    assert after[: len(kept)] == kept  # existing order untouched
-    assert after[-1] == dropped  # appended at the end
+    assert after[: len(kept)] == kept  # the curated prefix keeps its order
+    assert after[-1] == dropped  # the allowlist's last slug lands last
     assert sorted(after) == sorted(f"openrouter:{s}" for s in DEV_TIER_SLUGS)
     assert dropped in tier_menu("dev")
 
@@ -708,3 +720,158 @@ def test_free_suffix_is_priced_zero_without_a_catalog_row() -> None:
     from hedgefund_agents.llm.pricing import estimate_cost
 
     assert estimate_cost("somebody/brand-new-route:free", 1000, 1000, strict=True) == 0.0
+
+
+@pytest.mark.django_db
+def test_account_level_failure_never_quarantines(settings) -> None:
+    """Out of credits (402) or a data-policy 404 is the ACCOUNT, not the model:
+    it fails every rung of the chain. The run fails as before, but nothing is
+    deactivated — the eager quarantine took a whole tier offline for days on one
+    agent call. Only a 404 that a LATER rung contrasts (it answered) quarantines,
+    and never a 402 or an account-scoped 404 body even then."""
+    from apps.backtests.exceptions import ModelUnavailable
+    from hedgefund_agents.llm.adapters.openrouter import OpenRouterClient
+
+    settings.OPENROUTER_API_KEY = "test-key"
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    settings.OPENROUTER_PAID_FALLBACK = False
+    active = set(ModelEntry.objects.filter(is_active=True).values_list("id", flat=True))
+    first = f"openrouter:{DEV_TIER_SLUGS[0]}"
+
+    for status, text in (
+        (402, "Insufficient credits"),
+        (404, "No endpoints found matching your data policy"),
+        (404, "Function not found"),  # every rung dead: no contrast, no quarantine
+    ):
+        calls: list[str] = []
+
+        def account_down(self, body, headers, _status=status, _text=text, _calls=calls):
+            _calls.append(body["model"])
+            return _mk_resp(_status, text=_text)
+
+        with patch.object(OpenRouterClient, "_post_with_retry", account_down):
+            with pytest.raises(ModelUnavailable):
+                OpenRouterClient(api_key="test-key").complete(model=DEV_TIER_SLUGS[0], messages=[])
+        assert len(set(calls)) == 6  # the chain walked every rung
+        assert set(ModelEntry.objects.filter(is_active=True).values_list("id", flat=True)) == active
+
+    for status, text in (
+        (402, "This request requires more credits"),
+        (404, "No endpoints found matching your data policy"),
+    ):
+        calls = []
+
+        def then_ok(self, body, headers, _status=status, _text=text, _calls=calls):
+            _calls.append(body["model"])
+            if len(_calls) == 1:
+                return _mk_resp(_status, text=_text)
+            return _mk_resp(200, _ok_payload(body["model"]))
+
+        with patch.object(OpenRouterClient, "_post_with_retry", then_ok):
+            resp = OpenRouterClient(api_key="test-key").complete(
+                model=DEV_TIER_SLUGS[0], messages=[]
+            )
+        assert resp.text and len(calls) == 2
+        assert ModelEntry.objects.get(id=first).is_active is True
+
+
+@pytest.mark.django_db
+def test_seed_places_new_rungs_by_curated_rank_on_prod_shaped_dev_tier() -> None:
+    """Production's dev tier predates the re-curation: [nemotron-3-super,
+    deepseek-v4-flash:free (delisted), gemma-4 (429'd all day), glm-4.5-air:free
+    (delisted)]. Appending at the end left gemma-4 FIRST in the live menu — the
+    first fallback rung, heal target and default fallthrough. The deploy's
+    post_migrate now places each new rung by its curated rank (ahead of gemma-4)
+    without reordering existing rows, so an operator's own order survives too."""
+    from apps.models_catalog.models import TierConfig, TierMembership
+    from apps.models_catalog.seed import seed_tiers
+
+    dev = TierConfig.objects.get(tier_name="dev")
+    n3s = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    deepseek = "openrouter:deepseek/deepseek-v4-flash:free"
+    gemma = "openrouter:google/gemma-4-31b-it:free"
+    glm = "openrouter:z-ai/glm-4.5-air:free"
+    ModelEntry.objects.filter(id__in=[n3s, deepseek, glm]).update(is_active=False)
+    TierMembership.objects.filter(tier=dev).delete()
+    for ordering, mid in enumerate([n3s, deepseek, gemma, glm]):
+        TierMembership.objects.create(tier=dev, model_id=mid, ordering=ordering)
+
+    def order() -> list[str]:
+        return list(
+            TierMembership.objects.filter(tier=dev)
+            .order_by("ordering")
+            .values_list("model_id", flat=True)
+        )
+
+    seed_tiers()  # the deploy's post_migrate
+
+    curated = [f"openrouter:{s}" for s in DEV_TIER_SLUGS]
+    assert order() == [n3s, deepseek, *curated[:-1], gemma, glm]
+    assert tier_menu("dev") == curated  # gemma-4 last, not first
+    assert tier_menu("dev")[0] != gemma and tier_menu("dev")[-1] == gemma
+
+    # Nothing missing → no reorder: an operator's own order survives post_migrate.
+    TierMembership.objects.filter(tier=dev, model_id=curated[0]).update(ordering=50)
+    seed_tiers()
+    assert TierMembership.objects.get(tier=dev, model_id=curated[0]).ordering == 50
+
+    # The tier editor only accepts ACTIVE models, so an operator reorder saved
+    # while an allowlist member is dead leaves it out; the next reconcile re-adds
+    # it at its rank without undoing the operator's order of the others.
+    xing = curated[4]
+    ModelEntry.objects.filter(id=xing).update(is_active=False)
+    operator = [curated[1], curated[0], curated[3], curated[2], gemma]
+    TierMembership.objects.filter(tier=dev).delete()
+    for ordering, mid in enumerate(operator):
+        TierMembership.objects.create(tier=dev, model_id=mid, ordering=ordering)
+    seed_tiers()
+    assert order() == [*operator[:-1], xing, gemma]
+
+
+@pytest.mark.django_db
+def test_sync_releases_lapsed_quarantine_outside_the_allowlist(settings) -> None:
+    """The allowlist pass re-activates only dev/frugal rows once the TTL lapses,
+    so a quarantined research/quality route never came back (no admin toggle).
+    Any lapsed quarantine still listed upstream is now released; a row the seed
+    retires on purpose stays retired."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from apps.models_catalog.fetching import sync_tier_models
+    from apps.models_catalog.quarantine import QUARANTINE_PREFIX, quarantine_model
+
+    settings.LLM_RUNTIME_QUARANTINE_DAYS = 3
+    outside = "openrouter:acme/research-reasoner"
+    ModelEntry.objects.create(
+        id=outside,
+        provider="openrouter",
+        display_name="Acme Research Reasoner",
+        tier="hosted_open",
+        price_in_per_mtok=Decimal("1"),
+        price_out_per_mtok=Decimal("2"),
+    )
+    retired = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert quarantine_model(outside, status_code=404, body="dead")
+    ModelEntry.objects.filter(id=retired).update(
+        is_active=False,
+        last_verified_note=f"{QUARANTINE_PREFIX} HTTP 404 on a live call",
+        last_verified_at=timezone.now() - timedelta(days=10),
+    )
+
+    with patch(_FETCH, return_value=_or_catalog()):
+        res = sync_tier_models()
+    assert ModelEntry.objects.get(id=outside).is_active is False  # inside the TTL
+    assert outside not in res.synced
+
+    ModelEntry.objects.filter(id=outside).update(
+        last_verified_at=timezone.now() - timedelta(days=4)
+    )
+    with patch(_FETCH, return_value=_or_catalog()):
+        res = sync_tier_models()
+    row = ModelEntry.objects.get(id=outside)
+    assert row.is_active is True and row.last_verified_note == ""
+    assert outside in res.synced
+    assert ModelEntry.objects.get(id=retired).is_active is False

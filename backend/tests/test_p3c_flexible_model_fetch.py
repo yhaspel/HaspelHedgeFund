@@ -479,7 +479,13 @@ def test_dev_preset_spreads_personas_across_distinct_models() -> None:
     # can't give each a distinct slug. Instead require the personas to SPAN the
     # whole dev menu (same diversity intent: a provider 429 only takes down its
     # slug's share). See preset sanitation / test_preset_invariants.
-    assert persona_models == allow, (persona_models, allow)
+    # google/gemma-4-31b-it:free is the free ladder's LAST rung only (upstream
+    # 429'd 2026-10-20, P16): it stays in the allowlist, no persona defaults to it.
+    assert persona_models == allow - {"openrouter:google/gemma-4-31b-it:free"}, (
+        persona_models,
+        allow,
+    )
+    assert len(persona_models) >= 5  # genuine spread, not a collapse
 
 
 def test_frugal_preset_spreads_personas_across_distinct_models() -> None:

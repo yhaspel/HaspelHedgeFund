@@ -410,6 +410,7 @@ class OpenRouterClient:
         temperature: float = 0.2,
         json_mode: bool = False,
         _tried: tuple[str, ...] = (),
+        _free_429s: int = 0,
     ) -> LLMResponse:
         want_json_object = json_mode and model not in self._no_response_format
         body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
@@ -464,11 +465,20 @@ class OpenRouterClient:
             # DIFFERENT upstream provider), then the catalog-driven same-tier
             # candidates — every hop bounded by LLM_MAX_MODEL_FALLBACKS and
             # loop-proofed by _tried.
-            fb = _RATE_LIMIT_FALLBACK.get(model)
-            if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
-                # Same chain the dead-route path walks: DB same-tier siblings,
-                # then (for :free) the static free ladder + free last resort.
-                fb = _next_heal_target(model, _tried)
+            paid_hatch = getattr(settings, "OPENROUTER_PAID_FALLBACK", False) and model.endswith(
+                ":free"
+            )
+            fb = None
+            # A SECOND :free rung exhausting its retries means the shared free pool
+            # itself is saturated: more :free rungs 429 in lockstep, each burning a
+            # full retry budget (~30-40 s), which walks the ladder past the run's
+            # soft time limit. With the paid hatch on, take it now instead.
+            if not (paid_hatch and _free_429s >= 1):
+                fb = _RATE_LIMIT_FALLBACK.get(model)
+                if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
+                    # Same chain the dead-route path walks: DB same-tier siblings,
+                    # then (for :free) the static free ladder + free last resort.
+                    fb = _next_heal_target(model, _tried)
             if fb and fb not in _tried and len(_tried) < _max_fallbacks():
                 log.warning(
                     "openrouter %s exhausted retries for %s; falling back to %s " "(hop %d/%d)",
@@ -485,16 +495,14 @@ class OpenRouterClient:
                     temperature=temperature,
                     json_mode=json_mode,
                     _tried=_tried + (model,),
+                    _free_429s=_free_429s + int(model.endswith(":free")),
                 )
-            # Free same-tier fallbacks exhausted. With the opt-in paid escape
-            # hatch on, hop once from a :free route to the paid analytical
-            # default, which draws the account's paid quota instead of the
-            # saturated shared free pool. _tried guards against re-hopping.
-            if (
-                getattr(settings, "OPENROUTER_PAID_FALLBACK", False)
-                and model.endswith(":free")
-                and _PAID_FALLBACK_TARGET not in _tried
-            ):
+            # Free same-tier fallbacks exhausted (or the free pool is saturated).
+            # With the opt-in paid escape hatch on, hop once from a :free route to
+            # the paid analytical default, which draws the account's paid quota
+            # instead of the saturated shared free pool. _tried guards against
+            # re-hopping.
+            if paid_hatch and _PAID_FALLBACK_TARGET not in _tried:
                 log.warning(
                     "openrouter %s exhausted free routes for %s; "
                     "OPENROUTER_PAID_FALLBACK on — escalating to paid %s",
@@ -529,10 +537,12 @@ class OpenRouterClient:
             #
             # Run 1178: a route can be dead (404 "Function … not found") while
             # OpenRouter still LISTS it, so the daily catalog sync never retires
-            # it and every dispatch keeps picking it. Quarantine the catalog row
-            # right here (402/404 only — 401/403 are key problems), so selection
-            # healing moves every stored pick off it from the next dispatch on.
-            self._quarantine(model, resp.status_code, resp.text)
+            # it and every dispatch keeps picking it. Quarantine the catalog row,
+            # so selection healing moves every stored pick off it from the next
+            # dispatch on — but only once a LATER rung of this chain answered:
+            # that contrast proves the route, not the account, failed. Out of
+            # credits (402) or a data-policy 404 fails EVERY rung, and must not
+            # deactivate the whole tier (see apps.models_catalog.quarantine).
             healed = self._self_heal(
                 reason=f"model unavailable (HTTP {resp.status_code})",
                 model=model,
@@ -543,6 +553,7 @@ class OpenRouterClient:
                 _tried=_tried,
             )
             if healed is not None:
+                self._quarantine(model, resp.status_code, resp.text)
                 return healed
             self._log_no_fallback(model, _tried, f"HTTP {resp.status_code}")
             from apps.backtests.exceptions import ModelUnavailable

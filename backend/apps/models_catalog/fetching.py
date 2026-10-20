@@ -177,7 +177,7 @@ def sync_tier_models(
         defaults = {k: v for k, v in fields.items() if k != "id"}
         defaults["last_verified_at"] = now
         defaults["last_verified_note"] = ""
-        # A slug the RUNTIME quarantined (HTTP 402/404 on a real call — a route
+        # A slug the RUNTIME quarantined (HTTP 404 on a real call — a route
         # that is still LISTED upstream but dead, the nemotron-3-super class)
         # must not be resurrected by the catalog's presence check: keep it
         # inactive, and keep the quarantine note/stamp, until the TTL lapses.
@@ -232,5 +232,29 @@ def sync_tier_models(
             if not dry_run:
                 _deactivate(row, now, "missing upstream (broad reconcile sweep)")
             result.swept.append(row.id)
+
+    # Quarantine expiry OUTSIDE the allowlist (the allowlist pass above already
+    # re-activates its own rows once the TTL lapses): a runtime-quarantined
+    # research/quality route still listed upstream comes back after
+    # LLM_RUNTIME_QUARANTINE_DAYS too — nothing else (no admin toggle) would ever
+    # re-enable it. Rows the seed retires on purpose stay retired.
+    from .seed import CANONICAL_MODELS
+
+    retired = {spec["id"] for spec in CANONICAL_MODELS if spec.get("is_active") is False}
+    for row in ModelEntry.objects.filter(
+        is_active=False,
+        provider="openrouter",
+        last_verified_note__startswith=quarantine.QUARANTINE_PREFIX,
+    ):
+        if row.id in handled or row.id in retired or quarantine.is_quarantined(row, now=now):
+            continue
+        if row.id.removeprefix("openrouter:") not in catalog:
+            continue
+        if not dry_run:
+            row.is_active = True
+            row.last_verified_at = now
+            row.last_verified_note = ""
+            row.save(update_fields=["is_active", "last_verified_at", "last_verified_note"])
+        result.synced.append(row.id)
 
     return result

@@ -698,23 +698,44 @@ def test_paid_fallback_off_by_default_does_not_escalate(monkeypatch, settings):
 
 
 def test_paid_fallback_on_escalates_to_paid_route_once(monkeypatch, settings):
-    """With OPENROUTER_PAID_FALLBACK on, an exhausted free chain hops ONCE to the
-    paid (non-:free) analytical default instead of failing the run. _tried guards
-    against re-hopping, so it's exactly one extra call."""
+    """With OPENROUTER_PAID_FALLBACK on, a saturated free pool hops ONCE to the
+    paid (non-:free) analytical default instead of failing the run — as soon as a
+    SECOND :free rung has exhausted its retries (the pool-saturation signal), not
+    after walking all 6 rungs (36 posts, ~3-4 min per agent call: past the run's
+    soft time limit). _tried guards against re-hopping."""
     settings.OPENROUTER_PAID_FALLBACK = True
     settings.LLM_MAX_MODEL_FALLBACKS = 5
     monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
-    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(36)]
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(12)]
     ok = _resp({"choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}]})
     http = _seq_http(*rate_limited, ok)
     resp = _build_client(http).complete(model=_FREE_LADDER[0], messages=[Message("user", "hi")])
     assert resp.text == '{"ok":true}'
-    # 6 free rungs × 6×429 -> paid llama-3.3-70b (ok) = 37 posts.
+    # 2 free rungs × 6×429 -> paid llama-3.3-70b (ok) = 13 posts.
     assert resp.model == "meta-llama/llama-3.3-70b-instruct"
-    assert http.post.call_count == 37
-    assert http.post.call_args_list[-1].kwargs["json"]["model"] == (
-        "meta-llama/llama-3.3-70b-instruct"
-    )
+    assert http.post.call_count == 13
+    models = [c.kwargs["json"]["model"] for c in http.post.call_args_list]
+    assert models[:12] == [_FREE_LADDER[0]] * 6 + [_FREE_LADDER[1]] * 6
+    assert models[-1] == "meta-llama/llama-3.3-70b-instruct"
+
+
+def test_paid_fallback_on_single_saturated_rung_still_hops_free(monkeypatch, settings):
+    """One :free rung exhausting its retries is a provider-level 429, not a
+    saturated pool: even with the paid hatch on, the chain hops to a :free rung
+    on a different provider first and never bills when that one answers."""
+    settings.OPENROUTER_PAID_FALLBACK = True
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    monkeypatch.setattr("hedgefund_agents.llm.adapters.openrouter.time.sleep", lambda _: None)
+    rate_limited = [_resp({}, status_code=429, text="rate-limited") for _ in range(6)]
+    ok = _resp({"choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}]})
+    http = _seq_http(*rate_limited, ok)
+    resp = _build_client(http).complete(model=_FREE_LADDER[0], messages=[Message("user", "hi")])
+    assert resp.text == '{"ok":true}'
+    assert resp.model == _FREE_LADDER[1]
+    assert http.post.call_count == 7
+    assert "meta-llama/llama-3.3-70b-instruct" not in [
+        c.kwargs["json"]["model"] for c in http.post.call_args_list
+    ]
 
 
 # --- L2 self-healing: last-resort fallback to a known-good non-reasoning model ---
