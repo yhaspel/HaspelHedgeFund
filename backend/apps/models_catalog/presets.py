@@ -1,16 +1,31 @@
 """Named presets. Wildcards (`*persona*`, `*analytical*`, `*`) are expanded
 against the registered agent list when applied to a run.
 """
+
 from __future__ import annotations
 
 PERSONA_AGENTS = {
-    "buffett", "munger", "graham", "wood",
-    "druckenmiller", "burry", "damodaran", "lynch",
+    "buffett",
+    "munger",
+    "graham",
+    "wood",
+    "druckenmiller",
+    "burry",
+    "damodaran",
+    "lynch",
 }
 ANALYTICAL_AGENTS = {"fundamentals", "technicals", "valuation", "sentiment"}
-ALL_AGENTS = PERSONA_AGENTS | ANALYTICAL_AGENTS | {
-    "macro", "news_digest", "risk_manager", "portfolio_manager", "cio",
-}
+ALL_AGENTS = (
+    PERSONA_AGENTS
+    | ANALYTICAL_AGENTS
+    | {
+        "macro",
+        "news_digest",
+        "risk_manager",
+        "portfolio_manager",
+        "cio",
+    }
+)
 
 # Hybrid fallback when no local model has been discovered. Picked so the
 # existing hybrid-without-Ollama behavior is byte-identical to before the
@@ -29,22 +44,29 @@ PRESETS: dict[str, dict[str, str]] = {
         # smaller than 8 personas, so the personas SPAN the menu (some reused)
         # rather than 1-per-persona; the self-heal layer covers any that empty
         # out, and a provider 429 still only takes down its slug's share.
-        "buffett": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "munger": "openrouter:deepseek/deepseek-v4-flash:free",
-        "graham": "openrouter:google/gemma-4-31b-it:free",
-        "wood": "openrouter:z-ai/glm-4.5-air:free",
-        "druckenmiller": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "burry": "openrouter:deepseek/deepseek-v4-flash:free",
-        "damodaran": "openrouter:google/gemma-4-31b-it:free",
-        "lynch": "openrouter:z-ai/glm-4.5-air:free",
+        # 2026-10-20: nemotron-3-super:free died upstream (404 while still
+        # listed — run 1178), deepseek-v4-flash:free + glm-4.5-air:free were
+        # delisted; re-spread over the re-curated DEV_TIER_SLUGS. Decision
+        # roles (RM/PM/CIO) + news on the two strongest routes, on DIFFERENT
+        # providers (Nvidia / Minimax) so one upstream outage can't blind all
+        # three; gemma-4 (upstream-429'd all day on 2026-10-20) is kept off EVERY
+        # role — it is a fallback-only ladder rung until it stabilises.
+        "buffett": "openrouter:nvidia/nemotron-3.5-super-vl:free",
+        "munger": "openrouter:minimax/minimax-m3.1-flash:free",
+        "graham": "openrouter:nvidia/nemotron-3.5-lightning:free",
+        "wood": "openrouter:dots-studio/dots-3-note-preview:free",
+        "druckenmiller": "openrouter:xingchen-agi/xing4.0-29b-a4b:free",
+        "burry": "openrouter:minimax/minimax-m3.1-flash:free",
+        "damodaran": "openrouter:nvidia/nemotron-3.5-super-vl:free",
+        "lynch": "openrouter:dots-studio/dots-3-note-preview:free",
         # Fallback for any future ninth persona — keep the wildcard.
-        "*persona*": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "*analytical*": "openrouter:google/gemma-4-31b-it:free",
-        "macro": "openrouter:deepseek/deepseek-v4-flash:free",
-        "news_digest": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "risk_manager": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-        "portfolio_manager": "openrouter:z-ai/glm-4.5-air:free",
-        "cio": "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "*persona*": "openrouter:nvidia/nemotron-3.5-super-vl:free",
+        "*analytical*": "openrouter:nvidia/nemotron-3.5-lightning:free",
+        "macro": "openrouter:dots-studio/dots-3-note-preview:free",
+        "news_digest": "openrouter:minimax/minimax-m3.1-flash:free",
+        "risk_manager": "openrouter:nvidia/nemotron-3.5-super-vl:free",
+        "portfolio_manager": "openrouter:minimax/minimax-m3.1-flash:free",
+        "cio": "openrouter:nvidia/nemotron-3.5-super-vl:free",
     },
     "research": {
         "*persona*": "anthropic:claude-sonnet-4-6",

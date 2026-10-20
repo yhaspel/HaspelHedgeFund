@@ -10,6 +10,7 @@ global model preferences. These tests cover:
   - run-now threading the choice into daily_long_short_cycle.delay,
   - the untouched (no-body) path staying byte-identical to before.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -44,23 +45,35 @@ def _client(email: str) -> APIClient:
 def _strategy(user, **kwargs) -> PortfolioStrategy:
     universe = Universe.objects.create(name="cdo-uni", is_active=True)
     portfolio = Portfolio.objects.create(
-        user=user, name="strat", kind="strategy", cash_balance=Decimal("100000"),
+        user=user,
+        name="strat",
+        kind="strategy",
+        cash_balance=Decimal("100000"),
     )
     return PortfolioStrategy.objects.create(
-        user=user, name="s", universe=universe, portfolio=portfolio, **kwargs,
+        user=user,
+        name="s",
+        universe=universe,
+        portfolio=portfolio,
+        **kwargs,
     )
 
 
 def _seed_model(model_id: str = "openrouter:acme/frugal-test") -> str:
     ModelEntry.objects.create(
-        id=model_id, provider="openrouter", display_name="Acme Frugal Test",
-        tier="hosted_open", price_in_per_mtok=Decimal("0.5"),
-        price_out_per_mtok=Decimal("1.0"), is_active=True,
+        id=model_id,
+        provider="openrouter",
+        display_name="Acme Frugal Test",
+        tier="hosted_open",
+        price_in_per_mtok=Decimal("0.5"),
+        price_out_per_mtok=Decimal("1.0"),
+        is_active=True,
     )
     return model_id
 
 
 # ---- estimate_cycle / _resolve_model_overrides (unit) --------------------
+
 
 @pytest.mark.django_db
 def test_estimate_cycle_override_preset_expands_that_tier(user) -> None:
@@ -69,7 +82,7 @@ def test_estimate_cycle_override_preset_expands_that_tier(user) -> None:
     # Echoes the chosen tier, not the strategy's saved preset.
     assert est["preset"] == "dev"
     # dev maps every persona onto a distinct OpenRouter :free slug.
-    assert est["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert est["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3.5-super-vl:free"
 
 
 @pytest.mark.django_db
@@ -93,9 +106,7 @@ def test_estimate_cycle_override_models_active_verbatim_dead_healed(user) -> Non
 def test_resolve_model_overrides_explicit_overrides_win(user) -> None:
     strategy = _strategy(user, model_preset="research")
     live = _seed_model("openrouter:acme/live-explicit")
-    out = _resolve_model_overrides(
-        strategy, preset="dev", overrides={"buffett": live}
-    )
+    out = _resolve_model_overrides(strategy, preset="dev", overrides={"buffett": live})
     # An explicit map wins outright — preset is ignored. (P13: the map is
     # sanitized against the live catalog on the way through; an ACTIVE pick
     # like this one passes verbatim.)
@@ -106,7 +117,7 @@ def test_resolve_model_overrides_explicit_overrides_win(user) -> None:
 def test_resolve_model_overrides_explicit_preset_bypasses_strategy(user) -> None:
     strategy = _strategy(user, model_preset="research")
     out = _resolve_model_overrides(strategy, preset="dev")
-    assert out["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert out["buffett"] == "openrouter:nvidia/nemotron-3.5-super-vl:free"
 
 
 @pytest.mark.django_db
@@ -120,17 +131,19 @@ def test_resolve_model_overrides_no_args_unchanged(user) -> None:
 
 # ---- estimate endpoint (POST) --------------------------------------------
 
+
 @pytest.mark.django_db
 def test_estimate_post_with_preset(user) -> None:
     strategy = _strategy(user, model_preset="research")
     client = _client("cdo@example.com")
     resp = client.post(
         reverse("strategy-estimate", args=[strategy.pk]),
-        {"preset": "dev"}, format="json",
+        {"preset": "dev"},
+        format="json",
     )
     assert resp.status_code == 200, resp.data
     assert resp.data["preset"] == "dev"
-    assert resp.data["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert resp.data["overrides"]["buffett"] == "openrouter:nvidia/nemotron-3.5-super-vl:free"
 
 
 @pytest.mark.django_db
@@ -139,7 +152,8 @@ def test_estimate_post_unknown_preset_400(user) -> None:
     client = _client("cdo@example.com")
     resp = client.post(
         reverse("strategy-estimate", args=[strategy.pk]),
-        {"preset": "platinum"}, format="json",
+        {"preset": "platinum"},
+        format="json",
     )
     assert resp.status_code == 400
 
@@ -150,7 +164,8 @@ def test_estimate_post_unknown_agent_key_400(user) -> None:
     client = _client("cdo@example.com")
     resp = client.post(
         reverse("strategy-estimate", args=[strategy.pk]),
-        {"model_overrides": {"fundamentls": "openrouter:acme/x"}}, format="json",
+        {"model_overrides": {"fundamentls": "openrouter:acme/x"}},
+        format="json",
     )
     assert resp.status_code == 400
 
@@ -179,7 +194,8 @@ def test_estimate_post_valid_model_ok(user) -> None:
     client = _client("cdo@example.com")
     resp = client.post(
         reverse("strategy-estimate", args=[strategy.pk]),
-        {"model_overrides": {"buffett": mid}}, format="json",
+        {"model_overrides": {"buffett": mid}},
+        format="json",
     )
     assert resp.status_code == 200, resp.data
     assert resp.data["overrides"]["buffett"] == mid
@@ -190,6 +206,7 @@ def test_estimate_post_valid_model_ok(user) -> None:
 
 # ---- run-now endpoint ----------------------------------------------------
 
+
 @pytest.mark.django_db
 def test_run_now_threads_override_preset(user) -> None:
     strategy = _strategy(user)
@@ -198,12 +215,16 @@ def test_run_now_threads_override_preset(user) -> None:
         mock_task.return_value.id = "t1"
         resp = client.post(
             reverse("strategy-run-now", args=[strategy.pk]),
-            {"as_of_date": "2026-05-29", "preset": "dev"}, format="json",
+            {"as_of_date": "2026-05-29", "preset": "dev"},
+            format="json",
         )
     assert resp.status_code == 202, resp.data
     mock_task.assert_called_once_with(
-        strategy.pk, "2026-05-29", force=False,
-        override_preset="dev", override_models=None,
+        strategy.pk,
+        "2026-05-29",
+        force=False,
+        override_preset="dev",
+        override_models=None,
     )
 
 
@@ -221,8 +242,11 @@ def test_run_now_threads_model_overrides(user) -> None:
         )
     assert resp.status_code == 202, resp.data
     mock_task.assert_called_once_with(
-        strategy.pk, "2026-05-29", force=False,
-        override_preset=None, override_models={"buffett": mid},
+        strategy.pk,
+        "2026-05-29",
+        force=False,
+        override_preset=None,
+        override_models={"buffett": mid},
     )
 
 
@@ -234,27 +258,40 @@ def test_run_now_no_body_backward_compatible(user) -> None:
         mock_task.return_value.id = "t3"
         resp = client.post(
             reverse("strategy-run-now", args=[strategy.pk]),
-            {"as_of_date": "2026-05-29"}, format="json",
+            {"as_of_date": "2026-05-29"},
+            format="json",
         )
     assert resp.status_code == 202, resp.data
     mock_task.assert_called_once_with(
-        strategy.pk, "2026-05-29", force=False,
-        override_preset=None, override_models=None,
+        strategy.pk,
+        "2026-05-29",
+        force=False,
+        override_preset=None,
+        override_models=None,
     )
 
 
 # ---- budget trim honours the transient override (faithfulness) -----------
 
+
 def _seed_cheap_and_expensive() -> tuple[str, str]:
     ModelEntry.objects.create(
-        id="openrouter:acme/cheap", provider="openrouter", display_name="Cheap",
-        tier="hosted_open", price_in_per_mtok=Decimal("0.05"),
-        price_out_per_mtok=Decimal("0.05"), is_active=True,
+        id="openrouter:acme/cheap",
+        provider="openrouter",
+        display_name="Cheap",
+        tier="hosted_open",
+        price_in_per_mtok=Decimal("0.05"),
+        price_out_per_mtok=Decimal("0.05"),
+        is_active=True,
     )
     ModelEntry.objects.create(
-        id="anthropic:acme/expensive", provider="anthropic", display_name="Pricey",
-        tier="frontier", price_in_per_mtok=Decimal("15.0"),
-        price_out_per_mtok=Decimal("75.0"), is_active=True,
+        id="anthropic:acme/expensive",
+        provider="anthropic",
+        display_name="Pricey",
+        tier="frontier",
+        price_in_per_mtok=Decimal("15.0"),
+        price_out_per_mtok=Decimal("75.0"),
+        is_active=True,
     )
     return "openrouter:acme/cheap", "anthropic:acme/expensive"
 
@@ -278,16 +315,14 @@ def test_budget_trim_honours_transient_override(user) -> None:
     from apps.portfolios.tasks import PER_AGENT_TOKEN_ESTIMATES, _trim_k_for_budget
 
     strategy = _strategy(
-        user, model_preset="dev", cost_ceiling_per_cycle_usd=Decimal("1.00"),
+        user,
+        model_preset="dev",
+        cost_ceiling_per_cycle_usd=Decimal("1.00"),
     )
     cheap, exp = _seed_cheap_and_expensive()
     agents = [a for a in PER_AGENT_TOKEN_ESTIMATES if a != "cio"]
-    cheap_l, cheap_s = _trim_k_for_budget(
-        strategy, 5, 5, overrides={a: cheap for a in agents}
-    )
-    exp_l, exp_s = _trim_k_for_budget(
-        strategy, 5, 5, overrides={a: exp for a in agents}
-    )
+    cheap_l, cheap_s = _trim_k_for_budget(strategy, 5, 5, overrides={a: cheap for a in agents})
+    exp_l, exp_s = _trim_k_for_budget(strategy, 5, 5, overrides={a: exp for a in agents})
     # The pricey override fits fewer candidates under the same ceiling.
     assert (cheap_l + cheap_s) > (exp_l + exp_s)
 

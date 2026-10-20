@@ -7,6 +7,7 @@ three menus are static lists of already-seeded models.
 
 This module is imported by seed.py, so it must not import Django models.
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,11 +23,26 @@ log = logging.getLogger(__name__)
 #     upstream (runs 228-235). The free non-reasoning pool is small, so the
 #     dev preset spreads its 8 personas across these (some reused) rather than
 #     1-per-persona. test_preset_invariants enforces non-reasoning + vetted.
+#
+#     2026-10-20 re-curation (run 1178): nvidia/nemotron-3-super-120b-a12b:free
+#     is STILL LISTED in /api/v1/models but its Nvidia function was deleted —
+#     every call 404s ("Function '…': Not found for account"), so the catalog
+#     sync never retired it; deepseek-v4-flash:free and glm-4.5-air:free were
+#     delisted outright. The replacements were probed live the same day (clean
+#     JSON on a structured prompt with thinking disabled — see
+#     openrouter._THINKING_OFF_SLUGS). ORDER MATTERS: it is the runtime
+#     fallback ladder, so alternate upstream providers (Nvidia → Minimax →
+#     Nvidia → AtlasCloud → Google → Phala) so one provider's outage or
+#     rate-limit never takes out two consecutive rungs. gemma-4 stays LAST and off
+#     every preset role: a 429'd pick burns ~50s of retries per agent call
+#     before the hop, so it is a fallback-only rung until it stabilises.
 DEV_TIER_SLUGS: list[str] = [
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "deepseek/deepseek-v4-flash:free",
-    "google/gemma-4-31b-it:free",
-    "z-ai/glm-4.5-air:free",
+    "nvidia/nemotron-3.5-super-vl:free",  # Nvidia — 120B/12B-active, succeeds nemotron-3-super
+    "minimax/minimax-m3.1-flash:free",  # Minimax
+    "nvidia/nemotron-3.5-lightning:free",  # Nvidia — 30B/3B-active, fast
+    "dots-studio/dots-3-note-preview:free",  # AtlasCloud
+    "xingchen-agi/xing4.0-29b-a4b:free",  # Phala
+    "google/gemma-4-31b-it:free",  # Google — 429'd all day 2026-10-20: last rung only
 ]
 
 # --- frugal: cheap OpenRouter PAID slugs (stable, non-ephemeral). All
@@ -58,8 +74,8 @@ FRUGAL_TIER_SLUGS: list[str] = [
 #     row), which is what the §9.15 freshness invariant requires.
 REASONING_TIER_SLUGS: list[str] = [
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",  # free reasoning
-    "deepseek/deepseek-v4-pro",                            # flagship reasoning
-    "z-ai/glm-5.1",                                        # mid reasoning
+    "deepseek/deepseek-v4-pro",  # flagship reasoning
+    "z-ai/glm-5.1",  # mid reasoning
 ]
 
 _REASONING_MENU_IDS = [f"openrouter:{s}" for s in REASONING_TIER_SLUGS]
@@ -123,6 +139,7 @@ def tier_menu(preset: str) -> list[str]:
     """
     try:
         from .models import TierMembership
+
         rows = list(
             TierMembership.objects.filter(tier_id=preset)
             .order_by("ordering", "model_id")
@@ -146,11 +163,8 @@ def tier_default(preset: str) -> str | None:
     """
     try:
         from .models import TierConfig
-        tc = (
-            TierConfig.objects.filter(tier_name=preset)
-            .select_related("default_model")
-            .first()
-        )
+
+        tc = TierConfig.objects.filter(tier_name=preset).select_related("default_model").first()
     except Exception:
         tc = None
     if tc and tc.default_model_id and tc.default_model and tc.default_model.is_active:
@@ -163,15 +177,15 @@ def tier_default(preset: str) -> str | None:
 # preset context): cheap tiers first so healing never silently escalates cost.
 _TIER_PREFERENCE = ("frugal", "dev", "hybrid", "research", "quality")
 
+
 # The final rung when no tier menu yields a live candidate. Provider-qualified
 # form of settings.LLM_LAST_RESORT_MODEL (the runtime L2 target), so selection
 # healing and runtime healing converge on the same known-good model.
 def _last_resort_id() -> str:
     try:
         from django.conf import settings
-        slug = getattr(
-            settings, "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct"
-        )
+
+        slug = getattr(settings, "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct")
     except Exception:
         slug = "meta-llama/llama-3.3-70b-instruct"
     return slug if ":" in slug.split("/", 1)[0] else f"openrouter:{slug}"
@@ -185,6 +199,7 @@ def _provider_allowed(model_id: str) -> bool:
         return True
     try:
         from django.conf import settings
+
         return not getattr(settings, "BLOCK_ANTHROPIC", False)
     except Exception:
         return True
@@ -220,10 +235,9 @@ def _tiers_for_model(model_id: str) -> list[str]:
         candidates.add(f"openrouter:{model_id}")
     try:
         from .models import TierMembership
+
         tiers = set(
-            TierMembership.objects.filter(model_id__in=candidates).values_list(
-                "tier_id", flat=True
-            )
+            TierMembership.objects.filter(model_id__in=candidates).values_list("tier_id", flat=True)
         )
     except Exception:
         return []
@@ -261,9 +275,7 @@ def heal_overrides(
     """
     if not overrides:
         return overrides, []
-    catalog_ids = {
-        str(m) for m in overrides.values() if not str(m).startswith("ollama:")
-    }
+    catalog_ids = {str(m) for m in overrides.values() if not str(m).startswith("ollama:")}
     if not catalog_ids:
         return overrides, []
     check_ids = set(catalog_ids)
@@ -279,13 +291,10 @@ def heal_overrides(
         from django.db.models import Q
 
         from .models import ModelEntry
+
         active = set(
             ModelEntry.objects.filter(is_active=True)
-            .filter(
-                Q(id__in=check_ids)
-                | Q(id__in=bare_ids)
-                | Q(id__in=qualified_variants)
-            )
+            .filter(Q(id__in=check_ids) | Q(id__in=bare_ids) | Q(id__in=qualified_variants))
             .values_list("id", flat=True)
         )
     except Exception:
@@ -293,7 +302,8 @@ def heal_overrides(
         # (not just DB-down) is discoverable rather than silently no-op'd.
         log.warning(
             "heal_overrides(%r): DB read failed, passing through",
-            preset, exc_info=True,
+            preset,
+            exc_info=True,
         )
         return overrides, []
     active_short = {a.split(":", 1)[-1] for a in active}
@@ -318,6 +328,7 @@ def heal_overrides(
             if not keys:
                 try:
                     from django.conf import settings
+
                     keys = [getattr(settings, "LLM_DEFAULT_PRESET", "frugal")]
                 except Exception:
                     keys = ["frugal"]
@@ -330,9 +341,7 @@ def heal_overrides(
 
     healed = dict(overrides)
     moves: list[dict[str, str]] = []
-    dead_agents = sorted(
-        a for a, m in overrides.items() if str(m) in dead
-    )
+    dead_agents = sorted(a for a, m in overrides.items() if str(m) in dead)
     for i, agent in enumerate(dead_agents):
         old = str(overrides[agent])
         pool = _pool_for(old)
@@ -347,7 +356,8 @@ def heal_overrides(
     if moves:
         log.warning(
             "heal_overrides(%r): healed %d dead model reference(s): %s",
-            preset, len(moves),
+            preset,
+            len(moves),
             "; ".join(f"{m['agent']}: {m['from']} -> {m['to']}" for m in moves),
         )
     return healed, moves
@@ -384,7 +394,7 @@ def anchor_non_personas(
     if not tier_choice or preset == "hybrid":
         return overrides
     from .presets import PERSONA_AGENTS
+
     return {
-        agent: (mid if agent in PERSONA_AGENTS else tier_choice)
-        for agent, mid in overrides.items()
+        agent: (mid if agent in PERSONA_AGENTS else tier_choice) for agent, mid in overrides.items()
     }

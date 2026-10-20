@@ -34,12 +34,25 @@ def reconcile_model_catalog() -> dict:
     # user prefs, graph versions, queued runs) — drift now self-repairs daily
     # without a deploy instead of waiting to be re-healed on every dispatch.
     healed = heal_stored_model_maps()
-    if sync.deactivated or sync.excluded or sync.swept or drift or healed:
+    quarantined = getattr(sync, "quarantined", [])
+    membership_added = getattr(sync, "membership_added", [])
+    if (
+        sync.deactivated
+        or sync.excluded
+        or sync.swept
+        or quarantined
+        or membership_added
+        or drift
+        or healed
+    ):
         log.warning(
-            "model-catalog reconcile: deactivated=%s excluded=%s swept=%s drift=%s healed=%s",
+            "model-catalog reconcile: deactivated=%s excluded=%s swept=%s "
+            "quarantined=%s membership_added=%s drift=%s healed=%s",
             sync.deactivated,
             [e.get("slug") for e in sync.excluded],
             sync.swept,
+            quarantined,
+            membership_added,
             [r.model_id for r in drift],
             [(h["store"], h["id"]) for h in healed],
         )
@@ -51,6 +64,19 @@ def reconcile_model_catalog() -> dict:
         "drift": [r.as_dict() for r in drift],
         "healed": healed,
     }
+
+
+@shared_task
+def heal_stored_model_maps_task() -> list[dict]:
+    """Stored-map doctor on demand — dispatched by ``quarantine.quarantine_model``
+    the moment a live call proves a catalog model dead, so schedules / prefs /
+    graph versions / queued runs stop referencing it today, not at the next
+    daily reconcile."""
+    if skip_when_offline("heal_stored_model_maps_task"):
+        return []
+    from .doctor import heal_stored_model_maps
+
+    return heal_stored_model_maps()
 
 
 def _notify_operators(sync, drift, healed=None) -> None:
@@ -70,6 +96,12 @@ def _notify_operators(sync, drift, healed=None) -> None:
         lines.append(
             "Excluded: " + ", ".join(f"{e['slug']} ({e['reason']})" for e in sync.excluded)
         )
+    if getattr(sync, "quarantined", None):
+        lines.append(
+            "Still quarantined (dead on live calls, kept inactive): " + ", ".join(sync.quarantined)
+        )
+    if getattr(sync, "membership_added", None):
+        lines.append("Added to tier menus: " + ", ".join(sync.membership_added))
     if drift:
         lines.append("Pricing drift: " + ", ".join(r.model_id for r in drift))
     if healed:

@@ -1,4 +1,5 @@
 """OpenRouter adapter — speaks the OpenAI Chat Completions dialect."""
+
 from __future__ import annotations
 
 import json
@@ -48,8 +49,14 @@ RETRY_AFTER_CAP_SECONDS = 8.0
 # the "no reasoning model on a decision role / cheap-tier menu" guards in
 # tests/test_preset_invariants.py.
 _REASONING_SLUGS = (
-    "gpt-oss", "o1", "o3", "deepseek-r1", "qwen3",
-    "deepseek-v4-pro", "glm-5.1", "nemotron-3-nano-omni",
+    "gpt-oss",
+    "o1",
+    "o3",
+    "deepseek-r1",
+    "qwen3",
+    "deepseek-v4-pro",
+    "glm-5.1",
+    "nemotron-3-nano-omni",
 )
 
 
@@ -62,23 +69,57 @@ def is_reasoning_slug(model_id: str) -> bool:
     """
     return any(tag in model_id.lower() for tag in _REASONING_SLUGS)
 
+
+# Hybrid "thinking" routes that are NON-reasoning for our purposes only when
+# thinking is switched OFF. Every current :free dev-tier route is one of these:
+# left to their defaults they spend the whole max_tokens budget on hidden
+# reasoning and return EMPTY content (probed 2026-10-20: nemotron-3.5-super-vl,
+# nemotron-3.5-lightning and dots-3 all returned finish_reason='length' with
+# zero visible tokens; with `reasoning.enabled=false` the same prompts produced
+# clean ~100-token JSON). Matched as substrings against the slug, like
+# _REASONING_SLUGS. Keep the two tuples DISJOINT: a slug here gets
+# `reasoning: {enabled: false}`, a slug there gets `reasoning: {effort: low}`.
+# Curated rather than derived from OpenRouter's `supported_parameters` because
+# some providers 400 on an unexpected `reasoning` param — only routes that were
+# verified to accept it belong here. (minimax-m3.1-flash and xing4.0 answered
+# cleanly WITHOUT the param, so they are deliberately not listed.)
+_THINKING_OFF_SLUGS = (
+    "nemotron-3.5",
+    "dots-3",
+)
+
+
+def is_thinking_off_slug(model_id: str) -> bool:
+    """True if `model_id` names a hybrid-thinking route we run with thinking
+    disabled (per _THINKING_OFF_SLUGS). Accepts bare or provider-qualified ids."""
+    return any(tag in model_id.lower() for tag in _THINKING_OFF_SLUGS)
+
+
 # Same-price-tier fallback when a model STILL returns empty content. Free slugs
-# fall back to another free slug so we never silently escalate cost.
+# fall back to another free slug so we never silently escalate cost. The
+# catalog-driven chain (_fallback_candidates) is the general mechanism; this
+# map only pins a DIFFERENT-provider first hop for the dev-tier routes.
 _EMPTY_CONTENT_FALLBACK = {
-    "openai/gpt-oss-120b:free": "meta-llama/llama-3.3-70b-instruct:free",
+    "nvidia/nemotron-3.5-super-vl:free": "minimax/minimax-m3.1-flash:free",
+    "nvidia/nemotron-3.5-lightning:free": "dots-studio/dots-3-note-preview:free",
 }
 
 # Same-tier fallback when a route's transient-failure RETRIES ARE EXHAUSTED —
 # typically a persistently rate-limited :free upstream (run 152: llama-3.3-70b
 # :free via Venice returned 429 past the ~62s retry budget). Targets a non-
 # reasoning free slug on a DIFFERENT upstream provider so we ride out one
-# provider's rate limit without escalating cost. Hermes-3-405B is non-reasoning
-# (avoids the gpt-oss empty-content trap) and routed off Venice. The visited-set
-# guard (_tried) lets this compose with the empty-content hop above without ever
-# looping: gpt-oss(empty)→llama(429)→hermes, each model tried at most once.
+# provider's rate limit without escalating cost (Nvidia ↔ Minimax, AtlasCloud,
+# Google ↔ Nvidia). The visited-set guard (_tried) lets this compose with the
+# empty-content hop above without ever looping: each model tried at most once.
+# 2026-10-20: the previous targets (llama-3.3-70b:free, hermes-3-405b:free,
+# gpt-oss-120b:free) were all delisted from OpenRouter — a hop onto them 404'd.
 _RATE_LIMIT_FALLBACK = {
-    "meta-llama/llama-3.3-70b-instruct:free": "nousresearch/hermes-3-llama-3.1-405b:free",
-    "openai/gpt-oss-120b:free": "nousresearch/hermes-3-llama-3.1-405b:free",
+    "nvidia/nemotron-3.5-super-vl:free": "minimax/minimax-m3.1-flash:free",
+    "minimax/minimax-m3.1-flash:free": "nvidia/nemotron-3.5-super-vl:free",
+    "nvidia/nemotron-3.5-lightning:free": "dots-studio/dots-3-note-preview:free",
+    "dots-studio/dots-3-note-preview:free": "minimax/minimax-m3.1-flash:free",
+    "google/gemma-4-31b-it:free": "nvidia/nemotron-3.5-super-vl:free",
+    "xingchen-agi/xing4.0-29b-a4b:free": "minimax/minimax-m3.1-flash:free",
 }
 
 # Opt-in PAID escape hatch (settings.OPENROUTER_PAID_FALLBACK, default off). The
@@ -99,12 +140,38 @@ def _last_resort_model() -> str:
     configured route is dead (404/402), returns a non-JSON body, or is terminally
     empty. Defaults to the prod analytical default (Llama 3.3 70B). Under
     LLM_FREE_ONLY, use the :free variant so zero-spend environments never bill."""
-    target = getattr(
-        settings, "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct"
-    )
+    target = getattr(settings, "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct")
     if getattr(settings, "LLM_FREE_ONLY", False) and not target.endswith(":free"):
         target = f"{target}:free"
     return target
+
+
+# The :free-class last resort. Price-class discipline (rightly) stopped a :free
+# chain from ending on the PAID last resort — but that left a :free route with
+# NO final rung at all once its DB tier menu ran dry, which is exactly how run
+# 1178 died on the first 404 (nemotron-3-super:free dead, its dev-tier siblings
+# delisted). A free chain now always ends on a known-good $0 route on a
+# different upstream provider than the dev default (Minimax vs Nvidia).
+_DEFAULT_FREE_LAST_RESORT = "minimax/minimax-m3.1-flash:free"
+
+
+def _free_last_resort_model() -> str:
+    target = getattr(settings, "LLM_LAST_RESORT_FREE_MODEL", _DEFAULT_FREE_LAST_RESORT)
+    return target if target.endswith(":free") else f"{target}:free"
+
+
+def _static_free_ladder() -> list[str]:
+    """The curated dev-tier allowlist as a bare-slug ladder. Used ONLY for the
+    :free price class and ONLY when the DB tier menu yields nothing (unseeded
+    tier, every sibling deactivated, DB unreachable). Safe where a static paid
+    ladder would not be: a :free route is $0 by OpenRouter's own contract, so a
+    rung that completes can never record an unpriced/mis-priced call (every
+    allowlist slug is also in pricing.PRICING at 0/0 as a cold-start floor)."""
+    try:
+        from apps.models_catalog.tier_menus import DEV_TIER_SLUGS
+    except Exception:  # pragma: no cover — apps layer unavailable (unit tests)
+        return []
+    return [s for s in DEV_TIER_SLUGS if s.endswith(":free")]
 
 
 def _max_fallbacks() -> int:
@@ -179,7 +246,15 @@ def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
     resort — so the previous single-hop behavior is the chain's final rung."""
     if len(tried) >= _max_fallbacks():
         return None
+    is_free = model.endswith(":free")
     candidates = list(_fallback_candidates(model, tried))
+    if is_free:
+        # The DB menu may be empty or exhausted (unseeded tier, siblings
+        # deactivated, DB down): the static :free ladder + the free last resort
+        # guarantee a :free route always has somewhere $0 to go.
+        if not candidates:
+            candidates.extend(_static_free_ladder())
+        candidates.append(_free_last_resort_model())
     # Price-class discipline, same rule _fallback_candidates enforces: a `:free`
     # route must never silently chain onto a PAID one (and vice versa). The
     # static last resort used to bypass it, so once a :free chain exhausted its
@@ -187,7 +262,7 @@ def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
     # billed a route the caller had explicitly picked to cost nothing.
     # settings.OPENROUTER_PAID_FALLBACK remains the ONLY paid escape hatch.
     last_resort = _last_resort_model()
-    if last_resort.endswith(":free") == model.endswith(":free"):
+    if last_resort.endswith(":free") == is_free:
         candidates.append(last_resort)
     for candidate in candidates:
         if candidate != model and candidate not in tried:
@@ -216,9 +291,7 @@ class OpenRouterClient:
         # the retry / self-heal path handles; connect/write/pool stay bounded too.
         read_timeout = float(getattr(settings, "LLM_HTTP_READ_TIMEOUT", 45.0))
         self._http = http or httpx.Client(
-            timeout=httpx.Timeout(
-                connect=10.0, read=read_timeout, write=10.0, pool=10.0
-            )
+            timeout=httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=10.0)
         )
         # Models whose route rejected response_format=json_object outright. The
         # client is lru_cache'd (registry._make_client) and reused across every
@@ -254,7 +327,11 @@ class OpenRouterClient:
             return None
         log.warning(
             "openrouter self-heal: %s (model=%s); hop %d/%d to %s",
-            reason, model, len(_tried) + 1, _max_fallbacks(), target,
+            reason,
+            model,
+            len(_tried) + 1,
+            _max_fallbacks(),
+            target,
         )
         return self.complete(
             model=target,
@@ -263,6 +340,38 @@ class OpenRouterClient:
             temperature=temperature,
             json_mode=json_mode,
             _tried=_tried + (model,),
+        )
+
+    @staticmethod
+    def _quarantine(model: str, status_code: int, body: str) -> None:
+        """Best-effort catalog quarantine of a dead route (never raises)."""
+        try:
+            from apps.models_catalog.quarantine import quarantine_model
+
+            quarantine_model(model, status_code=status_code, body=body)
+        except Exception:  # pragma: no cover — apps layer unavailable (unit tests)
+            log.debug("openrouter: quarantine unavailable for %s", model, exc_info=True)
+
+    @staticmethod
+    def _log_no_fallback(model: str, tried: tuple[str, ...], reason: str) -> None:
+        """Make an un-healable failure diagnosable from the worker log: WHY the
+        chain had nowhere to go (self-heal off? bound reached? no live same-tier
+        candidates?) — run 1178 surfaced only the bare ModelUnavailable."""
+        try:
+            candidates = _fallback_candidates(model, tried)
+        except Exception:
+            candidates = []
+        log.error(
+            "openrouter: no fallback for %s after %s — self_heal=%s hops=%d/%d "
+            "tried=%s live_same_tier_candidates=%s free_class=%s",
+            model,
+            reason,
+            getattr(settings, "LLM_SELF_HEAL", True),
+            len(tried),
+            _max_fallbacks(),
+            list(tried),
+            candidates,
+            model.endswith(":free"),
         )
 
     def _json_with_retry(
@@ -283,9 +392,11 @@ class OpenRouterClient:
             if i == attempts:
                 break
             log.warning(
-                "openrouter non-JSON 2xx body (model=%s, status=%s); "
-                "re-POSTing (attempt %d/%d)",
-                body.get("model"), resp.status_code, i + 1, attempts,
+                "openrouter non-JSON 2xx body (model=%s, status=%s); " "re-POSTing (attempt %d/%d)",
+                body.get("model"),
+                resp.status_code,
+                i + 1,
+                attempts,
             )
             resp = self._post_with_retry(body, headers)
         return None
@@ -299,6 +410,7 @@ class OpenRouterClient:
         temperature: float = 0.2,
         json_mode: bool = False,
         _tried: tuple[str, ...] = (),
+        _free_429s: int = 0,
     ) -> LLMResponse:
         want_json_object = json_mode and model not in self._no_response_format
         body = self._build_body(model, messages, max_tokens, temperature, want_json_object)
@@ -317,8 +429,12 @@ class OpenRouterClient:
             # bubbling a hang/timeout up to the run (run 236 class).
             healed = self._self_heal(
                 reason=f"transport error ({type(exc).__name__})",
-                model=model, messages=messages, max_tokens=max_tokens,
-                temperature=temperature, json_mode=json_mode, _tried=_tried,
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+                _tried=_tried,
             )
             if healed is not None:
                 return healed
@@ -349,16 +465,23 @@ class OpenRouterClient:
             # DIFFERENT upstream provider), then the catalog-driven same-tier
             # candidates — every hop bounded by LLM_MAX_MODEL_FALLBACKS and
             # loop-proofed by _tried.
-            fb = _RATE_LIMIT_FALLBACK.get(model)
-            if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
-                fb = next(
-                    (c for c in _fallback_candidates(model, _tried) if c != model),
-                    None,
-                )
+            paid_hatch = getattr(settings, "OPENROUTER_PAID_FALLBACK", False) and model.endswith(
+                ":free"
+            )
+            fb = None
+            # A SECOND :free rung exhausting its retries means the shared free pool
+            # itself is saturated: more :free rungs 429 in lockstep, each burning a
+            # full retry budget (~30-40 s), which walks the ladder past the run's
+            # soft time limit. With the paid hatch on, take it now instead.
+            if not (paid_hatch and _free_429s >= 1):
+                fb = _RATE_LIMIT_FALLBACK.get(model)
+                if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
+                    # Same chain the dead-route path walks: DB same-tier siblings,
+                    # then (for :free) the static free ladder + free last resort.
+                    fb = _next_heal_target(model, _tried)
             if fb and fb not in _tried and len(_tried) < _max_fallbacks():
                 log.warning(
-                    "openrouter %s exhausted retries for %s; falling back to %s "
-                    "(hop %d/%d)",
+                    "openrouter %s exhausted retries for %s; falling back to %s " "(hop %d/%d)",
                     resp.status_code,
                     model,
                     fb,
@@ -372,16 +495,14 @@ class OpenRouterClient:
                     temperature=temperature,
                     json_mode=json_mode,
                     _tried=_tried + (model,),
+                    _free_429s=_free_429s + int(model.endswith(":free")),
                 )
-            # Free same-tier fallbacks exhausted. With the opt-in paid escape
-            # hatch on, hop once from a :free route to the paid analytical
-            # default, which draws the account's paid quota instead of the
-            # saturated shared free pool. _tried guards against re-hopping.
-            if (
-                getattr(settings, "OPENROUTER_PAID_FALLBACK", False)
-                and model.endswith(":free")
-                and _PAID_FALLBACK_TARGET not in _tried
-            ):
+            # Free same-tier fallbacks exhausted (or the free pool is saturated).
+            # With the opt-in paid escape hatch on, hop once from a :free route to
+            # the paid analytical default, which draws the account's paid quota
+            # instead of the saturated shared free pool. _tried guards against
+            # re-hopping.
+            if paid_hatch and _PAID_FALLBACK_TARGET not in _tried:
                 log.warning(
                     "openrouter %s exhausted free routes for %s; "
                     "OPENROUTER_PAID_FALLBACK on — escalating to paid %s",
@@ -404,6 +525,7 @@ class OpenRouterClient:
             # backtest: abort instead of null-signalling every council) rather
             # than dead-ending into the generic 4xx raise below.
             if resp.status_code == 429:
+                self._log_no_fallback(model, _tried, "HTTP 429 (retries exhausted)")
                 from apps.backtests.exceptions import RateLimited
 
                 raise RateLimited(model=model, body=resp.text)
@@ -412,13 +534,28 @@ class OpenRouterClient:
             # (402) used to fail the WHOLE run. Self-heal first: hop once to the
             # known-good non-reasoning model so one dead agent doesn't kill the
             # council. Only if the last resort is unreachable too do we raise.
+            #
+            # Run 1178: a route can be dead (404 "Function … not found") while
+            # OpenRouter still LISTS it, so the daily catalog sync never retires
+            # it and every dispatch keeps picking it. Quarantine the catalog row,
+            # so selection healing moves every stored pick off it from the next
+            # dispatch on — but only once a LATER rung of this chain answered:
+            # that contrast proves the route, not the account, failed. Out of
+            # credits (402) or a data-policy 404 fails EVERY rung, and must not
+            # deactivate the whole tier (see apps.models_catalog.quarantine).
             healed = self._self_heal(
                 reason=f"model unavailable (HTTP {resp.status_code})",
-                model=model, messages=messages, max_tokens=max_tokens,
-                temperature=temperature, json_mode=json_mode, _tried=_tried,
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+                _tried=_tried,
             )
             if healed is not None:
+                self._quarantine(model, resp.status_code, resp.text)
                 return healed
+            self._log_no_fallback(model, _tried, f"HTTP {resp.status_code}")
             from apps.backtests.exceptions import ModelUnavailable
 
             raise ModelUnavailable(model=model, status_code=resp.status_code, body=resp.text)
@@ -437,8 +574,12 @@ class OpenRouterClient:
         if payload is None:
             healed = self._self_heal(
                 reason="non-JSON 2xx response body",
-                model=model, messages=messages, max_tokens=max_tokens,
-                temperature=temperature, json_mode=json_mode, _tried=_tried,
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+                _tried=_tried,
             )
             if healed is not None:
                 return healed
@@ -523,8 +664,12 @@ class OpenRouterClient:
             # the agent still produces a real signal instead of a null one.
             healed = self._self_heal(
                 reason=f"terminal empty content (finish_reason={finish_reason!r})",
-                model=model, messages=messages, max_tokens=max_tokens,
-                temperature=temperature, json_mode=json_mode, _tried=_tried,
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+                _tried=_tried,
             )
             if healed is not None:
                 return healed
@@ -568,6 +713,10 @@ class OpenRouterClient:
             body["response_format"] = {"type": "json_object"}
         if is_reasoning_slug(model):
             body["reasoning"] = {"effort": "low"}
+        elif is_thinking_off_slug(model):
+            # Hybrid-thinking route used as a plain instruct model: without this
+            # it reasons away the whole budget and returns empty content.
+            body["reasoning"] = {"enabled": False}
         return body
 
     def _post_with_retry(self, body: dict, headers: dict) -> httpx.Response:
@@ -591,11 +740,13 @@ class OpenRouterClient:
                 if attempt == MAX_RETRIES:
                     raise
                 wait = min(
-                    BASE_BACKOFF_SECONDS * (2 ** attempt), RETRY_AFTER_CAP_SECONDS
+                    BASE_BACKOFF_SECONDS * (2**attempt), RETRY_AFTER_CAP_SECONDS
                 ) + random.uniform(0, 0.5)
                 log.warning(
                     "openrouter transport error %s on attempt %d; sleeping %.1fs",
-                    type(exc).__name__, attempt + 1, wait,
+                    type(exc).__name__,
+                    attempt + 1,
+                    wait,
                 )
                 time.sleep(wait)
                 continue
@@ -606,9 +757,9 @@ class OpenRouterClient:
                 return resp
             retry_after = resp.headers.get("retry-after")
             try:
-                wait = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2 ** attempt)
+                wait = float(retry_after) if retry_after else BASE_BACKOFF_SECONDS * (2**attempt)
             except ValueError:
-                wait = BASE_BACKOFF_SECONDS * (2 ** attempt)
+                wait = BASE_BACKOFF_SECONDS * (2**attempt)
             # Clamp: a saturated :free pool's Retry-After is an optimistic hint,
             # not a guarantee — honoring it unclamped blocked the worker for
             # minutes per call. Cap the sleep; the fallback chain handles the rest.

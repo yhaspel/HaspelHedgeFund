@@ -12,6 +12,7 @@ Two-layer guarantee for environments that must never call the Anthropic API
      run-74 scenario) falls through to the production Haiku default and
      triggers (A) — crashing a happy-path run instead of routing it.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -49,11 +50,22 @@ def test_default_models_contains_zero_anthropic_entries_when_blocked() -> None:
     # Every agent in the canonical list must be present — otherwise an
     # agent's call site does `DEFAULT_MODELS[name]` and KeyErrors.
     expected_agents = {
-        "fundamentals", "technicals", "valuation", "sentiment",
-        "macro", "news_digest",
-        "buffett", "munger", "graham", "wood",
-        "druckenmiller", "burry", "damodaran", "lynch",
-        "risk_manager", "cio",
+        "fundamentals",
+        "technicals",
+        "valuation",
+        "sentiment",
+        "macro",
+        "news_digest",
+        "buffett",
+        "munger",
+        "graham",
+        "wood",
+        "druckenmiller",
+        "burry",
+        "damodaran",
+        "lynch",
+        "risk_manager",
+        "cio",
     }
     assert set(resolved.keys()) == expected_agents
 
@@ -127,7 +139,10 @@ def test_models_endpoint_marks_paid_openrouter_as_unavailable_in_free_only() -> 
     assert rows_by_id["openrouter:qwen/qwen3.6-27b"]["available"] is False
     # Free OpenRouter: stay available.
     assert rows_by_id["openrouter:openai/gpt-oss-120b:free"]["available"] is True
-    assert rows_by_id["openrouter:nvidia/nemotron-3-super-120b-a12b:free"]["available"] is True
+    assert rows_by_id["openrouter:nvidia/nemotron-3.5-super-vl:free"]["available"] is True
+    # The dead nemotron-3-super:free row is seeded INACTIVE (2026-10 404 while
+    # still listed) and so is not offered at all.
+    assert "openrouter:nvidia/nemotron-3-super-120b-a12b:free" not in rows_by_id
 
 
 @pytest.mark.django_db

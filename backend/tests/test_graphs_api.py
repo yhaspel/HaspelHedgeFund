@@ -1,4 +1,5 @@
 """P4c graph editor API: CRUD, versions, validate, from-template, scoping."""
+
 from __future__ import annotations
 
 import pytest
@@ -37,6 +38,7 @@ def _canonical_payload(notes="v1"):
 
 # ---- registry ----------------------------------------------------------
 
+
 def test_registry_endpoint(client):
     r = client.get("/api/graphs/registry/")
     assert r.status_code == 200
@@ -56,10 +58,11 @@ def test_registry_endpoint(client):
     assert frugal["default_model"] == "openrouter:meta-llama/llama-3.3-70b-instruct"
     assert frugal["default_model"] in frugal["models"]
     assert "openrouter:meta-llama/llama-3.3-70b-instruct" in frugal["models"]
-    assert tiers["dev"]["default_model"] == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert tiers["dev"]["default_model"] == "openrouter:nvidia/nemotron-3.5-super-vl:free"
 
 
 # ---- list / templates --------------------------------------------------
+
 
 def test_list_shows_templates(client):
     r = client.get("/api/graphs/")
@@ -75,6 +78,7 @@ def test_list_shows_templates(client):
 
 # ---- create + uniqueness ----------------------------------------------
 
+
 def test_create_graph_and_name_conflict(client):
     r = client.post("/api/graphs/", {"name": "My Graph", "description": "d"}, format="json")
     assert r.status_code == 201, r.content
@@ -85,6 +89,7 @@ def test_create_graph_and_name_conflict(client):
 
 
 # ---- save version (valid + invalid) -----------------------------------
+
 
 def test_save_valid_version_increments(client):
     g = client.post("/api/graphs/", {"name": "G"}, format="json").json()
@@ -101,10 +106,14 @@ def test_save_invalid_version_rejected(client):
     g = client.post("/api/graphs/", {"name": "Bad"}, format="json").json()
     gid = g["id"]
     # no persona → Error
-    payload = {"nodes": [{"id": "fundamentals", "type": "fundamentals"}],
-               "edges": [{"from": "entry", "to": "fundamentals"},
-                         {"from": "fundamentals", "to": "analytical_join"}],
-               "tail_models": {}}
+    payload = {
+        "nodes": [{"id": "fundamentals", "type": "fundamentals"}],
+        "edges": [
+            {"from": "entry", "to": "fundamentals"},
+            {"from": "fundamentals", "to": "analytical_join"},
+        ],
+        "tail_models": {},
+    }
     r = client.post(f"/api/graphs/{gid}/versions/", payload, format="json")
     assert r.status_code == 400
     rules = {e["rule"] for e in r.json()["errors"]}
@@ -127,6 +136,7 @@ def test_save_version_fills_default_models(client):
 
 # ---- validate (no save) -----------------------------------------------
 
+
 def test_validate_endpoint_no_save(client):
     before = AgentGraph.objects.count()
     r = client.post("/api/graphs/validate/", _canonical_payload(), format="json")
@@ -136,6 +146,7 @@ def test_validate_endpoint_no_save(client):
 
 
 # ---- from-template -----------------------------------------------------
+
 
 def test_from_template_clones_independently(client):
     council = AgentGraph.objects.get(name="Council classic", is_template=True)
@@ -154,16 +165,22 @@ def test_from_template_clones_independently(client):
 
 # ---- read-only templates ----------------------------------------------
 
+
 def test_template_is_read_only(client):
     council = AgentGraph.objects.get(name="Council classic", is_template=True)
     patch_resp = client.patch(f"/api/graphs/{council.id}/", {"name": "x"}, format="json")
     assert patch_resp.status_code == 403
     assert client.delete(f"/api/graphs/{council.id}/").status_code == 403
-    assert client.post(f"/api/graphs/{council.id}/versions/", _canonical_payload(),
-                       format="json").status_code == 403
+    assert (
+        client.post(
+            f"/api/graphs/{council.id}/versions/", _canonical_payload(), format="json"
+        ).status_code
+        == 403
+    )
 
 
 # ---- scoping -----------------------------------------------------------
+
 
 def test_user_cannot_see_others_graph(client, other_user):
     g = AgentGraph.objects.create(user=other_user, name="Theirs")

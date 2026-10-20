@@ -10,6 +10,7 @@ The catalog endpoint is reused via the module reference
 ``apps.models_catalog.verification.fetch_openrouter_catalog`` still
 intercept the call here.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,7 +21,7 @@ from decimal import Decimal
 import httpx
 from django.utils import timezone
 
-from . import verification
+from . import quarantine, verification
 from .models import ModelEntry
 from .tier_menus import (
     DEV_TIER_SLUGS,
@@ -43,6 +44,11 @@ class SyncResult:
     # curated slug dying — a re-curation alert) because a ghost retiring is
     # routine cleanup, not a curation problem.
     swept: list[str] = field(default_factory=list)
+    # Allowlist rows the RUNTIME quarantined (dead while still listed upstream)
+    # that this sync deliberately left inactive — see apps.models_catalog.quarantine.
+    quarantined: list[str] = field(default_factory=list)
+    # Allowlist ids appended to a live-synced tier's DB menu by this sync.
+    membership_added: list[str] = field(default_factory=list)
     fetched_at: datetime | None = None
 
     def as_dict(self) -> dict:
@@ -52,6 +58,8 @@ class SyncResult:
             "deactivated": list(self.deactivated),
             "excluded": list(self.excluded),
             "swept": list(self.swept),
+            "quarantined": list(self.quarantined),
+            "membership_added": list(self.membership_added),
             "fetched_at": self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
@@ -72,9 +80,7 @@ def _derive_fields(slug: str, payload: dict) -> dict:
         "display_name": f"{name}{suffix}",
         "tier": "hosted_open",
         "context_window": int(context_window or 0),
-        "supports_caching": (
-            "input_cache_read" in pricing or "input_cache_write" in pricing
-        ),
+        "supports_caching": ("input_cache_read" in pricing or "input_cache_write" in pricing),
         "supports_structured_output": (
             "structured_outputs" in supported or "response_format" in supported
         ),
@@ -151,7 +157,8 @@ def sync_tier_models(
             if existing and existing.is_active:
                 if not dry_run:
                     _deactivate(
-                        existing, now,
+                        existing,
+                        now,
                         f"slug {slug!r} not in OpenRouter /api/v1/models response",
                     )
                 result.deactivated.append(mid)
@@ -170,6 +177,20 @@ def sync_tier_models(
         defaults = {k: v for k, v in fields.items() if k != "id"}
         defaults["last_verified_at"] = now
         defaults["last_verified_note"] = ""
+        # A slug the RUNTIME quarantined (HTTP 404 on a real call — a route
+        # that is still LISTED upstream but dead, the nemotron-3-super class)
+        # must not be resurrected by the catalog's presence check: keep it
+        # inactive, and keep the quarantine note/stamp, until the TTL lapses.
+        if existing is not None and quarantine.is_quarantined(existing, now=now):
+            result.quarantined.append(mid)
+            if not dry_run:
+                keep = {
+                    k: v
+                    for k, v in defaults.items()
+                    if k not in ("is_active", "last_verified_at", "last_verified_note")
+                }
+                ModelEntry.objects.filter(id=mid).update(**keep)
+            continue
         if dry_run:
             result.synced.append(mid)
             if existing is None:
@@ -179,6 +200,22 @@ def sync_tier_models(
         result.synced.append(mid)
         if created:
             result.created.append(mid)
+
+    # Membership reconciliation for live-synced tiers: the curated allowlist is
+    # their membership source of truth, so append any allowlist id the DB menu
+    # is missing (a slug added to DEV/FRUGAL_TIER_SLUGS after this deployment's
+    # cold-start seed). Never removes — dead members drop out via is_active.
+    if not dry_run:
+        from .models import TierConfig
+        from .seed import ensure_allowlist_membership
+
+        for tier_name, slugs in (("dev", DEV_TIER_SLUGS), ("frugal", FRUGAL_TIER_SLUGS)):
+            tc = TierConfig.objects.filter(tier_name=tier_name, is_live_synced=True).first()
+            if tc is None:
+                continue
+            result.membership_added.extend(
+                ensure_allowlist_membership(tc, [f"openrouter:{s}" for s in slugs])
+            )
 
     # Broad reconcile sweep: deactivate ANY active OpenRouter row that has
     # vanished upstream — not just the dev/frugal allowlist. Auto-retires the
@@ -195,5 +232,29 @@ def sync_tier_models(
             if not dry_run:
                 _deactivate(row, now, "missing upstream (broad reconcile sweep)")
             result.swept.append(row.id)
+
+    # Quarantine expiry OUTSIDE the allowlist (the allowlist pass above already
+    # re-activates its own rows once the TTL lapses): a runtime-quarantined
+    # research/quality route still listed upstream comes back after
+    # LLM_RUNTIME_QUARANTINE_DAYS too — nothing else (no admin toggle) would ever
+    # re-enable it. Rows the seed retires on purpose stay retired.
+    from .seed import CANONICAL_MODELS
+
+    retired = {spec["id"] for spec in CANONICAL_MODELS if spec.get("is_active") is False}
+    for row in ModelEntry.objects.filter(
+        is_active=False,
+        provider="openrouter",
+        last_verified_note__startswith=quarantine.QUARANTINE_PREFIX,
+    ):
+        if row.id in handled or row.id in retired or quarantine.is_quarantined(row, now=now):
+            continue
+        if row.id.removeprefix("openrouter:") not in catalog:
+            continue
+        if not dry_run:
+            row.is_active = True
+            row.last_verified_at = now
+            row.last_verified_note = ""
+            row.save(update_fields=["is_active", "last_verified_at", "last_verified_note"])
+        result.synced.append(row.id)
 
     return result

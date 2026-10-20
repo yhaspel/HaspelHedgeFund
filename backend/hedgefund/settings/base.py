@@ -115,15 +115,12 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     # The browsable API renders every view's docstring + a live HTML form for
     # any endpoint the caller can reach; it is a debugging aid, never a
     # production surface. JSON only unless DEBUG is explicitly on.
     "DEFAULT_RENDERER_CLASSES": (
-        ["rest_framework.renderers.JSONRenderer",
-         "rest_framework.renderers.BrowsableAPIRenderer"]
+        ["rest_framework.renderers.JSONRenderer", "rest_framework.renderers.BrowsableAPIRenderer"]
         if DEBUG
         else ["rest_framework.renderers.JSONRenderer"]
     ),
@@ -180,10 +177,12 @@ SIGNUP_ENABLED = os.environ.get("SIGNUP_ENABLED", "1") == "1"
 # probes from either hostname succeed without a CORS preflight failure.
 # Override with CORS_ALLOWED_ORIGINS in staging/prod.
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get(
+    o
+    for o in os.environ.get(
         "CORS_ALLOWED_ORIGINS",
         "http://localhost:4111,http://127.0.0.1:4111",
-    ).split(",") if o
+    ).split(",")
+    if o
 ]
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -270,9 +269,24 @@ LLM_SELF_HEAL = os.environ.get("LLM_SELF_HEAL", "1") == "1"
 LLM_MAX_MODEL_FALLBACKS = int(os.environ.get("LLM_MAX_MODEL_FALLBACKS", "5"))
 # Non-reasoning, proven prod analytical default. Under LLM_FREE_ONLY the adapter
 # uses the :free variant so zero-spend environments never silently bill.
-LLM_LAST_RESORT_MODEL = os.environ.get(
-    "LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct"
+LLM_LAST_RESORT_MODEL = os.environ.get("LLM_LAST_RESORT_MODEL", "meta-llama/llama-3.3-70b-instruct")
+# The :free-class counterpart. Price-class discipline keeps a :free chain off the
+# PAID last resort above, so a :free route needs its own final rung — otherwise
+# a dead :free pick whose tier siblings are also gone has nowhere to hop and the
+# run dies on the first 404 (run 1178, nemotron-3-super:free). A $0 route on a
+# different upstream provider than the dev default; see openrouter.py.
+LLM_LAST_RESORT_FREE_MODEL = os.environ.get(
+    "LLM_LAST_RESORT_FREE_MODEL", "minimax/minimax-m3.1-flash:free"
 )
+# Runtime quarantine (apps/models_catalog/quarantine.py): a model that answers a
+# LIVE call with HTTP 404 while a later rung of the same chain succeeds is
+# deactivated in the catalog — the daily sync only retires slugs that VANISH
+# from OpenRouter's list, and a route can be dead while still listed (402 and
+# account-scoped 404s never quarantine). The sync will not resurrect a quarantined row
+# for this many days; after that, if it is still dead, the next call re-hops and
+# re-quarantines (one extra fallback hop per window, never a failed run). Needs
+# LLM_SELF_HEAL on and LLM_MAX_MODEL_FALLBACKS > 0: the contrast is a later rung.
+LLM_RUNTIME_QUARANTINE_DAYS = int(os.environ.get("LLM_RUNTIME_QUARANTINE_DAYS", "3"))
 # When True (default), a live run tolerates a single agent's unrecoverable
 # failure by emitting that agent's null signal (the council proceeds and the run
 # completes "done", flagged degraded) instead of aborting the whole run. Genuine
@@ -292,9 +306,7 @@ RUN_DEFAULT_MAX_BUDGET_USD = Decimal(_run_budget) if _run_budget else None
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-EDGAR_USER_AGENT = os.environ.get(
-    "EDGAR_USER_AGENT", "AIHedgeFund Research example@example.com"
-)
+EDGAR_USER_AGENT = os.environ.get("EDGAR_USER_AGENT", "AIHedgeFund Research example@example.com")
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
 
@@ -327,9 +339,7 @@ OFFLINE_LLM_MODEL = os.environ.get("OFFLINE_LLM_MODEL", "qwen2.5:7b")
 # classify with this model (never the user's news-page preference): swapping
 # the sentiment model mid-experiment would silently change the sleeve's signal
 # definition and invalidate the forward test. Change only between experiments.
-NEWS_LAB_SENTIMENT_MODEL = os.environ.get(
-    "NEWS_LAB_SENTIMENT_MODEL", "openrouter:qwen/qwen3.6-27b"
-)
+NEWS_LAB_SENTIMENT_MODEL = os.environ.get("NEWS_LAB_SENTIMENT_MODEL", "openrouter:qwen/qwen3.6-27b")
 
 # P7 / P14 — Autonomous fund bootstrap. The fund trades ONE shared Alpaca paper
 # account, configured as a single UNNUMBERED ``ALPACA_PAPER_{NAME,KEY_ID,SECRET}``
@@ -391,10 +401,12 @@ CACHES = {
 # deployments override via infra/docker-compose.override.yml or env vars.
 # Recorded in ADR 0011 (gateway sidecar with loopback publishing).
 IBKR_GATEWAY_BASE_URL = os.environ.get(
-    "IBKR_GATEWAY_BASE_URL", "https://ibkr-gateway:5000",
+    "IBKR_GATEWAY_BASE_URL",
+    "https://ibkr-gateway:5000",
 )
 IBKR_GATEWAY_LOGIN_URL = os.environ.get(
-    "IBKR_GATEWAY_LOGIN_URL", "https://localhost:5000",
+    "IBKR_GATEWAY_LOGIN_URL",
+    "https://localhost:5000",
 )
 
 # P3a-3: TradeStation Web API (/v3) + OAuth 2.0 authorization-code. BYO
@@ -410,16 +422,20 @@ TRADESTATION_REDIRECT_URI = os.environ.get(
     "http://localhost:8811/api/broker-accounts/oauth/callback/",
 )
 TRADESTATION_AUTHORIZE_URL = os.environ.get(
-    "TRADESTATION_AUTHORIZE_URL", "https://signin.tradestation.com/authorize",
+    "TRADESTATION_AUTHORIZE_URL",
+    "https://signin.tradestation.com/authorize",
 )
 TRADESTATION_TOKEN_URL = os.environ.get(
-    "TRADESTATION_TOKEN_URL", "https://signin.tradestation.com/oauth/token",
+    "TRADESTATION_TOKEN_URL",
+    "https://signin.tradestation.com/oauth/token",
 )
 TRADESTATION_API_BASE_SIM = os.environ.get(
-    "TRADESTATION_API_BASE_SIM", "https://sim-api.tradestation.com/v3",
+    "TRADESTATION_API_BASE_SIM",
+    "https://sim-api.tradestation.com/v3",
 )
 TRADESTATION_API_BASE_LIVE = os.environ.get(
-    "TRADESTATION_API_BASE_LIVE", "https://api.tradestation.com/v3",
+    "TRADESTATION_API_BASE_LIVE",
+    "https://api.tradestation.com/v3",
 )
 TRADESTATION_SCOPES = "openid offline_access ReadAccount Trade"
 
@@ -448,17 +464,13 @@ BLOCK_INVALID_GRAPH_AT_SUBMISSION = os.environ.get("BLOCK_INVALID_GRAPH_AT_SUBMI
 # scheduled-run notifications are visible in the worker logs without an SMTP
 # server; staging/prod override EMAIL_BACKEND + EMAIL_HOST via env. The test
 # settings module swaps to the locmem backend so delivery is assertable.
-EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "0") == "1"
-DEFAULT_FROM_EMAIL = os.environ.get(
-    "DEFAULT_FROM_EMAIL", "Hedge Fund <hedgefund@localhost>"
-)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Hedge Fund <hedgefund@localhost>")
 # Resend HTTP-API key, consumed by apps.notifications.backends.ResendEmailBackend
 # when EMAIL_BACKEND points at it. Empty in dev unless set in .env.
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -592,8 +604,8 @@ if _DJANGO_ENV not in {"dev", "test"}:
             "FIELD_ENCRYPTION_KEY is not set (ADR 0022); stored BYO keys and "
             "broker credentials would fall back to the SECRET_KEY-derived key. "
             "Set a dedicated value — generate one with "
-            "`python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\"` — in "
+            '`python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"` — in '
             f"DJANGO_ENV={_DJANGO_ENV!r}."
         )
     else:
@@ -609,6 +621,6 @@ if _DJANGO_ENV not in {"dev", "test"}:
             raise RuntimeError(
                 "FIELD_ENCRYPTION_KEY is set but is not a valid Fernet key "
                 "(needs urlsafe-base64 of 32 bytes). Generate one with "
-                "`python -c \"from cryptography.fernet import Fernet; "
-                "print(Fernet.generate_key().decode())\"`."
+                '`python -c "from cryptography.fernet import Fernet; '
+                'print(Fernet.generate_key().decode())"`.'
             ) from exc
