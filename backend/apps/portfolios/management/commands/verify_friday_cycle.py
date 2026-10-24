@@ -47,14 +47,15 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts) -> None:
         from apps.data.models import DailyBar
+        from apps.portfolios import autopilot_risk
         from apps.portfolios.models import (
             AutopilotRun,
             PortfolioStrategy,
             Position,
             RebalanceOrder,
             StrategyAutopilot,
-            UniverseMembership,
         )
+        from apps.portfolios.tasks import _active_members
 
         if opts["date"]:
             cycle_date = dt.date.fromisoformat(opts["date"])
@@ -110,7 +111,7 @@ class Command(BaseCommand):
         )
 
         # 3 — RP pod generated Wave-0 close orders for the residuals still held
-        # on its account's book.
+        # in its book of record (its fund sleeve), the only book it trades.
         rp = next(
             (a for a in autopilots if a.strategy.kind == PortfolioStrategy.KIND_RISK_PARITY), None,
         )
@@ -125,7 +126,8 @@ class Command(BaseCommand):
                 ).values_list("ticker", "side", "quantity")
             )
             got = {t for t, _, _ in close_orders}
-            book_id = rp.broker_account.portfolio_id if rp.broker_account else None
+            book = autopilot_risk.member_book(rp)
+            book_id = book.pk if book is not None else None
             still_held = [
                 t for t in RESIDUAL_TICKERS
                 if Position.objects.filter(portfolio_id=book_id, ticker=t).exists()
@@ -140,12 +142,11 @@ class Command(BaseCommand):
         else:
             check("RP residuals: liquidation orders generated", False, "no RP target on cycle_date")
 
-        # 4 — the pods' universe data freshness + adjusted-close integrity.
-        tickers: set[str] = set(
-            UniverseMembership.objects.filter(
-                universe_id__in={a.strategy.universe_id for a in autopilots}
-            ).values_list("ticker", flat=True)
-        )
+        # 4 — the pods' universe data freshness + adjusted-close integrity, over
+        # the members the cycle actually trades on cycle_date.
+        tickers: set[str] = {
+            t for a in autopilots for t, _sector in _active_members(a.strategy, cycle_date)
+        }
         stale, corrupt = [], []
         for t in sorted(tickers):
             b = DailyBar.objects.filter(ticker=t, source="fmp").order_by("-date").first()

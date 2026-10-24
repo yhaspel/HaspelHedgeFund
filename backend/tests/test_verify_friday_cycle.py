@@ -8,6 +8,7 @@ from enabled StrategyAutopilot rows, and the command stays strictly read-only.
 from __future__ import annotations
 
 import datetime as dt
+from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,10 +22,13 @@ from django.test.utils import CaptureQueriesContext
 from apps.brokers.models import BrokerAccount
 from apps.data.models import DailyBar
 from apps.portfolios.models import (
+    AutonomousFund,
     AutopilotRun,
+    FundSleeve,
     Portfolio,
     PortfolioStrategy,
     PortfolioTarget,
+    Position,
     StrategyAutopilot,
     Universe,
     UniverseMembership,
@@ -148,3 +152,52 @@ def test_no_enabled_autopilot_is_not_reported_green(user):
     with pytest.raises(SystemExit):
         _verify(out)
     assert "[FAIL] Enabled autopilot pods" in out.getvalue()
+
+
+def test_rp_residuals_are_read_from_the_rp_sleeve_not_the_shared_account(layout, user):
+    """The RP pod trades its fund sleeve, so only a residual held THERE is its
+    to close; one sitting unallocated on the shared account book is not."""
+    fund = AutonomousFund.objects.create(owner=user, broker_account=layout.account)
+    sleeve = FundSleeve.objects.create(
+        fund=fund, strategy=layout.rp, allocation_pct=Decimal("100"),
+        portfolio=Portfolio.objects.create(user=user, kind=Portfolio.KIND_SLEEVE, name="rp"),
+    )
+    Position.objects.create(
+        portfolio=layout.account.portfolio, ticker="MRVL", quantity=10, avg_cost=100,
+    )
+    out = StringIO()
+    with patch("apps.brokers.reconcile.get_broker", return_value=_broker_with_open_orders()):
+        _verify(out)
+    assert "[PASS] RP residuals (MRVL/SIRI/ZETA)" in out.getvalue()
+
+    Position.objects.create(portfolio=sleeve.portfolio, ticker="MRVL", quantity=10, avg_cost=100)
+    out = StringIO()
+    with patch("apps.brokers.reconcile.get_broker", return_value=_broker_with_open_orders()), \
+         pytest.raises(SystemExit):
+        _verify(out)
+    assert "[FAIL] RP residuals (MRVL/SIRI/ZETA)" in out.getvalue()
+    assert "still held ['MRVL']" in out.getvalue()
+
+
+def test_universe_check_counts_only_members_active_on_the_cycle_date(layout):
+    """A retired or not-yet-effective member is neither traded nor refreshed by
+    the cycle, so its stale (or missing) bars are not a failure."""
+    UniverseMembership.objects.create(
+        universe=layout.rp.universe, ticker="OLDETF",
+        effective_from=dt.date(2020, 1, 1), effective_to=dt.date(2026, 1, 1),
+    )
+    DailyBar.objects.create(
+        ticker="OLDETF", date=dt.date(2025, 12, 31), open=100, high=100, low=100,
+        close=100, adjusted_close=100, volume=1_000, source="fmp",
+    )
+    UniverseMembership.objects.create(
+        universe=layout.trend.universe, ticker="NEWETF",
+        effective_from=CYCLE + dt.timedelta(days=7),
+    )
+    out = StringIO()
+    with patch("apps.brokers.reconcile.get_broker", return_value=_broker_with_open_orders()):
+        _verify(out)
+    report = out.getvalue()
+    assert "[PASS] Universe data fresh + adjusted-close clean (3 ETFs)" in report
+    assert "OLDETF" not in report
+    assert "NEWETF" not in report
