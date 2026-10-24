@@ -1,11 +1,15 @@
-"""Report BYO-key / broker-credential rows whose ciphertext will not decrypt.
+"""Report encrypted-at-rest values whose ciphertext will not decrypt.
 
-Diagnostic + verification tool for the FIELD_ENCRYPTION_KEY rollover (ADR 0022).
-A field is "undecryptable" when it is non-empty but ``decrypt()`` returns "" —
-i.e. neither the primary (FIELD_ENCRYPTION_KEY) nor the legacy SECRET_KEY-derived
-key can read it. Zero is the healthy state after the re-encrypt migration
-(``0009_reencrypt_field_keys``). Exit code is non-zero when any are found, so a
-wrapper/launchd job can detect it.
+Diagnostic + verification tool for field-key rollovers (ADR 0022). Scans BYO
+provider keys, broker credentials, per-user broker OAuth apps and the secret
+``<key>_enc`` entries of notification-channel configs. A field is
+"undecryptable" when it is non-empty but ``decrypt()`` returns "" — i.e. no
+configured key (FIELD_ENCRYPTION_KEY, FIELD_ENCRYPTION_KEY_PREVIOUS, or the legacy
+SECRET_KEY-derived key) can read it. Zero is the healthy state after the re-encrypt
+migration (``0009_reencrypt_field_keys``) or ``manage.py reencrypt_vault --apply``.
+Exit code is non-zero when any are found, so a wrapper/launchd job can detect it.
+A value only a previous key reads counts as healthy here, so whether a rotation is
+complete is ``reencrypt_vault --strict``'s check, not this one.
 
     python manage.py vault_doctor
 """
@@ -30,23 +34,35 @@ BROKER_CRED_FIELDS = [
     "encrypted_access_token",
     "encrypted_refresh_token",
 ]
+OAUTH_APP_FIELDS = [
+    "encrypted_client_id",
+    "encrypted_client_secret",
+]
+
+
+def channel_secret_fields() -> list[str]:
+    """The ``<key>_enc`` entries ``encrypt_config`` writes into a channel config."""
+    from apps.notifications.models import SECRET_CONFIG_KEYS
+
+    return [f"{key}_enc" for key in SECRET_CONFIG_KEYS]
 
 
 class Command(BaseCommand):
-    help = "Count BYO-key / broker-credential rows that fail to decrypt (ADR 0022)."
+    help = "Count encrypted-at-rest fields that fail to decrypt (ADR 0022)."
 
     def handle(self, *args, **opts) -> None:
-        from apps.brokers.models import BrokerCredential
+        from apps.brokers.models import BrokerCredential, UserBrokerOAuthApp
         from apps.models_catalog.models import ProviderKey
+        from apps.notifications.models import NotificationChannel
 
         checked = 0
         bad = 0
 
-        def scan(rows, fields, label, id_attr):
+        def scan(rows, fields, label, id_attr, get=getattr):
             nonlocal checked, bad
             for row in rows:
                 for field in fields:
-                    token = getattr(row, field, "") or ""
+                    token = get(row, field, "") or ""
                     if not token:
                         continue
                     checked += 1
@@ -57,8 +73,16 @@ class Command(BaseCommand):
                             f"[undecryptable] {label} {id_attr}={rid} field={field}"
                         )
 
+        def config_get(row, key, default):
+            return str((row.config or {}).get(key) or default)
+
         scan(ProviderKey.objects.all(), PROVIDER_KEY_FIELDS, "ProviderKey", "user_id")
         scan(BrokerCredential.objects.all(), BROKER_CRED_FIELDS, "BrokerCredential", "id")
+        scan(UserBrokerOAuthApp.objects.all(), OAUTH_APP_FIELDS, "UserBrokerOAuthApp", "id")
+        scan(
+            NotificationChannel.objects.all(), channel_secret_fields(),
+            "NotificationChannel.config", "id", get=config_get,
+        )
 
         self.stdout.write(
             f"vault_doctor: {checked} encrypted field(s) checked, {bad} undecryptable."

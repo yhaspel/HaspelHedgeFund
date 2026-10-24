@@ -28,6 +28,23 @@ def _clear_task_context(**_kw):
     request_id_var.set("")
     run_id_var.set("")
 
+
+# The worker and beat replace the root handlers from settings.LOGGING with their
+# own (worker_hijack_root_logger), which would drop the secret-redaction filter.
+# Re-attach it to every handler Celery installs on the root and task loggers, and
+# on billiard's non-propagating "multiprocessing" logger (configured just before).
+@signals.after_setup_logger.connect
+@signals.after_setup_task_logger.connect
+def _redact_celery_log_handlers(logger=None, **_kw):
+    from celery.utils.log import get_multiprocessing_logger
+
+    from hedgefund.logging_filters import RedactSecretsFilter
+
+    for target in (logger, get_multiprocessing_logger()):
+        for handler in getattr(target, "handlers", ()):
+            if not any(isinstance(f, RedactSecretsFilter) for f in handler.filters):
+                handler.addFilter(RedactSecretsFilter())
+
 # Default periodic schedule. The DatabaseScheduler picks these up at startup
 # and any operator-edited PeriodicTask rows override them.
 app.conf.beat_schedule = {

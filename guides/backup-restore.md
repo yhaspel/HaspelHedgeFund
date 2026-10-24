@@ -11,7 +11,10 @@ WAL shipping. Redis holds only transient Celery/broker state and cache, so it do
 > (and `DJANGO_SECRET_KEY`/`JWT_SIGNING_KEY`). BYO keys and broker credentials are
 > encrypted at rest with `FIELD_ENCRYPTION_KEY`; a database restored without the
 > matching key can be read, but those encrypted columns are unrecoverable. Store
-> the key separately from the dump.
+> the key separately from the dump. After a field-key rotation (procedure in
+> `.env.example`), keep the retired key with every dump taken before it: to restore
+> such a dump, list that key in `FIELD_ENCRYPTION_KEY_PREVIOUS` and finish the
+> procedure from its step 2 (`python manage.py reencrypt_vault --apply`).
 
 All commands below assume the compose stack is running
 (`docker compose -f infra/docker-compose.yml …`) and the default credentials from
