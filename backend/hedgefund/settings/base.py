@@ -17,6 +17,14 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", _DEV_INSECURE_SENTINEL)
 # the bottom of this module requires a real value in non-dev/test envs. Generate:
 #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
+# Field-key rotation: retired FIELD_ENCRYPTION_KEY values (comma-separated), kept
+# for DECRYPTION only until `manage.py reencrypt_vault --apply` has moved every
+# stored value to the current key. Empty by default; procedure in .env.example.
+FIELD_ENCRYPTION_KEY_PREVIOUS = [
+    key.strip()
+    for key in os.environ.get("FIELD_ENCRYPTION_KEY_PREVIOUS", "").split(",")
+    if key.strip()
+]
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "0") == "1"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
@@ -555,8 +563,13 @@ LOGGING = {
         # /bot<token>/sendMessage) where a query-param scrub cannot reach them.
         # The redact filter has a bot-token rule as a second line of defence,
         # but the request log itself has no operational value here — keep it at
-        # WARNING so the secret is never rendered in the first place.
-        "httpx": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        # WARNING so the secret is never rendered in the first place. The
+        # logger-level filter scrubs every httpx record at the source, whichever
+        # handler ends up emitting it (its args are httpx.URL objects, not str).
+        "httpx": {
+            "handlers": ["console"], "level": "WARNING", "propagate": False,
+            "filters": ["redact_secrets"],
+        },
         "httpcore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
@@ -626,3 +639,14 @@ if _DJANGO_ENV not in {"dev", "test"}:
                 '`python -c "from cryptography.fernet import Fernet; '
                 'print(Fernet.generate_key().decode())"`.'
             ) from exc
+        # The decrypt-only rotation keys get the same check: one bad entry would
+        # break the whole MultiFernet. The error names the entry, never the value.
+        for _n, _previous_key in enumerate(FIELD_ENCRYPTION_KEY_PREVIOUS, start=1):
+            try:
+                Fernet(_previous_key.encode())
+            except Exception:
+                raise RuntimeError(
+                    f"FIELD_ENCRYPTION_KEY_PREVIOUS entry {_n} of "
+                    f"{len(FIELD_ENCRYPTION_KEY_PREVIOUS)} is not a valid Fernet key "
+                    "(needs urlsafe-base64 of 32 bytes); fix or remove it."
+                ) from None

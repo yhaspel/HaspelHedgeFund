@@ -1,9 +1,9 @@
 """Log-record filter that scrubs secret-bearing query params from URLs.
 
-Attached to the root handler in settings.LOGGING. Applies to every log
-record before it hits any handler, so any logger that accidentally
-echoes an authenticated URL (httpx INFO request lines, custom debug
-logs, exception messages) is automatically sanitized.
+Attached to the root handler and the httpx logger in settings.LOGGING, and to
+the Celery worker/beat handlers (hedgefund/celery.py), so any logger that
+accidentally echoes an authenticated URL (httpx INFO request lines, custom
+debug logs, exception messages) is automatically sanitized.
 
 Add new param names to `SECRET_QUERY_KEYS` if a future provider uses a
 different query-string credential.
@@ -15,7 +15,7 @@ import logging
 import re
 import traceback
 
-SECRET_QUERY_KEYS = ("token", "apikey", "api_key", "access_token", "auth_token")
+SECRET_QUERY_KEYS = ("token", "apikey", "api_key", "access_token", "auth_token", "key")
 
 # P5-SH WS2.1 — greppable request/run correlation. Bound by RequestIdMiddleware
 # (HTTP) and the Celery task signals / execute_run (worker), read by ContextFilter
@@ -49,15 +49,17 @@ _REDACTED = r"\1=REDACTED"
 _BOT_TOKEN_PATTERN = re.compile(r"(?i)\bbot\d{4,}:[A-Za-z0-9_\-]+")
 _BOT_REDACTED = "botREDACTED"
 
-
-def _scrub(value: object) -> object:
-    if not isinstance(value, str):
-        return value
-    return _BOT_TOKEN_PATTERN.sub(_BOT_REDACTED, _PATTERN.sub(_REDACTED, value))
+# Credentials that travel in headers rather than URLs, should one ever be echoed
+# (a logged header dict, a provider error quoting the request): bearer tokens,
+# and OpenRouter / Anthropic keys anywhere in the text.
+_BEARER_PATTERN = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9\-._~+/]{8,}=*")
+_PROVIDER_KEY_PATTERN = re.compile(r"\b(sk-(?:or-v1|ant)-)[A-Za-z0-9_\-]+")
 
 
 def _scrub_text(value: str) -> str:
-    return _BOT_TOKEN_PATTERN.sub(_BOT_REDACTED, _PATTERN.sub(_REDACTED, value))
+    value = _BOT_TOKEN_PATTERN.sub(_BOT_REDACTED, _PATTERN.sub(_REDACTED, value))
+    value = _BEARER_PATTERN.sub(r"\1REDACTED", value)
+    return _PROVIDER_KEY_PATTERN.sub(r"\1REDACTED", value)
 
 
 def scrub_secrets(value: str) -> str:
@@ -68,25 +70,37 @@ def scrub_secrets(value: str) -> str:
 
 
 class RedactSecretsFilter(logging.Filter):
-    """Scrub credentials out of ``msg``, ``args`` AND the formatted traceback.
+    """Scrub credentials out of the formatted message AND the traceback.
+
+    The message is formatted here (``getMessage()``) and scrubbed whole, so an
+    argument of any type is covered — an ``httpx.HTTPStatusError`` or
+    ``httpx.URL`` whose ``str()`` carries ``?apikey=...`` included. ``msg``
+    becomes that text and ``args`` becomes ``()``: exactly what a formatter
+    would have rendered, ``%d``/``%s`` and all.
 
     ``log.exception(...)`` attaches the live exception via ``exc_info``; the
     formatter renders it later, *after* every filter has run, so scrubbing the
     message alone leaves the provider URL (``?apikey=...``) in the traceback.
     We therefore pre-render the traceback here, scrub it, park it on
-    ``record.exc_text`` and clear ``exc_info`` — both the stdlib formatter and
-    ``pythonjsonlogger`` prefer a pre-rendered ``exc_text``. Idempotent: a
-    second handler sees ``exc_info=None`` and an already-clean ``exc_text``.
+    ``record.exc_text`` and clear ``exc_info`` — the stdlib formatter uses a
+    pre-rendered ``exc_text``, and ``pythonjsonlogger`` would re-render a live
+    ``exc_info``. Idempotent: a second handler sees a pre-formatted ``msg``
+    with no ``args``, ``exc_info=None`` and an already-clean ``exc_text``.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = _scrub(record.msg)  # type: ignore[assignment]
-        if record.args:
-            if isinstance(record.args, tuple):
-                record.args = tuple(_scrub(a) for a in record.args)
-            elif isinstance(record.args, dict):
-                record.args = {k: _scrub(v) for k, v in record.args.items()}
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - a bad format/args pair must not raise here
+            try:
+                message = f"{record.msg} {record.args!r}"
+            except Exception:  # noqa: BLE001 - nor a message/arg whose str()/repr() raises
+                message = (
+                    f"{record.msg} <unprintable args>" if isinstance(record.msg, str)
+                    else "<unprintable log message>"
+                )
+        record.msg = _scrub_text(message)
+        record.args = ()
         if record.exc_info:
             if not record.exc_text:
                 record.exc_text = "".join(
