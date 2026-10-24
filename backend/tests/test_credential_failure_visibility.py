@@ -18,6 +18,7 @@ All network is mocked.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import types
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -187,6 +188,46 @@ def test_anthropic_401_raises_provider_auth_error(settings):
     assert "sk-ant-test" not in str(ei.value)
 
 
+@pytest.mark.django_db
+def test_backtest_abort_progress_names_the_key_not_a_model(monkeypatch, settings):
+    from apps.backtests import engine as engine_mod
+    from apps.backtests.models import Backtest
+
+    settings.BACKTEST_PRIME_PARALLELISM = 1
+    user = User.objects.create_user(email="bt-key@x.test", password="x" * 12)
+    bt = Backtest.objects.create(
+        user=user, name="dead key", universe=["AAA"],
+        start_date=dt.date(2025, 1, 6), end_date=dt.date(2025, 1, 8),
+        starting_cash=Decimal("100000"), is_window_days=5, oos_window_days=2,
+        step_days=2, n_candidates=1, max_budget_usd=Decimal("10"),
+    )
+    days = [dt.date(2025, 1, 6), dt.date(2025, 1, 7)]
+    monkeypatch.setattr(engine_mod, "trading_days", lambda *a, **k: days)
+    monkeypatch.setattr(engine_mod, "rebalance_dates_for", lambda d, f: set(d))
+
+    class DeadKeyGraph:
+        def invoke(self, state):
+            raise ProviderAuthError(
+                "OpenRouter", "nvidia/nemotron-3.5-super-vl:free", key_source="user"
+            )
+
+    monkeypatch.setattr(
+        "hedgefund_agents.graphs.council.build_council_graph",
+        lambda personas=None: DeadKeyGraph(),
+    )
+    monkeypatch.setattr("hedgefund_agents.versioning.ensure_versions_synced", lambda: None)
+    monkeypatch.setattr("hedgefund_agents.versioning.snapshot_versions", lambda *_a, **_k: {})
+    monkeypatch.setattr("apps.data.providers.factory.get_fmp_provider", lambda *a, **kw: object())
+    monkeypatch.setattr("apps.data.providers.factory.get_edgar_provider", lambda *a, **kw: object())
+    notes: list[str] = []
+    with pytest.raises(ProviderAuthError):
+        engine_mod.prime_agent_cache(
+            bt=bt, start=days[0], end=days[-1], rebalance_freq="daily",
+            progress_cb=lambda done, total, note: notes.append(note),
+        )
+    assert notes == ["aborted: provider rejected the API key"]
+
+
 def test_node_wrapper_reraises_provider_auth_error():
     from hedgefund_agents.graphs._node_fallback import wrap_backtest_tolerant
 
@@ -302,6 +343,22 @@ def test_refresh_summary_names_the_cause_never_the_url():
     )
     assert "SECRET" not in summary and "://" not in summary
     assert refresh_universe_bars(["GLD"], dt.date(2026, 10, 23), _FailingProvider({})) == ""
+
+
+@pytest.mark.django_db
+def test_refresh_failures_are_logged_by_reason_never_the_url(caplog):
+    """A worker logs through Celery's handlers, not the redacting Django ones, so
+    a refresh failure is logged by its short reason — never an httpx traceback,
+    whose message quotes the FMP URL and with it the API key."""
+    from apps.data.freshness import refresh_universe_bars
+
+    prov = _FailingProvider({"SPY": _http_error(401, "SPY")})
+    with caplog.at_level(logging.WARNING, logger="apps.data.freshness"):
+        refresh_universe_bars(["SPY"], dt.date(2026, 10, 23), prov)
+    assert "upsert failed ticker=SPY (HTTPStatusError 401)" in caplog.text
+    assert "dividend refresh failed ticker=SPY (HTTPStatusError 401)" in caplog.text
+    assert not any(r.exc_info or r.exc_text for r in caplog.records)  # no traceback
+    assert "SECRET" not in caplog.text and "apikey" not in caplog.text
 
 
 @pytest.mark.django_db
@@ -513,6 +570,38 @@ def test_schedule_fire_with_every_child_failed_is_recorded_failed(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_schedule_fire_records_children_that_fail_before_execute_runs_handler(settings):
+    """execute_run resolves its data provider before its own failure handler: a
+    user with no usable FMP key raises there, leaving the child RUNNING. The fire
+    must still settle each child FAILED (and alert), and record itself failed."""
+    from apps.data.providers import factory
+    from apps.runs.models import Run
+    from apps.schedules.models import ScheduledRunHistory
+    from apps.schedules.tasks import execute_scheduled_run
+
+    settings.ALLOW_PLATFORM_DATA_KEYS = False
+    factory._reset_caches_for_tests()
+    user = User.objects.create_user(email="sched-nokey@x.test", password="x" * 12)
+    NotificationChannel.objects.create(
+        user=user, kind=NotificationChannel.EMAIL, config={"address": "sched-nokey@x.test"},
+    )
+    sr, hist = _schedule(user, ["AAPL", "MSFT"])
+    out = execute_scheduled_run(sr.id, hist.id)
+    hist.refresh_from_db()
+    children = list(Run.objects.filter(user=user))
+    assert len(children) == 2 and {r.status for r in children} == {Run.FAILED}
+    assert all(r.error_message.startswith("RuntimeError: No FMP key configured") for r in children)
+    assert all(r.finished_at is not None for r in children)
+    assert out["status"] == "failed" and out["failed"] == 2
+    assert hist.status == ScheduledRunHistory.FAILED
+    assert hist.error.startswith("2/2 child runs failed (")
+    assert "): RuntimeError: No FMP key configured" in hist.error
+    failed_alerts = NotificationEvent.objects.filter(subject__endswith="] failed")
+    assert failed_alerts.count() == 2
+    factory._reset_caches_for_tests()
+
+
+@pytest.mark.django_db
 def test_schedule_partial_failure_stays_done_names_failures_and_still_notifies(monkeypatch):
     from apps.schedules.models import ScheduledRunHistory
     from apps.schedules.tasks import execute_scheduled_run
@@ -685,6 +774,24 @@ def test_probe_retries_an_alert_that_was_not_delivered(operator, settings):
     assert len(_alerts(operator)) == 1
 
 
+def test_probe_retries_an_alert_whose_send_raised(operator, settings):
+    from apps.models_catalog.key_probe import fingerprint
+    from apps.models_catalog.tasks import probe_provider_keys
+    from apps.notifications import operator as ops
+
+    settings.OPENROUTER_API_KEY = "sk-or-v1-test-dead"
+    settings.FMP_API_KEY = ""
+    with patch.object(ops, "_operator_channels", side_effect=RuntimeError("db gone")):
+        with respx.mock(assert_all_called=False) as m:
+            _probe_mock(m, openrouter={"sk-or-v1-test-dead": 401}, fmp={})
+            out = probe_provider_keys()
+    assert out["openrouter"] == {fingerprint("sk-or-v1-test-dead"): "error"}
+    with respx.mock(assert_all_called=False) as m:
+        _probe_mock(m, openrouter={"sk-or-v1-test-dead": 401}, fmp={})
+        probe_provider_keys()
+    assert len(_alerts(operator)) == 1
+
+
 # --- post-close bar refresh ------------------------------------------------------
 
 
@@ -767,6 +874,72 @@ def test_free_last_resort_skips_a_slug_the_catalog_retired(settings):
     assert _free_last_resort_model() == "xingchen-agi/xing4.0-29b-a4b:free"  # active: kept
     settings.LLM_LAST_RESORT_FREE_MODEL = "brand-new/route:free"
     assert _free_last_resort_model() == "brand-new/route:free"  # no row yet: kept
+
+
+def _walk(orm, model: str) -> list[str]:
+    tried, chain = (), []
+    while (nxt := orm._next_heal_target(model, tried)) is not None:
+        chain.append(nxt)
+        tried, model = tried + (model,), nxt
+    return chain
+
+
+@pytest.mark.django_db
+def test_free_chain_never_walks_onto_a_rung_the_catalog_retired(settings):
+    """Once the live DB siblings are spent, the static :free ladder takes over —
+    it must skip the retired rung too, so a chain whose every live rung failed
+    ends (and names its error) on the last LIVE rung, not the delisted one."""
+    from apps.models_catalog.models import ModelEntry
+    from apps.models_catalog.tier_menus import DEV_TIER_SLUGS
+    from hedgefund_agents.llm.adapters import openrouter as orm
+
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    settings.LLM_FREE_ONLY = False
+    retired = "minimax/minimax-m3.1-flash:free"
+    ModelEntry.objects.filter(id=f"openrouter:{retired}").update(is_active=False)
+    live = [s for s in DEV_TIER_SLUGS if s != retired]
+    for start in DEV_TIER_SLUGS:
+        chain = _walk(orm, start)
+        assert retired not in chain, (start, chain)
+    assert sorted(_walk(orm, DEV_TIER_SLUGS[0])) == sorted(live[1:])
+
+    calls: list[str] = []
+
+    def all_dead(self, body, headers):
+        calls.append(body["model"])
+        return httpx.Response(
+            404, text="No endpoints found", request=httpx.Request("POST", orm.API_URL)
+        )
+
+    with patch.object(orm.OpenRouterClient, "_post_with_retry", all_dead):
+        with pytest.raises(ModelUnavailable) as ei:
+            orm.OpenRouterClient(api_key="sk-or-v1-test").complete(
+                model=DEV_TIER_SLUGS[0], messages=[]
+            )
+    assert retired not in calls and sorted(calls) == sorted(live)
+    assert ei.value.model == calls[-1]
+
+
+@pytest.mark.django_db
+def test_free_last_resort_is_reached_once_the_live_ladder_is_spent(settings):
+    from apps.models_catalog.models import ModelEntry
+    from apps.models_catalog.tier_menus import DEV_TIER_SLUGS
+    from hedgefund_agents.llm.adapters import openrouter as orm
+
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    settings.LLM_FREE_ONLY = False
+    settings.LLM_LAST_RESORT_FREE_MODEL = "brand-new/route:free"
+    ModelEntry.objects.filter(id="openrouter:minimax/minimax-m3.1-flash:free").update(
+        is_active=False
+    )
+    assert _walk(orm, DEV_TIER_SLUGS[0])[-1] == "brand-new/route:free"
+    # The whole curated ladder retired (the run-1178 shape): the catalog has
+    # nothing live left, so the curated ladder is kept as the safety net.
+    ModelEntry.objects.filter(id__in=[f"openrouter:{s}" for s in DEV_TIER_SLUGS]).update(
+        is_active=False
+    )
+    assert orm._free_rungs() == (DEV_TIER_SLUGS, "brand-new/route:free")
 
 
 def test_default_free_last_resort_is_a_priced_curated_rung():

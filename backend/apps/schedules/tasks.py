@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from apps.runs.models import Run
 from apps.runs.tasks import execute_run
+from hedgefund.logging_filters import scrub_secrets
 
 from .costs import cheaper_preset, estimate_run_cost, resolve_overrides
 from .models import ScheduledRun, ScheduledRunHistory
@@ -287,8 +288,23 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         run_ids.append(run.id)
         try:
             execute_run(run.id)  # synchronous — see module docstring
-        except Exception:  # noqa: BLE001 — one ticker failing must not abort the batch
+        except Exception as exc:  # noqa: BLE001 — one ticker failing must not abort the batch
             log.exception("scheduled run: ticker %s failed (run=%s)", tk, run.id)
+            # execute_run records (and alerts on) its own failures — except one
+            # raised before its failure handler (provider setup, e.g. no usable
+            # FMP key), which would leave the child RUNNING and this fire "done".
+            if Run.objects.filter(pk=run.id, status__in=Run.ACTIVE_STATUSES).update(
+                status=Run.FAILED,
+                error_message=scrub_secrets(f"{type(exc).__name__}: {exc}")[:2000],
+                finished_at=timezone.now(),
+            ):
+                try:
+                    from apps.notifications.operator import notify_run_failed
+
+                    run.refresh_from_db()
+                    notify_run_failed(run)
+                except Exception:  # pragma: no cover — an alert must never break the batch
+                    log.exception("run-failed alert failed for run=%s", run.id)
     hist.runs.set(run_ids)
 
     # ---- materiality + notify ----

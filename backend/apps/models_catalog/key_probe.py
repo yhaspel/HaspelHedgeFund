@@ -92,8 +92,14 @@ def _record(provider: str, label: str, fp: str, status: int | None, used_by: lis
     if cache.add(outage, status, None):
         from apps.notifications.operator import notify_provider_key_rejected
 
-        if not notify_provider_key_rejected(label, fp, status_code=status, used_by=used_by):
-            cache.delete(outage)  # not delivered — let the next probe try again
+        delivered = 0
+        try:
+            delivered = notify_provider_key_rejected(
+                label, fp, status_code=status, used_by=used_by
+            )
+        finally:
+            if not delivered:
+                cache.delete(outage)  # not delivered (or raised) — the next probe retries
     return "rejected"
 
 

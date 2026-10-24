@@ -158,27 +158,37 @@ def _last_resort_model() -> str:
 _DEFAULT_FREE_LAST_RESORT = "xingchen-agi/xing4.0-29b-a4b:free"
 
 
-def _free_last_resort_model() -> str:
-    """The configured :free last resort — unless the catalog has retired it
-    (delisted upstream / quarantined), then the first curated dev-tier :free slug
-    whose catalog row is still active. A slug the catalog has no row for is kept
-    (cold start); with the DB unreachable the configured slug is used as-is."""
+def _free_rungs() -> tuple[list[str], str]:
+    """The static :free ladder and the :free last resort, minus every rung the
+    catalog has retired (an inactive row: delisted upstream / quarantined); a
+    retired last resort gives way to the first live ladder rung. A slug the
+    catalog has no row for is kept (cold start). With the DB unreachable, or the
+    WHOLE ladder retired (the run-1178 shape: the catalog has nothing live left),
+    both are used as configured."""
     target = getattr(settings, "LLM_LAST_RESORT_FREE_MODEL", _DEFAULT_FREE_LAST_RESORT)
     target = target if target.endswith(":free") else f"{target}:free"
     ladder = _static_free_ladder()
     try:
         from apps.models_catalog.models import ModelEntry
 
-        active = dict(
-            ModelEntry.objects.filter(
-                id__in=[f"openrouter:{s}" for s in (target, *ladder)]
-            ).values_list("id", "is_active")
-        )
+        retired = {
+            str(mid).split(":", 1)[1]
+            for mid in ModelEntry.objects.filter(
+                id__in=[f"openrouter:{s}" for s in (*ladder, target)], is_active=False
+            ).values_list("id", flat=True)
+        }
     except Exception:  # DB unreachable / apps layer unavailable (unit tests)
-        return target
-    if active.get(f"openrouter:{target}", True):
-        return target
-    return next((s for s in ladder if active.get(f"openrouter:{s}")), target)
+        return ladder, target
+    live = [s for s in ladder if s not in retired]
+    if not live:
+        return ladder, target
+    return live, (live[0] if target in retired else target)
+
+
+def _free_last_resort_model() -> str:
+    """The configured :free last resort — unless the catalog has retired it, then
+    the first live curated dev-tier :free slug (see ``_free_rungs``)."""
+    return _free_rungs()[1]
 
 
 def _static_free_ladder() -> list[str]:
@@ -272,10 +282,13 @@ def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
     if is_free:
         # The DB menu may be empty or exhausted (unseeded tier, siblings
         # deactivated, DB down): the static :free ladder + the free last resort
-        # guarantee a :free route always has somewhere $0 to go.
+        # guarantee a :free route always has somewhere $0 to go. Rungs the
+        # catalog has retired are skipped — a hop onto a delisted route only
+        # spends the fallback budget and leaves the error naming it.
+        ladder, last_free = _free_rungs()
         if not candidates:
-            candidates.extend(_static_free_ladder())
-        candidates.append(_free_last_resort_model())
+            candidates.extend(ladder)
+        candidates.append(last_free)
     # Price-class discipline, same rule _fallback_candidates enforces: a `:free`
     # route must never silently chain onto a PAID one (and vice versa). The
     # static last resort used to bypass it, so once a :free chain exhausted its

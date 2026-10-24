@@ -741,7 +741,7 @@ def prime_agent_cache(
     from hedgefund_agents.personas import ALL_PERSONAS
     from hedgefund_agents.versioning import ensure_versions_synced, snapshot_versions
 
-    from .exceptions import BudgetExceeded, ModelUnavailable
+    from .exceptions import BudgetExceeded, ModelUnavailable, ProviderAuthError
 
     ensure_versions_synced()
     selected_personas = list(bt.personas or ALL_PERSONAS)
@@ -862,7 +862,13 @@ def prime_agent_cache(
                 ticker, day, unwrapped,
             )
             if progress_cb:
-                progress_cb(done, total, f"aborted on unavailable model: {unwrapped.model}")
+                progress_cb(
+                    done,
+                    total,
+                    "aborted: provider rejected the API key"
+                    if isinstance(unwrapped, ProviderAuthError)
+                    else f"aborted on unavailable model: {unwrapped.model}",
+                )
             return True
         if err is not None:
             log.warning("graph.invoke failed for %s %s: %s", ticker, day, err)

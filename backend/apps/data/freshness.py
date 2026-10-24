@@ -126,8 +126,13 @@ def normalize_adjusted_tail(
     if provider is not None:
         try:
             refresh_dividends(ticker, provider, as_of=as_of)
-        except Exception:  # noqa: BLE001 — fall through to the staleness guard
-            log.exception("normalize_adjusted_tail: dividend refresh failed ticker=%s", ticker)
+        except Exception as exc:  # noqa: BLE001 — fall through to the staleness guard
+            # The reason, not the traceback: it would quote the keyed FMP URL.
+            log.warning(
+                "normalize_adjusted_tail: dividend refresh failed ticker=%s (%s)",
+                ticker,
+                _failure_reason(exc),
+            )
     led = last_adjustment_ex_date(ticker)
     newest_bar = (
         DailyBar.objects.filter(ticker=ticker, source=SOURCE)
@@ -202,8 +207,9 @@ def refresh_universe_bars(tickers, as_of: dt.date, provider, *, lookback_days: i
         try:
             provider.upsert_recent_bars(t, start, as_of)
         except Exception as exc:  # noqa: BLE001 — degrade to whatever is cached; assert gates
-            log.exception("refresh_universe_bars: upsert failed ticker=%s", t)
             failures[t] = _failure_reason(exc)
+            # The reason, not the traceback: it would quote the keyed URL.
+            log.warning("refresh_universe_bars: upsert failed ticker=%s (%s)", t, failures[t])
         try:
             # Pass the provider so the dividend table is topped up first —
             # otherwise every dividend paid since the last manual
