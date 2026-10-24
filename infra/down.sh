@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 # Non-destructive: the named pgdata volume is preserved, so the database (and
 # the frontend node_modules anon volume) survive -- `up.sh` brings everything
 # back with the same data. To ALSO wipe the database, add `-v`:
-#     docker compose down -v
+#     docker compose --profile scheduler down -v
 # or use restart-and-full-db-refresh.sh for a clean DB without losing images.
 
 echo ">> Stopping and removing the stack (pgdata volume preserved)..."

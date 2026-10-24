@@ -72,6 +72,9 @@ Re-read step 1.
 docker compose -f infra/docker-compose.yml up -d ibkr-gateway
 ```
 
+The session keep-warm (step 4) runs on Celery beat, which the local stack starts only
+with `--profile scheduler` (see the README).
+
 To confirm it's up:
 
 ```
@@ -91,7 +94,7 @@ The gateway listens on:
 4. Complete 2FA — IBKR Mobile (push notification) or SMS, whichever you have configured.
 5. You'll see "Client login succeeded." You're authenticated.
 
-The session stays alive until midnight ET *and* until you've been idle for about six minutes. The `keep_gateway_warm` Celery task tickles the session every two minutes, so as long as Celery is running you don't need to do anything to keep it alive within the day.
+The session stays alive until midnight ET *and* until you've been idle for about six minutes. The `keep_gateway_warm` Celery task tickles the session every two minutes, so as long as Celery beat is running you don't need to do anything to keep it alive within the day.
 
 When the daily reset fires, the **Accounts** page in the app will surface a *"Re-authenticate your IBKR gateway"* banner. Click it (or just re-open `https://localhost:5000`), repeat steps 1–4, and the banner clears within ~2 minutes of the next `keep_gateway_warm` tick.
 

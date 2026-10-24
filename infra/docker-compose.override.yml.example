@@ -7,3 +7,9 @@ services:
   # db:
   #   ports:
   #     - "127.0.0.1:55432:5432"
+  # Example: publish Redis for a backend run outside Docker (6380, so it can't
+  # collide with a native Redis on 6379). Compose reads this override only when
+  # no -f is given (e.g. the infra/*.sh scripts); with -f, pass both files.
+  # redis:
+  #   ports:
+  #     - "127.0.0.1:6380:6379"

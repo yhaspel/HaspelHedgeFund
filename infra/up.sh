@@ -80,5 +80,5 @@ Stack is up:
 
 Follow logs with:  docker compose -f infra/docker-compose.yml logs -f
 Stop the stack:    docker compose -f infra/docker-compose.yml --profile scheduler down
-Celery beat:       not started; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build
+Celery beat:       not started by this script; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build
 EOF
