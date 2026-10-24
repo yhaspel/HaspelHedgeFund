@@ -1,10 +1,12 @@
 """Verify the autonomous fund's weekly cron cycle ran cleanly (P10 §A1/§A3).
 
-Read-only. Checks that the deterministic pods (#53 risk_parity, #54 trend,
-#55 sector_momentum) fired on a given date, did NOT skip on the new stale-data
-guard, generated the expected residual-liquidation orders, and that the live
-universe data is fresh + adjusted-close-clean. Optionally pushes a pass/fail
-summary to the owner's notification channels.
+Read-only. The pods are the ENABLED autopilots, read from StrategyAutopilot
+(not hard-coded), together with the account(s) they trade and their
+universes. Checks that every pod fired on a given date, did NOT skip on the
+stale-data guard, that the risk-parity pod generated the expected
+residual-liquidation orders, and that the pods' universe data is fresh +
+adjusted-close-clean. Optionally pushes a pass/fail summary to the owner's
+notification channels.
 
     python manage.py verify_friday_cycle                      # defaults to the most recent Friday
     python manage.py verify_friday_cycle --date 2026-06-12
@@ -20,11 +22,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-POD_STRATEGY_IDS = [53, 54, 55]
-RP_PORTFOLIO_ID = 61
-RP_ACCOUNT_ID = 11
 RESIDUAL_TICKERS = ["MRVL", "SIRI", "ZETA"]
-UNIVERSE_NAMES = ["cross_asset_risk_parity", "spdr_sectors_11"]
 MAX_BAR_STALENESS_DAYS = 6
 FACTOR_TOL = 0.005
 
@@ -48,14 +46,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts) -> None:
-        from apps.brokers.models import BrokerAccount
         from apps.data.models import DailyBar
         from apps.portfolios.models import (
             AutopilotRun,
             PortfolioStrategy,
             Position,
             RebalanceOrder,
-            Universe,
+            StrategyAutopilot,
             UniverseMembership,
         )
 
@@ -73,10 +70,21 @@ class Command(BaseCommand):
             mark = "PASS" if ok else "FAIL"
             lines.append(f"[{mark}] {name}" + (f" — {detail}" if detail else ""))
 
+        # The live layout: one pod per ENABLED autopilot (a disabled or archived
+        # pod is not expected to fire), plus the account(s) it trades.
+        autopilots = list(
+            StrategyAutopilot.objects.filter(is_enabled=True)
+            .select_related("strategy", "broker_account")
+            .order_by("strategy_id")
+        )
+        if not autopilots:
+            check("Enabled autopilot pods", False, "no StrategyAutopilot is enabled")
+
         # 1 + 2 + 5a — autopilot runs per pod on cycle_date.
         runs_by_strat: dict[int, AutopilotRun | None] = {}
         any_stale = False
-        for sid in POD_STRATEGY_IDS:
+        for ap in autopilots:
+            sid = ap.strategy_id
             run = (
                 AutopilotRun.objects.filter(
                     autopilot__strategy_id=sid, fire_time_utc__date=cycle_date
@@ -85,8 +93,7 @@ class Command(BaseCommand):
                 .first()
             )
             runs_by_strat[sid] = run
-            strat = PortfolioStrategy.objects.filter(pk=sid).first()
-            name = strat.name if strat else f"strategy {sid}"
+            name = ap.strategy.name
             if run is None:
                 check(f"#{sid} {name}: cycle fired", False, f"no AutopilotRun on {cycle_date}")
                 continue
@@ -102,9 +109,15 @@ class Command(BaseCommand):
             "one or more pods skipped with reason=stale_data" if any_stale else "clean",
         )
 
-        # 3 — RP pod generated Wave-0 close orders for the residuals.
-        rp_run = runs_by_strat.get(53)
-        if rp_run is not None and rp_run.target_id:
+        # 3 — RP pod generated Wave-0 close orders for the residuals still held
+        # on its account's book.
+        rp = next(
+            (a for a in autopilots if a.strategy.kind == PortfolioStrategy.KIND_RISK_PARITY), None,
+        )
+        rp_run = runs_by_strat.get(rp.strategy_id) if rp is not None else None
+        if rp is None:
+            lines.append("[INFO] no enabled risk-parity pod; residual check skipped")
+        elif rp_run is not None and rp_run.target_id:
             close_orders = list(
                 RebalanceOrder.objects.filter(
                     target_id=rp_run.target_id, reason="close",
@@ -112,9 +125,10 @@ class Command(BaseCommand):
                 ).values_list("ticker", "side", "quantity")
             )
             got = {t for t, _, _ in close_orders}
+            book_id = rp.broker_account.portfolio_id if rp.broker_account else None
             still_held = [
                 t for t in RESIDUAL_TICKERS
-                if Position.objects.filter(portfolio_id=RP_PORTFOLIO_ID, ticker=t).exists()
+                if Position.objects.filter(portfolio_id=book_id, ticker=t).exists()
             ]
             ok = bool(got) or not still_held  # generated closes, or nothing left to close
             check(
@@ -126,14 +140,12 @@ class Command(BaseCommand):
         else:
             check("RP residuals: liquidation orders generated", False, "no RP target on cycle_date")
 
-        # 4 — universe data freshness + adjusted-close integrity.
-        tickers: set[str] = set()
-        for n in UNIVERSE_NAMES:
-            u = Universe.objects.filter(name=n).first()
-            if u:
-                tickers |= set(
-                    UniverseMembership.objects.filter(universe=u).values_list("ticker", flat=True)
-                )
+        # 4 — the pods' universe data freshness + adjusted-close integrity.
+        tickers: set[str] = set(
+            UniverseMembership.objects.filter(
+                universe_id__in={a.strategy.universe_id for a in autopilots}
+            ).values_list("ticker", flat=True)
+        )
         stale, corrupt = [], []
         for t in sorted(tickers):
             b = DailyBar.objects.filter(ticker=t, source="fmp").order_by("-date").first()
@@ -155,10 +167,9 @@ class Command(BaseCommand):
             detail,
         )
 
-        # 5b — stray AAPL open order on the RP account (best-effort; Alpaca-side).
-        aapl_note = "not checked"
-        acc = BrokerAccount.objects.filter(pk=RP_ACCOUNT_ID).first()
-        if acc is not None:
+        # 5b — stray open orders on each pod account (best-effort; Alpaca-side).
+        accounts = {a.broker_account_id: a.broker_account for a in autopilots if a.broker_account}
+        for acc in accounts.values():
             try:
                 from apps.brokers.reconcile import get_broker
 
@@ -168,10 +179,10 @@ class Command(BaseCommand):
 
                 opens = cli.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
                 strays = [f"{o.symbol} {o.side} {o.qty} {o.order_type}" for o in opens]
-                aapl_note = f"open Alpaca orders on acct 11: {strays or 'none'}"
+                order_note = f"open Alpaca orders on acct {acc.pk}: {strays or 'none'}"
             except Exception as exc:  # noqa: BLE001
-                aapl_note = f"Alpaca order check skipped: {exc}"
-        lines.append(f"[INFO] {aapl_note}")
+                order_note = f"Alpaca order check skipped for acct {acc.pk}: {exc}"
+            lines.append(f"[INFO] {order_note}")
 
         n_pass = sum(1 for _, ok in results if ok)
         n_total = len(results)
