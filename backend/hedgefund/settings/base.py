@@ -561,8 +561,13 @@ LOGGING = {
         # /bot<token>/sendMessage) where a query-param scrub cannot reach them.
         # The redact filter has a bot-token rule as a second line of defence,
         # but the request log itself has no operational value here — keep it at
-        # WARNING so the secret is never rendered in the first place.
-        "httpx": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        # WARNING so the secret is never rendered in the first place. The
+        # logger-level filter scrubs every httpx record at the source, whichever
+        # handler ends up emitting it (its args are httpx.URL objects, not str).
+        "httpx": {
+            "handlers": ["console"], "level": "WARNING", "propagate": False,
+            "filters": ["redact_secrets"],
+        },
         "httpcore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
