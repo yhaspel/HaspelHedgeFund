@@ -164,7 +164,9 @@ def book_value(book: Portfolio | None) -> Decimal | None:
     except Exception:  # noqa: BLE001 — marks are best-effort; cost basis stands in
         nav = Decimal(str(book.cash_balance or 0))
         for pos in book.positions.all():
-            nav += abs(Decimal(str(pos.quantity))) * Decimal(str(pos.avg_cost or 0))
+            # Signed, as value_portfolio marks it: a short's proceeds are already
+            # in cash, so it subtracts its buy-back liability.
+            nav += Decimal(str(pos.quantity)) * Decimal(str(pos.avg_cost or 0))
         return nav
 
 

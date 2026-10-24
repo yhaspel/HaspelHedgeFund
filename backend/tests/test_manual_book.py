@@ -5,10 +5,12 @@ regression, valuation, and API/permission validation.
 """
 from __future__ import annotations
 
+import logging
 from datetime import UTC, date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import httpx
 import pytest
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
@@ -16,6 +18,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.data.models import DailyBar, MacroSnapshot
+from apps.data.providers.fmp import FmpProvider
 from apps.portfolios.manual_book import (
     ManualBookError,
     adjust_cash,
@@ -732,3 +735,176 @@ def test_intraday_mark_caches_for_interval_minutes(db, user):
     assert first.price == Decimal("123.45")
     # Redis cache should have served the second call.
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Mark-provider outage: the overview degrades to cost basis instead of a 500
+# ---------------------------------------------------------------------------
+
+
+class _UnauthorizedHttp:
+    """An FMP client whose every request answers HTTP 401, so the provider's
+    own raise_for_status() raises the real httpx error (whose text embeds the
+    request URL, API key included)."""
+
+    def get(self, url, params=None):
+        return httpx.Response(401, request=httpx.Request("GET", url, params=params))
+
+
+def _open_long_and_short(user) -> None:
+    open_or_increase_position(
+        user=user, ticker="AAPL", side="long",
+        quantity=Decimal("10"), entry_price=Decimal("100"),
+    )
+    open_or_increase_position(
+        user=user, ticker="GME", side="short",
+        quantity=Decimal("5"), entry_price=Decimal("50"),
+    )
+
+
+@pytest.mark.django_db
+def test_overview_degrades_to_cost_basis_when_the_mark_provider_fails(
+    client, user, stub_fmp_provider, caplog,
+):
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    with caplog.at_level(logging.WARNING, logger="apps.portfolios.valuation"):
+        resp = client.get(reverse("portfolio-overview"))
+    assert resp.status_code == 200
+    assert resp.data["marks_degraded"] is True
+    by_ticker = {p["ticker"]: p for p in resp.data["positions"]}
+    assert Decimal(by_ticker["AAPL"]["mark_price"]) == Decimal("100")
+    assert Decimal(by_ticker["GME"]["market_value"]) == Decimal("-250.00")
+    # cash 99250 (100000 - 1000 + 250 short proceeds) + 1000 long - 250 short.
+    assert Decimal(resp.data["total_value"]) == Decimal("100000.00")
+    assert any("Market data unavailable" in w for w in resp.data["warnings"])
+    # The request URL (and the key in its query string) reaches neither the
+    # client nor the log.
+    assert "fmp-test-key" not in resp.content.decode()
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "status=401" in logged
+    assert "fmp-test-key" not in logged
+    assert "financialmodelingprep" not in logged
+
+
+@pytest.mark.django_db
+def test_overview_flags_marks_degraded_when_no_key_is_configured(client, user):
+    _open_long_and_short(user)
+    with patch(
+        "apps.portfolios.valuation.get_fmp_provider",
+        side_effect=RuntimeError("No FMP key configured for this user."),
+    ):
+        resp = client.get(reverse("portfolio-overview"))
+    assert resp.status_code == 200
+    assert resp.data["marks_degraded"] is True
+
+
+@pytest.mark.django_db
+def test_overview_marks_are_not_degraded_when_marks_load(client, user):
+    _open_long_and_short(user)
+    _seed_mark("AAPL", 120)
+    _seed_mark("GME", 40)
+    resp = client.get(reverse("portfolio-overview"))
+    assert resp.status_code == 200
+    assert resp.data["marks_degraded"] is False
+    assert Decimal(resp.data["total_value"]) == Decimal("100250.00")
+
+
+def test_value_portfolio_still_raises_for_nav_callers(db, user, stub_fmp_provider):
+    """Only the manual-book endpoints opt in: sizing, the drawdown breakers and
+    the hub catch the provider error to apply their own fallbacks."""
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        value_portfolio(get_or_create_manual_book(user))
+
+
+class _TimingOutHttp:
+    """An FMP client whose every request times out; counts the attempts."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, params=None):
+        self.calls += 1
+        raise httpx.ConnectTimeout("connect timed out")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("cadence", "provider_calls"), [
+    ("daily", 1),    # the daily-bars request
+    ("delayed", 2),  # the intraday quote, then its daily-close fallback
+])
+def test_a_failing_provider_is_called_for_one_ticker_only(
+    client, user, stub_fmp_provider, cadence, provider_calls,
+):
+    """Every call into a timing-out provider waits out the client timeout, so
+    after the first failure the rest of the book is valued from the mark cache
+    or at average cost instead of calling the provider once per ticker."""
+    from apps.portfolios.valuation import get_mark, get_or_create_preferences
+
+    prefs = get_or_create_preferences(user)
+    prefs.mark_cadence = cadence
+    prefs.save()
+    _open_long_and_short(user)
+    open_or_increase_position(
+        user=user, ticker="MSFT", side="long",
+        quantity=Decimal("2"), entry_price=Decimal("300"),
+    )
+    _seed_mark("MSFT", 310, on=date.today() - timedelta(days=1))
+    assert get_mark("MSFT", user=user) is not None  # cached before the outage
+    http = _TimingOutHttp()
+    stub_fmp_provider.return_value = FmpProvider(api_key="fmp-test-key", http=http)
+
+    resp = client.get(reverse("portfolio-overview"))
+
+    assert resp.status_code == 200
+    assert http.calls == provider_calls  # AAPL's fetch; GME and MSFT never call
+    assert resp.data["marks_degraded"] is True
+    by_ticker = {p["ticker"]: p for p in resp.data["positions"]}
+    assert Decimal(by_ticker["AAPL"]["mark_price"]) == Decimal("100")  # average cost
+    assert Decimal(by_ticker["GME"]["mark_price"]) == Decimal("50")    # average cost
+    assert Decimal(by_ticker["MSFT"]["mark_price"]) == Decimal("310")  # the cached mark
+
+
+@pytest.mark.django_db
+def test_a_mutation_during_a_provider_outage_succeeds_and_writes_once(
+    client, user, stub_fmp_provider,
+):
+    """The write commits before the response is valued: a 500 there reported a
+    committed deposit as failed and invited a retry that repeated it."""
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    deposits = LedgerEntry.objects.filter(
+        portfolio__user=user, kind=LedgerEntry.KIND_DEPOSIT,
+    )
+    before = deposits.count()
+    resp = client.post(
+        reverse("portfolio-cash"), {"kind": "deposit", "amount": "500"}, format="json",
+    )
+    assert resp.status_code == 200
+    assert resp.data["portfolio"]["marks_degraded"] is True
+    assert Decimal(resp.data["portfolio"]["cash_balance"]) == Decimal("99750.00")
+    assert deposits.count() == before + 1
+
+
+@pytest.mark.django_db
+def test_refresh_marks_and_positions_degrade_during_a_provider_outage(
+    client, user, stub_fmp_provider,
+):
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    refreshed = client.post(reverse("portfolio-refresh-marks"))
+    assert refreshed.status_code == 200
+    assert refreshed.data["marks_degraded"] is True
+    positions = client.get(reverse("portfolio-positions"))
+    assert positions.status_code == 200
+    assert {p["ticker"] for p in positions.data} == {"AAPL", "GME"}
