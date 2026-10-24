@@ -302,6 +302,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     summary = []
     actual_cost = Decimal("0")
     material: list[tuple] = []  # (run, result) for runs that should notify
+    failed: list[Run] = []
     for run_id in run_ids:
         run = Run.objects.filter(pk=run_id).first()
         if run is None:
@@ -309,6 +310,8 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         actual_cost += run.total_cost_usd or Decimal("0")
         if run.status != Run.DONE:
             summary.append({"ticker": run.tickers[0], "notify": False, "status": run.status})
+            if run.status == Run.FAILED:
+                failed.append(run)
             continue
         ticker = run.tickers[0]
         prior = _find_prior_run(sr.user, ticker, run)
@@ -361,15 +364,29 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     hist.submit_decision = submit_decision
     hist.notified_count = notified
     hist.actual_cost_usd = actual_cost
-    hist.status = ScheduledRunHistory.DONE
+    # A fire whose EVERY child run failed is a failed fire, not "done" with
+    # nothing to notify (e.g. a provider rejecting the API key fails every child
+    # run). A partial failure stays "done" (the other tickers were analysed and
+    # notified as usual) with the failures named in `error`.
+    hist.status = (
+        ScheduledRunHistory.FAILED
+        if failed and len(failed) == len(run_ids)
+        else ScheduledRunHistory.DONE
+    )
+    if failed:
+        tickers_failed = ", ".join(r.tickers[0] for r in failed)
+        reason = (failed[0].error_message or "").strip()[:300]
+        note = f"{len(failed)}/{len(run_ids)} child runs failed ({tickers_failed})"
+        note = f"{note}: {reason}" if reason else note
+        hist.error = f"{hist.error}; {note}" if hist.error else note
     hist.finished_at = timezone.now()
     hist.save(
         update_fields=[
             "materiality_decision", "submit_decision", "notified_count",
-            "actual_cost_usd", "status", "finished_at",
+            "actual_cost_usd", "status", "error", "finished_at",
         ]
     )
     return {
-        "status": "done", "tickers": len(run_ids), "notified": notified,
-        "submitted": submit_decision.get("submitted", 0),
+        "status": hist.status, "tickers": len(run_ids), "notified": notified,
+        "failed": len(failed), "submitted": submit_decision.get("submitted", 0),
     }

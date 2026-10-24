@@ -4,7 +4,8 @@ The bridge + guardrail sweep bypass the scheduled-run notify/digest machinery
 (``apps/schedules/tasks.py``), and ``apps/brokers`` imports notifications
 nowhere — so this small helper is the single emit point for the 7 autopilot
 transition types, over the user's email/Telegram channels (reusing the existing
-per-user daily-cap throttle in ``send_notification``).
+per-user daily-cap throttle in ``send_notification``; the fund-state alerts in
+``DAILY_CAP_EXEMPT`` and ``notify_fund`` bypass it so they are never crowded out).
 
 Every message carries the mandatory **"educational use only — not investment
 advice"** footer (§10).
@@ -27,6 +28,11 @@ REJECT = "reject"
 CAP_BREACH = "cap_breach"
 HALT = "halt"
 ACCOUNT_UNHEALTHY = "account_unhealthy"
+
+# Cycle done / skipped (sent as ACCOUNT_UNHEALTHY) / failed, and halts: the
+# alerts that say what the fund did or why it did not trade. They skip the
+# per-user daily cap — a day of earlier failure pings must not silence them.
+DAILY_CAP_EXEMPT = frozenset({CYCLE_DONE, HALT, ACCOUNT_UNHEALTHY})
 
 
 def _channel_for(autopilot):
@@ -52,6 +58,7 @@ def notify_autopilot(autopilot, event_type: str, summary: str, *, ticker: str = 
         body = f"{summary}\n\n{DISCLAIMER}"
         send_notification(
             channel, subject, body, ticker=ticker, triggered_by=None,
+            daily_cap_exempt=event_type in DAILY_CAP_EXEMPT,
         )
         return True
     except Exception:  # noqa: BLE001 — notifications must never break the loop
@@ -70,7 +77,7 @@ def notify_fund(fund, summary: str) -> bool:
             return False
         send_notification(
             channel, f"[Fund] {fund.name}: {summary}",
-            f"{summary}\n\n{DISCLAIMER}", triggered_by=None,
+            f"{summary}\n\n{DISCLAIMER}", triggered_by=None, daily_cap_exempt=True,
         )
         return True
     except Exception:  # noqa: BLE001

@@ -351,6 +351,56 @@ def guardrail_sweep() -> dict:
     }
 
 
+@shared_task(name="apps.portfolios.tasks_autopilot.refresh_autopilot_bars")
+def refresh_autopilot_bars() -> dict:
+    """Weekdays 17:30 ET: after the close, run the deterministic pods' cycle
+    pre-flight — force-refresh each enabled pod's universe bars, then the same
+    freshness gate — so a dead data key or a stale feed is reported days before
+    the Friday cycle would skip on it. One operator alert per run names every
+    failing pod and the refresh-failure cause. Data only: never creates a target
+    or an order; idempotent (an upsert plus a read-only check). A market holiday
+    is absorbed by the gate's MAX_STALENESS_DAYS tolerance."""
+    if skip_when_offline("refresh_autopilot_bars"):
+        return {"status": "skipped_offline"}
+    from apps.brokers.market_calendar import NY
+    from apps.data.freshness import assert_universe_fresh, refresh_universe_bars
+    from apps.data.providers.factory import get_fmp_provider
+    from hedgefund.logging_filters import scrub_secrets
+
+    from .models import PortfolioStrategy
+    from .tasks import _active_members
+
+    today = timezone.now().astimezone(NY).date()
+    deterministic = (
+        PortfolioStrategy.KIND_RISK_PARITY,
+        PortfolioStrategy.KIND_TREND,
+        PortfolioStrategy.KIND_SECTOR_MOMENTUM,
+    )
+    checked = 0
+    problems: list[str] = []
+    for ap in StrategyAutopilot.objects.filter(
+        is_enabled=True, strategy__kind__in=deterministic,
+    ).select_related("strategy__user").order_by("pk"):
+        strategy = ap.strategy
+        tickers = [t for t, _ in _active_members(strategy, today)]
+        if not tickers:
+            continue
+        checked += 1
+        try:
+            note = refresh_universe_bars(tickers, today, get_fmp_provider(user=strategy.user))
+            assert_universe_fresh(tickers, today, refresh_summary=note)
+        except Exception as exc:  # noqa: BLE001 — stale data, no key configured, …
+            log.warning("post-close bar refresh: %s not fresh: %s", strategy.pk, exc)
+            problems.append(
+                scrub_secrets(f"{strategy.name} (#{strategy.pk}): {exc}")[:1000]
+            )
+    if problems:
+        from apps.notifications.operator import notify_stale_market_data
+
+        notify_stale_market_data(problems)
+    return {"checked": checked, "stale": len(problems)}
+
+
 @shared_task(name="apps.portfolios.tasks_autopilot.release_pending_open_orders")
 def release_pending_open_orders() -> dict:
     """Submit locally-held pending_open orders once the market opens (§6.6).

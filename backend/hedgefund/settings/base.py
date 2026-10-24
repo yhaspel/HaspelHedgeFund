@@ -274,9 +274,11 @@ LLM_LAST_RESORT_MODEL = os.environ.get("LLM_LAST_RESORT_MODEL", "meta-llama/llam
 # PAID last resort above, so a :free route needs its own final rung — otherwise
 # a dead :free pick whose tier siblings are also gone has nowhere to hop and the
 # run dies on the first 404 (run 1178, nemotron-3-super:free). A $0 route on a
-# different upstream provider than the dev default; see openrouter.py.
+# different upstream provider than the dev default; if the catalog has retired
+# it, the adapter uses the first active curated dev-tier :free slug instead.
+# See openrouter.py.
 LLM_LAST_RESORT_FREE_MODEL = os.environ.get(
-    "LLM_LAST_RESORT_FREE_MODEL", "minimax/minimax-m3.1-flash:free"
+    "LLM_LAST_RESORT_FREE_MODEL", "xingchen-agi/xing4.0-29b-a4b:free"
 )
 # Runtime quarantine (apps/models_catalog/quarantine.py): a model that answers a
 # LIVE call with HTTP 404 while a later rung of the same chain succeeds is

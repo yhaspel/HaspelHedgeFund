@@ -36,7 +36,12 @@ log = logging.getLogger(__name__)
 class AnthropicClient:
     provider = "anthropic"
 
-    def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        http: httpx.Client | None = None,
+        key_source: str = "platform",
+    ) -> None:
         if getattr(settings, "OFFLINE_MODE", False):  # P4-OFF WS-1.8: defense in depth
             from hedgefund_agents.errors import OfflineLLMViolation
 
@@ -53,6 +58,9 @@ class AnthropicClient:
         self.api_key = api_key or settings.ANTHROPIC_API_KEY
         if not self.api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+        # "user" BYO key / "platform" env key (set by registry.get_llm) — named
+        # in a ProviderAuthError, never the key.
+        self.key_source = key_source
         self._http = http or httpx.Client(timeout=120.0)
 
     def complete(
@@ -109,8 +117,7 @@ class AnthropicClient:
             raw=payload,
         )
 
-    @staticmethod
-    def _raise_for_status(model: str, resp: httpx.Response) -> None:
+    def _raise_for_status(self, model: str, resp: httpx.Response) -> None:
         """Map Anthropic HTTP errors onto the same classes OpenRouter raises.
 
         Before this, every error status fell through ``resp.raise_for_status()``
@@ -119,7 +126,9 @@ class AnthropicClient:
         route for all 8 personas + risk + CIO, a single bad key therefore
         produced a DONE run whose entire council was a silent neutral/hold.
 
-        - 401/402/403/404  → ``ModelUnavailable`` (non-retryable config error);
+        - 401              → ``ProviderAuthError`` (the key is rejected; names
+          the key source, never the key);
+        - 402/403/404      → ``ModelUnavailable`` (non-retryable config error);
         - terminal 429/529 → ``RateLimited`` (capacity exhausted for this run);
         - terminal 5xx     → ``httpx.HTTPStatusError``, same as OpenRouter, so a
           genuinely transient upstream blip still self-heals per agent;
@@ -127,8 +136,15 @@ class AnthropicClient:
         """
         if resp.status_code < 400:
             return
-        from apps.backtests.exceptions import ModelUnavailable, RateLimited
+        from apps.backtests.exceptions import ModelUnavailable, ProviderAuthError, RateLimited
 
+        if resp.status_code == 401:
+            raise ProviderAuthError(
+                "Anthropic",
+                model,
+                key_source=self.key_source,
+                body=resp.text.replace(self.api_key, "[redacted]"),
+            )
         if resp.status_code in MODEL_UNAVAILABLE_STATUSES:
             raise ModelUnavailable(
                 model=model, status_code=resp.status_code, body=resp.text

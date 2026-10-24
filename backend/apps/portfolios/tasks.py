@@ -2245,8 +2245,10 @@ def daily_long_short_cycle(
         from apps.data.freshness import assert_universe_fresh, refresh_universe_bars
 
         _universe = [t for t, _ in members]
-        refresh_universe_bars(_universe, as_of, get_fmp_provider(user=strategy.user))
-        assert_universe_fresh(_universe, as_of)
+        refresh_note = refresh_universe_bars(
+            _universe, as_of, get_fmp_provider(user=strategy.user)
+        )
+        assert_universe_fresh(_universe, as_of, refresh_summary=refresh_note)
 
     # Risk-parity fast path: pure deterministic inverse-vol — no screener, no
     # council. Drops the entire LLM cost (matches plan default

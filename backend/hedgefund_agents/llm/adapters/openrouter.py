@@ -20,7 +20,9 @@ RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 # model will fail the same way. Surfaced as ModelUnavailable so prime_agent_cache
 # can abort the run with a clear config error instead of accumulating silent
 # graph.invoke failures until prime_min_completeness trips. 402 is the canonical
-# case: OpenRouter "free" routes whose backend provider is out of credits.
+# case: OpenRouter "free" routes whose backend provider is out of credits. A 401
+# is checked first and raised as the ProviderAuthError subclass: it rejects the
+# key, not the model, so it never walks the fallback chain below.
 MODEL_UNAVAILABLE_STATUSES = {401, 402, 403, 404}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
@@ -151,13 +153,32 @@ def _last_resort_model() -> str:
 # NO final rung at all once its DB tier menu ran dry, which is exactly how run
 # 1178 died on the first 404 (nemotron-3-super:free dead, its dev-tier siblings
 # delisted). A free chain now always ends on a known-good $0 route on a
-# different upstream provider than the dev default (Minimax vs Nvidia).
-_DEFAULT_FREE_LAST_RESORT = "minimax/minimax-m3.1-flash:free"
+# different upstream provider than the dev default (Phala vs Nvidia). The
+# previous default, minimax/minimax-m3.1-flash:free, was delisted 2026-10-23.
+_DEFAULT_FREE_LAST_RESORT = "xingchen-agi/xing4.0-29b-a4b:free"
 
 
 def _free_last_resort_model() -> str:
+    """The configured :free last resort — unless the catalog has retired it
+    (delisted upstream / quarantined), then the first curated dev-tier :free slug
+    whose catalog row is still active. A slug the catalog has no row for is kept
+    (cold start); with the DB unreachable the configured slug is used as-is."""
     target = getattr(settings, "LLM_LAST_RESORT_FREE_MODEL", _DEFAULT_FREE_LAST_RESORT)
-    return target if target.endswith(":free") else f"{target}:free"
+    target = target if target.endswith(":free") else f"{target}:free"
+    ladder = _static_free_ladder()
+    try:
+        from apps.models_catalog.models import ModelEntry
+
+        active = dict(
+            ModelEntry.objects.filter(
+                id__in=[f"openrouter:{s}" for s in (target, *ladder)]
+            ).values_list("id", "is_active")
+        )
+    except Exception:  # DB unreachable / apps layer unavailable (unit tests)
+        return target
+    if active.get(f"openrouter:{target}", True):
+        return target
+    return next((s for s in ladder if active.get(f"openrouter:{s}")), target)
 
 
 def _static_free_ladder() -> list[str]:
@@ -273,7 +294,12 @@ def _next_heal_target(model: str, tried: tuple[str, ...]) -> str | None:
 class OpenRouterClient:
     provider = "openrouter"
 
-    def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        http: httpx.Client | None = None,
+        key_source: str = "platform",
+    ) -> None:
         if getattr(settings, "OFFLINE_MODE", False):  # P4-OFF WS-1.8: defense in depth
             from hedgefund_agents.errors import OfflineLLMViolation
 
@@ -284,6 +310,9 @@ class OpenRouterClient:
         self.api_key = api_key or settings.OPENROUTER_API_KEY
         if not self.api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
+        # Which key this client runs on ("user" BYO key / "platform" env key, set
+        # by registry.get_llm) — named in a ProviderAuthError, never the key.
+        self.key_source = key_source
         # L1: a per-operation httpx.Timeout, not a scalar. The scalar 120s was a
         # per-READ timeout that a trickling reasoning route reset on every byte
         # and so never fired (run 236 parked the worker 10+ min). A tighter read
@@ -456,6 +485,20 @@ class OpenRouterClient:
             body = self._build_body(model, messages, max_tokens, temperature, False)
             resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        if resp.status_code == 401:
+            # The KEY is rejected (disabled / revoked / unknown account), so every
+            # model on it fails the same way: a ladder walk or the paid hatch only
+            # burns hops and leaves the error naming the last rung, and a
+            # quarantine would retire healthy routes. Fail once, naming the key
+            # source — never the key.
+            from apps.backtests.exceptions import ProviderAuthError
+
+            raise ProviderAuthError(
+                "OpenRouter",
+                model,
+                key_source=self.key_source,
+                body=resp.text.replace(self.api_key, "[redacted]"),
+            )
         # Retries inside _post_with_retry are exhausted and the route is still
         # failing transiently (typically a rate-limited :free upstream). Hop once
         # to a same-tier free model on a different provider rather than failing

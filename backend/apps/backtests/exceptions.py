@@ -91,3 +91,36 @@ class RateLimited(ModelUnavailable):
         self.model = model
         self.status_code = 429
         self.body = body
+
+
+class ProviderAuthError(ModelUnavailable):
+    """Raised by an LLM adapter on HTTP 401: the provider rejected the API KEY
+    itself (disabled, revoked, unknown account), not one model.
+
+    Every model reached with that key fails identically, so walking the fallback
+    ladder only burns hops and leaves the error naming the LAST rung instead of
+    the key. The adapter raises this immediately — no fallback hop, no paid-hatch
+    escalation, no catalog quarantine. A ModelUnavailable subclass, so every
+    existing handler (node self-heal wrapper, prime_agent_cache, the run task)
+    still aborts the run once. ``key_source`` says which key was in use ("user" =
+    the owner's BYO key, "platform" = the server env key); the key itself is
+    never part of the message.
+    """
+
+    def __init__(self, provider: str, model: str, *, key_source: str, body: str = "") -> None:
+        hint = (
+            "check Settings → Provider keys"
+            if key_source == "user"
+            else "check the platform API key in the server environment"
+        )
+        upstream = f" Upstream: {body[:200]}" if body else ""
+        RuntimeError.__init__(
+            self,
+            f"{provider} rejected the API key (HTTP 401, key_source={key_source}) — "
+            f"{hint}.{upstream}",
+        )
+        self.provider = provider
+        self.model = model
+        self.status_code = 401
+        self.body = body
+        self.key_source = key_source

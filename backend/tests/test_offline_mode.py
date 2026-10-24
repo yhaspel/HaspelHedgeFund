@@ -459,6 +459,8 @@ def test_macro_snapshot_serves_db_row_stale_offline(auth_client, user):
         ("apps.persona_evolution.tasks.evolve_personas", "reason"),
         ("apps.portfolios.tasks_lab.fetch_lab_news", "status"),
         ("apps.portfolios.tasks_lab.run_news_lab_cycles", "status"),
+        ("apps.models_catalog.tasks.probe_provider_keys", "status"),
+        ("apps.portfolios.tasks_autopilot.refresh_autopilot_bars", "status"),
     ],
 )
 def test_outward_facing_tasks_noop_offline(dotted, expect_key):

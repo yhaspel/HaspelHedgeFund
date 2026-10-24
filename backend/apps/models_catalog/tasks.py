@@ -67,6 +67,19 @@ def reconcile_model_catalog() -> dict:
 
 
 @shared_task
+def probe_provider_keys() -> dict:
+    """Beat (weekdays 08:40 ET, Fridays 15:00 ET): one cheap authenticated call
+    per distinct OpenRouter / FMP key in use, alerting the operator once per
+    outage on a rejected key — before the daily council batch and the Friday
+    autopilot cycles find out the hard way. Read-only; see ``key_probe``."""
+    if skip_when_offline("probe_provider_keys"):
+        return {"status": "skipped_offline"}
+    from .key_probe import probe_all
+
+    return probe_all()
+
+
+@shared_task
 def heal_stored_model_maps_task() -> list[dict]:
     """Stored-map doctor on demand — dispatched by ``quarantine.quarantine_model``
     the moment a live call proves a catalog model dead, so schedules / prefs /
