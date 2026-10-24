@@ -58,8 +58,9 @@ Database migrations run automatically when the `web` container boots. Published 
 bind to `127.0.0.1`, so the stack is reachable from your machine only.
 
 Celery beat drives every periodic job: scheduled runs, autopilot cycles and drawdown
-halts, broker order polling and reconciliation, orphan-run sweeps, IBKR keep-warm, and
-the daily data and model-catalog refreshes. The local stack does **not** start it by
+halts, broker order polling and reconciliation, orphan-run sweeps, IBKR keep-warm, the
+provider-key probes, the post-close bar refresh, and the daily data and model-catalog
+refreshes. The local stack does **not** start it by
 default: it sits behind the `scheduler` compose profile, so a dev stack never
 duplicates the schedules of an instance that already runs its own beat. Without it none
 of those jobs run (**Sync now** on a broker account still polls and reconciles it on
