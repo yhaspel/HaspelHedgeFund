@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
+from unittest.mock import patch
 
+import httpx
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -20,7 +22,7 @@ from rest_framework.test import APIClient
 from apps.brokers.adapters import mock as mock_adapter
 from apps.brokers.models import BrokerAccount, BrokerOrder
 from apps.portfolios import autopilot as bridge
-from apps.portfolios import autopilot_risk
+from apps.portfolios import autopilot_risk, sleeves
 from apps.portfolios.models import (
     AutonomousFund,
     AutopilotRun,
@@ -101,6 +103,40 @@ def test_F14_cost_basis_nav_proxy_double_counts_shorts(user):
         limit_price=Decimal("100"),
     )
     assert check(ok) == []
+
+
+# ===========================================================================
+# F14b (FIXED) — the same double count survived in sleeves.book_value's
+# cost-basis fallback (fund NAV / the fund drawdown breaker / NAV snapshots
+# while marks fail): a net-short book read 2× its short notional rich. The
+# fallback now signs the quantity exactly like value_portfolio's marked path.
+# ===========================================================================
+def _mark_at_cost(ticker, *args, **kwargs):
+    from apps.portfolios.valuation import Mark
+
+    pos = Position.objects.get(ticker=ticker)
+    return Mark(ticker=ticker, price=pos.avg_cost, as_of=dt.date.today(),
+                age_days=0, stale=False)
+
+
+@pytest.mark.parametrize(("quantity", "cash", "expected"), [
+    (Decimal("500"), Decimal("50000"), Decimal("100000")),     # long: 50k cash + 50k at cost
+    (Decimal("-500"), Decimal("150000"), Decimal("100000")),   # short: proceeds already in cash
+])
+def test_F14b_book_value_fallback_signs_positions_like_the_marked_path(
+    user, quantity, cash, expected,
+):
+    pf = Portfolio.objects.create(
+        user=user, kind=Portfolio.KIND_SLEEVE, name="s", cash_balance=cash,
+    )
+    Position.objects.create(portfolio=pf, ticker="XLE", quantity=quantity, avg_cost=Decimal("100"))
+    with patch("apps.portfolios.valuation.get_mark", side_effect=_mark_at_cost):
+        marked = sleeves.book_value(pf)
+    with patch("apps.portfolios.valuation.get_mark",
+               side_effect=httpx.ConnectError("mark provider down")):
+        fallback = sleeves.book_value(pf)
+    assert marked == expected
+    assert fallback == expected
 
 
 # ===========================================================================
