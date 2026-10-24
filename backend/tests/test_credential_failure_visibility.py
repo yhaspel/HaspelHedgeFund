@@ -163,6 +163,68 @@ def test_402_403_404_still_walk_the_fallback_chain(settings, status):
     assert http.post.call_count == 2
 
 
+_RELAYED_401 = (
+    '{"error":{"message":"Provider returned error","code":401,'
+    '"metadata":{"raw":"unauthorized","provider_name":"SomeHost"}}}'
+)
+
+
+@pytest.mark.django_db
+def test_relayed_upstream_401_hops_like_any_unavailable_route(settings):
+    """OpenRouter relays an upstream provider's own error as "Provider returned
+    error" with the provider's name. A 401 in that shape belongs to the route,
+    not to our key: hop as before, no ProviderAuthError, no quarantine."""
+    from apps.models_catalog.models import ModelEntry
+    from apps.models_catalog.tier_menus import DEV_TIER_SLUGS
+    from hedgefund_agents.llm.adapters import openrouter as orm
+
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    settings.LLM_FREE_ONLY = False
+    first = DEV_TIER_SLUGS[0]
+    calls: list[str] = []
+
+    def fake_post(self, body, headers):
+        calls.append(body["model"])
+        req = httpx.Request("POST", orm.API_URL)
+        if len(calls) == 1:
+            return httpx.Response(401, text=_RELAYED_401, request=req)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+            request=req,
+        )
+
+    with patch.object(orm.OpenRouterClient, "_post_with_retry", fake_post):
+        resp = orm.OpenRouterClient(api_key="sk-or-v1-test").complete(
+            model=first, messages=[Message("user", "hi")]
+        )
+    assert resp.text == '{"ok":true}'
+    assert len(calls) == 2 and calls[1] != first
+    assert ModelEntry.objects.get(id=f"openrouter:{first}").is_active is True
+
+
+@pytest.mark.parametrize(
+    "text,relayed",
+    [
+        (_USER_NOT_FOUND, False),  # OpenRouter's own verdict on the key
+        ('{"error":{"message":"No auth credentials found","code":401}}', False),
+        (_RELAYED_401, True),
+        ('{"error":{"message":"Provider returned error","code":401}}', True),
+        ('[{"error":"odd"}]', False),
+        ("Unauthorized", False),
+    ],
+)
+def test_relayed_upstream_error_reads_only_a_relayed_body(text, relayed):
+    from hedgefund_agents.llm.adapters.openrouter import API_URL, _relayed_upstream_error
+
+    resp = httpx.Response(401, text=text, request=httpx.Request("POST", API_URL))
+    assert _relayed_upstream_error(resp) is relayed
+
+
 @pytest.mark.django_db
 def test_anthropic_401_raises_provider_auth_error(settings):
     from hedgefund_agents.llm.adapters.anthropic import AnthropicClient
@@ -954,6 +1016,55 @@ def test_default_free_last_resort_is_a_priced_curated_rung():
     assert _DEFAULT_FREE_LAST_RESORT != DEV_TIER_SLUGS[0]  # not the dev default's upstream
     assert PRICING[_DEFAULT_FREE_LAST_RESORT].input_per_mtok == 0.0
     assert not is_reasoning_slug(_DEFAULT_FREE_LAST_RESORT)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("failure", ["rate_limited", "empty_content"])
+def test_pinned_first_hop_skips_a_target_the_catalog_retired(settings, failure):
+    """The rate-limit and empty-content maps pin a different-provider first hop.
+    Once the catalog retires that target, the hop goes down the catalog-driven
+    chain instead of spending one of the fallback hops on a delisted route."""
+    from apps.models_catalog.models import ModelEntry
+    from hedgefund_agents.llm.adapters import openrouter as orm
+
+    settings.LLM_SELF_HEAL = True
+    settings.LLM_MAX_MODEL_FALLBACKS = 5
+    settings.LLM_FREE_ONLY = False
+    settings.OPENROUTER_PAID_FALLBACK = False
+    start = "nvidia/nemotron-3.5-super-vl:free"
+    table = orm._RATE_LIMIT_FALLBACK if failure == "rate_limited" else orm._EMPTY_CONTENT_FALLBACK
+    pinned = table[start]
+    calls: list[str] = []
+
+    def fake_post(self, body, headers):
+        calls.append(body["model"])
+        req = httpx.Request("POST", orm.API_URL)
+        if body["model"] == start and failure == "rate_limited":
+            return httpx.Response(429, text="rate limited", request=req)
+        content = "" if body["model"] == start else '{"ok":true}'
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+            request=req,
+        )
+
+    def first_hop() -> str:
+        calls.clear()
+        with patch.object(orm.OpenRouterClient, "_post_with_retry", fake_post):
+            resp = orm.OpenRouterClient(api_key="sk-or-v1-test").complete(
+                model=start, messages=[Message("user", "hi")]
+            )
+        assert resp.text == '{"ok":true}'
+        return calls[1]
+
+    assert first_hop() == pinned  # live target: the pinned hop stands
+    ModelEntry.objects.filter(id=f"openrouter:{pinned}").update(is_active=False)
+    hop = first_hop()
+    assert hop != pinned
+    assert ModelEntry.objects.get(id=f"openrouter:{hop}").is_active is True
 
 
 # --- beat entries ---------------------------------------------------------------

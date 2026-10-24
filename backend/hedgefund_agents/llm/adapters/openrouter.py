@@ -22,7 +22,9 @@ RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 # graph.invoke failures until prime_min_completeness trips. 402 is the canonical
 # case: OpenRouter "free" routes whose backend provider is out of credits. A 401
 # is checked first and raised as the ProviderAuthError subclass: it rejects the
-# key, not the model, so it never walks the fallback chain below.
+# key, not the model, so it never walks the fallback chain below — unless
+# OpenRouter is relaying one upstream provider's error (_relayed_upstream_error),
+# which belongs to that route and is handled like any other unavailable route.
 MODEL_UNAVAILABLE_STATUSES = {401, 402, 403, 404}
 MAX_RETRIES = 5
 BASE_BACKOFF_SECONDS = 2.0
@@ -189,6 +191,41 @@ def _free_last_resort_model() -> str:
     """The configured :free last resort — unless the catalog has retired it, then
     the first live curated dev-tier :free slug (see ``_free_rungs``)."""
     return _free_rungs()[1]
+
+
+def _relayed_upstream_error(resp) -> bool:
+    """True when the error body is OpenRouter relaying one upstream provider's
+    error ("Provider returned error", with ``error.metadata.provider_name``)
+    rather than its own verdict on our key."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    err = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(err, dict):
+        return False
+    meta = err.get("metadata")
+    return err.get("message") == "Provider returned error" or (
+        isinstance(meta, dict) and bool(meta.get("provider_name"))
+    )
+
+
+def _static_hop(table: dict[str, str], model: str) -> str | None:
+    """``model``'s pinned first hop in ``table`` (the empty-content or rate-limit
+    map), or None once the catalog has retired that target, so the catalog-driven
+    chain takes over instead of spending a hop on a delisted route. A target with
+    no catalog row, or an unreachable DB, keeps the pinned hop (cold start)."""
+    target = table.get(model)
+    if target is None:
+        return None
+    try:
+        from apps.models_catalog.models import ModelEntry
+
+        if ModelEntry.objects.filter(id=f"openrouter:{target}", is_active=False).exists():
+            return None
+    except Exception:  # DB unreachable / apps layer unavailable (unit tests)
+        pass
+    return target
 
 
 def _static_free_ladder() -> list[str]:
@@ -498,12 +535,13 @@ class OpenRouterClient:
             body = self._build_body(model, messages, max_tokens, temperature, False)
             resp = self._post_with_retry(body, headers)
         latency_ms = int((time.perf_counter() - t0) * 1000)
-        if resp.status_code == 401:
+        if resp.status_code == 401 and not _relayed_upstream_error(resp):
             # The KEY is rejected (disabled / revoked / unknown account), so every
             # model on it fails the same way: a ladder walk or the paid hatch only
             # burns hops and leaves the error naming the last rung, and a
             # quarantine would retire healthy routes. Fail once, naming the key
-            # source — never the key.
+            # source — never the key. A relayed upstream 401 falls through to the
+            # unavailable-route handling below (quarantine only acts on 404).
             from apps.backtests.exceptions import ProviderAuthError
 
             raise ProviderAuthError(
@@ -530,7 +568,7 @@ class OpenRouterClient:
             # full retry budget (~30-40 s), which walks the ladder past the run's
             # soft time limit. With the paid hatch on, take it now instead.
             if not (paid_hatch and _free_429s >= 1):
-                fb = _RATE_LIMIT_FALLBACK.get(model)
+                fb = _static_hop(_RATE_LIMIT_FALLBACK, model)
                 if (fb is None or fb in _tried) and len(_tried) < _max_fallbacks():
                     # Same chain the dead-route path walks: DB same-tier siblings,
                     # then (for :free) the static free ladder + free last resort.
@@ -697,7 +735,7 @@ class OpenRouterClient:
         # token-budget escalation (the budget goes to hidden thinking). Fall
         # back once to a same-price-tier model rather than failing the run.
         if not text:
-            fb = _EMPTY_CONTENT_FALLBACK.get(model)
+            fb = _static_hop(_EMPTY_CONTENT_FALLBACK, model)
             if fb and fb not in _tried:
                 log.warning(
                     "openrouter empty content from %s (finish_reason=%r); "
