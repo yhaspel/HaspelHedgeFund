@@ -172,6 +172,16 @@ PIPELINE_AGENTS = [
 
 ORPHAN_THRESHOLD_MIN = 15
 
+# A run with no celery_task_id gives inspect.active() nothing to check: the
+# synchronous schedule fan-out and the pairs-cycle audit rows execute in-process
+# inside another task (no per-run Celery time limit), and a strategy candidate
+# sits QUEUED without one until a worker claims it. Age is the only signal for
+# those, so the window is far past anything legitimate: a Celery run is capped at
+# RUN_HARD_TIME_LIMIT_SECONDS (default 12 min), an in-process run makes the same
+# timeout-bounded LLM calls (minutes), and a queued candidate can wait behind
+# backtests holding every worker slot (BACKTEST_TIME_LIMIT_SECONDS, default 6.5 h).
+TASKLESS_ORPHAN_THRESHOLD_HOURS = 24
+
 
 def _orphan_cutoff():
     """Oldest `created_at` a run may have and still be considered live.
@@ -186,32 +196,62 @@ def _orphan_cutoff():
     return timezone.now() - dt.timedelta(seconds=seconds)
 
 
+def _sweep_taskless_runs() -> list[int]:
+    """Fail QUEUED/RUNNING runs that have no Celery task id and are older than
+    ``TASKLESS_ORPHAN_THRESHOLD_HOURS``. Returns the swept run ids."""
+    cutoff = timezone.now() - dt.timedelta(hours=TASKLESS_ORPHAN_THRESHOLD_HOURS)
+    swept_ids: list[int] = []
+    for run in Run.objects.filter(
+        status__in=Run.ACTIVE_STATUSES, celery_task_id="", created_at__lt=cutoff
+    ):
+        # Conditional, like the dispatched sweep: a run that moved on since the
+        # query (finished, cancelled, or claimed by a worker that stamped its
+        # task id) is never clobbered.
+        updated = Run.objects.filter(
+            pk=run.pk, status=run.status, celery_task_id=""
+        ).update(
+            status=Run.FAILED,
+            error_message=(
+                f"Orphaned: no Celery task id and still {run.status} after "
+                f"{TASKLESS_ORPHAN_THRESHOLD_HOURS}h; its process likely exited "
+                "before recording a terminal status."
+            ),
+            finished_at=timezone.now(),
+        )
+        if updated:
+            swept_ids.append(run.id)
+    return swept_ids
+
+
 @shared_task
 def sweep_orphan_runs() -> dict:
     """Mark abandoned runs as failed.
 
-    A run is "orphaned" only if ALL of these hold:
+    A run dispatched through Celery (non-empty ``celery_task_id``) is
+    "orphaned" only if ALL of these hold:
       * it is RUNNING (a QUEUED run has not started — it is waiting in the
         broker, and "no active task" is the normal state for it, not evidence
         of a dead worker);
-      * it was dispatched through Celery (non-empty ``celery_task_id``) — the
-        synchronous schedule fan-out executes ``execute_run`` in-process and
-        never has one, so the broker can say nothing about it;
       * at least one worker replied to ``inspect.active()`` and none of them is
         running its task id;
       * it has been sitting there longer than the task's own wall-clock ceiling
         (see ``_orphan_cutoff``).
+
+    A run with no task id (the synchronous schedule fan-out executes
+    ``execute_run`` in-process, so the broker can say nothing about it) is
+    swept on age alone — see ``TASKLESS_ORPHAN_THRESHOLD_HOURS``.
 
     Happens after worker restarts / container recreation kills the subprocess
     before the task wrapper can record terminal status.
     """
     from hedgefund.celery import app as celery_app  # local: avoid load-time cycle
 
+    swept_ids = _sweep_taskless_runs()
     candidates = Run.objects.filter(
         status=Run.RUNNING, created_at__lt=_orphan_cutoff()
     ).exclude(celery_task_id="")
     if not candidates.exists():
-        return {"swept": 0}
+        return _report_swept(swept_ids)
 
     active_ids: set[str] = set()
     try:
@@ -219,21 +259,19 @@ def sweep_orphan_runs() -> dict:
         replies = inspect.active()
     except Exception:  # broker unreachable etc. — better to do nothing than to clobber live runs
         log.warning("orphan sweep: could not inspect active tasks; aborting")
-        return {"swept": 0, "error": "inspect_failed"}
+        return _report_swept(swept_ids, error="inspect_failed")
     if not replies:
         # None = no worker answered within the 2s window (busy broker, slow or
         # restarting worker). `(None or {})` used to read that as "nothing is
         # running" and fail every live run.
         log.warning("orphan sweep: no worker replied to inspect.active(); aborting")
-        return {"swept": 0, "error": "no_worker_reply"}
+        return _report_swept(swept_ids, error="no_worker_reply")
     for _worker, tasks in replies.items():
         for t in tasks or []:
             tid = t.get("id")
             if tid:
                 active_ids.add(tid)
 
-    swept = 0
-    swept_ids: list[int] = []
     for run in candidates:
         if run.celery_task_id in active_ids:
             continue  # still running, just slow
@@ -250,8 +288,12 @@ def sweep_orphan_runs() -> dict:
         )
         if not updated:
             continue
-        swept += 1
         swept_ids.append(run.id)
+    return _report_swept(swept_ids)
+
+
+def _report_swept(swept_ids: list[int], **extra) -> dict:
+    swept = len(swept_ids)
     if swept:
         log.warning("orphan sweep marked %d runs failed", swept)
         # P5-SH WS2.2: a sweep > 0 means a worker died mid-run — tell the operator.
@@ -261,7 +303,7 @@ def sweep_orphan_runs() -> dict:
             notify_orphan_sweep(swept, run_ids=swept_ids)
         except Exception:  # pragma: no cover — never let an alert break the sweep
             log.exception("orphan-sweep operator alert failed")
-    return {"swept": swept}
+    return {"swept": swept, **extra}
 
 
 # L3: a per-task wall-clock cap so a run is GUARANTEED to terminate even if every
