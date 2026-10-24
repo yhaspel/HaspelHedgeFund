@@ -54,10 +54,19 @@ Then open:
 - Django admin → http://localhost:8811/admin/
 - API health probe → http://localhost:8811/api/health/ (200, no auth — what compose / load balancers / smoke checks should use)
 
-Database migrations run automatically when the `web` container boots.
+Database migrations run automatically when the `web` container boots. Published ports
+bind to `127.0.0.1`, so the stack is reachable from your machine only.
 
-Want it running when your machine is closed? Scheduled runs and autopilot cycles are
-driven by Celery beat, which stops with your laptop. See
+Scheduled runs and autopilot cycles are driven by Celery beat, which the local stack
+does **not** start by default: it sits behind the `scheduler` compose profile, so a dev
+stack never duplicates the schedules of an instance that already runs its own beat.
+Start it deliberately with:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile scheduler up -d --build
+```
+
+Want it running when your machine is closed? Beat stops with your laptop. See
 [`guides/railway-deploy.md`](./guides/railway-deploy.md) for an always-on cloud deploy
 (six services, ~$15–25/month) that can migrate your existing database as-is.
 

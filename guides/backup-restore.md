@@ -63,7 +63,7 @@ docker compose -f infra/docker-compose.yml exec -T db dropdb -U hedgefund hedgef
 docker compose -f infra/docker-compose.yml exec -T db createdb -U hedgefund hedgefund
 docker compose -f infra/docker-compose.yml exec -T db \
   pg_restore -U hedgefund -d hedgefund --no-owner < hf_backup_YYYY-MM-DD.dump
-docker compose -f infra/docker-compose.yml up -d web worker beat
+docker compose -f infra/docker-compose.yml up -d web worker   # + beat only if you run the scheduler locally
 ```
 
 ## Backing up a cloud-hosted database

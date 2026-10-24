@@ -80,7 +80,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 #    -> FIELD_ENCRYPTION_KEY=<that value>   (in .env)
 
 # 2. RECREATE the containers — `docker compose restart` does NOT re-read env_file.
-docker compose -f infra/docker-compose.yml up -d web worker beat
+docker compose -f infra/docker-compose.yml up -d web worker
 
 # 3. Confirm nothing is undecryptable (MultiFernet keeps the legacy key as secondary).
 docker compose -f infra/docker-compose.yml exec web python manage.py vault_doctor
@@ -289,6 +289,9 @@ After cutover, your **local** stack must never trade against the same broker acc
 again: a second beat + worker double-submits every autopilot cycle.
 
 - Keep the local stack **down** by default.
+- Never start a local beat: the compose `beat` service sits behind the `scheduler`
+  profile, so `./infra/up.sh` and a plain `docker compose up` leave it off — don't
+  pass `--profile scheduler` locally after cutover.
 - Set `PAPER_AUTO_SUBMIT_ENABLED=0` in your local `.env` **now**. It only gates paper
   auto-submit, so manual local dev keeps working; re-enabling is a deliberate flag flip.
 - Disable any local cron/launchd jobs that assumed the local stack was the live one.

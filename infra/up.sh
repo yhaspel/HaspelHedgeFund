@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-# Bring up the entire dev stack (db, redis, web, worker, beat, frontend) with
+# Bring up the entire dev stack (db, redis, web, worker, frontend) with
 # Docker Compose: builds images (Docker's layer cache keeps re-runs fast), waits
 # for the web container's startup migrations to finish, creates the dev
 # superuser if DJANGO_SUPERUSER_* are set in ../.env, then prints the URLs.
@@ -16,6 +16,10 @@ cd "$(dirname "$0")"
 # the `ibkr` compose profile). Opt in once you have the BYO clientportal.gw.zip:
 #     docker compose --profile ibkr up
 # (see guides/ibkr-gateway.md).
+#
+# Celery beat stays off too: it sits behind the `scheduler` compose profile, so
+# this script never starts a local scheduler. Start it deliberately with:
+#     docker compose --profile scheduler up -d --build
 
 # Auto-renew the frontend's anonymous node_modules volume when its pnpm lockfile
 # drifts from the image the volume was seeded with. Shared with restart-rebuild.sh.
@@ -75,5 +79,6 @@ Stack is up:
   API health    -> http://localhost:8811/api/health/
 
 Follow logs with:  docker compose -f infra/docker-compose.yml logs -f
-Stop the stack:    docker compose -f infra/docker-compose.yml down
+Stop the stack:    docker compose -f infra/docker-compose.yml --profile scheduler down
+Celery beat:       not started; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build
 EOF

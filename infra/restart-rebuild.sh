@@ -12,3 +12,4 @@ docker compose up -d --build
 # packages actually reach the container (otherwise `ng serve` fails to compile).
 renew_frontend_node_modules_if_lockfile_changed
 docker compose ps
+echo ">> Celery beat is not started by this script; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build"
