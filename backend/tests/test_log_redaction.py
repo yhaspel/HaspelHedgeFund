@@ -129,6 +129,32 @@ def test_mismatched_format_args_do_not_raise_and_are_scrubbed():
     assert "api_key=REDACTED" in rec.getMessage()
 
 
+class _Unprintable:
+    """An argument whose str() and repr() raise, like a model whose __str__
+    follows a missing relation (Model.__repr__ calls __str__)."""
+
+    def __str__(self):
+        raise RuntimeError("str boom")
+
+    __repr__ = __str__
+
+
+def test_unprintable_args_never_raise_from_the_filter(log_buffer):
+    # Filters run outside Handler.emit's error handling, so anything raised there
+    # would propagate into the code that logged.
+    rec = _record("order %s failed", (_Unprintable(),))
+    assert RedactSecretsFilter().filter(rec) is True
+    assert rec.getMessage() == "order %s failed <unprintable args>"
+
+    log = logging.getLogger("apps.probe")
+    log.error("order %s failed: %s", _Unprintable(), "https://x.test/?apikey=SECRET")
+    log.error(_Unprintable())
+    out = log_buffer.getvalue()
+    assert "order %s failed: %s <unprintable args>" in out
+    assert "<unprintable log message>" in out
+    assert "SECRET" not in out
+
+
 def test_redacts_key_param_bearer_tokens_and_provider_keys():
     rec = _record(
         "GET %s headers=%s or=%s ant=%s",
@@ -199,17 +225,20 @@ import logging
 import django
 django.setup()
 import httpx
+from celery.utils.log import get_multiprocessing_logger
 from hedgefund.celery import app
 from hedgefund.logging_filters import RedactSecretsFilter
 app.log.setup(loglevel="INFO")  # what `celery worker` / `celery beat` run at startup
-handlers = logging.getLogger().handlers + logging.getLogger("celery.task").handlers
-ok = bool(handlers) and all(
-    any(isinstance(f, RedactSecretsFilter) for f in h.filters) for h in handlers
+loggers = (logging.getLogger(), logging.getLogger("celery.task"), get_multiprocessing_logger())
+ok = all(lg.handlers for lg in loggers) and all(
+    any(isinstance(f, RedactSecretsFilter) for f in h.filters)
+    for lg in loggers for h in lg.handlers
 )
 print(f"FILTERED={ok}")
 url = httpx.URL("https://x.test/q?apikey=PROBE-SECRET")
 logging.getLogger("apps.probe").warning("GET %s", url)
 logging.getLogger("celery.task").warning("task GET %s", url)
+get_multiprocessing_logger().error("pool GET %s", url)  # billiard's own handler
 """
 
 
@@ -224,4 +253,4 @@ def test_celery_worker_and_beat_handlers_redact():
     assert result.returncode == 0, result.stderr
     assert "FILTERED=True" in result.stdout
     assert "PROBE-SECRET" not in result.stderr
-    assert result.stderr.count("apikey=REDACTED") == 2
+    assert result.stderr.count("apikey=REDACTED") == 3

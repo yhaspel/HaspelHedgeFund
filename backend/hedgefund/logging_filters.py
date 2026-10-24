@@ -92,7 +92,13 @@ class RedactSecretsFilter(logging.Filter):
         try:
             message = record.getMessage()
         except Exception:  # noqa: BLE001 - a bad format/args pair must not raise here
-            message = f"{record.msg} {record.args!r}"
+            try:
+                message = f"{record.msg} {record.args!r}"
+            except Exception:  # noqa: BLE001 - nor a message/arg whose str()/repr() raises
+                message = (
+                    f"{record.msg} <unprintable args>" if isinstance(record.msg, str)
+                    else "<unprintable log message>"
+                )
         record.msg = _scrub_text(message)
         record.args = ()
         if record.exc_info:

@@ -237,6 +237,7 @@ once per project). The Web service needs only `API_ORIGIN`.
 | `DJANGO_SECRET_KEY` | fresh random, ≥50 chars | generate |
 | `JWT_SIGNING_KEY` | fresh, ≥32 bytes — `python -c "import secrets; print(secrets.token_urlsafe(48))"` | invalidates existing sessions (you log in again) |
 | `FIELD_ENCRYPTION_KEY` | **the exact key from Step 2a** | this is what makes migrated credentials decrypt |
+| `FIELD_ENCRYPTION_KEY_PREVIOUS` | unset | only while rotating the field key, and then on API, Worker and Beat alike; procedure in `.env.example` |
 | `DJANGO_ALLOWED_HOSTS` | `<api-domain>,<web-domain>,healthcheck.railway.app` | third entry **required** for healthchecks |
 | `POSTGRES_DB` / `_USER` / `_PASSWORD` / `_HOST` / `_PORT` | `${{Postgres.PGDATABASE}}` / `${{Postgres.PGUSER}}` / `${{Postgres.PGPASSWORD}}` / `${{Postgres.PGHOST}}` / `${{Postgres.PGPORT}}` | Railway references — private network, no code change |
 | `REDIS_URL` | `${{Redis.REDIS_URL}}` | reference |

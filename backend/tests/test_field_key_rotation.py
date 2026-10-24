@@ -7,7 +7,10 @@ Locks the contract that:
     (ProviderKey, BrokerCredential, UserBrokerOAuthApp, NotificationChannel
     config secrets) to the primary without touching timestamps, is idempotent,
     and leaves undecryptable values in place (exit 0 unless --strict);
-  * vault_doctor scans the OAuth-app and notification-channel stores too;
+  * a --strict dry run fails while any value is still to re-encrypt: the check
+    before the old key is dropped, which vault_doctor cannot make;
+  * vault_doctor scans the OAuth-app and notification-channel stores too, and
+    the field lists both commands walk cover every encrypted column;
   * the non-dev boot guard rejects a malformed previous key without echoing it.
 """
 from __future__ import annotations
@@ -29,6 +32,11 @@ from django.test import override_settings
 from apps.brokers.credentials import set_api_key_secret
 from apps.brokers.models import BrokerAccount, BrokerCredential, UserBrokerOAuthApp
 from apps.models_catalog import crypto
+from apps.models_catalog.management.commands.vault_doctor import (
+    BROKER_CRED_FIELDS,
+    OAUTH_APP_FIELDS,
+    PROVIDER_KEY_FIELDS,
+)
 from apps.models_catalog.models import ProviderKey
 from apps.notifications.models import NotificationChannel
 from apps.portfolios.models import Portfolio
@@ -228,6 +236,34 @@ def test_undecryptable_values_are_left_untouched_and_counted(vault):
     assert ProviderKey.objects.get(pk=vault.keys.pk).tiingo_api_key_enc == lost
 
 
+def test_strict_dry_run_is_the_check_before_retiring_the_old_key(vault):
+    with override_settings(**ROTATING):
+        with pytest.raises(CommandError, match=r"7 value\(s\) still to re-encrypt"):
+            _reencrypt("--strict")
+
+        stale = ProviderKey.objects.get(pk=vault.keys.pk)  # loaded before the apply...
+        _reencrypt("--apply")
+        stale.set_key("tiingo", "tiingo-test-key")
+        stale.save()  # ...and saved after it: its old-key ciphertexts are back
+
+        # vault_doctor reads with every configured key, old one included, so it
+        # cannot see this; the strict dry run can.
+        call_command("vault_doctor", stdout=io.StringIO(), stderr=io.StringIO())
+        with pytest.raises(CommandError, match=r"2 value\(s\) still to re-encrypt"):
+            _reencrypt("--strict")
+
+        _reencrypt("--apply")
+        assert "(dry run): 0 value(s) to re-encrypt, 0 undecryptable" in _reencrypt("--strict")
+
+    with override_settings(**NEW_ONLY):
+        out = io.StringIO()
+        call_command("vault_doctor", stdout=out, stderr=io.StringIO())
+        assert "8 encrypted field(s) checked, 0 undecryptable." in out.getvalue()
+        assert ProviderKey.objects.get(pk=vault.keys.pk).get_key("openrouter") == (
+            PLAIN["openrouter"]
+        )
+
+
 @pytest.mark.django_db
 def test_apply_moves_legacy_secret_key_values_to_the_primary():
     user = User.objects.create_user(email="legacy@x.test", password="x" * 12)
@@ -245,6 +281,20 @@ def test_apply_moves_legacy_secret_key_values_to_the_primary():
 
 
 # --- vault_doctor ------------------------------------------------------------
+
+
+def test_scanned_field_lists_cover_every_encrypted_column():
+    # Both commands walk these lists: a new encrypted column missing from them
+    # would be neither re-encrypted nor checked.
+    def columns(model, prefix="", suffix=""):
+        return {
+            f.name for f in model._meta.concrete_fields
+            if f.name.startswith(prefix) and f.name.endswith(suffix)
+        }
+
+    assert set(PROVIDER_KEY_FIELDS) == columns(ProviderKey, suffix="_enc")
+    assert set(BROKER_CRED_FIELDS) == columns(BrokerCredential, prefix="encrypted_")
+    assert set(OAUTH_APP_FIELDS) == columns(UserBrokerOAuthApp, prefix="encrypted_")
 
 
 def test_vault_doctor_scans_oauth_apps_and_channel_secrets(vault):

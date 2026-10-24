@@ -8,6 +8,8 @@ configured key (FIELD_ENCRYPTION_KEY, FIELD_ENCRYPTION_KEY_PREVIOUS, or the lega
 SECRET_KEY-derived key) can read it. Zero is the healthy state after the re-encrypt
 migration (``0009_reencrypt_field_keys``) or ``manage.py reencrypt_vault --apply``.
 Exit code is non-zero when any are found, so a wrapper/launchd job can detect it.
+A value only a previous key reads counts as healthy here, so whether a rotation is
+complete is ``reencrypt_vault --strict``'s check, not this one.
 
     python manage.py vault_doctor
 """

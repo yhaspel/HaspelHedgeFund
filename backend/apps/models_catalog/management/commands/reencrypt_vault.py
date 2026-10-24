@@ -13,10 +13,15 @@ a per-row ``QuerySet.update`` — never ``save()`` — so ``auto_now`` timestamp
 notification channel only the ``<key>_enc`` entries of ``config`` change.
 Idempotent: a second ``--apply`` re-encrypts nothing. Undecryptable values are
 left untouched and counted (``vault_doctor`` lists the rows); the exit code is 0
-unless ``--strict``. Never prints a value or a key.
+unless ``--strict``, which fails while any undecryptable value remains and, on a
+dry run, while any value is still to re-encrypt. That strict dry run is the check
+before a previous key is retired: ``vault_doctor`` decrypts with every configured
+key, so it cannot see values that only the previous key reads. Never prints a
+value or a key.
 
     python manage.py reencrypt_vault            # dry run
     python manage.py reencrypt_vault --apply
+    python manage.py reencrypt_vault --strict   # exit 0 = all on the primary key
 """
 from __future__ import annotations
 
@@ -49,7 +54,10 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--strict", action="store_true",
-            help="Exit non-zero when any undecryptable value remains.",
+            help=(
+                "Exit non-zero when any undecryptable value remains or, on a dry run, "
+                "any value is still to re-encrypt."
+            ),
         )
 
     def handle(self, *args, **opts) -> None:
@@ -123,7 +131,10 @@ class Command(BaseCommand):
                 f"reencrypt_vault (dry run): {moved} value(s) to re-encrypt, "
                 f"{bad} undecryptable. Nothing written; re-run with --apply."
             )
-        if bad and opts["strict"]:
-            raise CommandError(
-                f"{bad} undecryptable value(s) remain — run vault_doctor to locate them."
-            )
+        problems = []
+        if moved and not apply:
+            problems.append(f"{moved} value(s) still to re-encrypt — run with --apply")
+        if bad:
+            problems.append(f"{bad} undecryptable value(s) remain — vault_doctor locates them")
+        if problems and opts["strict"]:
+            raise CommandError("; ".join(problems) + ".")
