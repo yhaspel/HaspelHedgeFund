@@ -813,11 +813,98 @@ def test_overview_marks_are_not_degraded_when_marks_load(client, user):
 
 
 def test_value_portfolio_still_raises_for_nav_callers(db, user, stub_fmp_provider):
-    """Only the read endpoint opts in: sizing, the drawdown breakers and the
-    hub catch the provider error to apply their own fallbacks."""
+    """Only the manual-book endpoints opt in: sizing, the drawdown breakers and
+    the hub catch the provider error to apply their own fallbacks."""
     _open_long_and_short(user)
     stub_fmp_provider.return_value = FmpProvider(
         api_key="fmp-test-key", http=_UnauthorizedHttp(),
     )
     with pytest.raises(httpx.HTTPStatusError):
         value_portfolio(get_or_create_manual_book(user))
+
+
+class _TimingOutHttp:
+    """An FMP client whose every request times out; counts the attempts."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, params=None):
+        self.calls += 1
+        raise httpx.ConnectTimeout("connect timed out")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("cadence", "provider_calls"), [
+    ("daily", 1),    # the daily-bars request
+    ("delayed", 2),  # the intraday quote, then its daily-close fallback
+])
+def test_a_failing_provider_is_called_for_one_ticker_only(
+    client, user, stub_fmp_provider, cadence, provider_calls,
+):
+    """Every call into a timing-out provider waits out the client timeout, so
+    after the first failure the rest of the book is valued from the mark cache
+    or at average cost instead of calling the provider once per ticker."""
+    from apps.portfolios.valuation import get_mark, get_or_create_preferences
+
+    prefs = get_or_create_preferences(user)
+    prefs.mark_cadence = cadence
+    prefs.save()
+    _open_long_and_short(user)
+    open_or_increase_position(
+        user=user, ticker="MSFT", side="long",
+        quantity=Decimal("2"), entry_price=Decimal("300"),
+    )
+    _seed_mark("MSFT", 310, on=date.today() - timedelta(days=1))
+    assert get_mark("MSFT", user=user) is not None  # cached before the outage
+    http = _TimingOutHttp()
+    stub_fmp_provider.return_value = FmpProvider(api_key="fmp-test-key", http=http)
+
+    resp = client.get(reverse("portfolio-overview"))
+
+    assert resp.status_code == 200
+    assert http.calls == provider_calls  # AAPL's fetch; GME and MSFT never call
+    assert resp.data["marks_degraded"] is True
+    by_ticker = {p["ticker"]: p for p in resp.data["positions"]}
+    assert Decimal(by_ticker["AAPL"]["mark_price"]) == Decimal("100")  # average cost
+    assert Decimal(by_ticker["GME"]["mark_price"]) == Decimal("50")    # average cost
+    assert Decimal(by_ticker["MSFT"]["mark_price"]) == Decimal("310")  # the cached mark
+
+
+@pytest.mark.django_db
+def test_a_mutation_during_a_provider_outage_succeeds_and_writes_once(
+    client, user, stub_fmp_provider,
+):
+    """The write commits before the response is valued: a 500 there reported a
+    committed deposit as failed and invited a retry that repeated it."""
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    deposits = LedgerEntry.objects.filter(
+        portfolio__user=user, kind=LedgerEntry.KIND_DEPOSIT,
+    )
+    before = deposits.count()
+    resp = client.post(
+        reverse("portfolio-cash"), {"kind": "deposit", "amount": "500"}, format="json",
+    )
+    assert resp.status_code == 200
+    assert resp.data["portfolio"]["marks_degraded"] is True
+    assert Decimal(resp.data["portfolio"]["cash_balance"]) == Decimal("99750.00")
+    assert deposits.count() == before + 1
+
+
+@pytest.mark.django_db
+def test_refresh_marks_and_positions_degrade_during_a_provider_outage(
+    client, user, stub_fmp_provider,
+):
+    _open_long_and_short(user)
+    stub_fmp_provider.return_value = FmpProvider(
+        api_key="fmp-test-key", http=_UnauthorizedHttp(),
+    )
+    refreshed = client.post(reverse("portfolio-refresh-marks"))
+    assert refreshed.status_code == 200
+    assert refreshed.data["marks_degraded"] is True
+    positions = client.get(reverse("portfolio-positions"))
+    assert positions.status_code == 200
+    assert {p["ticker"] for p in positions.data} == {"AAPL", "GME"}

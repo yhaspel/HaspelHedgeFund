@@ -294,11 +294,12 @@ def value_portfolio(
 ) -> PortfolioValuation:
     """Mark every position to market and return aggregated exposures.
 
-    ``tolerate_mark_errors`` (read endpoints): when the mark provider raises
-    (an HTTP error status, a network error), value the affected positions at
-    average cost and set ``marks_degraded`` instead of raising. Off by default:
-    the NAV callers (sizing, drawdown breakers, the hub) catch the exception to
-    apply their own fallbacks.
+    ``tolerate_mark_errors`` (the manual-book endpoints): when the mark
+    provider raises (an HTTP error status, a network error), value the affected
+    positions at average cost and set ``marks_degraded`` instead of raising;
+    the provider is not called again for the rest of this valuation. Off by
+    default: the NAV callers (sizing, drawdown breakers, the hub) catch the
+    exception to apply their own fallbacks.
     """
     user = portfolio.user
     as_of = on or timezone.now().date()
@@ -310,8 +311,16 @@ def value_portfolio(
     marks: dict[str, Mark | None] = {}
     portfolio_warnings: list[str] = []
     marks_degraded = False
+    provider_failed = False
     for pos in positions:
         if pos.ticker not in marks:
+            if provider_failed:
+                # One failed provider call per valuation: in a timeout-type
+                # outage every further call would wait out the client timeout
+                # too, so the remaining tickers come from the mark cache only.
+                cached = cache_get(_cache_key_for(prefs.mark_cadence, pos.ticker, as_of))
+                marks[pos.ticker] = _hydrate_cached_mark(cached) if cached else None
+                continue
             try:
                 marks[pos.ticker] = get_mark(
                     pos.ticker, as_of, user=user, preferences=prefs,
@@ -335,6 +344,7 @@ def value_portfolio(
                     portfolio_warnings.append(note)
                 marks[pos.ticker] = None
                 marks_degraded = True
+                provider_failed = True
 
     # Second pass: compute per-position valuation.
     valuations: list[PositionValuation] = []

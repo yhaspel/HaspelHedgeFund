@@ -44,8 +44,9 @@ def _err(message: str, code: int = 400) -> Response:
 
 
 def _serialize_portfolio(portfolio) -> dict:
-    # A provider outage degrades the overview to cost-basis marks (flagged
-    # ``marks_degraded``) instead of failing the whole page with a 500.
+    # Every manual-book response is valued here. A provider outage degrades to
+    # cost-basis marks (flagged ``marks_degraded``) instead of a 500 — which,
+    # after a mutation has committed, would invite a retry that repeats it.
     valuation = value_portfolio(portfolio, tolerate_mark_errors=True)
     return PortfolioValuationSerializer(asdict(valuation)).data
 
@@ -70,9 +71,7 @@ class PortfolioPositionsView(APIView):
 
     def get(self, request: Request) -> Response:
         portfolio = get_or_create_manual_book(request.user)
-        valuation = value_portfolio(portfolio)
-        payload = PortfolioValuationSerializer(asdict(valuation)).data
-        return Response(payload["positions"])
+        return Response(_serialize_portfolio(portfolio)["positions"])
 
     def post(self, request: Request) -> Response:
         # Ensure the book exists for the user before mutating it.
@@ -112,9 +111,8 @@ class PortfolioPositionsView(APIView):
             return _err(str(exc), exc.status_code)
         except RuntimeError as exc:
             return _err(str(exc), 400)
-        valuation = value_portfolio(result.portfolio)
         return Response({
-            "portfolio": PortfolioValuationSerializer(asdict(valuation)).data,
+            "portfolio": _serialize_portfolio(result.portfolio),
             "ledger_entry": LedgerEntrySerializer(result.ledger_entry).data,
         })
 
@@ -148,9 +146,8 @@ class PortfolioPositionDetailView(APIView):
             )
         except ManualBookError as exc:
             return _err(str(exc), exc.status_code)
-        valuation = value_portfolio(result.portfolio)
         return Response({
-            "portfolio": PortfolioValuationSerializer(asdict(valuation)).data,
+            "portfolio": _serialize_portfolio(result.portfolio),
             "ledger_entry": LedgerEntrySerializer(result.ledger_entry).data,
         })
 
@@ -202,9 +199,8 @@ class PortfolioPositionCloseView(APIView):
             return _err(str(exc), exc.status_code)
         except RuntimeError as exc:
             return _err(str(exc), 400)
-        valuation = value_portfolio(result.portfolio)
         return Response({
-            "portfolio": PortfolioValuationSerializer(asdict(valuation)).data,
+            "portfolio": _serialize_portfolio(result.portfolio),
             "ledger_entry": LedgerEntrySerializer(result.ledger_entry).data,
             "realized_pnl": str(result.realized_pnl),
         })
@@ -240,9 +236,8 @@ class PortfolioCashView(APIView):
             )
         except ManualBookError as exc:
             return _err(str(exc), exc.status_code)
-        valuation = value_portfolio(result.portfolio)
         return Response({
-            "portfolio": PortfolioValuationSerializer(asdict(valuation)).data,
+            "portfolio": _serialize_portfolio(result.portfolio),
             "ledger_entry": LedgerEntrySerializer(result.ledger_entry).data,
         })
 
@@ -338,5 +333,4 @@ class PortfolioRefreshMarksView(APIView):
             portfolio.positions.values_list("ticker", flat=True),
         )
         invalidate_mark_cache(request.user, tickers)
-        valuation = value_portfolio(portfolio)
-        return Response(PortfolioValuationSerializer(asdict(valuation)).data)
+        return Response(_serialize_portfolio(portfolio))
