@@ -6,6 +6,10 @@ from ``DJANGO_SECRET_KEY`` (ADR 0022). A ``MultiFernet`` keeps the legacy
 ``SECRET_KEY`` no longer silently bricks every stored key. New values are always
 written with the primary (``FIELD_ENCRYPTION_KEY``) cipher.
 
+``FIELD_ENCRYPTION_KEY`` itself rotates the same way: retired keys listed in
+``FIELD_ENCRYPTION_KEY_PREVIOUS`` stay valid for *decryption* only, until
+``manage.py reencrypt_vault --apply`` has moved every value to the primary.
+
 When ``FIELD_ENCRYPTION_KEY`` is unset (dev convenience), the legacy
 ``SECRET_KEY``-derived key is the primary — existing dev installs keep working
 with no ``.env`` change, and the non-dev boot guard in ``settings/base.py``
@@ -46,11 +50,26 @@ def _primary_fernet() -> Fernet | None:
     return Fernet(key.encode())
 
 
-def _cipher() -> MultiFernet:
+def _keyring() -> list[tuple[str, Fernet]]:
+    """Every key that may read a stored value, labelled, in ``MultiFernet`` order.
+
+    The first entry is the write key, labelled "primary": ``FIELD_ENCRYPTION_KEY``,
+    or the legacy key when that is unset. Then the decrypt-only
+    ``FIELD_ENCRYPTION_KEY_PREVIOUS`` keys ("previous"), then the legacy
+    ``SECRET_KEY``-derived key ("legacy").
+    """
     primary = _primary_fernet()
     legacy = _legacy_fernet()
-    keys = [primary, legacy] if primary is not None else [legacy]
-    return MultiFernet(keys)
+    raw = getattr(settings, "FIELD_ENCRYPTION_KEY_PREVIOUS", ()) or ()
+    keys = raw.split(",") if isinstance(raw, str) else raw
+    previous = [("previous", Fernet(key.strip().encode())) for key in keys if key.strip()]
+    if primary is None:
+        return [("primary", legacy), *previous]
+    return [("primary", primary), *previous, ("legacy", legacy)]
+
+
+def _cipher() -> MultiFernet:
+    return MultiFernet([fernet for _, fernet in _keyring()])
 
 
 def encrypt(value: str) -> str:
@@ -74,3 +93,23 @@ def decrypt(token: str) -> str:
             "corrupted row). Run `manage.py vault_doctor` to locate the rows."
         )
         return ""
+
+
+def key_source(token: str) -> str:
+    """Label of the key that reads ``token`` — "primary", "previous", "legacy" —
+    or "undecryptable". For ``manage.py reencrypt_vault``; never logs."""
+    for label, fernet in _keyring():
+        try:
+            fernet.decrypt(token.encode())
+        except InvalidToken:
+            continue
+        return label
+    return "undecryptable"
+
+
+def reencrypt(token: str) -> str:
+    """``token`` re-encrypted under the primary key (``MultiFernet.rotate``).
+
+    Raises ``InvalidToken`` when no configured key reads it.
+    """
+    return _cipher().rotate(token.encode()).decode()
