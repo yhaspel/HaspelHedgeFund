@@ -40,6 +40,8 @@ worker child was killed before it could record terminal status (an "orphan").
   (in-flight tasks are lost; re-run them).
 - **If beat isn't dispatching** scheduled runs, restart it:
   `docker compose -f infra/docker-compose.yml restart beat`
+  (the local stack runs beat only when started deliberately:
+  `docker compose -f infra/docker-compose.yml --profile scheduler up -d --build`).
 
 ## Prevention
 

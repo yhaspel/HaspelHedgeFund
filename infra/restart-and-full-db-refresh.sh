@@ -37,3 +37,4 @@ docker compose exec -T web python manage.py createsuperuser --noinput \
   || echo "   (skipped: superuser already exists, or DJANGO_SUPERUSER_* not set)"
 
 docker compose ps
+echo ">> Celery beat is not started by this script; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build"

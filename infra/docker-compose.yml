@@ -8,8 +8,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hedgefund}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Published dev ports (db, web, frontend) bind to 127.0.0.1: reachable from
+    # this machine only. Containers talk to each other over the compose network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hedgefund}"]
       interval: 5s
@@ -18,8 +20,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No host port: the app containers reach Redis at redis:6379 over the compose
+    # network, and a native Redis on the host often already holds 127.0.0.1:6379.
+    # For a shell: `docker compose exec redis redis-cli`.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -47,7 +50,7 @@ services:
     volumes:
       - ../backend:/app
     ports:
-      - "8811:8811"
+      - "127.0.0.1:8811:8811"
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -76,7 +79,13 @@ services:
       redis: { condition: service_healthy }
     command: celery -A hedgefund worker -l info --concurrency=8
 
+  # Celery beat is opt-in behind the `scheduler` compose profile: infra/up.sh and a
+  # plain `docker compose up` never start a local scheduler, so a dev stack can't
+  # duplicate the scheduled jobs (emails, LLM runs, data pulls) of an instance
+  # that already runs its own beat. Start it deliberately with:
+  #     docker compose --profile scheduler up -d --build
   beat:
+    profiles: ["scheduler"]
     build:
       context: ..
       dockerfile: infra/backend.Dockerfile
@@ -111,7 +120,7 @@ services:
       - ../frontend:/app
       - /app/node_modules
     ports:
-      - "4111:4111"
+      - "127.0.0.1:4111:4111"
     depends_on:
       - web
 

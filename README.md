@@ -54,10 +54,23 @@ Then open:
 - Django admin → http://localhost:8811/admin/
 - API health probe → http://localhost:8811/api/health/ (200, no auth — what compose / load balancers / smoke checks should use)
 
-Database migrations run automatically when the `web` container boots.
+Database migrations run automatically when the `web` container boots. Published ports
+bind to `127.0.0.1`, so the stack is reachable from your machine only.
 
-Want it running when your machine is closed? Scheduled runs and autopilot cycles are
-driven by Celery beat, which stops with your laptop. See
+Celery beat drives every periodic job: scheduled runs, autopilot cycles and drawdown
+halts, broker order polling and reconciliation, orphan-run sweeps, IBKR keep-warm, the
+provider-key probes, the post-close bar refresh, and the daily data and model-catalog
+refreshes. The local stack does **not** start it by
+default: it sits behind the `scheduler` compose profile, so a dev stack never
+duplicates the schedules of an instance that already runs its own beat. Without it none
+of those jobs run (**Sync now** on a broker account still polls and reconciles it on
+demand). Start it deliberately with:
+
+```bash
+docker compose -f infra/docker-compose.yml --profile scheduler up -d --build
+```
+
+Want it running when your machine is closed? Beat stops with your laptop. See
 [`guides/railway-deploy.md`](./guides/railway-deploy.md) for an always-on cloud deploy
 (six services, ~$15–25/month) that can migrate your existing database as-is.
 
@@ -108,7 +121,8 @@ optional.
 2. **Run an analysis** on a ticker — the agent council debates and returns a
    decision with reasoning.
 3. *(optional)* Run a **backtest** to clear the §9 validation gate, then **enable a
-   strategy / autopilot** and connect an Alpaca **paper** account.
+   strategy / autopilot** and connect an Alpaca **paper** account. Autopilot cycles
+   fire only while Celery beat runs (the `scheduler` profile, above).
 
 The in-app **Guides** (sidebar → Guides) cover every feature in depth — BYOK,
 the agent council, backtesting, connecting a broker, and each strategy.
@@ -160,7 +174,11 @@ provider's Terms of Service. This software is provided **as-is**.
 
 ## Run backend without Docker (optional)
 
-Requires Python 3.12, `uv`, and a local Postgres + Redis.
+Requires Python 3.12, `uv`, and a local Postgres + Redis. The compose Redis publishes
+no host port: run a native Redis on 6379, or publish the compose one on
+`127.0.0.1:6380` (see `infra/docker-compose.override.yml.example`) and export
+`REDIS_URL` and `CELERY_BROKER_URL` as `redis://localhost:6380/0` and
+`CELERY_RESULT_BACKEND` as `redis://localhost:6380/1`.
 
 ```bash
 cd backend
@@ -229,7 +247,8 @@ uv run python manage.py seed_validation_backtests --user me@example.com
 
 The IBKR gateway sidecar is gated behind a compose profile and skipped by default.
 Once you have the BYO `clientportal.gw.zip` (see `guides/ibkr-gateway.md`), include
-it with `docker compose -f infra/docker-compose.yml --profile ibkr up`.
+it with `docker compose -f infra/docker-compose.yml --profile ibkr up`. Its session
+keep-warm task runs on Celery beat, so it also needs `--profile scheduler` (see above).
 
 ## Disclaimer
 

@@ -8,3 +8,4 @@ cd "$(dirname "$0")"
 docker compose build --no-cache
 docker compose up -d
 docker compose ps
+echo ">> Celery beat is not started by this script; to run it deliberately: docker compose -f infra/docker-compose.yml --profile scheduler up -d --build"
