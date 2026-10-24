@@ -174,12 +174,13 @@ ORPHAN_THRESHOLD_MIN = 15
 
 # A run with no celery_task_id gives inspect.active() nothing to check: the
 # synchronous schedule fan-out and the pairs-cycle audit rows execute in-process
-# inside another task (no per-run Celery time limit), and a strategy candidate
-# sits QUEUED without one until a worker claims it. Age is the only signal for
+# inside another task (no per-run Celery time limit). Age is the only signal for
 # those, so the window is far past anything legitimate: a Celery run is capped at
-# RUN_HARD_TIME_LIMIT_SECONDS (default 12 min), an in-process run makes the same
-# timeout-bounded LLM calls (minutes), and a queued candidate can wait behind
-# backtests holding every worker slot (BACKTEST_TIME_LIMIT_SECONDS, default 6.5 h).
+# RUN_HARD_TIME_LIMIT_SECONDS (default 12 min) and an in-process run makes the
+# same timeout-bounded LLM calls (minutes). A QUEUED strategy candidate is not
+# swept: its chord message can still arrive (behind backtests holding every
+# worker slot, BACKTEST_TIME_LIMIT_SECONDS, default 6.5 h, or after a worker
+# outage), and run_candidate_council claims the row whatever its status.
 TASKLESS_ORPHAN_THRESHOLD_HOURS = 24
 
 
@@ -198,12 +199,13 @@ def _orphan_cutoff():
 
 def _sweep_taskless_runs() -> list[int]:
     """Fail QUEUED/RUNNING runs that have no Celery task id and are older than
-    ``TASKLESS_ORPHAN_THRESHOLD_HOURS``. Returns the swept run ids."""
+    ``TASKLESS_ORPHAN_THRESHOLD_HOURS``, except QUEUED strategy candidates (see
+    above). Returns the swept run ids."""
     cutoff = timezone.now() - dt.timedelta(hours=TASKLESS_ORPHAN_THRESHOLD_HOURS)
     swept_ids: list[int] = []
     for run in Run.objects.filter(
         status__in=Run.ACTIVE_STATUSES, celery_task_id="", created_at__lt=cutoff
-    ):
+    ).exclude(status=Run.QUEUED, source=Run.STRATEGY):
         # Conditional, like the dispatched sweep: a run that moved on since the
         # query (finished, cancelled, or claimed by a worker that stamped its
         # task id) is never clobbered.

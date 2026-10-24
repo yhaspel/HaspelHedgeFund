@@ -35,10 +35,10 @@ def user():
     return User.objects.create_user(email="orphan-runs@x.test", password="x")
 
 
-def _run(user, *, status, age, celery_task_id=""):
+def _run(user, *, status, age, celery_task_id="", source=Run.ADHOC):
     run = Run.objects.create(
         user=user, tickers=["AAPL"], as_of_date=dt.date(2026, 6, 1),
-        status=status, celery_task_id=celery_task_id,
+        status=status, celery_task_id=celery_task_id, source=source,
     )
     Run.objects.filter(pk=run.pk).update(created_at=timezone.now() - age)
     return run
@@ -72,6 +72,21 @@ def test_taskless_queued_run_past_the_threshold_is_swept(user):
     lost.refresh_from_db()
     assert lost.status == Run.FAILED
     assert "still queued" in lost.error_message
+
+
+def test_queued_strategy_candidate_is_left_for_its_chord(user):
+    """A candidate waits QUEUED with no task id until run_candidate_council
+    claims it, and that claim is unconditional: failing it here would be undone
+    when the chord message arrives, after a false operator alert."""
+    candidate = _run(
+        user, status=Run.QUEUED, source=Run.STRATEGY,
+        age=dt.timedelta(hours=TASKLESS_ORPHAN_THRESHOLD_HOURS, minutes=5),
+    )
+    out, alert = _sweep({"worker1": []})
+    assert out == {"swept": 0}
+    candidate.refresh_from_db()
+    assert candidate.status == Run.QUEUED
+    assert not alert.called
 
 
 def test_recent_taskless_runs_are_untouched(user):
