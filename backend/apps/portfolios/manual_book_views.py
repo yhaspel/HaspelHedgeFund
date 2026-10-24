@@ -44,7 +44,9 @@ def _err(message: str, code: int = 400) -> Response:
 
 
 def _serialize_portfolio(portfolio) -> dict:
-    valuation = value_portfolio(portfolio)
+    # A provider outage degrades the overview to cost-basis marks (flagged
+    # ``marks_degraded``) instead of failing the whole page with a 500.
+    valuation = value_portfolio(portfolio, tolerate_mark_errors=True)
     return PortfolioValuationSerializer(asdict(valuation)).data
 
 

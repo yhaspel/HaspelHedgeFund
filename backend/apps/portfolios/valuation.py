@@ -9,6 +9,7 @@ share a stale daily close into intraday mode.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
@@ -23,6 +24,8 @@ from apps.data.models import CorporateAction
 from apps.data.providers.factory import get_fmp_provider
 
 from .models import LedgerEntry, Portfolio, PortfolioPreferences
+
+log = logging.getLogger(__name__)
 
 # Daily-close marks rarely change inside a page render; 10 minutes is the
 # rule of thumb from the phase plan.
@@ -96,6 +99,9 @@ class PortfolioValuation:
     positions: list[PositionValuation]
     preferences: PreferencesView | None = None
     warnings: list[str] = field(default_factory=list)
+    # True when a position is valued at average cost because fetching its mark
+    # raised (missing key, offline, provider outage).
+    marks_degraded: bool = False
 
 
 def _money(x: Decimal | float | int) -> Decimal:
@@ -284,8 +290,16 @@ def value_portfolio(
     portfolio: Portfolio,
     *,
     on: date_cls | None = None,
+    tolerate_mark_errors: bool = False,
 ) -> PortfolioValuation:
-    """Mark every position to market and return aggregated exposures."""
+    """Mark every position to market and return aggregated exposures.
+
+    ``tolerate_mark_errors`` (read endpoints): when the mark provider raises
+    (an HTTP error status, a network error), value the affected positions at
+    average cost and set ``marks_degraded`` instead of raising. Off by default:
+    the NAV callers (sizing, drawdown breakers, the hub) catch the exception to
+    apply their own fallbacks.
+    """
     user = portfolio.user
     as_of = on or timezone.now().date()
     positions = list(portfolio.positions.all().order_by("ticker"))
@@ -295,6 +309,7 @@ def value_portfolio(
     # caching + Redis short-TTL keep it quick for typical book sizes.
     marks: dict[str, Mark | None] = {}
     portfolio_warnings: list[str] = []
+    marks_degraded = False
     for pos in positions:
         if pos.ticker not in marks:
             try:
@@ -304,6 +319,22 @@ def value_portfolio(
             except RuntimeError as exc:  # missing FMP key → bubble actionable msg
                 portfolio_warnings.append(str(exc))
                 marks[pos.ticker] = None
+                marks_degraded = True
+            except Exception as exc:
+                if not tolerate_mark_errors:
+                    raise
+                # Type and HTTP status only: an httpx error's text carries the
+                # request URL, and the FMP API key is a query parameter of it.
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                log.warning(
+                    "mark fetch failed ticker=%s error=%s status=%s; valuing at average cost",
+                    pos.ticker, type(exc).__name__, status,
+                )
+                note = "Market data unavailable — affected positions are valued at average cost."
+                if note not in portfolio_warnings:
+                    portfolio_warnings.append(note)
+                marks[pos.ticker] = None
+                marks_degraded = True
 
     # Second pass: compute per-position valuation.
     valuations: list[PositionValuation] = []
@@ -451,4 +482,5 @@ def value_portfolio(
             last_refreshed_at=prefs.last_refreshed_at,
         ),
         warnings=portfolio_warnings,
+        marks_degraded=marks_degraded,
     )

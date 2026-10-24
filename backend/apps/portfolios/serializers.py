@@ -133,6 +133,7 @@ class PortfolioValuationSerializer(serializers.Serializer):
     positions = PositionValuationSerializer(many=True)
     preferences = PortfolioPreferencesViewSerializer(allow_null=True)
     warnings = serializers.ListField(child=serializers.CharField())
+    marks_degraded = serializers.BooleanField()
 
 
 class LedgerEntrySerializer(serializers.ModelSerializer):
