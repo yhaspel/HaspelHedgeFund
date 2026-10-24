@@ -1,9 +1,16 @@
 import os
+from zoneinfo import ZoneInfo
 
 from celery import Celery, signals
 from celery.schedules import crontab
+from django_celery_beat.tzcrontab import TzAwareCrontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hedgefund.settings.dev")
+
+# Market-relative beats run on New York wall-clock time, so they track the
+# US session across DST changes (a fixed-UTC crontab drifts by an hour).
+# TzAwareCrontab also carries the zone into django_celery_beat's stored row.
+_NY = ZoneInfo("America/New_York")
 
 app = Celery("hedgefund")
 app.config_from_object("django.conf:settings", namespace="CELERY")
@@ -136,5 +143,24 @@ app.conf.beat_schedule = {
     "reconcile-model-catalog": {
         "task": "apps.models_catalog.tasks.reconcile_model_catalog",
         "schedule": crontab(minute=45, hour=6),  # 06:45 UTC daily
+    },
+    # Provider-key probe: one cheap authenticated call per distinct OpenRouter /
+    # FMP key in use, alerting once per outage on a rejected key — 45 min ahead
+    # of the 09:25 ET daily council batch, and ahead of the Friday 16:30/17:00 ET
+    # autopilot cycles.
+    "probe-provider-keys-premarket": {
+        "task": "apps.models_catalog.tasks.probe_provider_keys",
+        "schedule": TzAwareCrontab(minute=40, hour=8, day_of_week="1-5", tz=_NY),
+    },
+    "probe-provider-keys-friday": {
+        "task": "apps.models_catalog.tasks.probe_provider_keys",
+        "schedule": TzAwareCrontab(minute=0, hour=15, day_of_week=5, tz=_NY),
+    },
+    # Post-close bar refresh + freshness gate for the deterministic autopilot
+    # pods, so stale data / a dead data key surfaces days before the Friday
+    # cycle skips on it. Data only.
+    "refresh-autopilot-bars-postclose": {
+        "task": "apps.portfolios.tasks_autopilot.refresh_autopilot_bars",
+        "schedule": TzAwareCrontab(minute=30, hour=17, day_of_week="1-5", tz=_NY),
     },
 }

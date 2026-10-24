@@ -19,11 +19,14 @@ log = logging.getLogger(__name__)
 @lru_cache(maxsize=64)
 def _make_client(provider: str, user_id: int | None, api_key: str, host: str) -> LLMClient:
     """Internal cache key is the (provider, user_id, key, host) tuple so
-    we don't reuse a platform-key client where a user just saved a BYO key."""
+    we don't reuse a platform-key client where a user just saved a BYO key.
+    get_llm passes ``user_id`` only for the user's own key, so it also names
+    the key source the adapter reports on a 401."""
+    key_source = "user" if user_id is not None else "platform"
     if provider == "anthropic":
-        return AnthropicClient(api_key=api_key or None)
+        return AnthropicClient(api_key=api_key or None, key_source=key_source)
     if provider == "openrouter":
-        return OpenRouterClient(api_key=api_key or None)
+        return OpenRouterClient(api_key=api_key or None, key_source=key_source)
     if provider == "ollama":
         return OllamaClient(host=host or None)
     raise ValueError(f"Unknown LLM provider: {provider}")
@@ -75,7 +78,18 @@ def get_llm(provider: str, *, user_id: int | None = None, state: dict | None = N
         if pk is not None:
             if provider in ("anthropic", "openrouter", "openai") and pk.has_key(provider):
                 api_key = pk.get_key(provider)
-                source = "user"
+                if api_key:
+                    source = "user"
+                else:
+                    # A stored value that will not decrypt reads as "" and the
+                    # adapter then runs on the platform env key — report (and
+                    # cache) it as that, not as the user's key.
+                    log.warning(
+                        "llm_client provider=%s user_id=%s: stored key could not be "
+                        "decrypted; using the platform key",
+                        provider,
+                        user_id,
+                    )
             if provider == "ollama" and pk.ollama_host:
                 host = pk.ollama_host
                 source = "user"

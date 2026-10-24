@@ -4,8 +4,9 @@ A single self-hosted instance has no on-call rotation; the "operator" is whoever
 runs it — modeled here as the active superuser(s). Operational alerts (a failed
 run, an orphan sweep, a repeated provider outage, a scheduled-run ceiling breach)
 go to those users' existing email/Telegram notification channels, reusing
-``send_notification`` and its per-user daily cap. Every function is best-effort
-and never raises into the caller (a run/task must not fail because an alert did).
+``send_notification`` and its per-user daily cap (the rejected-key and stale-data
+alerts are exempt from it). Every function is best-effort and never raises into
+the caller (a run/task must not fail because an alert did).
 """
 from __future__ import annotations
 
@@ -38,7 +39,9 @@ def _operator_channels() -> list[NotificationChannel]:
     return list(NotificationChannel.objects.filter(user__in=ops, is_active=True))
 
 
-def _emit(channels, subject: str, body: str, *, ticker: str = "") -> int:
+def _emit(
+    channels, subject: str, body: str, *, ticker: str = "", daily_cap_exempt: bool = False
+) -> int:
     """Send to each channel; return how many were actually delivered."""
     if not channels:
         # Surface the drop — an operator with no configured channel would
@@ -48,7 +51,10 @@ def _emit(channels, subject: str, body: str, *, ticker: str = "") -> int:
     delivered = 0
     for ch in channels:
         try:
-            ev = send_notification(ch, subject, body, ticker=ticker, triggered_by=None)
+            ev = send_notification(
+                ch, subject, body, ticker=ticker, triggered_by=None,
+                daily_cap_exempt=daily_cap_exempt,
+            )
             if ev.delivery_status == NotificationEvent.SENT:
                 delivered += 1
         except Exception:  # noqa: BLE001 — an alert must never break its caller
@@ -106,6 +112,36 @@ def notify_ceiling_breach(scheduled_run, *, est_usd, ceiling, degraded: bool = F
         f"${ceiling} cost ceiling{extra}."
     )
     return _emit(_operator_channels(), subject, body)
+
+
+def notify_provider_key_rejected(
+    provider: str, fingerprint: str, *, status_code: int, used_by: list[str]
+) -> int:
+    """Alert the operator that a provider rejected an API key outright (the key
+    probe). The key is named only by its fingerprint. Exempt from the daily cap;
+    the probe sends one per outage."""
+    subject = f"[Ops] {provider} rejected an API key (HTTP {status_code})"
+    body = (
+        f"{provider} rejected the API key with fingerprint {fingerprint} "
+        f"(HTTP {status_code}). Used by: {', '.join(used_by)}.\n"
+        "Every run, data refresh or cycle on this key fails until it is replaced: "
+        "update it in Settings → Provider keys (a user key) or in the server "
+        "environment (the platform key)."
+    )
+    return _emit(_operator_channels(), subject, body, daily_cap_exempt=True)
+
+
+def notify_stale_market_data(problems: list[str]) -> int:
+    """Alert the operator that the post-close bar refresh left a deterministic
+    pod's universe stale or corrupt, so its next cycle would skip. Exempt from
+    the daily cap."""
+    subject = "[Ops] Market data still stale after the post-close refresh"
+    body = (
+        "The post-close bar refresh could not bring these autopilot pods' market "
+        "data up to date. Their next cycle will skip (book held) unless it "
+        "recovers:\n\n" + "\n".join(f"- {p}" for p in problems)
+    )
+    return _emit(_operator_channels(), subject, body, daily_cap_exempt=True)
 
 
 def record_provider_failure(provider: str, *, detail: str = "") -> bool:

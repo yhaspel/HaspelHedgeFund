@@ -58,7 +58,12 @@ def send_notification(
     triggered_by=None,
     ticker: str = "",
     enforce_cap: bool = True,
+    daily_cap_exempt: bool = False,
 ) -> NotificationEvent:
+    """``daily_cap_exempt`` skips only the per-user daily cap (the per-ticker cap
+    still applies): for operational alerts — fund/autopilot state changes, dead
+    provider keys, stale market data — that must not be crowded out by a burst
+    of earlier routine notifications."""
     ev = NotificationEvent.objects.create(
         channel=channel,
         triggered_by=triggered_by,
@@ -77,7 +82,7 @@ def send_notification(
 
     if not channel.is_active:
         return _finish(NotificationEvent.FAILED, "channel inactive")
-    if enforce_cap and not within_daily_cap(channel.user):
+    if enforce_cap and not daily_cap_exempt and not within_daily_cap(channel.user):
         return _finish(NotificationEvent.THROTTLED, "daily notification cap reached")
     if enforce_cap and not within_ticker_cap(channel.user, ticker):
         return _finish(NotificationEvent.THROTTLED, f"per-ticker cap reached for {ticker}")

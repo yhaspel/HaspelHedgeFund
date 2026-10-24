@@ -26,6 +26,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
+import httpx
 from django.db.models import F, Max
 
 from apps.data.models import CorporateAction, DailyBar
@@ -125,8 +126,13 @@ def normalize_adjusted_tail(
     if provider is not None:
         try:
             refresh_dividends(ticker, provider, as_of=as_of)
-        except Exception:  # noqa: BLE001 — fall through to the staleness guard
-            log.exception("normalize_adjusted_tail: dividend refresh failed ticker=%s", ticker)
+        except Exception as exc:  # noqa: BLE001 — fall through to the staleness guard
+            # The reason, not the traceback: it would quote the keyed FMP URL.
+            log.warning(
+                "normalize_adjusted_tail: dividend refresh failed ticker=%s (%s)",
+                ticker,
+                _failure_reason(exc),
+            )
     led = last_adjustment_ex_date(ticker)
     newest_bar = (
         DailyBar.objects.filter(ticker=ticker, source=SOURCE)
@@ -161,17 +167,49 @@ def normalize_adjusted_tail(
     return len(fixed)
 
 
-def refresh_universe_bars(tickers, as_of: dt.date, provider, *, lookback_days: int = 20) -> None:
+def _failure_reason(exc: Exception) -> str:
+    """Short, URL-free reason for a failed fetch — the exception class, plus the
+    status code for an HTTP error. Never ``str(exc)``: an httpx error message
+    quotes the request URL, and FMP URLs carry the API key."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{type(exc).__name__} {exc.response.status_code}"
+    return type(exc).__name__
+
+
+def _refresh_summary(failures: dict[str, str], total: int, key_source: str | None) -> str:
+    """One line naming why the refresh failed, e.g. "FMP refresh failed for 9/9
+    tickers: HTTPStatusError 401 (key_source=user)". Tickers are listed per
+    reason unless that reason hit every ticker. "" when nothing failed."""
+    if not failures:
+        return ""
+    by_reason: dict[str, list[str]] = {}
+    for ticker, reason in failures.items():
+        by_reason.setdefault(reason, []).append(ticker)
+    parts = [
+        reason if len(tks) == total else f"{reason} ({', '.join(tks)})"
+        for reason, tks in sorted(by_reason.items(), key=lambda kv: -len(kv[1]))
+    ]
+    src = f" (key_source={key_source})" if key_source else ""
+    return f"FMP refresh failed for {len(failures)}/{total} tickers: {'; '.join(parts)}{src}"
+
+
+def refresh_universe_bars(tickers, as_of: dt.date, provider, *, lookback_days: int = 20) -> str:
     """Force-fetch the recent tail for each ticker (bypassing the cache
     completeness heuristic) and normalize its adjusted tail, so the live cycle
     sizes on current, integrity-checked closes. Best-effort per ticker — the
-    subsequent `assert_universe_fresh` is the hard gate."""
+    subsequent `assert_universe_fresh` is the hard gate. Returns a one-line
+    summary of the per-ticker fetch failures ("" when every fetch succeeded),
+    for the gate's error to name the cause of stale data (a dead key, a 429)."""
     start = as_of - dt.timedelta(days=lookback_days)
+    tickers = list(tickers)
+    failures: dict[str, str] = {}
     for t in tickers:
         try:
             provider.upsert_recent_bars(t, start, as_of)
-        except Exception:  # noqa: BLE001 — degrade to whatever is cached; assert gates
-            log.exception("refresh_universe_bars: upsert failed ticker=%s", t)
+        except Exception as exc:  # noqa: BLE001 — degrade to whatever is cached; assert gates
+            failures[t] = _failure_reason(exc)
+            # The reason, not the traceback: it would quote the keyed URL.
+            log.warning("refresh_universe_bars: upsert failed ticker=%s (%s)", t, failures[t])
         try:
             # Pass the provider so the dividend table is topped up first —
             # otherwise every dividend paid since the last manual
@@ -179,6 +217,7 @@ def refresh_universe_bars(tickers, as_of: dt.date, provider, *, lookback_days: i
             normalize_adjusted_tail(t, provider=provider, as_of=as_of)
         except Exception:  # noqa: BLE001
             log.exception("refresh_universe_bars: normalize failed ticker=%s", t)
+    return _refresh_summary(failures, len(tickers), getattr(provider, "key_source", None))
 
 
 def assert_universe_fresh(
@@ -187,11 +226,14 @@ def assert_universe_fresh(
     *,
     max_staleness_days: int = MAX_STALENESS_DAYS,
     factor_tol: float = FACTOR_TOL,
+    refresh_summary: str = "",
 ) -> None:
     """Raise `StaleMarketDataError` if any ticker's latest bar (≤ as_of) is older
     than `max_staleness_days`, has a non-positive close, or its adjusted close
     deviates from the raw close by more than `factor_tol` with no corporate action
-    on that exact date to explain it."""
+    on that exact date to explain it. `refresh_summary` (what
+    `refresh_universe_bars` returned) leads the error message, so the alert names
+    the cause, not only the symptom."""
     problems: list[str] = []
     for t in tickers:
         b = (
@@ -222,4 +264,5 @@ def assert_universe_fresh(
                         f"(|Δ|>{factor_tol}) with no corporate action — corrupt"
                     )
     if problems:
-        raise StaleMarketDataError("; ".join(problems))
+        detail = "; ".join(problems)
+        raise StaleMarketDataError(f"{refresh_summary}. {detail}" if refresh_summary else detail)

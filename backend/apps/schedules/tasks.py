@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from apps.runs.models import Run
 from apps.runs.tasks import execute_run
+from hedgefund.logging_filters import scrub_secrets
 
 from .costs import cheaper_preset, estimate_run_cost, resolve_overrides
 from .models import ScheduledRun, ScheduledRunHistory
@@ -287,8 +288,23 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         run_ids.append(run.id)
         try:
             execute_run(run.id)  # synchronous — see module docstring
-        except Exception:  # noqa: BLE001 — one ticker failing must not abort the batch
+        except Exception as exc:  # noqa: BLE001 — one ticker failing must not abort the batch
             log.exception("scheduled run: ticker %s failed (run=%s)", tk, run.id)
+            # execute_run records (and alerts on) its own failures — except one
+            # raised before its failure handler (provider setup, e.g. no usable
+            # FMP key), which would leave the child RUNNING and this fire "done".
+            if Run.objects.filter(pk=run.id, status__in=Run.ACTIVE_STATUSES).update(
+                status=Run.FAILED,
+                error_message=scrub_secrets(f"{type(exc).__name__}: {exc}")[:2000],
+                finished_at=timezone.now(),
+            ):
+                try:
+                    from apps.notifications.operator import notify_run_failed
+
+                    run.refresh_from_db()
+                    notify_run_failed(run)
+                except Exception:  # pragma: no cover — an alert must never break the batch
+                    log.exception("run-failed alert failed for run=%s", run.id)
     hist.runs.set(run_ids)
 
     # ---- materiality + notify ----
@@ -302,6 +318,7 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     summary = []
     actual_cost = Decimal("0")
     material: list[tuple] = []  # (run, result) for runs that should notify
+    failed: list[Run] = []
     for run_id in run_ids:
         run = Run.objects.filter(pk=run_id).first()
         if run is None:
@@ -309,6 +326,8 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
         actual_cost += run.total_cost_usd or Decimal("0")
         if run.status != Run.DONE:
             summary.append({"ticker": run.tickers[0], "notify": False, "status": run.status})
+            if run.status == Run.FAILED:
+                failed.append(run)
             continue
         ticker = run.tickers[0]
         prior = _find_prior_run(sr.user, ticker, run)
@@ -361,15 +380,29 @@ def execute_scheduled_run(scheduled_run_id: int, history_id: int) -> dict:
     hist.submit_decision = submit_decision
     hist.notified_count = notified
     hist.actual_cost_usd = actual_cost
-    hist.status = ScheduledRunHistory.DONE
+    # A fire whose EVERY child run failed is a failed fire, not "done" with
+    # nothing to notify (e.g. a provider rejecting the API key fails every child
+    # run). A partial failure stays "done" (the other tickers were analysed and
+    # notified as usual) with the failures named in `error`.
+    hist.status = (
+        ScheduledRunHistory.FAILED
+        if failed and len(failed) == len(run_ids)
+        else ScheduledRunHistory.DONE
+    )
+    if failed:
+        tickers_failed = ", ".join(r.tickers[0] for r in failed)
+        reason = (failed[0].error_message or "").strip()[:300]
+        note = f"{len(failed)}/{len(run_ids)} child runs failed ({tickers_failed})"
+        note = f"{note}: {reason}" if reason else note
+        hist.error = f"{hist.error}; {note}" if hist.error else note
     hist.finished_at = timezone.now()
     hist.save(
         update_fields=[
             "materiality_decision", "submit_decision", "notified_count",
-            "actual_cost_usd", "status", "finished_at",
+            "actual_cost_usd", "status", "error", "finished_at",
         ]
     )
     return {
-        "status": "done", "tickers": len(run_ids), "notified": notified,
-        "submitted": submit_decision.get("submitted", 0),
+        "status": hist.status, "tickers": len(run_ids), "notified": notified,
+        "failed": len(failed), "submitted": submit_decision.get("submitted", 0),
     }

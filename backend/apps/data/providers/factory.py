@@ -59,7 +59,19 @@ def _resolve_data_key(
     if uid is not None:
         pk = ProviderKey.objects.filter(user_id=uid).first()
         if pk is not None and pk.has_key(provider):
-            return pk.get_key(provider), "user"
+            key = pk.get_key(provider)
+            if key:
+                return key, "user"
+            # A stored value that will not decrypt reads as "" and the provider
+            # then falls back to the platform env key on its own — report that
+            # source, not "user" (decrypt() has already logged the failure).
+            log.warning(
+                "data_provider provider=%s user_id=%s: stored key could not be "
+                "decrypted; the platform key is used",
+                provider,
+                uid,
+            )
+            return key, "platform"
 
     if (
         force_platform
@@ -83,7 +95,10 @@ def _resolve_data_key(
 
 @lru_cache(maxsize=128)
 def _cached_fmp(user_id: int | None, api_key: str) -> FmpProvider:
-    return FmpProvider(api_key=api_key or None)
+    # user_id is passed only for the user's own key (see get_fmp_provider).
+    return FmpProvider(
+        api_key=api_key or None, key_source="user" if user_id is not None else "platform"
+    )
 
 
 @lru_cache(maxsize=128)

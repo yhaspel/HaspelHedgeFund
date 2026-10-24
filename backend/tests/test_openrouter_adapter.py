@@ -403,7 +403,9 @@ _FREE_LADDER = [
     "xingchen-agi/xing4.0-29b-a4b:free",
     "google/gemma-4-31b-it:free",
 ]
-_FREE_LAST_RESORT = "minimax/minimax-m3.1-flash:free"
+# minimax-m3.1-flash:free was delisted 2026-10-23; the last resort moved to a
+# still-listed ladder rung on a non-Nvidia upstream.
+_FREE_LAST_RESORT = "xingchen-agi/xing4.0-29b-a4b:free"
 
 
 def test_static_free_ladder_matches_curated_dev_tier():

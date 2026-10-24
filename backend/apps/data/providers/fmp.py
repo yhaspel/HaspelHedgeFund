@@ -67,10 +67,18 @@ METRIC_MAP: dict[str, tuple[str, str]] = {
 class FmpProvider:
     name = SOURCE
 
-    def __init__(self, api_key: str | None = None, http: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        http: httpx.Client | None = None,
+        key_source: str = "platform",
+    ) -> None:
         self.api_key = api_key or settings.FMP_API_KEY
         if not self.api_key:
             raise RuntimeError("FMP_API_KEY is not configured")
+        # "user" BYO key / "platform" env key (set by the factory) — quoted in
+        # refresh-failure summaries, never the key.
+        self.key_source = key_source
         self._http = http or make_client(timeout=30.0)
 
     # ---- intraday quote ----------------------------------------------
